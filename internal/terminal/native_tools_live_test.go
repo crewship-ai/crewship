@@ -1,4 +1,4 @@
-//go:build integration
+//go:build native_tools_live
 
 package terminal
 
@@ -24,7 +24,7 @@ import (
 func TestNativeToolsLiveTerminal(t *testing.T) {
 	profile, crewID := os.Getenv("CREWSHIP_NATIVE_TOOLS_PROFILE"), os.Getenv("CREWSHIP_NATIVE_TOOLS_CREW_ID")
 	if profile == "" || crewID == "" {
-		t.Skip("explicit dev profile and test crew required")
+		t.Fatal("explicit dev profile and test crew required")
 	}
 	cfg, err := cli.LoadConfig()
 	if err != nil {

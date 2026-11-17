@@ -72,7 +72,7 @@ func TestGenerateDockerfile_CarriesAgentToolEnv(t *testing.T) {
 func TestImageEnvChanges(t *testing.T) {
 	imageEnv := map[string]string{"PATH": "/usr/local/bin:/usr/bin", "LANG": "C.UTF-8"}
 	got := imageEnvChanges(map[string]string{
-		"PATH":       "/opt/mise/data/shims:/opt/crew-tools/bin:${containerEnv:PATH}",
+		"PATH":       "/opt/mise/data/shims:${containerEnv:PATH}",
 		"TZ":         "Europe/Prague",
 		"WITH SPACE": "x",                                   // invalid key: skipped
 		"lower":      "x",                                   // not an env name by the Dockerfile rule: skipped
@@ -83,7 +83,7 @@ func TestImageEnvChanges(t *testing.T) {
 	want := []string{
 		`ENV CONDA="/opt/conda/bin"`,
 		`ENV NOTE="has \"q\""`,
-		`ENV PATH="/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/bin:/usr/bin"`,
+		`ENV PATH="/opt/mise/data/shims:/usr/local/bin:/usr/bin"`,
 		`ENV TZ="Europe/Prague"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -93,7 +93,7 @@ func TestImageEnvChanges(t *testing.T) {
 		t.Error("nil env must render no changes")
 	}
 	// No image env at all: the reference goes, the tool dirs stay.
-	got = imageEnvChanges(map[string]string{"PATH": "/opt/mise/data/shims:/opt/crew-tools/bin:${containerEnv:PATH}"}, nil)
+	got = imageEnvChanges(map[string]string{"PATH": "/opt/mise/data/shims:${containerEnv:PATH}"}, nil)
 	if len(got) != 1 || got[0] != `ENV PATH="/opt/mise/data/shims"` {
 		t.Errorf("unresolvable reference not dropped cleanly: %v", got)
 	}

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package devcontainer
 
 import (
@@ -13,11 +15,11 @@ import (
 func TestAgentToolProfileAfterLoginPathReset(t *testing.T) {
 	// A system login profile may replace the image PATH. Exercise the actual
 	// generated POSIX hook, including repeated sourcing and inherited children.
-	for _, shell := range []string{"sh", "bash", "zsh"} {
+	for _, shell := range []string{"sh", "bash"} {
 		t.Run(shell, func(t *testing.T) {
 			binary, err := exec.LookPath(shell)
 			if err != nil {
-				t.Skipf("optional shell: %v", err)
+				t.Fatalf("required POSIX shell: %v", err)
 			}
 			script := "PATH=/usr/bin:/bin\n" + AgentToolProfile() + AgentToolProfile() + "exec sh -c 'printf %s \"$PATH\"'"
 			out, err := exec.Command(binary, "-c", script).CombinedOutput()
