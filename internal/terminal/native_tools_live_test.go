@@ -3,7 +3,8 @@
 package terminal
 
 import (
-	"fmt"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,6 +38,18 @@ func TestNativeToolsLiveTerminal(t *testing.T) {
 	if err != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost") {
 		t.Fatal("live gate accepts only an explicit local dev server")
 	}
+	client := cli.NewClient(p.Server, p.Token, p.Workspace)
+	response, err := client.Get("/api/v1/ws-token")
+	if err != nil {
+		t.Fatal("request terminal ticket failed")
+	}
+	defer response.Body.Close()
+	var ticket struct {
+		Token string `json:"token"`
+	}
+	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 16384)).Decode(&ticket) != nil || ticket.Token == "" {
+		t.Fatal("valid terminal ticket required")
+	}
 	u.Scheme = "ws"
 	u.Path = "/ws/terminal"
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"X-Crewship-Client": []string{"native-tools-regression"}})
@@ -44,10 +57,10 @@ func TestNativeToolsLiveTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if err := c.WriteJSON(map[string]string{"type": "auth", "token": p.Token}); err != nil {
+	if err := c.WriteJSON(map[string]string{"type": "auth", "token": ticket.Token}); err != nil {
 		t.Fatal("terminal auth write failed")
 	}
-	if err := c.WriteJSON(map[string]any{"crew_id": crewID, "mode": "shell", "rows": 30, "cols": 120}); err != nil {
+	if err := c.WriteJSON(map[string]any{"crew_id": crewID, "crew_slug": "live-probe", "mode": "shell", "rows": 30, "cols": 120}); err != nil {
 		t.Fatal(err)
 	}
 	c.SetReadDeadline(time.Now().Add(10 * time.Minute))
@@ -99,7 +112,7 @@ printf '\nNATIVE_DONE:%s\n' "$fail"
 		if match := done.FindStringSubmatch(output.String()); match != nil {
 			t.Logf("actual terminal result:\n%s", output.String())
 			if match[1] != "0" {
-				t.Fatal(fmt.Sprintf("native tool commands failed (receipt %s)", match[1]))
+				t.Fatalf("native tool commands failed (receipt %s)", match[1])
 			}
 			break
 		}
