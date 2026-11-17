@@ -884,7 +884,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Prepare pinned real native Codex fixture
+      - name: Prepare pinned real native CLI fixtures
         timeout-minutes: 3
         shell: bash
         run: |
@@ -892,10 +892,11 @@ jobs:
           artifact_dir="$RUNNER_TEMP/codex-outer-native"
           mkdir -p "$artifact_dir"
           printf '{"private":true}\n' > "$artifact_dir/package.json"
-          pnpm --dir "$artifact_dir" add --ignore-scripts --save-exact @openai/codex@0.169.0
+          pnpm --dir "$artifact_dir" add --ignore-scripts --save-exact @openai/codex@0.169.0 @anthropic-ai/claude-code@2.1.326 opencode-ai@2.2.7
           native=$(find "$artifact_dir/node_modules" -type f -path '*/vendor/x86_64-unknown-linux-musl/bin/codex' -print -quit)
           test -n "$native" && test -x "$native"
           printf 'CREWSHIP_TEST_CODEX_NATIVE=%s\n' "$native" >> "$GITHUB_ENV"
+          printf '%s\n' "$artifact_dir/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Require executed Docker and protected capture fixtures
         timeout-minutes: 24
         # Existing fixtures retain their privilege profiles. Protected capture

@@ -4,7 +4,11 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +19,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // Deterministic local providers drive actual CLI shell tools without paid model
@@ -26,9 +33,37 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 			defer cancel()
 			home := t.TempDir()
+			_, key, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signer, err := ssh.NewSignerFromKey(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block, err := ssh.MarshalPrivateKey(key, "synthetic CLI fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			privateKey := string(pem.EncodeToMemory(block))
+			// Exercise all legacy text shapes through actual native shell tools.
+			if adapter == "CLAUDE_CODE" {
+				privateKey = strings.ReplaceAll(privateKey, "\n", "\r\n")
+			} else if adapter == "CODEX_CLI" {
+				privateKey = strings.TrimSuffix(privateKey, "\n")
+			}
+			port := startNativeSSHFixture(t, signer)
+			known := filepath.Join(home, "fixture-known-hosts")
+			if err := os.WriteFile(known, []byte(knownhosts.Line([]string{fmt.Sprintf("[127.0.0.1]:%d", port)}, signer.PublicKey())+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			generic := "fixture-file-$HOME\r\nopaque-final-LF\n"
+			password := "fixture-password-$HOME\n"
 			req := AgentRunRequest{AgentSlug: "fixture", RunID: "fixture-run", CLIAdapter: adapter, ToolProfile: "FULL", UserMessage: "Run the fixture shell tool once and report its result.", LLMModel: "gpt-5-mini", Credentials: []Credential{
 				{ID: "token", Type: "CLI_TOKEN", EnvVarName: "NATIVE_TEST_TOKEN", PlainValue: "fixture-token-value"},
-				{ID: "file", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_TEST_SECRET_FILE", PlainValue: "fixture-file-value"},
+				{ID: "file", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_TEST_SECRET_FILE", PlainValue: generic},
+				{ID: "key", Type: "SSH_KEY", EnvVarName: "NATIVE_TEST_SSH_KEY", PlainValue: privateKey},
+				{ID: "login", Type: "USERPASS", EnvVarName: "NATIVE_TEST_LOGIN", Username: "fixture-user", PlainValue: password},
 			}}
 			script, _, _, err := buildCredFileScript(req.Credentials, home, true)
 			if err != nil {
@@ -43,7 +78,17 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := `test "$NATIVE_TEST_TOKEN" = fixture-token-value && test -f "$NATIVE_TEST_SECRET_FILE" && printf '%s' fixture-file-value | cmp -s "$NATIVE_TEST_SECRET_FILE" - && sh -c 'test "$NATIVE_TEST_TOKEN" = fixture-token-value' && printf '%s%s' NATIVE_ENV_ OK`
+			command := fmt.Sprintf(`set -eu
+test "$NATIVE_TEST_TOKEN" = fixture-token-value
+test "$(sha256sum "$NATIVE_TEST_SECRET_FILE" | cut -d ' ' -f1)" = %x
+test -f "$NATIVE_TEST_LOGIN_USERNAME" && test -f "$NATIVE_TEST_LOGIN_PASSWORD"
+test "$(cat "$NATIVE_TEST_LOGIN_USERNAME")" = fixture-user
+test "$(sha256sum "$NATIVE_TEST_LOGIN_PASSWORD" | cut -d ' ' -f1)" = %x
+test "$(stat -c %%a "$NATIVE_TEST_SSH_KEY_PATH")" = 600
+test "$(stat -c %%a "$NATIVE_TEST_LOGIN_PASSWORD")" = 400
+sh -c 'test "$NATIVE_TEST_TOKEN" = fixture-token-value && test -f "$NATIVE_TEST_SECRET_FILE" && test -f "$NATIVE_TEST_LOGIN_PASSWORD" && test -f "$NATIVE_TEST_SSH_KEY_PATH"'
+test "$(ssh -F /dev/null -i "$NATIVE_TEST_SSH_KEY_PATH" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o ClearAllForwardings=yes -o ConnectTimeout=3 -o UserKnownHostsFile="$NATIVE_TEST_KNOWN_HOSTS" -p %d fixture@127.0.0.1 whoami)" = 'fixture\native-user'
+printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)), port)
 			var passed atomic.Bool
 			var calls atomic.Int32
 			fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +195,7 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			defer fixture.Close()
 			env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
 			env = overrideEnv(env, "HOME", home)
+			env = overrideEnv(env, "NATIVE_TEST_KNOWN_HOSTS", known)
 			if err := os.MkdirAll(filepath.Join(home, "codex"), 0700); err != nil {
 				t.Fatal(err)
 			}
