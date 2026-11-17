@@ -6,7 +6,7 @@ import (
 )
 
 // File credentials must reach child processes as paths on every adapter.
-func TestVaultNativeAnalysisProcessAliases(t *testing.T) {
+func TestNativeCredentialProcessAliases(t *testing.T) {
 	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI", "OPENCODE", "GEMINI_CLI"} {
 		t.Run(adapter, func(t *testing.T) {
 			req := AgentRunRequest{AgentSlug: "synthetic", RunID: "synthetic-run", CLIAdapter: adapter,
@@ -69,6 +69,27 @@ func TestNativeFileEnvironmentCannotClaimRuntimeNames(t *testing.T) {
 		if _, err := appendCredentialFileEnv(nil, creds, "/secrets/fixture/run", true); err == nil {
 			t.Fatalf("runtime name %s accepted", name)
 		}
+	}
+}
+
+func TestNativeCLITokenProviderSlotKeepsDirectValue(t *testing.T) {
+	req := AgentRunRequest{CLIAdapter: "CODEX_CLI", Credentials: []Credential{{ID: "fixture", Type: "CLI_TOKEN", EnvVarName: "OPENAI_API_KEY", PlainValue: "synthetic-direct-key"}}}
+	env, err := appendCredentialFileEnv(BuildEnvVarsSidecar(req, true), req.Credentials, "/secrets/fixture/run", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := envMap(t, env)
+	if got["OPENAI_API_KEY"] != "synthetic-direct-key" {
+		t.Fatal("native alias replaced direct provider token")
+	}
+	assignments := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "OPENAI_API_KEY=") {
+			assignments++
+		}
+	}
+	if assignments != 1 {
+		t.Fatal("ambiguous duplicate provider token assignments")
 	}
 }
 

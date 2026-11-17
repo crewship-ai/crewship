@@ -7,11 +7,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"golang.org/x/crypto/ssh"
 	"math/big"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // pemFixture builds a fake PEM block at runtime. Used by tests so the

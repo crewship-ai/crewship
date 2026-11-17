@@ -766,7 +766,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// The sidecar proxy cannot inject credentials into HTTPS CONNECT tunnels.
 	for _, cred := range req.Credentials {
 		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
-			env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
 		}
 	}
 
@@ -1900,6 +1900,15 @@ func appendCredentialFileEnv(env []string, creds []Credential, secretsDir string
 aliasesLoop:
 	for _, alias := range aliases {
 		name, _, _ := strings.Cut(alias, "=")
+		// Provider auth slots are deliberately direct for CLI_TOKEN; a
+		// generated dummy is not a conflicting credential or a file alias.
+		if providerAuthSlot(name) {
+			for _, cred := range creds {
+				if cred.Type == "CLI_TOKEN" && cred.EnvVarName == name && envHasAssignment(env, name, cred.PlainValue) {
+					continue aliasesLoop
+				}
+			}
+		}
 		if nativeAliasReserved(name) {
 			return nil, fmt.Errorf("credential delivery uses reserved runtime name: %s", name)
 		}
@@ -1961,6 +1970,14 @@ func nativeAliasReserved(name string) bool {
 	}
 	switch name {
 	case "HOME", "PATH", "SHELL", "IFS", "ENV", "BASH_ENV", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY", "CODEX_HOME", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "OPENCODE_CONFIG_CONTENT", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GOOGLE_GEMINI_BASE_URL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY":
+		return true
+	}
+	return false
+}
+
+func providerAuthSlot(name string) bool {
+	switch name {
+	case "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN":
 		return true
 	}
 	return false

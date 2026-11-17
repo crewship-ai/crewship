@@ -202,6 +202,7 @@ var credCreateCmd = &cobra.Command{
 		flags := cmd.Flags()
 		name, _ := flags.GetString("name")
 		credType, _ := flags.GetString("type")
+		credType = strings.ToUpper(credType)
 		provider, _ := flags.GetString("provider")
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")

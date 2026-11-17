@@ -71,10 +71,10 @@ func readCredentialValueLimit(input io.Reader, source string, maxValueStdinBytes
 		return "", fmt.Errorf("%s value is too long (max %d bytes)", source, maxValueStdinBytes)
 	}
 	if bytes.IndexByte(b, 0) >= 0 {
-		return "", fmt.Errorf("%s contains NUL bytes; binary credential import is not supported by the text/JSON API", source)
+		return "", fmt.Errorf("%s contains NUL bytes; binary input is not supported by this CLI; supply UTF-8 text without NUL bytes", source)
 	}
 	if !utf8.Valid(b) {
-		return "", fmt.Errorf("%s contains non-UTF-8 bytes; binary credential import is not supported by the text/JSON API", source)
+		return "", fmt.Errorf("%s contains non-UTF-8 bytes; binary input is not supported by this CLI; supply UTF-8 text without NUL bytes", source)
 	}
 	return string(b), nil
 }

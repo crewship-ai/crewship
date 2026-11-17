@@ -76,8 +76,10 @@ func TestRecordCredentialEvent_DeliveredDoesNotMeanUsed(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedTestCrew(t, db, wsID)
+	seedTestAgentInCrew(t, db, wsID, crewID, "fixture")
 	seedCredentialEnc(t, db, wsID, userID, "delivered-fixture", "NATIVE", "synthetic-material")
-	if err := RecordCredentialEvent(context.Background(), db, auditLogger(), "delivered-fixture", AuditEventDelivered, "fixture-agent", "", map[string]any{"run_id": "fixture-run", "channel": "file", "authentication": "unknown"}); err != nil {
+	if err := RecordCredentialEvent(context.Background(), db, auditLogger(), "delivered-fixture", AuditEventDelivered, "agent_fixture", "", map[string]any{"run_id": "fixture-run", "channel": "file", "authentication": "unknown"}); err != nil {
 		t.Fatal(err)
 	}
 	var lastUsed sql.NullString
@@ -91,7 +93,7 @@ func TestRecordCredentialEvent_DeliveredDoesNotMeanUsed(t *testing.T) {
 	if err := db.QueryRow(`SELECT agent_id, metadata_json FROM credential_audit WHERE credential_id='delivered-fixture' AND event_type='DELIVERED'`).Scan(&agent, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if agent != "fixture-agent" || !strings.Contains(metadata, "fixture-run") || strings.Contains(metadata, "synthetic-material") {
+	if agent != "agent_fixture" || !strings.Contains(metadata, "fixture-run") || strings.Contains(metadata, "synthetic-material") {
 		t.Fatal("delivery attribution or redaction failed")
 	}
 }

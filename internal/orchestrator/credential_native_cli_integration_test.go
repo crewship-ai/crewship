@@ -34,14 +34,16 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := exec.CommandContext(ctx, "sh", "-c", script).Run(); err != nil {
+			writer := exec.CommandContext(ctx, "sh")
+			writer.Stdin = strings.NewReader(script)
+			if err := writer.Run(); err != nil {
 				t.Fatal(err)
 			}
 			env, err := appendCredentialFileEnv(BuildEnvVarsSidecar(req, true), req.Credentials, home, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := `test "$NATIVE_TEST_TOKEN" = fixture-token-value && test -f "$NATIVE_TEST_SECRET_FILE" && test "$(cat "$NATIVE_TEST_SECRET_FILE")" = fixture-file-value && sh -c 'test "$NATIVE_TEST_TOKEN" = fixture-token-value' && printf '%s%s' NATIVE_ENV_ OK`
+			command := `test "$NATIVE_TEST_TOKEN" = fixture-token-value && test -f "$NATIVE_TEST_SECRET_FILE" && printf '%s' fixture-file-value | cmp -s "$NATIVE_TEST_SECRET_FILE" - && sh -c 'test "$NATIVE_TEST_TOKEN" = fixture-token-value' && printf '%s%s' NATIVE_ENV_ OK`
 			var passed atomic.Bool
 			var calls atomic.Int32
 			fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +150,9 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			defer fixture.Close()
 			env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
 			env = overrideEnv(env, "HOME", home)
+			if err := os.MkdirAll(filepath.Join(home, "codex"), 0700); err != nil {
+				t.Fatal(err)
+			}
 			env = overrideEnv(env, "CODEX_HOME", filepath.Join(home, "codex"))
 			env = overrideEnv(env, "ANTHROPIC_API_KEY", "synthetic-fixture-key")
 			env = overrideEnv(env, "ANTHROPIC_BASE_URL", fixture.URL)
@@ -155,8 +160,17 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			var argv []string
 			switch adapter {
 			case "CLAUDE_CODE":
+				req.LLMModel = "claude-sonnet-5-5"
 				argv = (claudeCodeAdapter{}).BuildCommand(req)
-				argv = append(argv, req.UserMessage)
+				mcp := filepath.Join(home, ".mcp.json")
+				if err := os.WriteFile(mcp, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				for i := range argv {
+					if argv[i] == "--mcp-config" {
+						argv[i+1] = mcp
+					}
+				}
 			case "CODEX_CLI":
 				argv = (codexAdapter{}).BuildCommand(req)
 				for i := range argv {
@@ -164,7 +178,7 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 						argv[i] = "danger-full-access"
 					}
 				}
-				argv = append(argv, "--config", `model_provider="fixture"`, "--config", `model_providers.fixture.name="Fixture"`, "--config", fmt.Sprintf("model_providers.fixture.base_url=%q", fixture.URL), "--config", `model_providers.fixture.wire_api="responses"`, "--config", `model_providers.fixture.requires_openai_auth=false`)
+				argv = append([]string{argv[0], "--config", `model_provider="fixture"`, "--config", `model_providers.fixture.name="Fixture"`, "--config", fmt.Sprintf("model_providers.fixture.base_url=%q", fixture.URL), "--config", `model_providers.fixture.wire_api="responses"`, "--config", `model_providers.fixture.requires_openai_auth=false`}, argv[1:]...)
 			case "OPENCODE":
 				req.LLMModel = "fixture/fixture"
 				configuration := map[string]any{"provider": map[string]any{"fixture": map[string]any{"npm": "@ai-sdk/openai-compatible", "name": "Fixture", "options": map[string]any{"baseURL": fixture.URL + "/v1", "apiKey": "synthetic-fixture-key"}, "models": map[string]any{"fixture": map[string]any{"name": "Fixture", "limit": map[string]any{"context": 200000, "output": 1000}}}}}, "permission": map[string]any{"*": "allow"}}
@@ -175,6 +189,13 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			path, err := exec.LookPath(argv[0])
 			if err != nil {
 				t.Fatal("required native CLI unavailable", err)
+			}
+			version := exec.CommandContext(ctx, path, "--version")
+			version.Env = env
+			if out, err := version.Output(); err == nil {
+				t.Logf("native CLI version: %s", strings.TrimSpace(string(out)))
+			} else {
+				t.Fatal("cannot identify native CLI version", err)
 			}
 			cmd := exec.CommandContext(ctx, path, argv[1:]...)
 			cmd.Env = env
