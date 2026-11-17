@@ -24,6 +24,7 @@ import {
 import { arrival } from "@/lib/motion"
 import { fieldText } from "@/lib/adapter-field"
 import { visibleAgentText } from "@/lib/chat-text"
+import { chatTurnStatusNote } from "@/lib/chat-turn-status"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { pageProvenanceForTurn } from "./page-provenance"
@@ -481,9 +482,10 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
 
   // Older Codex streams stored a CLI progress line as an assistant turn.
   // The transient work indicator below the transcript is its replacement.
-  if (turn.parts.length === 0 || turn.parts.every((part) =>
+  const hasTerminalNote = !turn.isStreaming && !!chatTurnStatusNote(turn)
+  if (!hasTerminalNote && (turn.parts.length === 0 || turn.parts.every((part) =>
     part.type === "text" && visibleAgentText(part.content) === ""
-  )) return null
+  ))) return null
 
   // Assistant turn - use the new grouped component
   const assistantBody = (

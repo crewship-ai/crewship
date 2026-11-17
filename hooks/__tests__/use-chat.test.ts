@@ -725,11 +725,13 @@ describe("useChat", () => {
     expect(result.current.turns).toHaveLength(0)
   })
 
-  it("stopGeneration sends cancel_message", () => {
+  it("stopGeneration sends cancel_message for an active request", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
 
+    // An idle Stop is a no-op; create the actual pending request first.
+    act(() => { result.current.sendMessage("Please reply") })
     act(() => {
       result.current.stopGeneration()
     })

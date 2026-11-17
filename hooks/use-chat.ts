@@ -442,6 +442,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   }, [authorityKey, rejectPendingAsks])
   const isStreamingRef = useRef(false)
   isStreamingRef.current = isStreaming
+  // Observed legacy activity can open a turn without our local send state.
+  // Its synchronous terminal fence also prevents stale React turns arming Stop.
+  const legacyActivityRef = useRef(false)
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
   // Tracked in a ref so the (deps: []) WS handlers see the latest value without
@@ -520,6 +523,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     canonicalRef.current.clear()
     pendingControlsRef.current.clear()
     canonicalActiveRef.current = false
+    legacyActivityRef.current = false
     replySoundSinceRef.current = Date.now()
     replyHasTextRef.current = false
     setIsStreaming(false)
@@ -1144,6 +1148,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     })
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
+    // Stop can race this terminal event before React publishes the new state.
+    isStreamingRef.current = false
     setIsStreaming(false)
   }, [])
 
@@ -1245,6 +1251,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         return
       }
       if (controlRun) activeRunIdRef.current = controlRun
+      if (eventType === "done" || eventType === "error" || eventType === "agent_busy") legacyActivityRef.current = false
+      else if (eventType && ["text", "status", "thinking", "tool_call", "tool_result", "image"].includes(eventType)) legacyActivityRef.current = true
       if (eventType === "text" && content.trim()) replyHasTextRef.current = true
       if (eventType === "error" || eventType === "agent_busy") replyHasTextRef.current = false
       if (eventType === "text") {
@@ -1388,7 +1396,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         const turn: ChatTurn = { ...prior, id: prior?.id ?? next.turn_id, runId: next.run_id, role: "assistant", timestamp: prior?.timestamp ?? new Date(next.occurred_at), parts, turnState: state, isStreaming: !terminal, ...(stopRequested && !terminal ? { cancelRequested: true } : {}) }
         return at < 0 ? [...previous, turn] : previous.map((value, index) => index === at ? turn : value)
       })
-      setIsStreaming(!terminalTurn(cursor.state))
+      isStreamingRef.current = !terminalTurn(cursor.state)
+      setIsStreaming(isStreamingRef.current)
       if (terminalTurn(cursor.state)) { stopPendingRef.current = false; setStopPending(false) }
     }
     if (cursor.resetThrough !== undefined && cursor.through >= cursor.resetThrough) cursor.resetThrough = undefined
@@ -1772,6 +1781,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       }
 
       setTurns((prev) => [...prev, userTurn])
+      isStreamingRef.current = true
       setIsStreaming(true)
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
@@ -1788,7 +1798,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   const stopGeneration = useCallback(() => {
     if (!isCurrentAuthority()) return
     // One cancel per stop on the canonical stream: a press while one is pending sends nothing.
-    if (canonicalActiveRef.current && stopPendingRef.current) return
+    if (canonicalActiveRef.current) {
+      if (!isStreamingRef.current || stopPendingRef.current) return
+    } else if (!isStreamingRef.current && !legacyActivityRef.current && !pendingTextRef.current) return
     restrictedAbortRef.current?.abort()
     restrictedAbortRef.current = null
     send({
@@ -1801,6 +1813,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       setTurns(previous => previous.map(turn => turn.isStreaming ? { ...turn, cancelRequested: true } : turn))
       return // A Stop request is not a server terminal acknowledgement.
     }
+    const localRequestPending = isStreamingRef.current
     // Flip local streaming state immediately so the UI returns to the
     // input-ready state even if the WS is dropped before the server's
     // cancel ack arrives. Closing assistant turns mark them no longer
@@ -1808,6 +1821,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     // any deltas already in flight from re-opening the cancelled turn
     // or appending parts to it; cleared by the next sendMessage.
     setIsStreaming(false)
+    isStreamingRef.current = false
+    legacyActivityRef.current = false
     cancelledRef.current = true
     // Drop any buffered-but-uncommitted tokens and cancel their frame so
     // a late flush can't re-open the turn we're closing here.
@@ -1816,22 +1831,22 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
-    setTurns((prev) =>
-      prev.map((t) =>
-        t.role === "assistant" && t.isStreaming
-          ? {
-              ...t,
-              isStreaming: false,
-              // Drop transient status rows (mirrors handleDoneEvent) — a
-              // stopped turn must not keep a stale animated progress line.
-              parts: stripStatusParts(t.parts),
-            }
-          : t,
-      )
-      // A turn that held only status parts is now empty — drop it entirely
-      // (same as handleDoneEvent's orphaned status-only turn cleanup).
-      .filter((t) => !(t.role === "assistant" && t.parts.length === 0)),
-    )
+    setTurns((prev) => {
+      let stopped = false
+      const next = prev.map((turn): ChatTurn => {
+        if (turn.role !== "assistant" || !turn.isStreaming || (turn.turnState && terminalTurn(turn.turnState))) return turn
+        stopped = true
+        // This is the local legacy stop, not a persisted server acknowledgement.
+        // Keep its empty note after removing transient progress rows.
+        return { ...turn, turnState: "cancelled", isStreaming: false, parts: stripStatusParts(turn.parts) }
+      })
+      // Stop can precede the first legacy status/text frame after our send.
+      // A completed assistant turn or idle conversation must not gain a note.
+      if (!stopped && localRequestPending && prev.at(-1)?.role === "user") {
+        next.push({ id: uuid(), role: "assistant", parts: [], turnState: "cancelled", isStreaming: false, timestamp: new Date() })
+      }
+      return next
+    })
   }, [send, sessionId, isCurrentAuthority])
 
   // Regenerate the last assistant response by re-sending the last user message.
@@ -2024,6 +2039,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       })
     })
     const live = loaded.some(turn => turn.isStreaming) || [...canonicalRef.current.values()].some(cursor => cursor.state !== undefined && !terminalTurn(cursor.state))
+    isStreamingRef.current = live
+    legacyActivityRef.current = false
     setIsStreaming(live)
     // History can be what confirms the stop: nothing left running ends it.
     if (!live) { stopPendingRef.current = false; setStopPending(false) }
