@@ -30,6 +30,7 @@ import {
   type ProviderLogin,
 } from "@/lib/credentials/provider-logins"
 import { toast } from "@/lib/toast"
+import { bedrockModelLabel } from "@/lib/credentials/bedrock"
 import { agentsByCrew, bindingKey, createBinding, deleteBinding, targetKey, useBindingTargets, type BindingTarget } from "./bindings"
 import { providerLabel } from "./provider-accounts"
 import { SettingsCard } from "./secret-settings"
@@ -58,6 +59,25 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
     for (const b of bindings ?? []) if (b.credential_id === credential.id) m.set(bindingKey(b), b.id)
     return m
   }, [bindings, credential.id])
+
+  // Agents this account already pays for: re-assigning them with another
+  // permitted model changes the model in place (same account, no off and on).
+  const assigned = React.useMemo(() => (bindings ?? []).filter((b) => b.credential_id === credential.id && b.scope === "AGENT" && b.agent_id).map((b) => b.agent_id as string), [bindings, credential.id])
+  const [applying, setApplying] = React.useState(false)
+  const applyModel = async () => {
+    setApplying(true)
+    try {
+      const result = await apiFetch(`/api/v1/credentials/${encodeURIComponent(credential.id)}/bedrock-assign?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: bedrockModel, agent_ids: assigned, crew_ids: [] }) })
+      const data = await result.json().catch(() => ({}))
+      if (!result.ok) throw new Error(typeof data.error === "string" ? data.error : `HTTP ${result.status}`)
+      toast.success(`${bedrockModelLabel(bedrockModel)} set for ${assigned.length === 1 ? "1 agent" : `${assigned.length} agents`}`)
+      onChanged()
+    } catch (err) {
+      toast.error("Couldn't change the model", { description: err instanceof Error ? err.message : "Bedrock assignment could not run" })
+    } finally {
+      setApplying(false)
+    }
+  }
 
   const fit = (agents ?? []).filter((a) => isBedrock || runnerFits(a.cli_adapter, provider))
   const unfit = (agents ?? []).length - fit.length
@@ -104,7 +124,7 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
       {!canBind && (
         <p role="note" className="text-label text-muted-foreground">Only workspace owners and admins change which agents an account pays for.</p>
       )}
-      {isBedrock && <SettingsCard title="Bedrock model" icon={Users}><div className="space-y-2 p-4"><label htmlFor="bedrock-pays-model" className="text-sm">Model for new assignments</label><select id="bedrock-pays-model" disabled={!canBind} className="min-h-11 coarse:min-h-[44px] w-full rounded-md border bg-background px-2" value={bedrockModel} onChange={(e) => setBedrockModel(e.target.value)}>{login.bedrock?.models.map((m) => <option key={m} value={m}>{m}</option>)}</select><p className="text-sm text-muted-foreground">Assignment sets the OpenCode runner, this account and model together. Missing or expired access stops the run. To change an existing agent's model, turn its assignment off and on with the model selected here.</p></div></SettingsCard>}
+      {isBedrock && <SettingsCard title="Bedrock model" icon={Users}><div className="space-y-2 p-4"><label htmlFor="bedrock-pays-model" className="text-sm">Model</label><select id="bedrock-pays-model" disabled={!canBind} className="min-h-11 coarse:min-h-[44px] w-full rounded-md border bg-background px-2" value={bedrockModel} onChange={(e) => setBedrockModel(e.target.value)}>{login.bedrock?.models.map((m) => <option key={m} value={m}>{bedrockModelLabel(m)} · {m}</option>)}</select><p className="text-sm text-muted-foreground">Assigning an agent or a crew below sets this account, this model and the OpenCode runner together. Missing or expired access stops the run.</p>{canBind && assigned.length > 0 && <div className="flex flex-wrap items-center gap-3"><Button size="sm" variant="outline" disabled={applying} onClick={() => void applyModel()}>Use for {assigned.length === 1 ? "the assigned agent" : `all ${assigned.length} assigned agents`}</Button><span className="text-xs text-muted-foreground">Takes effect on the next run.</span></div>}</div></SettingsCard>}
       {!isBedrock && <SettingsCard title="Workspace default" icon={Building2}>
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <p className="min-w-0 flex-1 text-label text-muted-foreground">

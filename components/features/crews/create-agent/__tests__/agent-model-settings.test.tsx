@@ -13,12 +13,28 @@ function Harness({ initial }: { initial?: Partial<AgentDraft> }) {
 const draft = () => JSON.parse(screen.getByTestId("draft").textContent || "{}")
 
 describe("Agent model settings", () => {
-  it("switches provider, runner and model together when selecting Codex", () => {
+  it("switches provider, runner and model together when selecting OpenAI", () => {
     render(<Harness />)
-    fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
     expect(draft()).toMatchObject({ cliAdapter: "CODEX_CLI", llmProvider: "OPENAI" })
     expect(draft().llmModel).not.toContain("claude")
     expect(draft().llmModel).not.toBe("")
+  })
+
+  it("offers only the runners that can run the provider's models", () => {
+    render(<Harness />)
+    const runners = within(screen.getByRole("radiogroup", { name: "Agent runner" })).getAllByRole("radio").map((r) => r.textContent)
+    expect(runners).toHaveLength(2)
+    expect(runners[0]).toMatch(/^Claude Code/)
+    expect(runners[1]).toMatch(/^OpenCode/)
+  })
+
+  it("leaves OpenCode for a provider OpenCode cannot run", () => {
+    render(<Harness initial={{ cliAdapter: "OPENCODE" }} />)
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Cursor" }))
+    expect(draft()).toMatchObject({ llmProvider: "CURSOR", cliAdapter: "CURSOR_CLI" })
+    expect(screen.queryByRole("radiogroup", { name: "Agent runner" })).toBeNull()
+    expect(screen.getByText(/set by Cursor/)).toBeInTheDocument()
   })
 
   it("keeps OpenCode when changing its provider and converts minutes only at the API boundary", () => {
@@ -38,6 +54,8 @@ describe("Agent model settings", () => {
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: label }))
     expect(draft()).toMatchObject({ cliAdapter: "OPENCODE", llmProvider: provider })
     expect(draft().llmModel.startsWith(prefix)).toBe(true)
+    expect(screen.queryByRole("radiogroup", { name: "Agent runner" })).toBeNull()
+    expect(screen.getByText(new RegExp(`set by ${label}`))).toBeInTheDocument()
   })
 
   it("supports arrow-key selection with a single radio tab stop", () => {

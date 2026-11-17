@@ -199,8 +199,10 @@ configured by this connection.
 ## Amazon Bedrock
 
 Choose **Vault → AI providers → Add AI provider → Amazon Bedrock**. Enter a
-Bedrock API key, its AWS region and expiration, and the native model IDs this
-account may use. These settings and the key are encrypted together. Pasted keys
+Bedrock API key and its expiration, pick its AWS region from the list and tick
+the inference profiles this account may use. A profile that is not listed can be
+added by its ID. **EU profiles only** keeps the region in the EU and offers only
+`eu.` profiles. These settings and the key are encrypted together. Pasted keys
 require manual renewal; AWS role authentication is not offered by this method.
 See [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html).
 
@@ -214,7 +216,15 @@ Crewship atomically assigns the account, sets the OpenCode runner and stores the
 full model ID, for example `amazon-bedrock/eu.anthropic.claude-opus-5-5`.
 The devcontainer's normal preparation installs the managed OpenCode version on
 its next run. Later assignments are available in the saved account's **Pays for**
-tab. Crew assignment expands to explicit bindings for the current members;
+tab, which can also move every agent it already pays for to another permitted
+model.
+
+In **New agent → Model** (and **Edit agent → Model**), choosing **Amazon
+Bedrock** asks for the account first and then offers that account's permitted
+models by name. The runner is shown as OpenCode and cannot be changed; the
+account, model and runner are assigned together when the agent is saved.
+**Pays with** offers only logins of the agent's model provider, and a Bedrock
+account only for a Bedrock agent. Crew assignment expands to explicit bindings for the current members;
 new crew members must be assigned separately. A missing, expired, revoked or
 withheld account stops the run, without trying another payer.
 

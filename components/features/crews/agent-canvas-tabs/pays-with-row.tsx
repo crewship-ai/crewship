@@ -11,8 +11,9 @@
  * (Codex CLI paying with a Claude login) are caught where the choice is made,
  * not as a 401 in a run.
  *
- * Every seat in the workspace is listed. The ones of the adapter's provider
- * are selectable; the others are visible and disabled — "wrong provider" —
+ * Every seat in the workspace is listed. The ones of the agent's provider —
+ * the adapter's own, or for OpenCode the provider of its model — are
+ * selectable; the others are visible and disabled — "wrong provider" —
  * because a picker that hides them makes the operator wonder where the seat
  * they just added went.
  */
@@ -39,6 +40,7 @@ import {
   type ProviderLogin,
 } from "@/lib/credentials/provider-logins"
 import { LoginBrandMark, LoginStatusPill } from "@/components/features/credentials/provider-login-bits"
+import { bedrockModelFor } from "@/lib/credentials/bedrock"
 import { cn } from "@/lib/utils"
 
 import { ConfigRow } from "../canvas/config-field"
@@ -59,9 +61,12 @@ interface BindingRow {
  * A failed create puts the released binding back; if that fails too the
  * error says so. Returns without a write when `seat` is already bound.
  */
-export async function swapSeat(workspaceId: string, agentId: string, seat: LoginCredential, boundSeat: BindingRow | null): Promise<void> {
+export async function swapSeat(workspaceId: string, agentId: string, seat: LoginCredential, boundSeat: BindingRow | null, agentModel = ""): Promise<void> {
   const ws = encodeURIComponent(workspaceId)
   if (boundSeat?.credential_id === seat.id) return
+  const bedrock = (seat.login?.provider ?? seat.provider) === "AWS_BEDROCK"
+  const model = bedrock ? bedrockModelFor(seat, agentModel) : ""
+  if (bedrock && !model) throw new Error(`${seat.name} permits no Bedrock model. Add one in Vault first.`)
   let released: BindingRow | null = null
   try {
     const slot = loginBindingSlot(seat.login, boundSeat?.slot ?? null) ?? "PROVIDER_LOGIN"
@@ -70,11 +75,20 @@ export async function swapSeat(workspaceId: string, agentId: string, seat: Login
       if (!del.ok && del.status !== 404) throw new Error(`Couldn't release the current seat (HTTP ${del.status}).`)
       if (del.ok) released = boundSeat
     }
-    const res = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential_id: seat.id, scope: "AGENT", crew_id: "", agent_id: agentId, slot }),
-    })
+    // A Bedrock account is assigned through its own endpoint: it binds the
+    // account and sets the permitted model and the OpenCode runner in one
+    // transaction, so the agent never runs on a model the account refuses.
+    const res = bedrock
+      ? await apiFetch(`/api/v1/credentials/${encodeURIComponent(seat.id)}/bedrock-assign?workspace_id=${ws}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, agent_ids: [agentId], crew_ids: [] }),
+        })
+      : await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential_id: seat.id, scope: "AGENT", crew_id: "", agent_id: agentId, slot }),
+        })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       throw new Error(typeof data.error === "string" ? data.error : `Couldn't assign the seat (HTTP ${res.status}).`)
@@ -98,7 +112,7 @@ export async function swapSeat(workspaceId: string, agentId: string, seat: Login
  * agent's bindings and the workspace's seats fresh, so the swap releases what
  * is bound now rather than what was bound when the dialog opened.
  */
-export async function applyPaysWith(workspaceId: string, agentId: string, seat: LoginCredential): Promise<void> {
+export async function applyPaysWith(workspaceId: string, agentId: string, seat: LoginCredential, agentModel = ""): Promise<void> {
   const ws = encodeURIComponent(workspaceId)
   const [listRes, bindRes] = await Promise.all([
     apiFetch(`/api/v1/credentials?workspace_id=${ws}&kind=provider_login`),
@@ -109,7 +123,30 @@ export async function applyPaysWith(workspaceId: string, agentId: string, seat: 
   const body = (await bindRes.json()) as { bindings?: BindingRow[] }
   const seatIds = new Set((Array.isArray(list) ? (list as LoginCredential[]) : []).filter((c) => c?.login).map((c) => c.id))
   const bound = (Array.isArray(body?.bindings) ? body.bindings : []).find((b) => seatIds.has(b.credential_id)) ?? null
-  await swapSeat(workspaceId, agentId, seat, bound)
+  await swapSeat(workspaceId, agentId, seat, bound, agentModel)
+}
+
+// Model providers whose models only a login of the same provider can pay for.
+// Anything else an OpenCode agent runs (Ollama, a router) is not checked here.
+const SEAT_PROVIDERS = new Set(["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN", "AWS_BEDROCK"])
+
+/** The provider whose seats can pay for this agent, or null when any can. */
+export function seatProvider(cliAdapter: string | null | undefined, llmProvider: string | null | undefined): string | null {
+  const own = adapterProvider(cliAdapter)
+  if (own) return own
+  const llm = (llmProvider ?? "").toUpperCase()
+  return SEAT_PROVIDERS.has(llm) ? llm : null
+}
+
+/**
+ * Can a seat of `seat` provider pay for an agent whose seats must be of
+ * `provider`? A Bedrock account only ever pays for a Bedrock agent: assigning
+ * it rewrites the agent's model, which is not what a Pays with pick means.
+ */
+export function seatFits(seat: string, provider: string | null): boolean {
+  const s = seat.toUpperCase()
+  if (provider === null) return s !== "AWS_BEDROCK"
+  return s === provider
 }
 
 export interface PaysWithRowProps {
@@ -117,6 +154,13 @@ export interface PaysWithRowProps {
   agentId: string
   agentName: string
   cliAdapter: string
+  /**
+   * The agent's model provider. An OpenCode agent takes any provider's login,
+   * but only the login of the provider its model belongs to can pay for it.
+   */
+  llmProvider?: string | null
+  /** The agent's model, kept when a Bedrock account permits it. */
+  llmModel?: string
   /** `pays_with` from GET /agents/{id}, when the server sends it. */
   paysWith?: AgentPaysWith | null
   /** After a binding is written — the canvas may want to re-read `pays_with`. */
@@ -130,7 +174,7 @@ export interface PaysWithRowProps {
   pending?: LoginCredential | null
 }
 
-export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysWith, onChanged, onPick, pending }: PaysWithRowProps) {
+export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, llmProvider = null, llmModel = "", paysWith, onChanged, onPick, pending }: PaysWithRowProps) {
   const { abilities } = useAbilities()
   const canBind = abilities.can("manage", "Credential")
   const [seats, setSeats] = React.useState<LoginCredential[]>([])
@@ -143,7 +187,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   React.useEffect(() => { setSnapshotStale(false) }, [paysWith])
   const snapshot = snapshotStale ? null : paysWith
 
-  const provider = adapterProvider(cliAdapter)
+  const provider = seatProvider(cliAdapter, llmProvider)
   const ws = encodeURIComponent(workspaceId)
 
   // Loaded when the picker opens, not when the tab does. The resting state
@@ -207,7 +251,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
         : `This seat is at its limit${until}. If no other ${getBrand(currentRow!.login!.provider).label} seat is in scope, the next run of ${agentName} waits.`
   const mismatch =
     currentLogin && provider && currentLogin.provider.toUpperCase() !== provider
-      ? `${adapterLabel(cliAdapter)} cannot pay with a ${getBrand(currentLogin.provider).label} seat. Pick a ${getBrand(provider).label} seat, or change the adapter.`
+      ? `${getBrand(provider).label} models cannot be paid with a ${getBrand(currentLogin.provider).label} seat. Pick a ${getBrand(provider).label} seat, or change the model provider.`
       : null
 
   async function choose(seat: LoginCredential) {
@@ -223,7 +267,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
     setSaving(true)
     try {
       setSnapshotStale(true)
-      await swapSeat(workspaceId, agentId, seat, boundSeat)
+      await swapSeat(workspaceId, agentId, seat, boundSeat, llmModel)
       toast.success(`Pays with saved`)
       setOpen(false)
       void load()
@@ -305,7 +349,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
               )}
               {seats.map((seat) => {
                 const login = seat.login!
-                const wrong = provider !== null && login.provider.toUpperCase() !== provider
+                const wrong = !seatFits(login.provider, provider)
                 const selected = seat.id === (pending?.id ?? currentId)
                 return (
                   <li key={seat.id}>
@@ -327,7 +371,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
                         <span className="block truncate type-row text-foreground">{seat.name}</span>
                         <span className="block truncate type-meta text-muted-foreground">
                           {wrong
-                            ? `${getBrand(login.provider).label} — ${adapterLabel(cliAdapter)} cannot pay with this`
+                            ? `${getBrand(login.provider).label} — ${provider ? `${getBrand(provider).label} models` : adapterLabel(cliAdapter)} cannot run on this`
                             : [
                                 modeLabel(login.mode),
                                 planLabel(login),

@@ -379,7 +379,7 @@ export function CreateAgentDialog({
       // later failure does not apply it twice.
       if (agent && seatDraft) {
         try {
-          await applyPaysWith(workspaceId, agent.id, seatDraft)
+          await applyPaysWith(workspaceId, agent.id, seatDraft, draft.llmModel)
         } catch (err) {
           throw new Error(`Agent settings saved, but the provider account could not be changed: ${err instanceof Error ? err.message : String(err)}`)
         }
@@ -421,7 +421,7 @@ export function CreateAgentDialog({
       // the agent that now exists (credential, then skills).
       if (!agent && seatDraft) {
         try {
-          await applyPaysWith(workspaceId, created.id, seatDraft)
+          await applyPaysWith(workspaceId, created.id, seatDraft, draft.llmModel)
         } catch {
           failed.push(`pays with ${seatDraft.name}`)
         }
@@ -854,7 +854,7 @@ WORK STYLE: …`}
           </CreateSurfaceSection>}
           </EditorPanel>
           <EditorPanel active={show("model")}>
-            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
+            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} seat={seatDraft} boundSeatId={agent?.llm_provider === "AWS_BEDROCK" ? agent.pays_with?.credential_id ?? null : null} onSeat={setSeatDraft} />
             {agent && (
               <RestrictedExecutionField
                 value={restrictedDraft ?? (agent.restricted_execution_profile as RestrictedProfile | undefined) ?? "disabled"}
@@ -887,7 +887,7 @@ WORK STYLE: …`}
           <EditorPanel active={show("access")}>
             {!agent && (
               <CreateSurfaceSection title="Pays with" icon={CreditCard} hint="the provider account its runs are charged to">
-                <PaysWithRow workspaceId={workspaceId} agentId="" agentName={draft.name || "this agent"} cliAdapter={draft.cliAdapter} paysWith={null} pending={seatDraft} onPick={setSeatDraft} />
+                <PaysWithRow workspaceId={workspaceId} agentId="" agentName={draft.name || "this agent"} cliAdapter={draft.cliAdapter} llmProvider={draft.llmProvider} paysWith={null} pending={seatDraft} onPick={setSeatDraft} />
                 <p className="text-xs text-muted-foreground">Left alone, it uses the account shared with {crewName ?? "the workspace"}. Assigned right after the agent is created.</p>
               </CreateSurfaceSection>
             )}
@@ -897,7 +897,7 @@ WORK STYLE: …`}
               </CreateSurfaceSection>
             )}
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
-            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
+            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.llmProvider === "AWS_BEDROCK" ? <p className="text-sm text-muted-foreground">{seatDraft ? `Pays with ${seatDraft.name}, chosen under Model.` : "The Amazon Bedrock account is chosen under Model."}</p> : draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} llmProvider={agent.llm_provider} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
             {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Tools and access.</p>}
           </EditorPanel>
           <EditorPanel active={show("chat")}>

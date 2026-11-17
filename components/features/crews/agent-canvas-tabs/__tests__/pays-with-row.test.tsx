@@ -52,6 +52,11 @@ const claude: LoginCredential = { id: "c_claude", name: "Claude Max · pavel", p
   provider: "ANTHROPIC", plan: "max", plan_label: "Max 20×", owner_email: "pavel@unify.cz", delivery: { kind: "env", target: "CLAUDE_CODE_OAUTH_TOKEN" }, refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
 }) }
 
+const bedrockSeat: LoginCredential = { id: "c_bedrock", name: "Bedrock EU", provider: "AWS_BEDROCK", status: "ACTIVE", login: login({
+  mode: "api_key", provider: "AWS_BEDROCK", plan: null, plan_label: null, owner_email: null, delivery: { kind: "sidecar", target: "AWS_BEARER_TOKEN_BEDROCK" }, refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
+  bedrock: { region: "eu-central-1", models: ["eu.anthropic.claude-sonnet-5-5", "eu.anthropic.claude-opus-5-5"], auth_method: "bedrock_api_key", eu_only: true },
+}) }
+
 function ok(body: unknown, status = 200) {
   return { ok: true, status, json: async () => body } as unknown as Response
 }
@@ -63,6 +68,7 @@ function serve(seats: LoginCredential[], bindings: unknown[] = []) {
     if (u.startsWith("/api/v1/credentials/bindings") && init?.method === "POST") return ok({ id: "b_new" }, 201)
     if (u.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings })
     if (u.startsWith("/api/v1/credentials/bindings/") && init?.method === "DELETE") return ok({})
+    if (u.includes("/bedrock-assign") && init?.method === "POST") return ok({ assigned: 1 })
     throw new Error(`unexpected ${u}`)
   })
 }
@@ -101,19 +107,49 @@ describe("the picker", () => {
     const wrong = options.find((o) => o.textContent?.includes("Claude Max · pavel"))!
     expect(wrong).toBeDisabled()
     expect(wrong).toHaveTextContent("wrong provider")
-    expect(wrong).toHaveTextContent("Codex CLI cannot pay with this")
+    expect(wrong).toHaveTextContent("OpenAI models cannot run on this")
     const right = options.find((o) => o.textContent?.includes("ChatGPT Plus · jana"))!
     expect(right).not.toBeDisabled()
     expect(right).toHaveTextContent(/subscription · ChatGPT Plus · expires in 2 d \(auto\)/)
     expect(within(right).getByTestId("login-status-at_limit")).toBeInTheDocument()
   })
 
-  it("OpenCode takes any provider — nothing is greyed", async () => {
+  it("OpenCode with no known model provider takes any provider's login — nothing is greyed", async () => {
     serve([chatgpt, claude])
     renderRow({ cliAdapter: "OPENCODE" })
     fireEvent.click(await screen.findByRole("button", { name: /pays with/i }))
     const options = await screen.findAllByRole("option")
     for (const o of options) expect(o).not.toBeDisabled()
+  })
+
+  it("OpenCode on Anthropic models offers only Anthropic logins", async () => {
+    serve([chatgpt, claude])
+    renderRow({ cliAdapter: "OPENCODE", llmProvider: "ANTHROPIC" })
+    fireEvent.click(await screen.findByRole("button", { name: /pays with/i }))
+    const options = await screen.findAllByRole("option")
+    expect(options.find((o) => o.textContent?.includes("ChatGPT Plus · jana"))).toBeDisabled()
+    expect(options.find((o) => o.textContent?.includes("Claude Max · pavel"))).not.toBeDisabled()
+  })
+
+  it("a Bedrock account pays only for a Bedrock agent", async () => {
+    serve([chatgpt, bedrockSeat])
+    renderRow({ cliAdapter: "OPENCODE" })
+    fireEvent.click(await screen.findByRole("button", { name: /pays with/i }))
+    const options = await screen.findAllByRole("option")
+    expect(options.find((o) => o.textContent?.includes("Bedrock EU"))).toBeDisabled()
+    expect(options.find((o) => o.textContent?.includes("ChatGPT Plus · jana"))).not.toBeDisabled()
+  })
+
+  it("assigns a Bedrock account through bedrock-assign, keeping a permitted model", async () => {
+    serve([bedrockSeat])
+    renderRow({ cliAdapter: "OPENCODE", llmProvider: "AWS_BEDROCK", llmModel: "amazon-bedrock/eu.anthropic.claude-opus-5-5" })
+    fireEvent.click(await screen.findByRole("button", { name: /pays with/i }))
+    fireEvent.click(await screen.findByRole("option", { name: /Bedrock EU/ }))
+    await waitFor(() => expect(h.toast.success).toHaveBeenCalled())
+    const call = h.apiFetch.mock.calls.find(([u]) => String(u).includes("/bedrock-assign"))!
+    expect(String(call[0])).toContain("/api/v1/credentials/c_bedrock/bedrock-assign?workspace_id=ws1")
+    expect(JSON.parse((call[1] as { body: string }).body)).toEqual({ model: "eu.anthropic.claude-opus-5-5", agent_ids: ["a1"], crew_ids: [] })
+    expect(h.apiFetch.mock.calls.some(([u, i]) => String(u).startsWith("/api/v1/credentials/bindings?") && (i as { method?: string })?.method === "POST")).toBe(false)
   })
 
   it("shows the server's pays_with when the agent carries one", async () => {
@@ -229,6 +265,6 @@ describe("the warning", () => {
   it("a seat of the wrong provider is said before the run says 401", async () => {
     serve([chatgpt, claude])
     renderRow({ paysWith: { credential_id: "c_claude", name: "Claude Max · pavel", login: claude.login! } })
-    expect(screen.getByRole("status")).toHaveTextContent(/codex cli cannot pay with a anthropic seat/i)
+    expect(screen.getByRole("status")).toHaveTextContent(/openai models cannot be paid with a anthropic seat/i)
   })
 })
