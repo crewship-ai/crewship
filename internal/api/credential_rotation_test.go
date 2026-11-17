@@ -97,6 +97,48 @@ func TestRotate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestRotateRejectsMalformedNativeMaterialWithoutMutation(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	key, _, _, certificate := validCredentialPEMs(t)
+	for typ, old := range map[string]string{"SSH_KEY": key, "CERTIFICATE": certificate} {
+		t.Run(typ, func(t *testing.T) {
+			id := "native-rotate-" + typ
+			seedCredentialEnc(t, db, wsID, userID, id, id, old)
+			if _, err := db.Exec(`UPDATE credentials SET type=? WHERE id=?`, typ, id); err != nil {
+				t.Fatal(err)
+			}
+			var before string
+			if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id=?`, id).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			req := rotationReq(t, "POST", "/api/v1/credentials/"+id+"/rotate", `{"value":"malformed-native-material"}`, userID, wsID)
+			req.SetPathValue("credentialId", id)
+			rr := httptest.NewRecorder()
+			NewCredentialHandler(db, slog.Default()).Rotate(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("malformed material accepted: HTTP %d", rr.Code)
+			}
+			var after string
+			if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id=?`, id).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if before != after {
+				t.Fatal("rejected rotation changed stored material")
+			}
+			var rotations int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM credential_rotations WHERE credential_id=?`, id).Scan(&rotations); err != nil {
+				t.Fatal(err)
+			}
+			if rotations != 0 {
+				t.Fatal("rejected rotation opened a grace window")
+			}
+		})
+	}
+}
+
 // TestRotate_CustomGrace verifies the configurable window (0..7d).
 func TestRotate_CustomGrace(t *testing.T) {
 	t.Parallel()

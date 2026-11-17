@@ -9,6 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Native Vault credentials were present on disk but missing from agent shells.** File paths now accompany the runtime environment without sourcing `.env` or replacing direct CLI tokens. SSH keys and certificates repair CRLF and a missing final LF on delivery, including existing stored values.
+- **SSH key imports could lose their final newline.** File imports preserve every byte, opaque stdin remains unchanged, and key/certificate validation parses actual material. The Vault paste wizard preserves the value and recognizes key/certificate shapes. USERPASS creation accepts `--username` and `--password-stdin`; skipped authentication checks no longer report a successful test.
+- ⚠️ **Behaviour change:** malformed or encrypted private keys and malformed certificate chains are rejected when written; duplicate native delivery names fail closed instead of overwriting another file.
+
+
 - **Bedrock peer queries reuse the running crew sidecar (#5427).** A missing exact peer account is resolved through a bounded sidecar-only host request, without restarting its parent or exporting a key to the agent. Incomplete Bedrock usage is retained as unknown or a partial lower bound, and the Local AI seed installs managed OpenCode 2. Separate AWS infrastructure credentials remain available through approved Keeper executions; ambient AWS/MCP authentication stays isolated from inference.
 
 - **Choosing Preview in a Docs code block always requests its render (#5436).** Earlier queued previews can no longer consume the page budget and pause the block the reader explicitly chose. Automatic previews still respect that budget, and typing keeps the source visible.

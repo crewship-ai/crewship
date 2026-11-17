@@ -791,7 +791,7 @@ func seedTypedCredential(t *testing.T, db *sql.DB, wsID, userID, credID, name, c
 func TestCredUpdate_MergedValidation(t *testing.T) {
 	t.Parallel()
 
-	pemSSH := pemFixture("OPENSSH PRIVATE KEY", "abc")
+	pemSSH, _, _, _ := validCredentialPEMs(t)
 
 	tests := []struct {
 		name string

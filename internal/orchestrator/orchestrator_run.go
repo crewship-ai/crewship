@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"io"
 	"log/slog"
 	"path"
@@ -1971,7 +1972,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// credential-delivery path and must withhold SECRETs under Keeper too.
 		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 	} else {
-		env = BuildEnvVars(*req, cred)
+		env = BuildEnvVars(*req, cred, keeperEnabled)
 		// #1754: a worker sub-agent skips STARTING a sidecar (the crew's is
 		// already listening on 127.0.0.1:9119 in this same container) and used
 		// to be given no per-agent token either — so every call it made to that
@@ -2180,6 +2181,12 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
 	}
+	var credentialEnvErr error
+	env, credentialEnvErr = appendCredentialFileEnv(env, req.Credentials, secretsAgentDir, keeperEnabled, collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON))
+	if credentialEnvErr != nil {
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare credential environment: %w", credentialEnvErr)
+	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
@@ -2273,6 +2280,13 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	if hasMCP && batch.stepFailed(preflightStepMCPConfig) {
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, flushErr)
+	}
+
+	if fileCreds {
+		if err := o.recordNativeCredentialDeliveries(ctx, req, keeperEnabled); err != nil {
+			o.failRun(ctx, req, runID, "error")
+			return nil, "", err
+		}
 	}
 
 	return env, workDir, nil
@@ -2414,8 +2428,10 @@ func shortID(id string) string {
 // one package away, which is how it was missed here.
 func collectSecretValues(req AgentRunRequest) []string {
 	var secretValues []string
+	seenSecret := make(map[string]bool)
 	addSecret := func(v string) {
-		if strings.TrimSpace(v) != "" {
+		if strings.TrimSpace(v) != "" && !seenSecret[v] {
+			seenSecret[v] = true
 			secretValues = append(secretValues, v)
 		}
 	}
@@ -2442,6 +2458,12 @@ func collectSecretValues(req AgentRunRequest) []string {
 	}
 	for _, c := range req.Credentials {
 		addSecret(c.PlainValue)
+		addSecret(credpolicy.FileValue(c.Type, c.PlainValue))
+		for _, field := range c.Fields {
+			if field.IsSecret {
+				addSecret(field.Value)
+			}
+		}
 		// A rotation's grace value (#1882) is the previous secret, held for
 		// the sidecar's 401 replay; it is exactly as secret as the current one.
 		addSecret(c.GraceToken)

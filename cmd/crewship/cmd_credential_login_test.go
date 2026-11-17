@@ -51,8 +51,8 @@ func TestCredCreateCmd_ProviderLoginFromFile(t *testing.T) {
 	if got["type"] != "PROVIDER_LOGIN" || got["provider"] != "OPENAI" || got["mode"] != "subscription" {
 		t.Errorf("body = %v", got)
 	}
-	// The file's trailing newline is not part of the login.
-	if v, _ := got["value"].(string); !strings.HasPrefix(v, "{") || strings.HasSuffix(v, "\n") {
+	// File imports preserve the original bytes, including the final newline.
+	if v, _ := got["value"].(string); !strings.HasPrefix(v, "{") || !strings.HasSuffix(v, "\n") {
 		t.Errorf("value = %q", v)
 	}
 }
