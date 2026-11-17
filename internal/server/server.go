@@ -549,7 +549,7 @@ func (s *Server) mountAPIRouter(
 	// bridges the orchestrator's narrow AuditEmitter interface to
 	// api.WriteAuditLog so the orchestrator package stays independent
 	// of internal/api.
-	orch.SetAuditLog(newOrchestratorAuditAdapter(deps.DB))
+	orch.SetAuditLog(newOrchestratorAuditAdapter(deps.DB, s.journalWriter))
 
 	// Wire the journal into the stats collector so Crow's Nest's
 	// resource sparklines and replay view get container.metrics rows
@@ -591,6 +591,7 @@ func (s *Server) mountAPIRouter(
 		return agentMayRun(ctx, deps.DB, agentID)
 	})
 	orch.SetManagedLaunchResolver(managedLaunchResolver(deps.DB))
+	orch.SetCodexSandboxPolicyResolver(codexSandboxPolicyResolver(deps.DB))
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a

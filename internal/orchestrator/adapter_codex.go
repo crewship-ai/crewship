@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -74,16 +73,12 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 		model = routed.ModelID
 	}
 
-	// Sandbox policy: MINIMAL profile is read-only, all other profiles get
-	// workspace-write so the agent can edit code. Operators whose outer
-	// container already isolates the crew may explicitly opt into the
-	// unsandboxed CLI mode when Linux user namespaces are unavailable there.
-	// MESSAGING was retired in #261; only the three remaining profiles
-	// flow through here now.
+	// MINIMAL is always read-only. Only host admission can authorize the
+	// crew-scoped outer-isolation mode after actual runtime preflight.
 	sandbox := "workspace-write"
 	if req.ToolProfile == "MINIMAL" {
 		sandbox = "read-only"
-	} else if os.Getenv("CREWSHIP_CODEX_SANDBOX_MODE") == "danger-full-access" {
+	} else if req.codexOuterSandbox {
 		sandbox = "danger-full-access"
 	}
 	cmd = append(cmd, "--sandbox", sandbox)

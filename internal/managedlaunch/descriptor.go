@@ -37,7 +37,7 @@ func DecodeDescriptor(encoded string) (Descriptor, error) {
 		}
 		seen[key] = true
 		switch key {
-		case "path", "sha256", "format", "image_id", "revision_id", "lock_sha256", "binary", "version", "run_id", "env_keys":
+		case "path", "sha256", "format", "image_id", "revision_id", "lock_sha256", "binary", "version", "run_id", "env_keys", "outer_sandbox":
 		default:
 			return d, denied
 		}

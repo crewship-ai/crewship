@@ -36,14 +36,17 @@ UID 1001, read-only rootfs, no privileged mode, CapDrop ALL, no added capabiliti
 or devices, no-new-privileges, private PID/IPC/network namespaces, no volumes-from,
 no unconfined security profile, and only approved crew mounts. Docker sockets,
 host-sensitive binds and writable overlays of executable/launcher code refuse
-qualification. A bounded credential-free process probe checks effective
-NoNewPrivs and seccomp under the actual exec UID. Seccomp mode 2 alone does not
+qualification. The existing trusted static launcher checks effective UID, GID, NoNewPrivs,
+seccomp and zero capabilities in its own process immediately before exec.
+It creates no additional probe process or RunID. Seccomp mode 2 alone does not
 attest filter contents.
 
 The selected native Codex executable must have an exact pin and native lock,
 immutable environment revision, image, canonical artifact path and SHA-256.
-Qualification and execution use the same attested immutable managed launcher and
-artifact. A PATH lookup or self-reported CLI version is not executable authority.
+Image-bound startup qualification and execution select the same attested
+immutable artifact. The trusted launcher validates and executes the same open
+file descriptor. Startup qualification alone does not prove shell functionality;
+the release E2E fixture must execute the actual Codex shell tool. A PATH lookup or self-reported CLI version is not executable authority.
 Existing mutable launcher binds require runtime recreation, and images missing
 artifact evidence require reprovisioning. No silent fallback to a legacy launch
 is allowed. The managed-launch static-native limitations apply; this mode does
@@ -59,7 +62,10 @@ and actual runtime are rechecked. Changed evidence refuses execution.
 
 Preflight is bounded, uses no credential values and makes no paid model request.
 Audit carries crew, agent, run, selected mode, consent source, immutable image and
-artifact digest, and qualification outcome. Persistence failure refuses execution.
+artifact digest, and qualification outcome. `admitted` records successful host attestation and stored
+consent, with effective kernel checks still enforced by the launcher before
+Codex executes; it is not a successful-shell receipt. Persistence failure
+refuses execution.
 No credential value, provider token or material from a private key enters the
 audit. Approval to use outer isolation does not prove model authentication or a
 successful shell execution.
@@ -78,3 +84,15 @@ runtime proof; changed artifact/image/consent before exec; and mixed crews.
 A real qualified container with the exact Codex executable and a local provider
 fixture must execute a shell command. The same fixture must refuse an
 unqualified container. A model response or COMPLETED run state is insufficient.
+
+## Child tool environment
+
+The static launcher uses its fixed system PATH plus `/opt/crew-tools/bin` and
+`/opt/mise/data/shims` only for this mode. Host admission supplies the platform's
+`MiseRuntimeEnv` constants; image PATH and loader/shell hooks remain excluded.
+The main Codex still executes through the verified FD even if a same-named child
+program exists in the tools path. Child tools are arbitrary code within the crew
+trust boundary: `/opt/crew-tools` is writable and its tools are not attested.
+These fixed paths do not cover every devcontainer feature's custom bin directory;
+no complete feature-tool availability is claimed. The original managed pilot's
+fixed system PATH and environment contract are unchanged.

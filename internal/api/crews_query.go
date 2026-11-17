@@ -66,7 +66,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints, c.allow_codex_outer_sandbox,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,
@@ -138,7 +138,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var c crewResponse
 	err := scanCrewRow(h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints, c.allow_codex_outer_sandbox,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.services_json, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,

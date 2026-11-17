@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // orchestratorAuditAdapter bridges the orchestrator's narrow AuditEmitter
@@ -24,11 +26,16 @@ import (
 // same event — same "pass nil to skip the journal dual-write" pattern
 // admin_reencrypt.go already uses for the same reason.
 type orchestratorAuditAdapter struct {
-	db *sql.DB
+	db      *sql.DB
+	journal journal.Emitter
 }
 
-func newOrchestratorAuditAdapter(db *sql.DB) *orchestratorAuditAdapter {
-	return &orchestratorAuditAdapter{db: db}
+func newOrchestratorAuditAdapter(db *sql.DB, emitters ...journal.Emitter) *orchestratorAuditAdapter {
+	a := &orchestratorAuditAdapter{db: db}
+	if len(emitters) > 0 {
+		a.journal = emitters[0]
+	}
+	return a
 }
 
 func (a *orchestratorAuditAdapter) RecordAudit(ctx context.Context, action, entityType, entityID, userID, workspaceID string, metadata map[string]any) {
@@ -51,4 +58,11 @@ func (a *orchestratorAuditAdapter) RecordNativeCredentialDelivery(ctx context.Co
 		goapi.AuditEventDelivered, agentID, "", map[string]any{
 			"run_id": runID, "source": "native_preflight", "channel": "file", "authentication": "unknown",
 		})
+}
+
+func (a *orchestratorAuditAdapter) RecordCodexSandboxPreflight(ctx context.Context, e provider.CodexSandboxEvidence) error {
+	if a == nil || a.db == nil {
+		return errors.New("Codex sandbox audit database unavailable")
+	}
+	return goapi.RecordCodexSandboxPreflight(ctx, a.db, a.journal, e)
 }

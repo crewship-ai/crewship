@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -33,7 +34,7 @@ func (o *Orchestrator) SetManagedLaunchResolver(resolve ManagedLaunchResolver) {
 }
 
 func (o *Orchestrator) admitManagedLaunch(ctx context.Context, req *AgentRunRequest, use *provider.RuntimeUse) error {
-	if !o.managedLaunchCrews[req.CrewID] {
+	if req.codexOuterSandbox || !o.managedLaunchCrews[req.CrewID] {
 		return nil
 	}
 	if req.CLIAdapter == "CLAUDE_CODE" {
@@ -92,6 +93,17 @@ func managedExecConfig(req AgentRunRequest, cmd, env []string, workDir string) (
 	}
 	if large, _ := firstOversizedArg(cmd); large {
 		return provider.ExecConfig{}, errors.New("managed launch: CLI argument exceeds execve limit")
+	}
+	if req.codexOuterSandbox {
+		env = append([]string(nil), env...)
+		for _, kv := range devcontainer.MiseRuntimeEnv {
+			for _, entry := range env {
+				if strings.HasPrefix(entry, kv[0]+"=") && entry != kv[0]+"="+kv[1] {
+					return provider.ExecConfig{}, errors.New("Codex outer isolation: conflicting reserved mise environment")
+				}
+			}
+			env = overrideEnv(env, kv[0], kv[1])
+		}
 	}
 	values, keys, err := managedlaunch.Environment(env)
 	if err != nil {

@@ -20,26 +20,27 @@ import (
 )
 
 type updateCrewRequest struct {
-	Name                  *string   `json:"name"`
-	Slug                  *string   `json:"slug"`
-	Description           *string   `json:"description"`
-	Color                 *string   `json:"color"`
-	Icon                  *string   `json:"icon"`
-	AvatarStyle           *string   `json:"avatar_style"`
-	ContainerMemoryMB     *int      `json:"container_memory_mb"`
-	ContainerCPUs         *float64  `json:"container_cpus"`
-	ContainerTTLHours     *int      `json:"container_ttl_hours"`
-	NetworkMode           *string   `json:"network_mode"`
-	AllowedDomains        *[]string `json:"allowed_domains"`
-	AllowPrivateEndpoints *bool     `json:"allow_private_endpoints"`
-	MCPConfigJSON         *string   `json:"mcp_config_json"`
-	EscalationConfig      *string   `json:"escalation_config"`
-	IssuePrefix           *string   `json:"issue_prefix"`
-	RuntimeImage          *string   `json:"runtime_image"`
-	DevcontainerConfig    *string   `json:"devcontainer_config"`
-	MiseConfig            *string   `json:"mise_config"`
-	ServicesJSON          *string   `json:"services_json"`
-	ExpectedServicesJSON  *string   `json:"expected_services_json"` // optional client snapshot CAS; omitted preserves legacy callers
+	Name                   *string   `json:"name"`
+	Slug                   *string   `json:"slug"`
+	Description            *string   `json:"description"`
+	Color                  *string   `json:"color"`
+	Icon                   *string   `json:"icon"`
+	AvatarStyle            *string   `json:"avatar_style"`
+	ContainerMemoryMB      *int      `json:"container_memory_mb"`
+	ContainerCPUs          *float64  `json:"container_cpus"`
+	ContainerTTLHours      *int      `json:"container_ttl_hours"`
+	NetworkMode            *string   `json:"network_mode"`
+	AllowedDomains         *[]string `json:"allowed_domains"`
+	AllowPrivateEndpoints  *bool     `json:"allow_private_endpoints"`
+	AllowCodexOuterSandbox *bool     `json:"allow_codex_outer_sandbox"`
+	MCPConfigJSON          *string   `json:"mcp_config_json"`
+	EscalationConfig       *string   `json:"escalation_config"`
+	IssuePrefix            *string   `json:"issue_prefix"`
+	RuntimeImage           *string   `json:"runtime_image"`
+	DevcontainerConfig     *string   `json:"devcontainer_config"`
+	MiseConfig             *string   `json:"mise_config"`
+	ServicesJSON           *string   `json:"services_json"`
+	ExpectedServicesJSON   *string   `json:"expected_services_json"` // optional client snapshot CAS; omitted preserves legacy callers
 	// MaxEphemeralAgents is the hire-flow quota (see v103 migration
 	// + agents_hire.go). PR-G surfaces this on the policy panel so
 	// operators can raise/lower the cap without dropping to the CLI.
@@ -87,6 +88,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Private-network egress remains a workspace administrator decision.
 	if req.AllowPrivateEndpoints != nil && !canRole(role, "manage") {
 		replyError(w, http.StatusForbidden, "Workspace administration required for private endpoints")
+		return
+	}
+
+	if req.AllowCodexOuterSandbox != nil && !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Workspace administration required for Codex outer isolation")
 		return
 	}
 
@@ -426,6 +432,9 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.SetNull("allowed_domains")
 		}
 	}
+	if req.AllowCodexOuterSandbox != nil {
+		ub.Set("allow_codex_outer_sandbox", *req.AllowCodexOuterSandbox)
+	}
 	// #961 private-endpoint egress opt-in.
 	if req.AllowPrivateEndpoints != nil {
 		v := 0
@@ -486,6 +495,17 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if req.AllowCodexOuterSandbox != nil && !canRole(currentRole, "manage") {
+		replyError(w, http.StatusForbidden, "Workspace administration required for Codex outer isolation")
+		return
+	}
+	var previousCodexOuter bool
+	if req.AllowCodexOuterSandbox != nil {
+		if err := tx.QueryRowContext(r.Context(), `SELECT allow_codex_outer_sandbox FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&previousCodexOuter); err != nil {
+			replyInternalError(w, h.logger, "read previous Codex outer isolation", err)
+			return
+		}
+	}
 	var previousSecurity map[string]any
 	if req.DevcontainerConfig != nil {
 		var previous sql.NullString
@@ -547,7 +567,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var c crewResponse
 	err = scanCrewRow(tx.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints, c.allow_codex_outer_sandbox,
 			c.mcp_config_json, c.escalation_config,
 			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
 			c.max_ephemeral_agents,
@@ -576,6 +596,9 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata := map[string]any{"name": c.Name, "fields": changedCrewFields(&req)}
+	if req.AllowCodexOuterSandbox != nil {
+		metadata["codex_outer_sandbox"] = map[string]any{"previous": previousCodexOuter, "current": *req.AllowCodexOuterSandbox}
+	}
 	if req.DevcontainerConfig != nil {
 		current := ""
 		if c.DevcontainerConfig != nil {
@@ -599,7 +622,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.crewMutationActorIn(r, tx, crewID, "manage", req.AllowPrivateEndpoints == nil); err != nil {
+	if err := h.crewMutationActorIn(r, tx, crewID, "manage", req.AllowPrivateEndpoints == nil && req.AllowCodexOuterSandbox == nil); err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusForbidden, "Forbidden")
 		} else {
@@ -739,6 +762,7 @@ func changedCrewFields(req *updateCrewRequest) []string {
 	add("network_mode", req.NetworkMode != nil)
 	add("allowed_domains", req.AllowedDomains != nil)
 	add("allow_private_endpoints", req.AllowPrivateEndpoints != nil)
+	add("allow_codex_outer_sandbox", req.AllowCodexOuterSandbox != nil)
 	add("mcp_config_json", req.MCPConfigJSON != nil)
 	add("escalation_config", req.EscalationConfig != nil)
 	add("issue_prefix", req.IssuePrefix != nil)

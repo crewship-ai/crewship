@@ -54,13 +54,14 @@ var crewListCmd = &cobra.Command{
 		}
 
 		var crews []struct {
-			ID          string  `json:"id" yaml:"id"`
-			Name        string  `json:"name" yaml:"name"`
-			Slug        string  `json:"slug" yaml:"slug"`
-			Description *string `json:"description" yaml:"description"`
-			MemoryMB    int     `json:"container_memory_mb" yaml:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus" yaml:"container_cpus"`
-			NetworkMode string  `json:"network_mode" yaml:"network_mode"`
+			ID                     string  `json:"id" yaml:"id"`
+			Name                   string  `json:"name" yaml:"name"`
+			Slug                   string  `json:"slug" yaml:"slug"`
+			Description            *string `json:"description" yaml:"description"`
+			MemoryMB               int     `json:"container_memory_mb" yaml:"container_memory_mb"`
+			CPUs                   float64 `json:"container_cpus" yaml:"container_cpus"`
+			NetworkMode            string  `json:"network_mode" yaml:"network_mode"`
+			AllowCodexOuterSandbox bool    `json:"allow_codex_outer_sandbox" yaml:"allow_codex_outer_sandbox"`
 			// #1648: the configured mode is not necessarily the effective
 			// one. Missing on an older server, where the zero value would
 			// read as "not enforced" and mark every crew — so it is a
@@ -185,16 +186,17 @@ var crewGetCmd = &cobra.Command{
 		}
 
 		var crew struct {
-			ID          string  `json:"id" yaml:"id"`
-			Name        string  `json:"name" yaml:"name"`
-			Slug        string  `json:"slug" yaml:"slug"`
-			Description *string `json:"description" yaml:"description"`
-			Color       *string `json:"color" yaml:"color"`
-			Icon        *string `json:"icon" yaml:"icon"`
-			MemoryMB    int     `json:"container_memory_mb" yaml:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus" yaml:"container_cpus"`
-			TTLHours    *int    `json:"container_ttl_hours" yaml:"container_ttl_hours"`
-			NetworkMode string  `json:"network_mode" yaml:"network_mode"`
+			ID                     string  `json:"id" yaml:"id"`
+			Name                   string  `json:"name" yaml:"name"`
+			Slug                   string  `json:"slug" yaml:"slug"`
+			Description            *string `json:"description" yaml:"description"`
+			Color                  *string `json:"color" yaml:"color"`
+			Icon                   *string `json:"icon" yaml:"icon"`
+			MemoryMB               int     `json:"container_memory_mb" yaml:"container_memory_mb"`
+			CPUs                   float64 `json:"container_cpus" yaml:"container_cpus"`
+			TTLHours               *int    `json:"container_ttl_hours" yaml:"container_ttl_hours"`
+			NetworkMode            string  `json:"network_mode" yaml:"network_mode"`
+			AllowCodexOuterSandbox bool    `json:"allow_codex_outer_sandbox" yaml:"allow_codex_outer_sandbox"`
 			// #1648: configured vs effective. See networkModeDisplay.
 			NetworkModeEnforced         *bool    `json:"network_mode_enforced" yaml:"network_mode_enforced"`
 			NetworkModeUnenforcedReason string   `json:"network_mode_unenforced_reason" yaml:"network_mode_unenforced_reason"`
@@ -264,6 +266,7 @@ var crewGetCmd = &cobra.Command{
 		pairs = append(pairs,
 			[]string{"Allowed Domains", domainsStr},
 			[]string{"Private Endpoints", privateEndpointsStr},
+			[]string{"Codex Outer Isolation", fmt.Sprintf("%t (requires immutable runtime qualification; MINIMAL stays read-only)", crew.AllowCodexOuterSandbox)},
 			[]string{"Created", crew.CreatedAt},
 		)
 		return f.AutoDetail(crew, pairs)
