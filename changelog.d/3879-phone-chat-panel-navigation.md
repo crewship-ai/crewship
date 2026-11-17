@@ -1,0 +1,1 @@
+- **Phone chats have one panel selector, including Memory (#3879).** The shared keyboard-accessible control switches between Chat, Artifacts, Work and Memory without repeating the panel tabs.
