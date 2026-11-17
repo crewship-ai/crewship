@@ -583,11 +583,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				mkdirResult.Reader.Close()
 			}
 		}
-		execCmd = []string{"/bin/bash", "--login"}
+		// The container already carries the provisioned login/feature PATH.
+		// A login shell would reset it via /etc/profile; a private PATH here
+		// also hid mise tools. Inherit the runtime contract, without any
+		// agent-run environment (which may contain scoped credentials).
+		execCmd = []string{"/bin/bash", "-i"}
 		execEnv = []string{
 			"TERM=xterm-256color",
 			"HOME=/home/agent",
-			"PATH=/opt/crew-tools/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		}
 	}
 

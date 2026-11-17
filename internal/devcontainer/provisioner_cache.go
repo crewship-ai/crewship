@@ -63,6 +63,7 @@ const cacheImageRepoPrefix = "crewship-cache:"
 func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) string {
 	h := sha256.New()
 	h.Write([]byte(provisionerSchemaVersion))
+	h.Write([]byte(AgentToolProfile()))
 	h.Write([]byte("|"))
 	// Feature-provided CLIs may leave the mise inputs unchanged. Include the
 	// installer release policy so an old image cannot be restamped as current.

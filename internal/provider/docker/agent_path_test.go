@@ -95,7 +95,7 @@ func TestApplyAgentLoginPath_MergesExistingPath(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly one PATH entry, got %d: %v", n, got)
 	}
-	want := "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/feature/bin:/usr/bin:/bin"
+	want := "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/opt/feature/bin:/usr/bin:/bin"
 	if v := envValue(got, "PATH"); v != want {
 		t.Errorf("PATH = %q\n   want %q", v, want)
 	}

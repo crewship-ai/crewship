@@ -240,8 +240,13 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	if cfg.WorkingDir != "/crew/shared" {
 		t.Errorf("WorkingDir = %q, want /crew/shared", cfg.WorkingDir)
 	}
-	if len(cfg.Cmd) != 2 || cfg.Cmd[0] != "/bin/bash" || cfg.Cmd[1] != "--login" {
-		t.Errorf("Cmd = %v, want [/bin/bash --login]", cfg.Cmd)
+	if len(cfg.Cmd) != 2 || cfg.Cmd[0] != "/bin/bash" || cfg.Cmd[1] != "-i" {
+		t.Errorf("Cmd = %v, want [/bin/bash -i]", cfg.Cmd)
+	}
+	// Only terminal metadata is supplied: PATH and mise configuration must
+	// come from the crew container, never from a credential-bearing run env.
+	if strings.Join(cfg.Env, "\n") != "TERM=xterm-256color\nHOME=/home/agent" {
+		t.Errorf("terminal must inherit native runtime environment, got %v", cfg.Env)
 	}
 	if cfg.Rows != 24 || cfg.Cols != 80 {
 		t.Errorf("default size = %dx%d, want 24x80", cfg.Rows, cfg.Cols)

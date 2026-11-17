@@ -211,6 +211,19 @@ and the saving depends on what a fresh build downloads.
 
 The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin`, `/opt/crewship/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. At container start the runtime merges three sources into one PATH — these directories, the build's aggregated `containerEnv` PATH (feature-declared directories and the image's own, with `${containerEnv:PATH}` expanded), and the login PATH captured at build time — so nothing a feature or a profile script added is lost, and a captured login PATH that does not know about mise's shims cannot hide them. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
 
+The interactive terminal opens an interactive, non-login Bash and inherits this
+container environment. It overrides only terminal metadata and `HOME`; it does
+not copy an agent run's credential environment. Routine scripts and child
+processes inherit the same native tool paths unless their caller explicitly
+supplies another PATH. `/opt/crew-tools/bin` is also part of the shared path.
+For POSIX login shells, new images install `/etc/profile.d/zz-crewship-tools.sh`
+from the same directory list, restoring tool paths after a system profile resets
+PATH. Mise shims select the configured version, so PATH contains no versioned
+install directories. Failed installs, missing mise versions and dangling shims
+fail provisioning. Existing images need reprovisioning to acquire the login
+profile hook; terminal inheritance takes effect with the updated server.
+
+
 ### Adapter CLIs are installed and verified
 
 Provisioning also records the required agent CLIs' observed versions and paths

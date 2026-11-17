@@ -1,6 +1,9 @@
 package docker
 
-import "strings"
+import (
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"strings"
+)
 
 // wellKnownDevcontainerBinDirs are PATH entries that devcontainer features add
 // for LOGIN shells only (via /etc/profile.d/*), so a non-login `docker exec`
@@ -16,13 +19,10 @@ import "strings"
 //     on purpose (internal/devcontainer/mise.go). Missing from this list
 //     until 2026-09-06: a wizard-built crew whose only `claude` came from
 //     mise answered every chat with "No such file or directory".
-var wellKnownDevcontainerBinDirs = []string{
+var wellKnownDevcontainerBinDirs = append([]string{
 	"/usr/local/py-utils/bin",
 	"/usr/local/share/npm-global/bin",
-	"/home/agent/.local/bin",
-	"/opt/crewship/bin",
-	"/opt/mise/data/shims",
-}
+}, devcontainer.AgentToolPathDirs...)
 
 // defaultAgentPath is the last-resort PATH used when neither a captured login
 // PATH nor an image ENV PATH is available. Mirrors the standard Debian/Ubuntu

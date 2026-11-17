@@ -478,7 +478,9 @@ func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) err
 	// than the one this check exists for.
 	stdout, exitCode, err := exec(ctx, containerID, []string{
 		"sh", "-c",
-		`broken=""; for s in ` + miseShimsDir + `/*; do ` +
+		`missing=$(mise ls --missing --no-header) || exit $?; ` +
+			`[ -z "$missing" ] || { printf 'missing mise installations: %s\n' "$missing"; exit 1; }; ` +
+			`broken=""; for s in ` + miseShimsDir + `/*; do ` +
 			`[ -e "$s" ] && continue; ` +
 			`[ -L "$s" ] || continue; ` +
 			`broken="$broken $(basename "$s")"; done; ` +
@@ -488,7 +490,7 @@ func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) err
 		return fmt.Errorf("%w: verify shims: %v", ErrMiseInstallFailed, err)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("%w: shims do not resolve (dangling:%s) — the pinned versions would be "+
+		return fmt.Errorf("%w: tool availability check failed (%s) — the pinned versions would be "+
 			"silently replaced by whatever the base image ships", ErrMiseInstallFailed, strings.TrimSpace(stdout))
 	}
 	return nil
