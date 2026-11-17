@@ -212,7 +212,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 			SELECT c.id FROM credentials c
 			JOIN agent_credentials ac ON ac.credential_id = c.id
 			WHERE ac.agent_id = ? AND ac.env_var_name = ? AND c.workspace_id = ?
-			  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+			  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL AND COALESCE(c.provider,'') <> 'AWS_BEDROCK'
 			LIMIT 1`,
 			body.RequestingAgentID, body.CredentialName, body.WorkspaceID).Scan(&body.CredentialID)
 		if err != nil {
@@ -320,7 +320,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		FROM credentials c
 		JOIN agent_credentials ac ON ac.credential_id = c.id
 		WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?
-		  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+		  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL AND COALESCE(c.provider,'') <> 'AWS_BEDROCK'
 		  AND (ac.expires_at IS NULL OR ac.expires_at > ?)`,
 		body.CredentialID, body.RequestingAgentID, body.WorkspaceID, leaseNow).Scan(&credName, &secLevel)
 	if err != nil {
@@ -657,7 +657,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		`SELECT 1 FROM credentials c
 		 JOIN agent_credentials ac ON ac.credential_id = c.id
 		 WHERE c.id = ? AND ac.agent_id = ? AND c.workspace_id = ?
-		   AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+		   AND c.status = 'ACTIVE' AND c.deleted_at IS NULL AND COALESCE(c.provider,'') <> 'AWS_BEDROCK'
 		   AND (ac.expires_at IS NULL OR ac.expires_at > ?)`,
 		body.CredentialID, body.RequestingAgentID, body.WorkspaceID,
 		time.Now().UTC().Format(time.RFC3339)).Scan(&stillActive); err != nil {
@@ -722,7 +722,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		var encValue string
 		if err := h.db.QueryRowContext(r.Context(),
 			`SELECT encrypted_value FROM credentials
-			 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND COALESCE(provider,'') <> 'AWS_BEDROCK'`,
 			body.CredentialID, body.WorkspaceID).Scan(&encValue); err != nil {
 			h.logger.Error("keeper execute: secret not in store and vault lookup failed",
 				"credential_id", body.CredentialID, "error", err)

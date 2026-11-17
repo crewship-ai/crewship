@@ -102,6 +102,7 @@ for (const width of [1280, 390]) {
     await page.getByRole("button", { name: "Add AI provider", exact: true }).click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^Amazon Bedrock/ }).click()
+    await dialog.getByText("Name and labels", { exact: false }).click()
     await dialog.getByLabel("Name", { exact: true }).fill("Bedrock EU")
     await dialog.getByLabel("API key", { exact: true }).fill("synthetic-bedrock-key")
     await dialog.getByLabel("Permitted Bedrock model IDs").fill("eu.anthropic.claude-opus-5-5")

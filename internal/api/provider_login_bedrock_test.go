@@ -93,6 +93,31 @@ func TestBedrockAccountCreateAssignAndIsolation(t *testing.T) {
 	if e != nil || view == nil || view.Bedrock == nil || view.Bedrock.Region != "eu-central-1" || strings.Contains(string(raw), "bedrock-synthetic-secret") || view.Refresh.Supported {
 		t.Fatal("unsafe or misleading account view")
 	}
+	var renewed bedrock.Account
+	_ = json.Unmarshal([]byte(bedrockAccountFixture(t)), &renewed)
+	renewed.APIKey = "renewed-bedrock-key"
+	renewed.ExpiresAt = time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
+	replacement, _ := json.Marshal(renewed)
+	patchBody, _ := json.Marshal(map[string]any{"value": string(replacement), "mode": "api_key"})
+	patch := plRequest(t, "PATCH", "/api/v1/credentials/"+first, string(patchBody), user, ws, "OWNER")
+	patch.SetPathValue("credentialId", first)
+	rr := httptest.NewRecorder()
+	h.Update(rr, patch)
+	if rr.Code != 200 {
+		t.Fatalf("renewal failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if got := plDecryptColumn(t, db, `SELECT encrypted_value FROM credentials WHERE id=?`, first); got != string(replacement) {
+		t.Fatal("renewal did not replace the complete account atomically")
+	}
+	var expiry string
+	_ = db.QueryRow(`SELECT token_expires_at FROM credentials WHERE id=?`, first).Scan(&expiry)
+	if expiry != renewed.ExpiresAt {
+		t.Fatal("renewal expiry was not replaced")
+	}
+	d, _, e = loadDeliveredCredentials(t.Context(), db, "bedrock-a")
+	if e != nil || len(d) != 1 || d[0].ID != first {
+		t.Fatal("renewal lost account bindings")
+	}
 	execOrFatal(t, db, `UPDATE credentials SET status='REVOKED' WHERE id=?`, first)
 	if d, _, e := loadDeliveredCredentials(t.Context(), db, "bedrock-a"); e != nil || len(d) != 0 {
 		t.Fatalf("revocation fell back to another payer: %v %+v", e, d)
