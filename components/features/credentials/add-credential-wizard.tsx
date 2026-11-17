@@ -1187,7 +1187,7 @@ export function AddCredentialWizard({
                 {canBind && <ChoiceButton selected={assignNow} onClick={() => { setAssignNow(true); setScope("AGENT") }}>{login ? "Choose now" : "Assign now"}</ChoiceButton>}
               </div>
               <CardNote>{login
-                ? (assignNow ? `Only agents whose runner can use ${loginProvider(provider)?.label ?? "this provider"} are offered.` : "Save the account now and choose the agents it pays for later.")
+                ? (assignNow ? (isBedrock ? "OpenCode is selected automatically for the agents you choose." : `Only agents whose runner can use ${loginProvider(provider)?.label ?? "this provider"} are offered.`) : "Save the account now and choose the agents it pays for later.")
                 : (assignNow ? "Choose who will receive this credential. Runtime access still follows workspace policy." : "Save in the workspace vault without creating delivery assignments. You can assign it later.")}</CardNote>
             </CreateSurfaceSection>
             {login && canBind && matchingPools.length > 0 && (

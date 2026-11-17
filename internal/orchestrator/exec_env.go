@@ -78,7 +78,7 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		return env
 	}
 
-	if activeCred != nil {
+	if activeCred != nil && providerlogin.Canonical(activeCred.Provider) != bedrock.Provider {
 		// #2092/#2246: a further review found this selector still unguarded
 		// — the non-sidecar path never consulted credpolicy at
 		// all, so an unclassified credential (fallback Delivery: DeliveryNone)
@@ -177,7 +177,7 @@ func appendCredentialFields(env []string, cred Credential, secretsToo bool) []st
 	// bookkeeping. The login reaches the container only as its derivative —
 	// CLAUDE_CODE_OAUTH_TOKEN, $CODEX_HOME/auth.json, or the CredStore — so
 	// no part is ever exported, on either delivery path, under any name.
-	if cred.isProviderLogin() {
+	if cred.isProviderLogin() || providerlogin.Canonical(cred.Provider) == bedrock.Provider {
 		return env
 	}
 	for _, f := range cred.Fields {
@@ -371,6 +371,9 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 
 	// Match credentials to MCP env var references
 	for _, cred := range req.Credentials {
+		if providerlogin.Canonical(cred.Provider) == bedrock.Provider {
+			continue
+		}
 		if bedrockRun(req) && providerlogin.IsProvider(cred.Provider) {
 			continue
 		}
