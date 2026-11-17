@@ -48,6 +48,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"path/filepath"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -93,13 +94,17 @@ const (
 // hash would be a far worse bug than the one this file exists to fix.
 func (p *Provider) crewRuntimeContractDigest() string {
 	p.contractOnce.Do(func() {
+		dirs := crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir}
+		if p.pathMap != nil {
+			dirs = crewDirs{output: filepath.Join(p.pathMap.local, ".contract/output"), workspace: filepath.Join(p.pathMap.local, ".contract/workspace"), crew: filepath.Join(p.pathMap.local, ".contract/crew")}
+		}
 		cfg, hostCfg, err := p.assembleCrewSpec(
 			provider.CrewConfig{ID: contractCrewID, Slug: contractCrewSlug},
 			"", // image: the container's own image is checked separately (image drift)
 			p.ociRuntime(),
 			contractMemoryMB,
 			contractCPUs,
-			crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
+			dirs,
 			[]string{"CREWSHIP_CREW_ID=" + contractCrewID},
 			nil, // no image ENV: applyDefaultEnv/applyAgentLoginPath both tolerate it
 		)
@@ -107,6 +112,24 @@ func (p *Provider) crewRuntimeContractDigest() string {
 			p.logger.Warn("cannot compute the crew runtime-contract digest; container-config drift will not be reported",
 				"error", err)
 			return
+		}
+		// Data paths are canonical placeholders in this contract, not a
+		// per-installation layout. Building inside a mapped root must not
+		// change the digest when its effective daemon mapping is identity.
+		for i := range hostCfg.Mounts {
+			m := &hostCfg.Mounts[i]
+			canonical := ""
+			switch m.Target {
+			case "/workspace":
+				canonical = contractWorkingDir
+			case "/output":
+				canonical = contractOutputDir
+			case "/crew":
+				canonical = contractCrewDir
+			}
+			if canonical != "" && m.VolumeOptions != nil && m.VolumeOptions.DriverConfig != nil {
+				m.VolumeOptions.DriverConfig.Options["device"] = canonical
+			}
 		}
 		p.contractDigest = digestCrewSpec(cfg, hostCfg)
 	})

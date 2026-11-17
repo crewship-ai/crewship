@@ -445,6 +445,9 @@ func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, targe
 // per-crew mutex makes the second caller see the freshly-created
 // container and reuse it instead.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (containerID string, err error) {
+	if runtimeErr := p.runtimeAvailableForRequest(ctx); runtimeErr != nil {
+		return "", fmt.Errorf("Docker runtime unavailable: %w", runtimeErr)
+	}
 	if p.cfg.OwnerActive != nil {
 		if err := p.cfg.OwnerActive(ctx, team.ID); err != nil {
 			return "", err
@@ -673,7 +676,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	if err := p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes); err != nil {
+		return "", err
+	}
 
 	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
 	if err != nil {
@@ -1295,8 +1300,8 @@ func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 // (running as root) to chown the bind-mount paths. Windows has no host-side
 // chown at all (os.Chown always errors), so skip straight to the
 // in-container path — Docker Desktop's file sharing surfaces uid mapping
-// inside the VM, where chown works. Best-effort: failures degrade to a 0777
-// chmod fallback rather than aborting the ensure.
+// inside the VM, where chown works. Helper creation errors abort creation;
+// completed ownership commands retain their prior best-effort handling.
 //
 // volumes are the crew's NAMED volumes (/home/agent, /opt/crew-tools).
 // They are handled here, and only here, because nothing else in the tree
@@ -1319,7 +1324,7 @@ func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 // ownership is what decides whether the agent can create entries in it;
 // the files inside were written by the agent already. A recursive chown
 // of a 1.6 GB /home/agent on every create would cost seconds for nothing.
-func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs, volumes []string) {
+func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs, volumes []string) error {
 	needsDockerChown := goruntime.GOOS == "windows" || len(volumes) > 0
 	if !needsDockerChown {
 		for _, dir := range dirs.all {
@@ -1340,6 +1345,11 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 			volTargets = append(volTargets, target)
 			mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
 		}
+		translated, mapErr := p.daemonMounts(mounts)
+		if mapErr != nil {
+			return fmt.Errorf("ownership mounts rejected: %w", mapErr)
+		}
+		mounts = translated
 		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets)
 		initResp, initErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 			Config: &container.Config{
@@ -1349,33 +1359,31 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 			},
 			HostConfig: &container.HostConfig{Mounts: mounts},
 		})
-		if initErr == nil {
-			_, _ = p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
-			// ContainerWait returns two channels; drain one of them (or
-			// cancel) so we do not leak a goroutine inside the docker client
-			// when the wait completes. A short timeout keeps us from hanging
-			// indefinitely on a wedged daemon.
-			waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
-			wait := p.client.ContainerWait(waitCtx, initResp.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
-			select {
-			case <-wait.Result:
-			case werr := <-wait.Error:
-				if werr != nil {
-					p.logger.Debug("init container wait returned error", "error", werr)
-				}
-			case <-waitCtx.Done():
-				p.logger.Debug("init container wait timed out", "error", waitCtx.Err())
-			}
-			waitCancel()
-			_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
-			p.logger.Debug("init container fixed bind-mount ownership")
-		} else {
-			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
-			for _, dir := range dirs.all {
-				os.Chmod(dir, 0777) //nolint:errcheck
-			}
+		if initErr != nil {
+			return fmt.Errorf("ownership init create: %w", initErr)
 		}
+		if _, err := p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{}); err != nil {
+			p.logger.Warn("ownership init start failed; retaining existing permissions", "error", err)
+		}
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		wait := p.client.ContainerWait(waitCtx, initResp.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+		select {
+		case result := <-wait.Result:
+			if result.StatusCode != 0 {
+				p.logger.Warn("ownership init exited unsuccessfully; retaining existing permissions", "exit_code", result.StatusCode)
+			}
+		case waitErr := <-wait.Error:
+			p.logger.Warn("ownership init wait failed; retaining existing permissions", "error", waitErr)
+		case <-waitCtx.Done():
+			p.logger.Warn("ownership init wait timed out; retaining existing permissions", "error", waitCtx.Err())
+		}
+		cancel()
+		// Preserve the existing non-forced removal behavior. A slow recursive
+		// chown is not killed or made fatal by this path-mapping change.
+		_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
+
 	}
+	return nil
 }
 
 // buildCrewContainerConfig assembles the container env (merging and
@@ -1884,9 +1892,9 @@ func shellQuote(s string) string {
 // volumeTargets are the in-init-container mount points of the crew's
 // NAMED volumes. Their roots get a non-recursive chown + chmod 755 so the
 // agent can create entries in them — see fixBindMountOwnership for why
-// nothing else in the tree is able to do this, and why it is not -R. The
-// step is appended with `;` rather than `&&` so a failure on one volume
-// cannot skip the other, and cannot mask the bind chown's result.
+// nothing else in the tree is able to do this, and why it is not -R.
+// Preserve the existing best-effort ownership command in this path-mapping
+// fix. Strict exit handling requires separate measurement and qualification.
 func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string) string {
 	mnt := func(p string) string { return shellQuote("/mnt" + p) }
 

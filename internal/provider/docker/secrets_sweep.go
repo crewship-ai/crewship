@@ -184,6 +184,11 @@ func (p *Provider) removeLegacySecretsDirViaHelper(ctx context.Context, dirPath 
 		},
 	}
 
+	translated, err := p.daemonMounts(helperHost.Mounts)
+	if err != nil {
+		return fmt.Errorf("legacy secrets helper mounts: %w", err)
+	}
+	helperHost.Mounts = translated
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:     helperCfg,
 		HostConfig: helperHost,
@@ -233,11 +238,34 @@ func (p *Provider) sweepLegacySecretsDirs(ctx context.Context) {
 		p.logger.Warn("legacy secrets sweep skipped: cannot list containers", "error", err)
 		return
 	}
-	protected := protectedLegacySecretsDirs(listResult.Items, base)
+	protected, err := p.protectedLegacySecrets(listResult.Items, base)
+	if err != nil {
+		p.logger.Warn("legacy secrets sweep skipped: cannot authenticate mapped paths", "error", err)
+		return
+	}
 	removed, skipped, failed := sweepLegacySecretsBase(base, protected, p.logger, os.RemoveAll,
 		func(dir string) error { return p.removeLegacySecretsDirViaHelper(ctx, dir) })
 	if removed+skipped+failed > 0 {
 		p.logger.Info("legacy host-side secrets sweep complete",
 			"removed", removed, "still_mounted_skipped", skipped, "failed", failed)
 	}
+}
+
+// Compare Docker's namespace with Docker's namespace before any local removal.
+// Preserve both spellings for pre-mapping legacy containers conservatively.
+func (p *Provider) protectedLegacySecrets(items []container.Summary, base string) (map[string]bool, error) {
+	if p.runtimeErr != nil {
+		return nil, p.runtimeErr
+	}
+	protected := protectedLegacySecretsDirs(items, base)
+	if p.pathMap != nil {
+		daemonBase, err := p.pathMap.translate(base)
+		if err != nil {
+			return nil, err
+		}
+		for crew := range protectedLegacySecretsDirs(items, daemonBase) {
+			protected[crew] = true
+		}
+	}
+	return protected, nil
 }

@@ -160,6 +160,10 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	if p.cfg.SidecarBinaryPath == "" {
 		return "", errors.New("no sidecar binary path configured; the helper runs the bind-mounted crewship-sidecar")
 	}
+	translated, err := p.daemonMounts([]mount.Mount{{Type: mount.TypeBind, Source: p.cfg.SidecarBinaryPath, Target: "/usr/local/bin/crewship-sidecar", ReadOnly: true}})
+	if err != nil {
+		return "", err
+	}
 	// A fixed name per crew container: a helper orphaned by a cancelled
 	// create (the daemon made it, the reply was lost) is removed here before
 	// the next one, instead of accumulating.
@@ -187,12 +191,7 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 			SecurityOpt:    []string{"no-new-privileges"},
 			ReadonlyRootfs: true,
 			Runtime:        "runc",
-			Mounts: []mount.Mount{{
-				Type:     mount.TypeBind,
-				Source:   p.cfg.SidecarBinaryPath,
-				Target:   "/usr/local/bin/crewship-sidecar",
-				ReadOnly: true,
-			}},
+			Mounts:         translated,
 		},
 	})
 	if err != nil {

@@ -36,6 +36,7 @@ for _ in $(seq 1 90); do
   if curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
     curl -fsS --max-time 10 "http://127.0.0.1:$port/" >/dev/null
     echo "Image boot and embedded UI verified on $platform"
+    bash "$(dirname "$0")/smoke-image-runtime.sh" "$image" "$expected" "$platform"
     exit 0
   fi
   [ "$(docker inspect -f '{{.State.Running}}' "$cid")" = true ] || break

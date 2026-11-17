@@ -69,6 +69,8 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 		labels := sidecarVolumeLabels(crewID, crewSlug, svc.Name, v.Name)
 		labels[quotaBytesLabel] = strconv.FormatInt(d.Bytes, 10)
 		labels[quotaGenerationLabel] = strconv.FormatInt(gen, 10)
+		// d.Mount comes from the trusted host quota helper in the daemon
+		// namespace, not from server-local OutputBasePath. Do not translate it.
 		options := map[string]string{"type": "none", "o": "bind", "device": d.Mount}
 		existing, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
 		if err == nil {

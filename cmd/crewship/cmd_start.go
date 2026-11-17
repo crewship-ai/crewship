@@ -1733,6 +1733,8 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 	}
 	return docker.Config{
 		QuotaCatalog:      catalog,
+		DaemonDataPath:    os.Getenv("CREWSHIP_DOCKER_DAEMON_DATA_PATH"),
+		ServerContainer:   os.Getenv("CREWSHIP_DOCKER_SERVER_CONTAINER"),
 		RuntimeImage:      cfg.Container.RuntimeImage,
 		DefaultRuntime:    cfg.Container.DefaultRuntime,
 		EgressFenceCrews:  cfg.Container.EgressFenceCrews,
@@ -1840,6 +1842,7 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 		}
 		d, err := docker.New(ctx, dockerProviderConfig(cfg, gate), logger)
 		if err != nil {
+			deps.RuntimeInitError = err
 			logger.Warn("docker provider unavailable, running without containers", "error", err)
 		} else {
 			deps.Container = d

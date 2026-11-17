@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -42,6 +43,8 @@ type Config struct {
 	DefaultRuntime  string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network         string
 	OutputBasePath  string
+	DaemonDataPath  string // daemon-visible counterpart of OutputBasePath; never used for local I/O.
+	ServerContainer string // explicit container identity to inspect for the storage mount.
 	ContainerPrefix string // Container name prefix (e.g. "crewship" -> "crewship-team-{slug}"). Allows multi-instance isolation.
 
 	// SidecarBinaryPath is the host path to crewship-sidecar to bind-mount
@@ -121,11 +124,15 @@ type Provider struct {
 	// Tests only.
 	networkDisconnectHook func(netName string) error
 
-	serviceOperation serviceOperationGate
-	client           *client.Client
-	cfg              Config
-	logger           *slog.Logger
-	detected         DetectResult
+	serviceOperation  serviceOperationGate
+	runtimeErr        error         // immutable mapping/configuration error
+	runtimeProbeGate  chan struct{} // context-aware serialization; nil on bare test providers
+	runtimeProbeState atomic.Pointer[mandatoryProbeState]
+	pathMap           *daemonPathMap
+	client            *client.Client
+	cfg               Config
+	logger            *slog.Logger
+	detected          DetectResult
 
 	// digestResolver short-circuits repeated HEAD requests to the registry
 	// for the runtime image. Shared helper (see internal/dockerutil) so the
@@ -630,6 +637,9 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		checkVolumeMountpoint: daemonSharesHostFS(ctx, cli),
 		cgroupVersion:         detectCgroupVersion(ctx, cli),
 	}
+
+	p.pathMap, p.runtimeErr = p.resolveDaemonPaths(ctx)
+	p.runtimeProbeGate = make(chan struct{}, 1)
 
 	logger.Info("container runtime detected",
 		"runtime", detected.Runtime,
@@ -1655,7 +1665,7 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 			ReadOnly: true,
 		},
 	)
-	return mounts, nil
+	return p.daemonMounts(mounts)
 }
 
 // verifySidecarIsLinuxELF guards against a host sidecar binary that cannot

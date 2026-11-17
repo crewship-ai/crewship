@@ -191,6 +191,7 @@ func TestRuntimeConformance(t *testing.T) {
 	waitForPID1(ctx, t, p, created.ID)
 
 	facts := readContainerFacts(ctx, t, p, created.ID)
+	t.Logf("effective persistent data mounts: workspace=%s output=%s crew=%s", facts["WORKSPACE_MOUNT"], facts["OUTPUT_MOUNT"], facts["CREW_MOUNT"])
 	probes := evaluate(t, p, hostCfg, facts)
 	probes = append(probes, contractLabelProbe(ctx, t, p, created.ID))
 	probes = append(probes, imageProvenanceProbes(imageProv)...)
@@ -531,6 +532,12 @@ echo "TMP_OPTS=$(awk '$2=="/tmp"{print $4}' /proc/mounts)"
 echo "TMP_BYTES=$(df -B1 /tmp 2>/dev/null | awk 'NR==2{print $2}')"
 echo "SECRETS_OPTS=$(awk '$2=="/secrets"{print $4}' /proc/mounts)"
 echo "SECRETS_STAT=$(stat -c '%a %u %g' /secrets 2>/dev/null)"
+echo "WORKSPACE_MOUNT=$(awk '$2=="/workspace"{print $0}' /proc/mounts)"
+echo "OUTPUT_MOUNT=$(awk '$2=="/output"{print $0}' /proc/mounts)"
+echo "CREW_MOUNT=$(awk '$2=="/crew"{print $0}' /proc/mounts)"
+echo "WORKSPACE_OPTS=$(awk '$2=="/workspace"{print $4}' /proc/mounts)"
+echo "OUTPUT_OPTS=$(awk '$2=="/output"{print $4}' /proc/mounts)"
+echo "CREW_OPTS=$(awk '$2=="/crew"{print $4}' /proc/mounts)"
 echo "ROOT_OPTS=$(awk '$2=="/"{print $4}' /proc/mounts)"
 echo "ETC_WRITABLE=$(touch /etc/.crewship-conformance 2>/dev/null && echo yes || echo no)"
 echo "MEM_MAX=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)"

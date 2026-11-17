@@ -111,7 +111,9 @@ boundary between sibling agents. The defaults applied in
   or enumerate peers.
 - Agent-writable persistent mounts include `/workspace`, `/output`, `/crew`
   and `/home/agent`; see [Container isolation](/security/container-isolation)
-  for their different sharing, persistence and `noexec` properties.
+  for their sharing and persistence properties. Persistent-data `noexec,nosuid`
+  enforcement is currently not reliable in tested Docker configurations and
+  must not be assumed as a containment layer.
 - `NetworkMode` is **instance-wide**, set from the server config
   (`p.cfg.Network`) — *not* per-agent. Operators who need per-agent
   network isolation must build it at the host network layer (e.g.
