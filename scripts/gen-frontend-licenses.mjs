@@ -87,6 +87,9 @@ const EXCEPTIONS = {
   // v0.1.20 tree contain no license text. package.json declares MIT; preserve
   // that declaration honestly as an EXCEPTION-NOTICE, not invented copyright.
   "worker-f@0.1.20": "package.json declares MIT; upstream v0.1.20 commit 32742a0f8a57f19968c73539a09ecb3606efa3f9 also ships no license text: https://gitlab.com/catamphetamine/worker-f/-/blob/32742a0f8a57f19968c73539a09ecb3606efa3f9/package.json",
+  // Exact 0.1.24 registry tarball inspected; SHA-512 matches pnpm-lock.yaml.
+  // No license/notice text is shipped; retain its MIT declaration as evidence.
+  "worker-f@0.1.24": "package.json declares MIT; exact locked tarball https://registry.npmjs.org/worker-f/-/worker-f-0.1.24.tgz has no license text; upstream gitHead 60518db528d5b4cfdd8a5a70a631990bf8b623eb",
   // Dependency refresh (2026-10-05): inspected the exact registry tarballs
   // linked in PR #2915 and checked their package.json license declarations.
   // None ships a package-level license text; provider-utils only includes a

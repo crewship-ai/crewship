@@ -43,6 +43,15 @@ describe("bounded local XLSX data", () => {
     expect(result.sheets[0].table.rows).toEqual([["", "", "", ""], ["", "", "", ""], ["", " Žofie & 文 ", "", "TRUE"]])
     expect(result.sheets[1].table.rows).toEqual([["12345678901234567890"]])
   })
+  it("decodes XLSX escapes once across sheet names, shared strings, inline strings and saved formula results", async () => {
+    const bytes = workbook(['<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><r><t>_x00</t></r><r><t>41_ _x005F_x0042_</t></r></is></c><c r="C1" t="str"><f>CONCAT(A1)</f><v>_x0043_ _x005F_x0044_</v></c></row>'], {
+      "xl/workbook.xml": `<workbook xmlns="${NS}" xmlns:r="${REL}"><sheets><sheet name="_x0053_heet _x005F_x0041_" sheetId="1" r:id="r0"/></sheets></workbook>`,
+    }, { shared: '<sst><si><r><t>_x017</t></r><r><t>D_ _x005F_x0041_</t></r></si></sst>' })
+    const result = await parseXlsxWorkbook(bytes)
+    expect(result.sheets[0].name).toBe("Sheet _x0041_")
+    expect(result.sheets[0].table.rows).toEqual([["Ž _x0041_", "A _x0042_", "C _x0044_"]])
+    expect(result.formulas).toBe(1)
+  })
   it("renders only cached formula values and labels missing caches explicitly", async () => {
     const result = await parseXlsxWorkbook(workbook(['<row r="1"><c r="A1"><f>HYPERLINK("https://untrusted.test")</f><v>42</v></c><c r="B1" t="str"><f>CONCAT(A1)</f><v>saved result</v></c><c r="C1" t="str"><f>UNCACHED()</f></c><c r="D1"><f>UNCACHED()</f><v/></c><c r="E1" t="str"><f>EMPTY()</f><v/></c></row>']))
     expect(result.formulas).toBe(5)
