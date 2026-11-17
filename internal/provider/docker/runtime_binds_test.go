@@ -127,7 +127,14 @@ func TestStageRuntimeArtifactsRestagesAChangedArtifact(t *testing.T) {
 	if err := os.WriteFile(src, []byte{0x7f, 'E', 'L', 'F', 1}, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dataDir := t.TempDir()
+	// macOS TempDir starts below the /var -> /private/var symlink.
+	// Immutable staging deliberately refuses symlinked ancestors; exercise its
+	// positive path with a canonical directory, as the managed staging fixture
+	// does, without relaxing production host trust checks.
+	dataDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	first := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
 
 	// A new deploy: different bytes, different length, newer mtime.
