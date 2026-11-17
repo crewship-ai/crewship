@@ -438,7 +438,7 @@ describe("CreateAgentDialog", () => {
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Ada" } })
     fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
-    fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
     fireEvent.click(screen.getByRole("button", { name: "Step 4: Instructions" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Agent system prompt" }), { target: { value: "Review documents carefully." } })
@@ -684,5 +684,130 @@ describe("stored avatar render", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
     expect(avatarPuts(spy)).toEqual([])
+  })
+})
+
+// #5442 — moving an agent onto or off a Bedrock account in Edit.
+describe("Bedrock account in Edit", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const bedrockAgent = {
+    id: "existing", workspace_id: "ws-1", crew_id: "c1", name: "Alice", slug: "alice",
+    description: null, role_title: null, agent_role: "AGENT", lead_mode: null,
+    status: "IDLE", cli_adapter: "OPENCODE", llm_provider: "AWS_BEDROCK", llm_model: "amazon-bedrock/eu.anthropic.claude-opus-5-5",
+    system_prompt: null, timeout_seconds: 1800, tool_profile: "CODING", memory_enabled: true,
+    avatar_seed: null, avatar_style: null, updated_at: "2026-09-08T00:00:00Z", crew: null,
+    pays_with: { credential_id: "c_eu", name: "Bedrock EU" },
+  }
+  const account = (id: string, name: string, models: string[]) => ({
+    id, name, provider: "AWS_BEDROCK", status: "ACTIVE",
+    login: { mode: "api_key", provider: "AWS_BEDROCK", plan: null, plan_label: null, owner_user_id: null, owner_email: null, expires_at: null,
+      refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null,
+      delivery: { kind: "sidecar", target: "AWS_BEARER_TOKEN_BEDROCK" }, pays_for: { agents: 1, crews: 0 },
+      bedrock: { region: "eu-central-1", models, auth_method: "bedrock_api_key", eu_only: true } },
+  })
+  const accounts = [account("c_eu", "Bedrock EU", ["eu.anthropic.claude-opus-5-5"]), account("c_lab", "Bedrock lab", ["eu.anthropic.claude-sonnet-5-5"])]
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+  const calls = (spy: { mock: { calls: unknown[][] } }) =>
+    (spy.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>).map(([u, i]) => `${i?.method ?? "GET"} ${String(u).split("?")[0]}`)
+
+  function openModel() {
+    const model = screen.queryByRole("button", { name: /Model/ })
+    if (model) fireEvent.click(model)
+  }
+
+  it("releases the Bedrock account after the agent moves to another provider", async () => {
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (init?.method === "PATCH") return json({ ...bedrockAgent, llm_provider: "ANTHROPIC" })
+      if (u.includes("/api/v1/credentials/bindings?")) return json({ bindings: [{ id: "b1", credential_id: "c_eu", scope: "AGENT", agent_id: "existing", slot: "AWS_BEARER_TOKEN_BEDROCK" }] })
+      if (init?.method === "DELETE") return json({})
+      if (u.includes("/api/v1/credentials?")) return json(accounts)
+      return catalogueResponse(u) ?? json({})
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" agent={bedrockAgent} open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    openModel()
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls(spy)).toContain("DELETE /api/v1/credentials/bindings/b1"))
+    const order = calls(spy).filter((c) => c.startsWith("PATCH") || c.startsWith("DELETE"))
+    expect(order).toEqual(["PATCH /api/v1/agents/existing", "DELETE /api/v1/credentials/bindings/b1"])
+  })
+
+  it("assigns another Bedrock account before the PATCH, and saves nothing when the assignment is refused", async () => {
+    const spy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (u.includes("/bedrock-assign")) return json({ error: "Bedrock account expired or selected model is not permitted" }, 400)
+      if (init?.method === "PATCH") return json(bedrockAgent)
+      if (u.includes("/api/v1/credentials/bindings?")) return json({ bindings: [{ id: "b1", credential_id: "c_eu", scope: "AGENT", agent_id: "existing", slot: "AWS_BEARER_TOKEN_BEDROCK" }] })
+      if (init?.method === "DELETE") return json({})
+      if (init?.method === "POST" && u.includes("/api/v1/credentials/bindings")) return json({ id: "b1" }, 201)
+      if (u.includes("/api/v1/credentials?")) return json(accounts)
+      return catalogueResponse(u) ?? json({})
+    })
+    render(<CreateAgentDialog workspaceId="ws-1" agent={bedrockAgent} open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    openModel()
+    const group = await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    fireEvent.click(within(group).getByRole("radio", { name: /Bedrock lab/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls(spy)).toContain("POST /api/v1/credentials/c_lab/bedrock-assign"))
+    await waitFor(() => expect(calls(spy).filter((c) => c === "POST /api/v1/credentials/bindings")).toHaveLength(1))
+    expect(calls(spy)).not.toContain("PATCH /api/v1/agents/existing")
+  })
+})
+
+// #5446 — a crew's Bedrock account rule is the new agent's default, and
+// choosing another provider stays an explicit choice.
+describe("crew Bedrock account rule in New agent", () => {
+  afterEach(() => vi.restoreAllMocks())
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+  const ruleAccount = {
+    id: "c_rule", name: "Crew Bedrock", provider: "AWS_BEDROCK", status: "ACTIVE",
+    login: { mode: "api_key", provider: "AWS_BEDROCK", plan: null, plan_label: null, owner_user_id: null, owner_email: null, expires_at: null,
+      refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null,
+      delivery: { kind: "sidecar", target: "AWS_BEARER_TOKEN_BEDROCK" }, pays_for: { agents: 0, crews: 1 },
+      bedrock: { region: "eu-central-1", models: ["eu.anthropic.claude-opus-5-5", "eu.anthropic.claude-sonnet-5-5"], auth_method: "bedrock_api_key", eu_only: true } },
+  }
+  function stub() {
+    return vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (init?.method === "POST" && u.includes("/api/v1/agents")) return json({ id: "new-1", slug: "filip", name: "Filip" }, 201)
+      if (u.includes("/api/v1/credentials/bindings?") && u.includes("scope=CREW") && u.includes("crew_id=c1"))
+        return json({ bindings: [{ id: "rule", credential_id: "c_rule", scope: "CREW", crew_id: "c1", agent_id: null, slot: "AWS_BEARER_TOKEN_BEDROCK", bedrock_model: "eu.anthropic.claude-sonnet-5-5" }] })
+      if (u.includes("/api/v1/credentials?")) return json([ruleAccount])
+      if (init?.method === "PUT") return json({})
+      return catalogueResponse(u) ?? json({})
+    })
+  }
+  const posted = (spy: ReturnType<typeof stub>) =>
+    JSON.parse(String(spy.mock.calls.find(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")![1]!.body))
+
+  it("preselects the crew's account and model, and creates the agent on them", async () => {
+    const spy = stub()
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
+    const account = await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    expect(within(account).getByRole("radio", { name: /Crew Bedrock/ })).toHaveAttribute("aria-checked", "true")
+    expect(within(screen.getByRole("radiogroup", { name: "Bedrock model" })).getByRole("radio", { name: /Claude Sonnet 5\.5/ })).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(createButton())
+    await waitFor(() => expect(spy.mock.calls.some(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")).toBe(true))
+    expect(posted(spy)).toMatchObject({ llm_provider: "AWS_BEDROCK", cli_adapter: "OPENCODE", llm_model: "amazon-bedrock/eu.anthropic.claude-sonnet-5-5" })
+    // The account comes from the crew rule on the server; no second assignment.
+    expect(spy.mock.calls.some(([u]) => String(u).includes("/bedrock-assign"))).toBe(false)
+  })
+
+  it("keeps another provider the person chose", async () => {
+    const spy = stub()
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
+    await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(createButton())
+    await waitFor(() => expect(spy.mock.calls.some(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")).toBe(true))
+    expect(posted(spy).llm_provider).toBe("ANTHROPIC")
   })
 })

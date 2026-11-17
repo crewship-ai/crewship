@@ -30,6 +30,7 @@ export interface BindingAgent {
   name: string
   slug?: string
   cli_adapter?: string | null
+  llm_provider?: string | null
   crew_id?: string | null
   crew?: { name?: string } | null
 }

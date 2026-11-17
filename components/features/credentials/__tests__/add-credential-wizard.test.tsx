@@ -386,7 +386,7 @@ describe("provider login (#2428)", () => {
     fireEvent.click(screen.getByRole("button",{name:/^Amazon Bedrock/i}))
     fireEvent.change(screen.getByLabelText(/^API key$/i),{target:{value:"fixture-bedrock-key"}})
     fireEvent.change(screen.getByLabelText(/^name$/i),{target:{value:"Bedrock EU"}})
-    fireEvent.change(screen.getByLabelText("Permitted Bedrock model IDs"),{target:{value:"eu.anthropic.claude-opus-5-5"}})
+    fireEvent.click(screen.getByRole("checkbox",{name:/^Claude Opus 5\.5 · EU/}))
     fireEvent.change(screen.getByLabelText("Key expires at"),{target:{value:"2099-01-01T12:00"}})
     expect(screen.getByText(/automatic renewal is not available/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button",{name:/^continue$/i}))
@@ -398,6 +398,23 @@ describe("provider login (#2428)", () => {
     expect(body).toMatchObject({provider:"AWS_BEDROCK",type:"PROVIDER_LOGIN",mode:"api_key"})
     expect(JSON.parse(body.value as string)).toMatchObject({auth_method:"bedrock_api_key",api_key:"fixture-bedrock-key",region:"eu-central-1",models:["eu.anthropic.claude-opus-5-5"],eu_only:true})
     expect(h.apiFetch.mock.calls.some(([url])=>String(url).endsWith("/fields"))).toBe(false)
+  })
+
+  it("offers Bedrock regions and profiles from lists, EU-only hiding the rest", () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button",{name:/^Amazon Bedrock/i}))
+    const region=screen.getByLabelText("AWS region") as HTMLSelectElement
+    expect(region.value).toBe("eu-central-1")
+    expect(Array.from(region.options).every((o)=>o.value.startsWith("eu-"))).toBe(true)
+    expect(screen.queryByRole("checkbox",{name:/· Global/})).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox",{name:/^EU profiles only/}))
+    expect(screen.getByRole("checkbox",{name:/^Claude Opus 5\.5 · Global/})).toBeInTheDocument()
+    expect(Array.from(region.options).some((o)=>o.value==="us-east-1")).toBe(true)
+    fireEvent.change(screen.getByLabelText("Another inference profile id"),{target:{value:"us.meta.llama4-maverick-17b-instruct-v1:0"}})
+    fireEvent.click(screen.getByRole("button",{name:"Add"}))
+    expect(screen.getByRole("checkbox",{name:/^Llama4 Maverick 17b Instruct · US/})).toBeChecked()
+    fireEvent.click(screen.getByRole("checkbox",{name:/^EU profiles only/}))
+    expect(screen.queryByRole("checkbox",{name:/Llama4/})).toBeNull()
   })
 
   it.each([
