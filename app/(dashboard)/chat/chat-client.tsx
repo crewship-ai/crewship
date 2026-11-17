@@ -28,6 +28,7 @@ import {
 } from "@/components/features/chat/chat-kind"
 import { SidebarCollapseButton, SIDEBAR_WIDTH_COLLAPSED } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Segmented } from "@/components/ui/segmented"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -99,11 +100,11 @@ function useAgentSlugFromUrl(): string | null {
  *  branches since it was written. */
 type MobilePanel = "chat" | "artifacts" | "work" | "memory"
 
-const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
-  { id: "work", label: "Work", icon: ListTodo },
-  { id: "memory", label: "Memory", icon: Brain },
+const MOBILE_PANELS: { value: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
+  { value: "chat", label: "Chat", icon: MessageSquare },
+  { value: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { value: "work", label: "Work", icon: ListTodo },
+  { value: "memory", label: "Memory", icon: Brain },
 ]
 
 /**
@@ -905,45 +906,17 @@ function ChatClientBody() {
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
         {subbar}
 
-        {!humanConversationId && <div
-          role="tablist"
-          aria-label="Chat panel"
-          className="flex h-9 coarse:h-[44px] shrink-0 items-stretch border-b border-foreground/[0.08]"
-        >
-          {MOBILE_PANELS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              id={`chat-phone-tab-${id}`}
-              aria-controls="chat-phone-panel"
-              tabIndex={mobilePanel === id ? 0 : -1}
-              aria-selected={mobilePanel === id}
-              onClick={() => setMobilePanel(id)}
-              onKeyDown={event => {
-                const index = MOBILE_PANELS.findIndex(panel => panel.id === id)
-                const next = event.key === "Home" ? 0 : event.key === "End" ? MOBILE_PANELS.length - 1
-                  : event.key === "ArrowRight" ? (index + 1) % MOBILE_PANELS.length
-                    : event.key === "ArrowLeft" ? (index + MOBILE_PANELS.length - 1) % MOBILE_PANELS.length : null
-                if (next === null) return
-                event.preventDefault()
-                setMobilePanel(MOBILE_PANELS[next].id)
-                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
-              }}
-              className={cn(
-                "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 text-micro",
-                mobilePanel === id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>}
+        {!humanConversationId && <Segmented
+          value={mobilePanel}
+          onChange={setMobilePanel}
+          options={MOBILE_PANELS}
+          ariaLabel="Chat panel"
+          size="xs"
+          fill
+          className="rounded-none border-x-0 border-t-0"
+        />}
 
-        <div id="chat-phone-panel" role={humanConversationId ? undefined : "tabpanel"} aria-labelledby={humanConversationId ? undefined : `chat-phone-tab-${mobilePanel}`} className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
+        <div className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
 
         {drawerOpen && (
           <>

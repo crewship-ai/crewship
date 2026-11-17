@@ -85,7 +85,7 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
 }))
 
 import { ChatClient } from "../chat-client"
-import { measureCollapsedRail } from "@/components/layout/__tests__/measure-collapsed-rail"
+import { measureCollapsedRail, measurePhoneViews } from "@/components/layout/__tests__/measure-collapsed-rail"
 
 const receiptForm = JSON.stringify([
   {
@@ -190,21 +190,23 @@ describe("<ChatClient> — the panel gets what the roster record already holds",
     window.innerWidth = 390
     render(<ChatClient />)
     await screen.findByTestId("chat-panel")
-    const tabs = within(await screen.findByRole("tablist", { name: "Chat panel" })).getAllByRole("tab")
+    const group = await screen.findByRole("radiogroup", { name: "Chat panel" })
+    const tabs = within(group).getAllByRole("radio")
     expect(tabs.map(tab => tab.textContent)).toEqual(["Chat", "Artifacts", "Work", "Memory"])
     tabs[0].focus()
     fireEvent.keyDown(tabs[0], { key: "End" })
     expect(tabs[3]).toHaveFocus()
-    expect(tabs[3]).toHaveAttribute("aria-selected", "true")
+    expect(tabs[3]).toHaveAttribute("aria-checked", "true")
     fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
     expect(tabs[0]).toHaveFocus()
-    expect(tabs[0]).toHaveAttribute("aria-selected", "true")
+    expect(tabs[0]).toHaveAttribute("aria-checked", "true")
     fireEvent.keyDown(tabs[0], { key: "ArrowLeft" })
     expect(tabs[3]).toHaveFocus()
     fireEvent.keyDown(tabs[3], { key: "Home" })
     expect(tabs[0]).toHaveFocus()
     expect(tabs.filter(tab => tab.tabIndex === 0)).toEqual([tabs[0]])
-  })
+    await measurePhoneViews(group.outerHTML)
+  }, 60_000)
 
   it("passes the record's suggested_prompts, so a configured agent keeps its own chips", async () => {
     expect((await panel()).getAttribute("data-suggested")).toBe(
