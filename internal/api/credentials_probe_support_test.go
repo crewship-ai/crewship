@@ -192,7 +192,7 @@ func TestProbeSupported_ProbelessRegistrationFails(t *testing.T) {
 	// The exact set, pinned. Losing a probe (or gaining one nobody meant to
 	// advertise) shows up here as a diff on this list.
 	want := []string{
-		"ANTHROPIC", "OPENAI", "GOOGLE",
+		"ANTHROPIC", "OPENAI", "GOOGLE", "AWS_BEDROCK",
 		// OpenRouter: reachable by pasting a credential alone (phase 2), so
 		// the wizard's Test button is the first thing that tells an operator
 		// the key works.

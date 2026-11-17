@@ -220,6 +220,7 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 	// point is that adding a name here is a decision someone made, not a way to
 	// silence the test.
 	notUpstreamDelivery := map[string]string{
+		"internal/api/provider_login_bedrock.go":   "decrypts a Bedrock account solely to validate expiry/model before a local binding transaction; no credential is delivered upstream",
 		"internal/api/pages_draft_key.go":          "decrypts purpose-bound local browser data-key envelopes for their original authorized human; never selects an API_KEY row or delivers provider credentials upstream",
 		"internal/providerlogin/codex_proof.go":    "only signed PROVIDER_LOGIN identity verification; selects no API_KEY rows and grants no inference entitlement or upstream auth delivery",
 		"internal/restricteddispatch/run_proof.go": "decrypts a sealed host output capability, not a provider credential; checked only against scoped context in the host",

@@ -53,9 +53,9 @@ func newCredentialBedrockAssignCmd() *cobra.Command {
 			return err
 		}
 		var result struct {
-			Assigned int    `json:"assigned"`
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
+			Assigned int    `json:"assigned" yaml:"assigned"`
+			Provider string `json:"provider" yaml:"provider"`
+			Model    string `json:"model" yaml:"model"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
