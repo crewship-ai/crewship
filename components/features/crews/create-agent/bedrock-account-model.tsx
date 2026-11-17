@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Plus } from "lucide-react"
+import { Check, Plus } from "lucide-react"
 
 import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { LoginBrandMark, LoginStatusPill } from "@/components/features/credentials/provider-login-bits"
@@ -120,6 +120,7 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
                   onClick={() => pick(current, bedrockAgentModel(id))}
                   className={cn("flex min-h-9 coarse:min-h-[44px] flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3 py-2 text-left last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", on ? "bg-primary/10" : "hover:bg-muted")}
                 >
+                  <Check className={cn("h-3.5 w-3.5 shrink-0 text-primary", !on && "invisible")} aria-hidden="true" />
                   <span className="text-sm">{bedrockModelLabel(id)}</span>
                   <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{id}</span>
                 </button>
