@@ -186,6 +186,7 @@ printf OWNED_READER_OK
 }
 
 func TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped(t *testing.T) {
+	t.Run("exact-session-targets", nativeTmuxExactSessionTargets)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	home := t.TempDir()
@@ -656,5 +657,59 @@ func TestNativeTmuxCurrentRunCannotInheritRevokedToken(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(privateDir, kind)); !os.IsNotExist(err) {
 			t.Errorf("tmux %s survived completed run", kind)
 		}
+	}
+}
+
+// A missing short run must not select its live longer-named neighbor through
+// tmux prefix matching. Exercise both native ownership probes and stop.
+func nativeTmuxExactSessionTargets(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	root := nativeTmuxSocketRoot(t)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TMUX_TMPDIR=" + root, "TMUX="}
+	tmux := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, "tmux", args...)
+		cmd.Env = env
+		return cmd.Run()
+	}
+	shortID := fmt.Sprintf("native-exact-%d-%d", os.Getpid(), time.Now().UnixNano())
+	short := TmuxSessionName("fixture", shortID)
+	long := TmuxSessionName("fixture", shortID+"-long")
+	if err := tmux("-f", "/dev/null", "new-session", "-d", "-s", long, "sleep 60"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		clean, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stop()
+		cmd := exec.CommandContext(clean, "tmux", "kill-server")
+		cmd.Env = env
+		_ = cmd.Run()
+	})
+	c := &nativeTmuxHostFixture{baseEnv: env}
+	o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	loc := RunLocation{ContainerID: "private-fixture", AgentSlug: "fixture", RunID: shortID}
+	if alive, err := o.RunIsAliveAt(ctx, loc); err != nil || alive {
+		t.Errorf("missing short run matched longer session: alive=%v err=%v", alive, err)
+	}
+	if stopped, err := o.StopRunAt(ctx, loc); err != nil || !stopped {
+		t.Errorf("missing short run not settled absent: stopped=%v err=%v", stopped, err)
+	}
+	if err := tmux("has-session", "-t", "="+long); err != nil {
+		t.Fatal("stopping absent short run killed its live neighbor")
+	}
+	if err := tmux("new-session", "-d", "-s", short, "sleep 60"); err != nil {
+		t.Fatal(err)
+	}
+	if alive, err := o.RunIsAliveAt(ctx, loc); err != nil || !alive {
+		t.Errorf("present exact short run not found: alive=%v err=%v", alive, err)
+	}
+	if stopped, err := o.StopRunAt(ctx, loc); err != nil || !stopped {
+		t.Errorf("present exact short run not stopped: stopped=%v err=%v", stopped, err)
+	}
+	if err := tmux("has-session", "-t", "="+short); err == nil {
+		t.Error("short run survived its stop")
+	}
+	if err := tmux("has-session", "-t", "="+long); err != nil {
+		t.Fatal("stopping exact short run killed its live neighbor")
 	}
 }
