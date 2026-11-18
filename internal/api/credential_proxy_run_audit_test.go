@@ -11,7 +11,7 @@ import (
 )
 
 func TestProxyAdmissionRunAuditScopeAndFailure(t *testing.T) {
-	for _, scenario := range []string{"valid", "legacy", "unknown run", "peer run", "foreign workspace", "foreign crew", "duplicate start", "ended run", "expired grant", "revoked credential", "hard budget", "audit failure", "no credential"} {
+	for _, scenario := range []string{"valid", "legacy", "unknown run", "peer run", "foreign workspace", "foreign crew", "missing crew", "crew-only run", "duplicate start", "ended run", "expired grant", "revoked credential", "hard budget", "audit failure", "no credential"} {
 		t.Run(scenario, func(t *testing.T) {
 			r, _ := costRouter(t)
 			db := r.db
@@ -34,7 +34,8 @@ func TestProxyAdmissionRunAuditScopeAndFailure(t *testing.T) {
 				startAgent = peer
 			}
 			if scenario == "foreign workspace" {
-				startWS = seedTestWorkspace(t, db, user)
+				startWS = "proxy-other-workspace"
+				exec(`INSERT INTO workspaces(id,name,slug) VALUES(?,'Other','proxy-other-workspace')`, startWS)
 			}
 			if scenario == "foreign crew" {
 				startCrew = otherCrew
@@ -47,6 +48,9 @@ func TestProxyAdmissionRunAuditScopeAndFailure(t *testing.T) {
 			}
 			if scenario == "duplicate start" {
 				put("proxy-start-two", "run.started")
+			}
+			if scenario == "missing crew" {
+				exec(`UPDATE journal_entries SET crew_id=NULL WHERE id='proxy-start'`)
 			}
 			if scenario == "ended run" {
 				put("proxy-ended", "run.completed")
@@ -69,6 +73,11 @@ func TestProxyAdmissionRunAuditScopeAndFailure(t *testing.T) {
 			}
 			if scenario == "no credential" {
 				body["credential_id"] = ""
+			}
+			if scenario == "crew-only run" {
+				delete(body, "agent_id")
+				delete(body, "credential_id")
+				body["crew_id"] = crew
 			}
 			raw, err := json.Marshal(body)
 			if err != nil {

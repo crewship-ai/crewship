@@ -25,6 +25,7 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 		Crew       string `json:"crew_id"`
 		Credential string `json:"credential_id"`
 		Provider   string `json:"provider"`
+		Run        string `json:"run_id"`
 	}
 	req.Body = http.MaxBytesReader(w, req.Body, 4096)
 	dec := json.NewDecoder(req.Body)
@@ -38,8 +39,16 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 		replyError(w, http.StatusBadRequest, "provider and exactly one of agent_id or crew_id required")
 		return
 	}
+	// Scope, grant, budget and run checks share the audit transaction. A
+	// concurrent authority change cannot be attributed using an old scope
+	// snapshot followed by an audit append against newer state.
+	tx, err := r.db.BeginTx(req.Context(), nil)
+	if err != nil {
+		replyError(w, http.StatusServiceUnavailable, "proxy admission unavailable")
+		return
+	}
+	defer tx.Rollback()
 	var crew string
-	var err error
 	if body.Crew != "" {
 		// Crew-scoped caller (#2761). The identity comes from the token, not
 		// the body: an unbound token, or one bound to another crew, cannot
@@ -50,17 +59,17 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 			replyError(w, http.StatusForbidden, "crew scope mismatch")
 			return
 		}
-		if body.Credential != "" {
+		if body.Credential != "" || body.Run != "" {
 			replyError(w, http.StatusForbidden, "a crew-scoped caller holds no credential")
 			return
 		}
-		err = r.db.QueryRowContext(req.Context(), `SELECT id FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, body.Crew, ws).Scan(&crew)
+		err = tx.QueryRowContext(req.Context(), `SELECT id FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, body.Crew, ws).Scan(&crew)
 		if err != nil {
 			replyError(w, http.StatusForbidden, "crew scope unavailable")
 			return
 		}
 	} else {
-		err = r.db.QueryRowContext(req.Context(), `SELECT a.crew_id FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.deleted_at IS NULL`, body.Agent, ws).Scan(&crew)
+		err = tx.QueryRowContext(req.Context(), `SELECT a.crew_id FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.deleted_at IS NULL`, body.Agent, ws).Scan(&crew)
 		if err != nil {
 			replyError(w, http.StatusForbidden, "agent scope unavailable")
 			return
@@ -72,7 +81,7 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 	}
 	kind := ""
 	if body.Credential != "" {
-		err = r.db.QueryRowContext(req.Context(), `SELECT c.type FROM credentials c
+		err = tx.QueryRowContext(req.Context(), `SELECT c.type FROM credentials c
    WHERE c.id=? AND c.workspace_id=? AND c.provider=? AND c.status='ACTIVE' AND c.deleted_at IS NULL AND c.type IN ('API_KEY','AI_CLI_TOKEN','PROVIDER_LOGIN')
    AND (EXISTS (SELECT 1 FROM agent_credentials ac WHERE ac.credential_id=c.id AND ac.agent_id=? AND (ac.expires_at IS NULL OR ac.expires_at>?))
     OR (c.type!='PROVIDER_LOGIN' AND (c.scope='WORKSPACE'
@@ -89,7 +98,7 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 	// credential changed from API_KEY to PROVIDER_LOGIN may still leave its
 	// old metered key in a running sidecar, so billing labels cannot exempt it.
 	var found int
-	err = r.db.QueryRowContext(req.Context(), `SELECT 1 FROM budget_limits WHERE workspace_id=? AND enabled=1 AND mode IN ('hard','tiered')
+	err = tx.QueryRowContext(req.Context(), `SELECT 1 FROM budget_limits WHERE workspace_id=? AND enabled=1 AND mode IN ('hard','tiered')
    AND (scope_kind='workspace' OR (scope_kind='crew' AND scope_id=?) OR (scope_kind='agent' AND scope_id=?) OR scope_kind='mission' OR (?='' AND scope_kind IN ('crew','agent'))) LIMIT 1`, ws, crew, body.Agent, body.Credential).Scan(&found)
 	if err != nil && err != sql.ErrNoRows {
 		replyError(w, http.StatusServiceUnavailable, "budget admission unavailable")
@@ -97,6 +106,39 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 	}
 	if err == nil {
 		replyError(w, http.StatusForbidden, "hard-budget traffic requires the restricted broker")
+		return
+	}
+	if body.Run != "" {
+		// Attribute only an unambiguous, active journal run in the already
+		// validated agent/workspace/crew scope. The event describes
+		// admission, not later forwarding.
+		var starts, ended int
+		var recordedAgent, recordedCrew string
+		err = tx.QueryRowContext(req.Context(), `SELECT COUNT(*),COALESCE(MAX(agent_id),''),COALESCE(MAX(crew_id),'') FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type='run.started'`, ws, body.Run).Scan(&starts, &recordedAgent, &recordedCrew)
+		if err == nil {
+			err = tx.QueryRowContext(req.Context(), `SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')`, ws, body.Run).Scan(&ended)
+		}
+		if err != nil {
+			replyError(w, http.StatusServiceUnavailable, "run attribution unavailable")
+			return
+		}
+		if starts != 1 || recordedAgent != body.Agent || recordedCrew != crew || ended != 0 {
+			replyError(w, http.StatusForbidden, "run scope unavailable")
+			return
+		}
+		if body.Credential != "" {
+			err = RecordCredentialEventTx(req.Context(), tx, body.Credential, AuditEventProxyAdmitted, body.Agent, "", map[string]any{
+				"source": "sidecar_proxy_admission", "run_id": body.Run, "crew_id": crew,
+				"provider": body.Provider, "channel": "proxy", "stage": "admitted", "authentication": "unknown",
+			})
+			if err != nil {
+				replyError(w, http.StatusServiceUnavailable, "proxy audit unavailable")
+				return
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		replyError(w, http.StatusServiceUnavailable, "proxy admission unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"allowed": true})
