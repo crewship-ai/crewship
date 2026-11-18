@@ -986,3 +986,10 @@ It rejects incomplete archives and older full archives without this companion
 before changing installed files. Rollback restores the previous server and the
 previous absence of a newly introduced companion. CLI-only updates keep their
 existing archive contract.
+
+The native client runtime qualification currently covers Linux hosts with the
+Docker provider. It supplies the canonical `/usr/local/bin/crewship` executable
+needed by native Keeper commands; agents do not install or update their own
+copy. Windows host ACL custody, Docker Desktop host path qualification and the
+Apple container provider require separate platform qualification. Packaging a
+Linux companion in an archive does not establish those runtime guarantees.
