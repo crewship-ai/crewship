@@ -93,7 +93,14 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 		t.Fatal(err)
 	}
 
-	inboxMigration, err := os.ReadFile("../database/migrations/20261118135312_agent_inbox_receipts.sql")
+	inboxMigrations, err := filepath.Glob("../database/migrations/*_agent_inbox_receipts.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inboxMigrations) != 1 {
+		t.Fatalf("want one agent inbox receipts migration, found %v", inboxMigrations)
+	}
+	inboxMigration, err := os.ReadFile(inboxMigrations[0])
 	if err != nil {
 		t.Fatal(err)
 	}
