@@ -33,7 +33,10 @@ CLI_TESTS = {'internal/orchestrator': {
 }}
 CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 PACKAGING_TESTS = {'internal/devcontainer': {'TestCodexNativePackaging'}}
-SDK_TESTS = {'internal/provider/docker': {'TestAgentCLIRealDockerCleanAndRetainedUpgrade'}}
+SDK_TESTS = {
+    'internal/provider/docker': {'TestAgentCLIRealDockerCleanAndRetainedUpgrade'},
+    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab'},
+}
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},

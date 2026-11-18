@@ -5,3 +5,5 @@ package orchestrator
 var NativeCredentialScriptForTest = buildCredFileScript
 var NativeCredentialEnvForTest = appendCredentialFileEnv
 var NativeSSHFixtureForTest = startNativeSSHFixture
+
+var NativeCredentialWriteForTest = writeCredentialFiles

@@ -22,6 +22,18 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertNotIn('sudo', command)
         self.assertIn('-timeout=5m', command)
 
+    def test_native_vault_container_tool_cannot_skip_or_omit_receipt(self):
+        name = 'TestNativeVaultRealCrewContainerGlab'
+        key = (managed.PREFIX + 'internal/orchestrator', name)
+        self.assertIn(key, managed.REQUIRED)
+        missing = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(missing, 0))
+        skipped = missing + [{'Package': key[0], 'Test': name, 'Action': 'skip'}]
+        self.assertTrue(managed.failures(skipped, 0))
+        command = next(c for c in managed.commands() if name in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('./internal/orchestrator', command)
+
     def test_actual_cli_trio_requires_each_shell_subtest_and_nonroot_execution(self):
         expected = {'CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE'}
         package = managed.PREFIX + 'internal/orchestrator'
