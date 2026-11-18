@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/credhostgate"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
@@ -93,20 +94,11 @@ const probeNoValidationMsg = "No validation available for this provider"
 // Support is a function of both: an ENDPOINT_URL is probeable whatever the
 // provider, because the stored value IS the target being dialled.
 func probeSupported(provider, credType string) bool {
-	// A PROVIDER_LOGIN is a CLI login artifact (for Codex, auth.json), not
-	// an API key. The OPENAI probe below sends its value as a bearer token to
-	// /v1/models, which tests the wrong credential shape and can report a
-	// perfectly usable login as invalid. Its validity needs a CLI run.
-	if credType == string(CredTypeProviderLogin) {
-		return false
-	}
-	if provider == "OPENAI" && credType == string(CredTypeAICLIToken) {
-		// Legacy Codex auth blobs carry ChatGPT OAuth credentials, not an
-		// OpenAI API key. They predate PROVIDER_LOGIN but need the same guard.
-		return false
-	}
 	if credType == string(CredTypeEndpointURL) {
 		return true
+	}
+	if !credpolicy.TokenProbeAllowed(credType, provider) {
+		return false
 	}
 	_, ok := probeSupportedProviders[provider]
 	return ok
@@ -125,12 +117,22 @@ func probeSupported(provider, credType string) bool {
 // other provider dials a FIXED vendor host (api.anthropic.com, …), never a
 // user-chosen one, so they are unaffected by this flag.
 func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
-	if ctype == string(CredTypeProviderLogin) || (provider == "OPENAI" && ctype == string(CredTypeAICLIToken)) {
+	if !credpolicy.Known(ctype) {
+		return testResult{Error: "Unknown credential type"}
+	}
+	if ctype == string(CredTypeEndpointURL) {
+		// Reachability has its own role/SSRF boundary and never sends auth
+		// material. Do not dispatch an endpoint through a vendor token probe.
+		res := probeProviderInner(ctx, "NONE", ctype, value, dialEndpoint)
+		res.Supported = dialEndpoint
+		return res
+	}
+	if !credpolicy.TokenProbeAllowed(ctype, provider) {
 		// Preserve the existing unprobeable-provider wire convention: valid
 		// means no check failed, supported=false says no upstream check ran.
 		// The CLI and UI use supported to avoid claiming a working login.
 		return testResult{Valid: true, Supported: false,
-			Error: "CLI login is delivered to the agent; an API-key probe cannot validate it"}
+			Error: "This credential is not an API key; an API-key probe cannot validate it"}
 	}
 	// Stamp Supported once, from the same table the client is told about, rather
 	// than at each of the ~30 returns below — a per-return flag is a field
@@ -482,6 +484,14 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Value == "" {
 		replyError(w, http.StatusBadRequest, "Value is required")
+		return
+	}
+	if body.Type == "" {
+		// Preserve the historical request shape used by token-only clients.
+		body.Type = string(CredTypeAPIKey)
+	}
+	if !credpolicy.Known(body.Type) {
+		replyError(w, http.StatusBadRequest, "Unknown credential type")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
