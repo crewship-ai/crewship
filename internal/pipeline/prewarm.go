@@ -51,6 +51,18 @@ func (e *Executor) PrewarmForRun(ctx context.Context, pipelineID, workspaceID st
 	if !dslUsesCrewContainer(dsl) {
 		return
 	}
+	if e.stepOverrides != nil {
+		overrides, err := e.stepOverrides.OverridesFor(ctx, pipelineID)
+		if err != nil {
+			prewarmDebug("load step overrides", pipelineID, err)
+			return
+		}
+		applyStepOverrides(dsl.Steps, overrides)
+	}
+	if err := e.validateRoutineModelPins(ctx, workspaceID, p.AuthorCrewID, dsl.Steps, nil); err != nil {
+		prewarmDebug("validate model pins", pipelineID, err)
+		return
+	}
 	if err := pw.PrewarmCrew(ctx, p.AuthorCrewID, workspaceID); err != nil {
 		prewarmDebug("prewarm crew", pipelineID, err)
 	}

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -56,4 +57,49 @@ func routineModelMatchesProvider(model, expected string) bool {
 		return true
 	}
 	return orchestrator.ModelNameProviderID(model) == expected
+}
+
+// Validate explicit pins without loading credentials or acquiring a runtime.
+// RunStep rechecks the effective agent config before dispatch.
+func (r *OrchestratorRunner) validateModelPin(ctx context.Context, workspaceID, crewID string, step Step) error {
+	var info chatbridge.ChatInfo
+	err := r.db.QueryRowContext(ctx, `SELECT a.cli_adapter,COALESCE(a.llm_model,'') FROM agents a
+		JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id AND c.deleted_at IS NULL
+		WHERE a.workspace_id=? AND a.crew_id=? AND a.slug=? AND a.deleted_at IS NULL`,
+		workspaceID, crewID, step.AgentSlug).Scan(&info.CLIAdapter, &info.LLMModel)
+	if err != nil {
+		return fmt.Errorf("step %q: resolve model pin agent: %w", step.ID, err)
+	}
+	pin := splitAdapterModel(step.ModelOverride, "")
+	if _, err := routineAgentModel(&info, AgentStepRequest{
+		AgentSlug: step.AgentSlug, Adapter: pin.Adapter, Model: pin.Model, ModelOverride: step.ModelOverride,
+	}); err != nil {
+		return fmt.Errorf("step %q: %w", step.ID, err)
+	}
+	return nil
+}
+
+func (e *Executor) validateRoutineModelPins(ctx context.Context, workspaceID, crewID string, steps []Step, restored map[string]string) error {
+	validator, ok := e.runner.(interface {
+		validateModelPin(context.Context, string, string, Step) error
+	})
+	if !ok {
+		return nil
+	}
+	for _, step := range steps {
+		if _, done := restored[step.ID]; done {
+			continue
+		}
+		if step.Type == StepAgentRun && step.ModelOverride != "" {
+			if err := validator.validateModelPin(ctx, workspaceID, crewID, step); err != nil {
+				return err
+			}
+		}
+		if step.Foreach != nil {
+			if err := e.validateRoutineModelPins(ctx, workspaceID, crewID, step.Foreach.Steps, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

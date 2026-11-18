@@ -60,7 +60,7 @@ func (r *RunResult) recordOutcome(step Step, c *outcomeCapture) *outcomeEvidence
 // executed latest agent with no report must not fall back to an earlier success.
 func outcomeStepOrder(dsl *DSL) []int {
 	order := make([]int, 0, len(dsl.Steps))
-	if parallelismMode(dsl) == ParallelismOff {
+	if parallelismMode(dsl) == ParallelismOff || (parallelismMode(dsl) == ParallelismAuto && hasCallPipeline(dsl)) {
 		for i := range dsl.Steps {
 			order = append(order, i)
 		}

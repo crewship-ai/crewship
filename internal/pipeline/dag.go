@@ -367,7 +367,7 @@ func (e *Executor) runDAG(
 		// kill mid-DAG loses at most the in-flight wave. DAG resume
 		// granularity is therefore per-wave, not per-step — the
 		// parallel scheduler has no single current_step_id to stamp.
-		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
+		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, result.outcomeEvidence, costSnap, startedAt)
 
 		// Suspend takes precedence over a failure: a wait step parked on an
 		// approval (MarkWaiting already stamped status=waiting + current_step

@@ -371,3 +371,41 @@ func TestExecutorPreUpgradeResumeDerivesLegacyOutcome(t *testing.T) {
 		t.Fatalf("legacy run did not settle from restored output: %+v calls=%d err=%v", row, len(runner.calls), err)
 	}
 }
+
+func TestOutcomeWaveFlushRecoversMissingIncrementalEvidence(t *testing.T) {
+	runs, db := openRunsTestDB(t)
+	defer db.Close()
+	rec := &RunRecord{ID: "wave-evidence-run", WorkspaceID: "ws_runs", PipelineID: "pln_a"}
+	if err := runs.Insert(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	step := "author"
+	outcome := outcomeEvidence{Version: 1, Executed: true, Outcome: "SUCCEEDED", SourceKind: "agent_run",
+		SourceRunID: rec.ID, SourcePipelineID: rec.PipelineID, SourcePath: "/author"}
+	outputs := map[string]string{step: outcomeHandoff("SUCCEEDED")}
+	if err := runs.FlushStepOutputs(t.Context(), rec.ID, outputs, 0, 0, map[string]outcomeEvidence{step: outcome}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.FlushStepOutputs(t.Context(), rec.ID, outputs, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runs.getOutcomeEvidence(t.Context(), rec.ID)
+	if err != nil || got[step] != outcome {
+		t.Fatalf("wave evidence was not recovered or was overwritten: %+v err=%v", got, err)
+	}
+}
+
+func TestForeachOutcomeUsesActualLinearOrder(t *testing.T) {
+	child := Step{ID: "agent", Type: StepAgentRun, Needs: []string{"ignored-by-foreach"}}
+	dsl := foreachBodyDSL("test", &DSL{}, nil, []Step{child}, "", "")
+	run := &RunResult{
+		StepOutputs: map[string]string{"agent": outcomeHandoff("FAILED")},
+		outcomeEvidence: map[string]outcomeEvidence{"agent": {
+			Version: 1, Executed: true, Outcome: "FAILED", SourceKind: "agent_run",
+			SourcePath: "/agent", SourceRunID: "run", SourcePipelineID: "pipeline",
+		}},
+	}
+	if report := selectedOutcome(dsl, run); report.Outcome != "FAILED" {
+		t.Fatalf("foreach lost executed agent outcome: %+v", report)
+	}
+}

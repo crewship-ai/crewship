@@ -845,6 +845,12 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	in.pipeline = p
 	in.dsl = dsl
 
+	if in.Mode != ModeDryRun {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, p.AuthorCrewID, dsl.Steps, in.restoredOutputs); err != nil {
+			return nil, err
+		}
+	}
+
 	// Dispatch gates — same chokepoint, same reason as the status gate above.
 	//
 	// RunPreflight's own doc says the operation "had two doors and only one
@@ -2060,6 +2066,12 @@ func (e *Executor) runStepBody(
 		span.End()
 	}()
 
+	if step.Type == StepAgentRun && step.ModelOverride != "" {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, in.AuthorCrewID, []Step{step}, nil); err != nil {
+			return "", 0, 0, err
+		}
+	}
+
 	// Per-step before hook (Wave 4.1): runs ahead of the step; its
 	// failure fails the step (setup contract, like routine before_all).
 	if step.Hooks != nil && step.Hooks.Before != nil {
@@ -2715,7 +2727,7 @@ func (e *Executor) persistStepOutput(ctx context.Context, in RunInput, depth int
 // dag.go), so its resume granularity is per-wave: this upserts every
 // entry in the wave's outputs snapshot in one transaction instead of
 // rewriting the whole step_outputs_json blob (#1411 item 4).
-func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, costUSD float64, startedAt time.Time) {
+func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, evidence map[string]outcomeEvidence, costUSD float64, startedAt time.Time) {
 	if !e.stepPersistEnabled(in, depth) {
 		return
 	}
@@ -2726,7 +2738,7 @@ func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth in
 	for k, v := range stepOutputs {
 		scrubbed[k] = scrubStepOutput(v)
 	}
-	if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+	if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, costUSD, time.Since(startedAt).Milliseconds(), evidence); err != nil {
 		e.persistWarn("wave outputs", runID, err)
 	}
 }
@@ -2935,7 +2947,7 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 			for k, v := range result.StepOutputs {
 				scrubbed[k] = scrubStepOutput(v)
 			}
-			if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, result.CostUSD, dur); err != nil {
+			if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, result.CostUSD, dur, result.outcomeEvidence); err != nil {
 				e.persistWarn("step outputs flush", runID, err)
 			}
 		}

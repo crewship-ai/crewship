@@ -269,7 +269,7 @@ func jsonOrString(s string) any {
 // item at a time, so it is fenced too.
 func foreachBodyDSL(name string, parent *DSL, egress []string, steps []Step, items, as string) *DSL {
 	signals := signalWaitStepIDs(parent)
-	sub := &DSL{Name: name, EgressTargets: egress, Steps: steps, inheritedSignalSteps: signals}
+	sub := &DSL{Name: name, Parallelism: ParallelismOff, EgressTargets: egress, Steps: steps, inheritedSignalSteps: signals}
 	for id := range signals {
 		if strings.Contains(items, "steps."+id+".") {
 			sub.untrustedItemInput = as

@@ -234,7 +234,7 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// and side-effect-free (no run/cost event) — a miss only forfeits the
 	// latency it was trying to save. Runs concurrently with the Run dispatch
 	// below, overlapping the container start with routine/agent resolution.
-	if pw, ok := d.executor.(runPrewarmer); ok {
+	if pw, ok := d.executor.(runPrewarmer); ok && pr.PinnedVersion == nil {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()

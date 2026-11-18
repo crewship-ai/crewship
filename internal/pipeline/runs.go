@@ -445,7 +445,7 @@ WHERE id = ?`, costUSD, durationMs, runID); err != nil {
 // re-affirming already-persisted steps (idempotent, harmless). Unlike the
 // old whole-blob rewrite this happens O(N) times ONCE per run, not on
 // every step boundary.
-func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64) error {
+func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64, evidence ...map[string]outcomeEvidence) error {
 	if len(stepOutputs) == 0 {
 		return nil
 	}
@@ -456,9 +456,10 @@ func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutpu
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at`)
+INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at, outcome_evidence_json)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at,
+outcome_evidence_json=COALESCE(excluded.outcome_evidence_json,pipeline_run_step_outputs.outcome_evidence_json)`)
 	if err != nil {
 		return fmt.Errorf("pipeline_run_step_outputs: flush prepare: %w", err)
 	}
@@ -466,7 +467,17 @@ ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at
 
 	now := formatRFC3339(time.Now().UTC())
 	for stepID, output := range stepOutputs {
-		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now); err != nil {
+		var normalized any
+		if len(evidence) > 0 {
+			if report, ok := evidence[0][stepID]; ok {
+				raw, err := json.Marshal(report)
+				if err != nil {
+					return err
+				}
+				normalized = string(raw)
+			}
+		}
+		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now, normalized); err != nil {
 			return fmt.Errorf("pipeline_run_step_outputs: flush upsert step %s: %w", stepID, err)
 		}
 	}
