@@ -768,8 +768,15 @@ func TestL4Escalation_ForeignWorkspaceApprovalIsRefused(t *testing.T) {
 
 	// Present the approval under the foreign workspace claim, straight to the
 	// chokepoint (the handler-level boundary checks would mask it).
-	ap, fail := h.consumeKeeperApproval(context.Background(), esc.RequestID,
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap, fail := h.consumeKeeperApproval(context.Background(), tx, esc.RequestID,
 		foreignWS, agentID, credID, keeper.RequestTypeExecute, cmd)
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
 	if fail == nil {
 		t.Fatalf("an approval scoped to workspace %s was honoured under %s (verdict %+v)", wsID, foreignWS, ap)
 	}

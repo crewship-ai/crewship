@@ -53,6 +53,8 @@ func ledgerActorID(userID, adjudicator string) string {
 }
 
 func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
+	// Only verified calling/stored run identity may enter the audit context.
+	r = r.WithContext(journal.WithoutRunID(r.Context()))
 	if !requireRole(w, r, "manage") {
 		return
 	}

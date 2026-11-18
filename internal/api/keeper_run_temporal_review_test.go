@@ -17,6 +17,7 @@ func TestKeeperEndedDuringJudgeCannotIssueLease(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			db := setupTestDB(t)
 			ws, crew, agent, credential := seedKeeperFixture(t, db)
+			setSecurityLevel(t, db, credential, int(keeper.SecurityLevelL3))
 			enableAutoLease(t, db, ws, 900)
 			writer := newKeeperTestJournal(t, db)
 			const run = "keeper-lease-run"
@@ -60,9 +61,15 @@ func TestKeeperApprovalSpendAndRequestAdmissionAreAtomic(t *testing.T) {
 	db := setupTestDB(t)
 	ws, crew, agent, credential := seedL4Fixture(t, db)
 	h, _ := newL4Handler(t, db, nil, nil)
-	initial := doKeeperRequest(h, keeperRequestBody{WorkspaceID: ws, RequestingCrewID: crew, RequestingAgentID: agent, CredentialID: credential, Intent: "fixture approved window"})
+	initial := doKeeperRequest(h, keeperRequestBody{WorkspaceID: ws, RequestingCrewID: crew, RequestingAgentID: agent, CredentialID: credential, Intent: "Verify this isolated synthetic fixture account during the explicitly approved regression change window."})
 	if initial.Code != http.StatusOK {
 		t.Fatalf("initial: %d", initial.Code)
+	}
+	var initialDecision struct {
+		Decision string `json:"decision"`
+	}
+	if err := json.Unmarshal(initial.Body.Bytes(), &initialDecision); err != nil || initialDecision.Decision != "ESCALATE" {
+		t.Fatalf("fixture did not escalate: %s %v", initialDecision.Decision, err)
 	}
 	approval := latestRequestID(t, db)
 	var owner string
@@ -79,7 +86,7 @@ func TestKeeperApprovalSpendAndRequestAdmissionAreAtomic(t *testing.T) {
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 	trigger := fmt.Sprintf(`CREATE TRIGGER fixture_end_at_approval_spend BEFORE UPDATE OF approval_consumed_at ON keeper_requests WHEN OLD.id=%s AND NEW.approval_consumed_at IS NOT NULL BEGIN INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES('spend-terminal',%s,%s,%s,'run.completed','orchestrator','fixture end at spend','{}',%s); END`, quote(approval), quote(ws), quote(crew), quote(agent), quote(run))
 	execOrFatal(t, db, trigger)
-	out := doKeeperRequest(h, keeperRequestBody{WorkspaceID: ws, RequestingCrewID: crew, RequestingAgentID: agent, RequestingRunID: run, CredentialID: credential, Intent: "fixture approved window", ApprovalRequestID: approval})
+	out := doKeeperRequest(h, keeperRequestBody{WorkspaceID: ws, RequestingCrewID: crew, RequestingAgentID: agent, RequestingRunID: run, CredentialID: credential, Intent: "Verify this isolated synthetic fixture account during the explicitly approved regression change window.", ApprovalRequestID: approval})
 	if out.Code != http.StatusForbidden {
 		t.Errorf("race did not refuse run: %d", out.Code)
 	}
@@ -133,6 +140,7 @@ func TestKeeperLegacyUnknownCannotInheritUnrelatedRun(t *testing.T) {
 func TestKeeperAccessCannotAllowWithoutVaultDecisionAudit(t *testing.T) {
 	db := setupTestDB(t)
 	ws, crew, agent, credential := seedKeeperFixture(t, db)
+	setSecurityLevel(t, db, credential, int(keeper.SecurityLevelL3))
 	enableAutoLease(t, db, ws, 900)
 	execOrFatal(t, db, `CREATE TRIGGER fixture_deny_vault_audit BEFORE INSERT ON credential_audit WHEN NEW.event_type='KEEPER_DECISION' BEGIN SELECT RAISE(ABORT,'fixture audit unavailable'); END`)
 	h := NewKeeperHandler(db, "synthetic-internal", &mockEvaluator{resp: keeper.GatekeeperResponse{Decision: "ALLOW", Reason: "fixture", RiskScore: 1}}, keeperEventsLogger())

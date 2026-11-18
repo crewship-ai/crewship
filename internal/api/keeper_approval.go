@@ -86,16 +86,24 @@ func (f approvalFailure) write(w http.ResponseWriter) {
 //     UPDATE that consumes — two concurrent retries race on the write, and
 //     exactly one changes a row
 //
+// The caller owns a transaction spanning run admission, consumption and the
+// new request's PENDING audit. It must commit them together, or roll back the
+// spend when admission or persistence fails.
+//
 // Consumption precedes the retry's own execution, deliberately: if the exec
 // later fails, the approval is spent. The alternative — refunding on failure —
 // would turn a flaky container into an unlimited retry oracle, and single-use
 // is the property the whole design rests on.
 func (h *KeeperHandler) consumeKeeperApproval(
 	ctx context.Context,
+	tx *sql.Tx,
 	approvalID, workspaceID, agentID, credentialID string,
 	requestType keeper.RequestType,
 	command string,
 ) (*consumedApproval, *approvalFailure) {
+	if tx == nil {
+		return nil, &approvalFailure{status: http.StatusInternalServerError, body: "approval transaction required"}
+	}
 	if approvalID == "" {
 		return nil, &approvalFailure{
 			status: http.StatusBadRequest,
@@ -119,7 +127,7 @@ func (h *KeeperHandler) consumeKeeperApproval(
 	// Scoped through the credential's workspace, the same way HandleResolve
 	// scopes: keeper_requests carries no workspace of its own, and a request
 	// id from another tenant must learn nothing from the difference.
-	err := h.db.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT kr.decision, kr.decided_at, kr.approval_consumed_at, kr.resolved_by_user_id,
 		       kr.requesting_agent_id, kr.credential_id, kr.request_type, kr.command,
 		       kr.reason, kr.risk_score, c.workspace_id
@@ -227,12 +235,12 @@ func (h *KeeperHandler) consumeKeeperApproval(
 	}
 
 	// The spend. The WHERE clause re-asserts every precondition the read
-	// checked, because the read happened outside any transaction: two
-	// concurrent retries can both pass it and both arrive here, and the
-	// conditional UPDATE is what turns that race into exactly one winner.
+	// checked. The caller's transaction now serializes admission and the
+	// pending audit with this spend; retain the conditional UPDATE as the
+	// single-use guard rather than trusting a preceding read alone.
 	// RowsAffected is the verdict.
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE keeper_requests
 		   SET approval_consumed_at = ?
 		 WHERE id = ?

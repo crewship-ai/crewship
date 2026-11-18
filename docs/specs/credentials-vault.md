@@ -258,10 +258,14 @@ the bundle. The separate active-secret export excludes tombstones.
 
 The sidecar derives `requesting_run_id` from the verified current v2 calling-run
 identity, never from the request body or its boot IPC run. Legacy identities
-without a verified run leave attribution unknown. The host admits new requests
+without a verified run leave attribution unknown and explicitly clear unrelated
+inherited Journal run context while preserving request cancellation. The host admits new requests
 against the durable journal start/terminal records for the same workspace, crew
-and agent, before consuming a human approval and again before persistence.
-Execute rechecks run liveness before container execution. A run may still end
+and agent. Approval consumption, run admission and the new pending request and
+ledger are committed in one transaction; failed admission or persistence rolls
+back the spend. Both paths recheck after judging and record an unavailable run
+as a system denial before optional lease issuance. Execute also rechecks run
+liveness before container execution. A run may still end
 concurrently with an already admitted container operation; this is not a claim
 of an atomic kernel-level cancellation boundary.
 

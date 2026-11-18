@@ -39,6 +39,8 @@ type keeperRequestBody struct {
 // Called by the sidecar bridge when an agent requests a non-API credential.
 
 func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	// Only verified calling/stored run identity may enter the audit context.
+	r = r.WithContext(journal.WithoutRunID(r.Context()))
 	var body keeperRequestBody
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
@@ -216,8 +218,24 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// ALLOW row → presented as approval → …) is exactly what resolved_by_user_id
 	// being NULL on it exists to prevent (#2574).
 	var approvedVia *consumedApproval
+	var approvalTx *sql.Tx
 	if body.ApprovalRequestID != "" {
-		ap, fail := h.consumeKeeperApproval(r.Context(), body.ApprovalRequestID,
+		var txErr error
+		approvalTx, txErr = h.db.BeginTx(r.Context(), nil)
+		if txErr != nil {
+			replyInternalError(w, h.logger, "keeper approval transaction", txErr)
+			return
+		}
+		defer approvalTx.Rollback() // no-op after pending request transaction commits
+		if err := validateKeeperRunTx(r.Context(), approvalTx, body.WorkspaceID, body.RequestingAgentID, body.RequestingCrewID, body.RequestingRunID); err != nil {
+			if errors.Is(err, errKeeperRunScope) {
+				replyError(w, http.StatusForbidden, "keeper calling run unavailable")
+			} else {
+				replyInternalError(w, h.logger, "keeper run admission", err)
+			}
+			return
+		}
+		ap, fail := h.consumeKeeperApproval(r.Context(), approvalTx, body.ApprovalRequestID,
 			body.WorkspaceID, body.RequestingAgentID, body.CredentialID,
 			keeper.RequestTypeAccess, "")
 		if fail != nil {
@@ -271,7 +289,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Intent:       body.Intent,
 			ActorType:    keeperActorAgent,
 			ActorID:      body.RequestingAgentID,
-		}); err != nil {
+		}, approvalTx); err != nil {
 		if errors.Is(err, errKeeperRunScope) {
 			replyError(w, http.StatusForbidden, "run scope unavailable")
 			return
@@ -379,6 +397,19 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A judge may finish after its calling run. Persist a system denial through
+	// the normal decision ledger before returning, without issuing a lease.
+	runUnavailable := false
+	if err := validateKeeperRunTx(r.Context(), h.db, body.WorkspaceID, body.RequestingAgentID, body.RequestingCrewID, body.RequestingRunID); err != nil {
+		if !errors.Is(err, errKeeperRunScope) {
+			replyInternalError(w, h.logger, "keeper post-judge run admission", err)
+			return
+		}
+		runUnavailable = true
+		gkResp.Decision = string(keeper.DecisionDeny)
+		gkResp.Reason = "keeper calling run ended or unavailable"
+	}
+
 	// Clamp risk score to valid range [1, 10] regardless of evaluator output
 	if gkResp.RiskScore < 1 {
 		gkResp.RiskScore = 1
@@ -402,6 +433,10 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	if approvedVia != nil {
 		decidedActorType, decidedActorID = keeperActorUser, approvedVia.ApproverID
 	}
+	if runUnavailable {
+		decidedActorType, decidedActorID = keeperActorSystem, "keeper-run-admission"
+	}
+
 	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
 		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
@@ -421,6 +456,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			ActorID:      decidedActorID,
 		}); err != nil {
 		h.logger.Error("keeper: update request decision", "error", err)
+		replyError(w, http.StatusInternalServerError, "audit persistence failed")
+		return
 	}
 
 	// #1373: an ALLOW is an APPROVAL, and an approval is what mints a lease.
@@ -462,8 +499,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		AgentID:     body.RequestingAgentID,
 		Type:        journal.EntryKeeperDecision,
 		Severity:    decisionSeverity,
-		ActorType:   journal.ActorKeeper,
-		ActorID:     "keeper",
+		ActorType:   journal.ActorType(decidedActorType),
+		ActorID:     decidedActorID,
 		Summary: fmt.Sprintf("keeper %s credential %s for %s (risk %d)",
 			gkResp.Decision, credName, agentName, gkResp.RiskScore),
 		Payload: func() map[string]any {
@@ -635,6 +672,11 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			"risk_score":      gkResp.RiskScore,
 			"decided_at":      now,
 		})
+	}
+
+	if runUnavailable {
+		replyError(w, http.StatusForbidden, "keeper calling run unavailable")
+		return
 	}
 
 	result := keeper.RequestResult{

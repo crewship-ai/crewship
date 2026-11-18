@@ -180,8 +180,15 @@ func insertKeeperRequestWithTransition(
 	requestSQL string,
 	requestArgs []any,
 	tr keeperTransition,
+	providedTx ...*sql.Tx,
 ) error {
-	tx, err := db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	var err error
+	if len(providedTx) > 0 && providedTx[0] != nil {
+		tx = providedTx[0]
+	} else {
+		tx, err = db.BeginTx(ctx, nil)
+	}
 	if err != nil {
 		return fmt.Errorf("keeper audit: begin: %w", err)
 	}
