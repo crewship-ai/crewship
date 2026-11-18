@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const issueGetFixtureWithOwnerDelegate = `{
@@ -90,14 +92,14 @@ func TestAcceptance_IssueGet_JSON_ShowsOwnerAndDelegate(t *testing.T) {
 	}
 }
 
-func TestAcceptance_IssueJSON_PreservesWorkspaceID(t *testing.T) {
+func TestAcceptance_IssueMachineOutput_PreservesWorkspaceID(t *testing.T) {
 	srv := startIssueGetStub(t, issueGetFixtureWithOwnerDelegate)
 	apiOut, err := runIssueGetCLI(t, srv.URL, "api", "request", "GET", "/api/v1/issues/BE-42")
 	if err != nil {
 		t.Fatalf("API request: %v\noutput: %s", err, apiOut)
 	}
 	var fromAPI struct {
-		WorkspaceID string `json:"workspace_id"`
+		WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
 	}
 	if err := json.Unmarshal([]byte(apiOut), &fromAPI); err != nil {
 		t.Fatalf("decode API response: %v\noutput: %s", err, apiOut)
@@ -106,41 +108,47 @@ func TestAcceptance_IssueJSON_PreservesWorkspaceID(t *testing.T) {
 		t.Fatalf("API fixture has no workspace_id: %s", apiOut)
 	}
 
-	for _, tc := range []struct {
-		name string
-		args []string
-		list bool
-	}{
-		{name: "get", args: []string{"issue", "get", "BE-42", "--format", "json"}},
-		{name: "list", args: []string{"issue", "list", "--format", "json"}, list: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := runIssueGetCLI(t, srv.URL, tc.args...)
-			if err != nil {
-				t.Fatalf("issue %s: %v\noutput: %s", tc.name, err, out)
-			}
-			var got string
-			if tc.list {
-				var rows []struct {
-					WorkspaceID string `json:"workspace_id"`
+	for _, format := range []string{"json", "yaml"} {
+		decode := json.Unmarshal
+		if format == "yaml" {
+			decode = yaml.Unmarshal
+		}
+		for _, tc := range []struct {
+			name string
+			args []string
+			list bool
+		}{
+			{name: "get", args: []string{"issue", "get", "BE-42", "--format", format}},
+			{name: "list", args: []string{"issue", "list", "--format", format}, list: true},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				out, err := runIssueGetCLI(t, srv.URL, tc.args...)
+				if err != nil {
+					t.Fatalf("issue %s: %v\noutput: %s", tc.name, err, out)
 				}
-				if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 1 {
-					t.Fatalf("decode issue list: %v, rows=%d\noutput: %s", err, len(rows), out)
+				var got string
+				if tc.list {
+					var rows []struct {
+						WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+					}
+					if err := decode([]byte(out), &rows); err != nil || len(rows) != 1 {
+						t.Fatalf("decode issue list: %v, rows=%d\noutput: %s", err, len(rows), out)
+					}
+					got = rows[0].WorkspaceID
+				} else {
+					var row struct {
+						WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+					}
+					if err := decode([]byte(out), &row); err != nil {
+						t.Fatalf("decode issue get: %v\noutput: %s", err, out)
+					}
+					got = row.WorkspaceID
 				}
-				got = rows[0].WorkspaceID
-			} else {
-				var row struct {
-					WorkspaceID string `json:"workspace_id"`
+				if got != fromAPI.WorkspaceID {
+					t.Fatalf("workspace_id = %q, API returned %q\noutput: %s", got, fromAPI.WorkspaceID, out)
 				}
-				if err := json.Unmarshal([]byte(out), &row); err != nil {
-					t.Fatalf("decode issue get: %v\noutput: %s", err, out)
-				}
-				got = row.WorkspaceID
-			}
-			if got != fromAPI.WorkspaceID {
-				t.Fatalf("workspace_id = %q, API returned %q\noutput: %s", got, fromAPI.WorkspaceID, out)
-			}
-		})
+			})
+		}
 	}
 }
 
