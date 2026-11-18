@@ -126,7 +126,7 @@ func TestCfg2_Resolve_KeeperBlockForSecretCreds(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	prompt, _ := resp["system_prompt"].(string)
-	if !strings.Contains(prompt, "KEEPER") || !strings.Contains(prompt, "/keeper/request") {
+	if !strings.Contains(prompt, "KEEPER") || !strings.Contains(prompt, "crewship keeper request") || !strings.Contains(prompt, "cr-cfg2-sec") || strings.Contains(prompt, "agent_slug") {
 		t.Errorf("system_prompt missing KEEPER block")
 	}
 }

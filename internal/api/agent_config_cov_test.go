@@ -721,13 +721,16 @@ func TestCovCfgBuildKeeperBlock(t *testing.T) {
 	block := h.buildKeeperBlock("ada", creds)
 	for _, want := range []string{
 		"[CREDENTIAL ACCESS CONTROL — KEEPER]",
-		"agent_slug\":\"ada\"",
+		"crewship keeper request",
 		"- API_KEY",
 		"[END CREDENTIAL ACCESS CONTROL]",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("keeper block missing %q", want)
 		}
+	}
+	if strings.Contains(block, "agent_slug") || strings.Contains(block, "should-be-wiped") {
+		t.Error("Keeper prompt must not assemble acting identity or expose values")
 	}
 	withholdKeeperSecretValues(creds)
 	if creds[0].Value != "" {
