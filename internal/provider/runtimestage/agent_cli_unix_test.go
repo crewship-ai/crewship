@@ -67,7 +67,7 @@ func TestAgentCLIStagingRetainsImmutableGenerations(t *testing.T) {
 }
 
 func TestAgentCLIStagingRejectsUntrustedInputs(t *testing.T) {
-	for _, mutation := range []string{"script", "macho", "dynamic", "source-symlink", "staging-symlink", "existing-symlink", "existing-hardlink", "existing-writable", "existing-corrupt"} {
+	for _, mutation := range []string{"script", "macho", "dynamic", "non-linux-abi", "source-writable", "source-hardlink", "source-symlink", "staging-symlink", "existing-symlink", "existing-hardlink", "existing-writable", "existing-corrupt"} {
 		t.Run(mutation, func(t *testing.T) {
 			root, install := t.TempDir(), t.TempDir()
 			source := filepath.Join(install, "crewship-agent-cli")
@@ -83,6 +83,22 @@ func TestAgentCLIStagingRejectsUntrustedInputs(t *testing.T) {
 			}
 			if err := os.WriteFile(source, raw, 0755); err != nil {
 				t.Fatal(err)
+			}
+			if mutation == "non-linux-abi" {
+				raw[7] = 9
+				if err := os.WriteFile(source, raw, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mutation == "source-writable" {
+				if err := os.Chmod(source, 0777); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mutation == "source-hardlink" {
+				if err := os.Link(source, source+".alias"); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if mutation == "source-symlink" {
 				target := source + ".real"
