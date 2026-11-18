@@ -60,7 +60,7 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 			return
 		}
 		if body.Credential != "" || body.Run != "" {
-			replyError(w, http.StatusForbidden, "a crew-scoped caller holds no credential")
+			replyError(w, http.StatusForbidden, "a crew-scoped caller holds no credential or run identity")
 			return
 		}
 		err = tx.QueryRowContext(req.Context(), `SELECT id FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, body.Crew, ws).Scan(&crew)
