@@ -102,7 +102,12 @@ func TestHandleQuery_MissingFields(t *testing.T) {
 }
 
 func TestHandleQuery_UnknownTarget(t *testing.T) {
-	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, []CrewMember{
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"target bob not found"}`))
+	}))
+	defer host.Close()
+	srv := newQueryServer(t, &IPCConfig{BaseURL: host.URL, Token: "tok"}, []CrewMember{
 		{Slug: "alice", Name: "Alice"},
 	})
 
@@ -113,8 +118,8 @@ func TestHandleQuery_UnknownTarget(t *testing.T) {
 
 	srv.handleQuery(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
 	}
 	var body map[string]string
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
@@ -218,14 +223,17 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 }
 
 // TestHandleQuery_MemberAttribution — the peer-query path attributes to the
-// caller-supplied from validated as a crew member (same shared-sidecar contract
-// as escalation): a second member (riley) is preserved (not collapsed to the
-// boot agent), and a non-member from is refused.
+// caller-supplied from. The host validates whether that sender is a current crew
+// member, including senders hired after sidecar startup.
 func TestHandleQuery_MemberAttribution(t *testing.T) {
 	var receivedBody string
 	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
 		receivedBody = string(bodyBytes)
+		if strings.Contains(receivedBody, `"from_slug":"ghost"`) {
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unknown sender"})
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"query_id":"q-1","response":"ok","status":"COMPLETED"}`))
@@ -239,7 +247,7 @@ func TestHandleQuery_MemberAttribution(t *testing.T) {
 		CrewID:      "crew-1",
 		WorkspaceID: "ws-1",
 		ChatID:      "chat-1",
-	}, []CrewMember{{Slug: "bob", Name: "Bob"}, {Slug: "riley", Name: "Riley"}})
+	}, []CrewMember{{Slug: "bob", Name: "Bob"}})
 
 	// A different crew member queries a peer through nela's shared sidecar.
 	req := httptest.NewRequest(http.MethodPost, "/query",
@@ -261,8 +269,8 @@ func TestHandleQuery_MemberAttribution(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
 	srv.handleQuery(w2, req2)
-	if w2.Code != http.StatusBadRequest {
-		t.Errorf("non-member from: status = %d, want 400", w2.Code)
+	if w2.Code != http.StatusForbidden {
+		t.Errorf("non-member from: status = %d, want 403", w2.Code)
 	}
 }
 

@@ -609,6 +609,7 @@ routes are:
 | `/assign` | POST | Assign a task to a crew member (subject to the delegation limits above) |
 | `/results/{id}` | GET | Poll for assignment result |
 | `/query` | POST | Ask a crew member a quick question |
+The host resolves current crew membership for assignments and peer queries. An agent cannot assign work to or query itself.
 | `/standup` | GET | Get crew standup summary |
 | `/escalate` | POST | Escalate an issue to humans |
 | `/mission/create` | POST | Create a multi-task mission (subject to the mission limits above) |

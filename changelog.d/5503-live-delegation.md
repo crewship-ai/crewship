@@ -1,0 +1,1 @@
+- **Delegation rejected current crew members after the sidecar started:** resolve delegation against the host's current membership, including legacy peer queries. ⚠️ **Behaviour change:** agents cannot assign work to or query themselves.

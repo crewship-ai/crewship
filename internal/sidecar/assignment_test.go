@@ -75,7 +75,12 @@ func TestHandleAssign_MissingFields(t *testing.T) {
 }
 
 func TestHandleAssign_UnknownTarget(t *testing.T) {
-	srv := newAssignmentServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, []CrewMember{
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"target bob not found"}`))
+	}))
+	defer host.Close()
+	srv := newAssignmentServer(t, &IPCConfig{BaseURL: host.URL, Token: "tok", AgentID: "alice"}, []CrewMember{
 		{Slug: "alice", Name: "Alice"},
 	})
 
@@ -85,8 +90,8 @@ func TestHandleAssign_UnknownTarget(t *testing.T) {
 
 	srv.handleAssign(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
 	}
 	var body map[string]string
 	json.NewDecoder(w.Body).Decode(&body)
@@ -338,26 +343,35 @@ func TestHandleAssign_UnknownCrew_Returns404(t *testing.T) {
 	}
 }
 
-// Naming your own crew is the same request as not naming one, so the
-// membership check still applies — otherwise the explicit form would be a way
-// to skip it.
+// Naming the local crew still uses the host's current membership authority.
+// A stale sidecar snapshot must neither accept a revoked target nor veto a hire.
 func TestHandleAssign_OwnCrewNamed_StillChecksMembership(t *testing.T) {
 	var forwarded map[string]string
-	mock := stubCrewshipdForAssign(t, `[{"id":"crew-1","slug":"engineering"}]`, &forwarded)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/internal/crews":
+			writeJSONResponse(w, http.StatusOK, []map[string]string{{"id": "crew-1", "slug": "engineering"}})
+		case "/api/v1/internal/assignments":
+			if err := json.NewDecoder(r.Body).Decode(&forwarded); err != nil {
+				t.Errorf("invalid forwarded request: %v", err)
+			}
+			// The authoritative host rejects this missing target. A permissive
+			// generic 201 stub cannot test a membership rejection boundary.
+			writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target agent not found"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
 	defer mock.Close()
-
-	srv := newAssignmentServer(t, &IPCConfig{
-		BaseURL: mock.URL, Token: "tok", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1",
-	}, []CrewMember{{Slug: "alex", Name: "Alex"}})
-
-	req := httptest.NewRequest(http.MethodPost, "/assign",
-		strings.NewReader(`{"target":"ghost","task":"x","crew":"engineering"}`))
+	srv := newAssignmentServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1"}, []CrewMember{{Slug: "alex", Name: "Alex"}})
+	req := httptest.NewRequest(http.MethodPost, "/assign", strings.NewReader(`{"target":"ghost","task":"x","crew":"engineering"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	srv.handleAssign(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "target agent not found") {
+		t.Fatalf("host membership rejection lost: %d %s", w.Code, w.Body.String())
+	}
+	if forwarded["target_slug"] != "ghost" || forwarded["crew_id"] != "crew-1" || forwarded["workspace_id"] != "ws-1" || forwarded["actor_agent_id"] != "boot-agent" {
+		t.Fatalf("named local crew lost bound host validation context: %+v", forwarded)
 	}
 }
