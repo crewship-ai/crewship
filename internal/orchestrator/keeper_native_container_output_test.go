@@ -13,6 +13,7 @@ import (
 // Docker Exec combines stdout and stderr; the CLI deliberately writes its
 // decision on stdout and its nonzero-exit envelope on stderr in JSON mode.
 func decodeNativeKeeperCrewReply(raw []byte, code int, reply *nativeCrewKeeperReply) error {
+	*reply = nativeCrewKeeperReply{}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decisions, diagnostics := 0, 0
 	for {
@@ -100,7 +101,7 @@ func TestNativeKeeperCrewReplyRejectsAmbiguousStreams(t *testing.T) {
 		{"conflicting fields", `{"request_id":"fixture-request","decision":"ALLOW","error":{}}`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var reply nativeCrewKeeperReply
+			reply := nativeCrewKeeperReply{RequestID: "stale-request", Decision: "ALLOW"}
 			if err := decodeNativeKeeperCrewReply([]byte(tc.raw), tc.code, &reply); err == nil {
 				t.Fatal("contradictory execution evidence accepted")
 			}
