@@ -548,10 +548,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (access) / Art. 17 (deletion) compliance events with required
 	// `reason` fields — a regulator audit reading "we lost the
 	// GDPR log on a restore" is not a defensible posture.
-	"gdpr_actions":                  IntentInclude,
-	"hooks_config":                  IntentInclude,
-	"inbox_items":                   IntentInclude,
-	"run_failure_notice_deliveries": IntentInclude, // delivery tombstones must survive inbox retention and portable restores
+	"gdpr_actions": IntentInclude,
+	"hooks_config": IntentInclude,
+	"inbox_items":  IntentInclude,
 	// inbox_item_reads (A7, PRD-ISSUES-AND-ROUTINES-2026.md §9.7) is the
 	// per-user "did THIS person read THIS item" marker. IntentInclude, not
 	// operational: unlike notification_deliveries (dedup/retry state that

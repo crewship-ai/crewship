@@ -147,7 +147,6 @@ var BackupTables = []string{
 	"issue_counters",
 	"subscriptions",
 	"inbox_items",
-	"run_failure_notice_deliveries",
 	// inbox_item_reads (A7): per-user read marker, FK inbox_item_id →
 	// inbox_items(id), so it must restore after its parent. No workspace_id
 	// column — see the workspaceFilterSQL case below.

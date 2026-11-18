@@ -305,8 +305,7 @@ var TableCategory = map[string]string{
 	"mission_code_links": categoryWorkOnly, "labels": categoryWorkOnly, "milestones": categoryWorkOnly,
 	"project_guest_issue_intake": categoryWorkOnly,
 	"projects":                   categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
-	"run_failure_notice_deliveries": categoryWorkOnly,
-	"inbox_item_reads":              categoryWorkOnly, "triage_rules": categoryWorkOnly, "saved_views": categoryWorkOnly,
+	"inbox_item_reads": categoryWorkOnly, "triage_rules": categoryWorkOnly, "saved_views": categoryWorkOnly,
 }
 
 // Crew container sections (collector.go) and the category each belongs to.

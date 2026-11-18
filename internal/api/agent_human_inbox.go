@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/runauthority"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var errHumanInboxDisabled = errors.New("human inbox is disabled")
@@ -321,7 +322,7 @@ func (h *InternalHandler) AgentInboxRead(w http.ResponseWriter, r *http.Request)
 			result = humanInboxEntry{ID: a.TriggerMessageID, Kind: "chat_message", Content: content}
 			notifyUser = a.HumanAuthority.UserID
 		}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
+		now := tsformat.Format(time.Now())
 		if _, err := q.ExecContext(r.Context(), `INSERT INTO agent_inbox_receipts(workspace_id,agent_id,source_kind,source_id,run_id,read_at,source_sha256,source_revision) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,agent_id,source_kind,source_id) DO UPDATE SET run_id=excluded.run_id,read_at=excluded.read_at,source_sha256=excluded.source_sha256,source_revision=excluded.source_revision WHERE agent_inbox_receipts.source_sha256<>excluded.source_sha256 OR agent_inbox_receipts.source_revision<>excluded.source_revision`, body.WorkspaceID, body.AgentID, result.Kind, result.ID, body.RunID, now, sourceHash, sourceRevision); err != nil {
 			return err
 		}

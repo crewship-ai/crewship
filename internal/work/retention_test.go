@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // retDelivery is one accepted webhook carrying a payload. The body bytes and the
@@ -561,7 +563,7 @@ func TestSweepExpiresOnlyOldEndedInboxEvidence(t *testing.T) {
 		INSERT INTO agents(id,workspace_id,name,slug) VALUES('agent-jamie','ws1','Jamie','jamie')`); err != nil {
 		t.Fatal(err)
 	}
-	stamp := func(delta time.Duration) string { return clock.Now().Add(delta).UTC().Format(time.RFC3339Nano) }
+	stamp := func(delta time.Duration) string { return tsformat.Format(clock.Now().Add(delta)) }
 	old := stamp(-2 * DefaultDedupWindow)
 	for _, entry := range []struct {
 		id    string
