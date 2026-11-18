@@ -48,6 +48,7 @@ type fakeCrewContainer struct {
 // really removes and create really creates, so a test can drive a full
 // stop -> remove -> create cycle and observe the end state.
 type sidecarFakeDaemon struct {
+	sdk        *agentSDKFake
 	mu         sync.Mutex
 	containers map[string]*fakeCrewContainer
 	order      []string
@@ -93,6 +94,9 @@ func (d *sidecarFakeDaemon) handler() http.HandlerFunc {
 		path := r.URL.Path
 		d.mu.Lock()
 		defer d.mu.Unlock()
+		if d.sdk != nil && d.sdk.serve(w, r, d) {
+			return
+		}
 		writeJSON := func(v any) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(v)
@@ -234,7 +238,7 @@ func newSidecarRefreshFixture(t *testing.T, stamp, status string) (*Provider, *s
 
 	d := &sidecarFakeDaemon{containers: map[string]*fakeCrewContainer{}}
 	srv := httptest.NewServer(d.handler())
-	cli, err := client.New(client.WithHost(srv.URL), client.WithAPIVersion("1.43"))
+	cli, err := client.New(client.WithHost("tcp://"+strings.TrimPrefix(srv.URL, "http://")), client.WithAPIVersion("1.43"))
 	if err != nil {
 		srv.Close()
 		t.Fatalf("docker client: %v", err)

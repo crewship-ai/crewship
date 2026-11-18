@@ -58,15 +58,31 @@ class ArtifactIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.fixture_binary(root / 'crewship')
-            for name in ('crewship-sidecar', 'entrypoint.sh'):
+            for name in ('crewship-sidecar', 'entrypoint.sh', 'crewship-agent-cli'):
                 (root / name).write_text('fixture')
             path = root / 'release.tar.gz'
             with tarfile.open(path, 'w:gz') as archive:
-                for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh'):
+                for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh', 'crewship-agent-cli'):
                     archive.add(root / name, arcname=name)
             result = subprocess.run(['python3', str(ROOT / 'scripts/ci/smoke-archive.py'), str(path), EXPECTED], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Archive commit identity mismatch', result.stderr)
+
+
+    def test_archive_requires_native_client_before_boot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture_binary(root / 'crewship')
+            for name in ('crewship-sidecar', 'entrypoint.sh'):
+                (root / name).write_text('fixture')
+            path = root / 'missing-client.tar.gz'
+            with tarfile.open(path, 'w:gz') as archive:
+                for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh'):
+                    archive.add(root / name, arcname=name)
+            result = subprocess.run(['python3', str(ROOT / 'scripts/ci/smoke-archive.py'),
+                                     str(path), EXPECTED], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Archive is missing crewship-agent-cli', result.stderr)
 
 
 if __name__ == '__main__':
