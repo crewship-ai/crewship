@@ -1065,7 +1065,8 @@ func responseComponents() map[string]any {
 		"_count": ref("CrewCounts"),
 	})
 	agent := object(map[string]any{
-		"id": scalar("string"), "crew_id": nullable("string"), "workspace_id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
+		"human_inbox_enabled": scalar("boolean"),
+		"id":                  scalar("string"), "crew_id": nullable("string"), "workspace_id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
 		"description": nullable("string"), "role_title": nullable("string"), "agent_role": scalar("string"), "lead_mode": nullable("string"), "status": scalar("string"),
 		"cli_adapter": scalar("string"), "llm_provider": nullable("string"), "llm_model": nullable("string"), "system_prompt": nullable("string"),
 		"avatar_seed": nullable("string"), "avatar_style": nullable("string"), "avatar_url": nullable("string"), "timeout_seconds": scalar("integer"),

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -20,6 +19,7 @@ const DomainHostChatTurn = "host_chat_turn"
 // validated by the host. The existing chat run ID remains the attempt identity.
 type HostChatRequest struct {
 	RunID, WorkspaceID, AgentID, CrewID, ChatID, UserID, TriggerMessageID string
+	CaptureInboxSource                                                    bool
 }
 
 type HostChatAttempt struct {
@@ -119,11 +119,7 @@ func (s *Store) BeginHostChat(ctx context.Context, r HostChatRequest) (*Claimed,
 	}
 	// Store the optional source commitment with the existing admission.
 	// Missing older messages still start normally and have no inbox source.
-	enabled, err := featureflags.IsEnabledWith(ctx, tx, r.WorkspaceID, featureflags.AgentHumanInbox)
-	if err != nil {
-		return nil, false, err
-	}
-	if enabled {
+	if r.CaptureInboxSource {
 		var content string
 		err = tx.QueryRowContext(ctx, `SELECT content FROM conversation_messages
 			WHERE id=? AND session_id=? AND agent_id=? AND role='user' AND author_user_id=?`,

@@ -25,6 +25,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -32,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -52,14 +54,24 @@ func isUniqueViolation(err error) bool {
 // FeatureFlagHandler implements CRUD for feature flag definitions plus
 // per-workspace override upsert/delete.
 type FeatureFlagHandler struct {
-	db     *sql.DB
-	hub    *ws.Hub
-	logger *slog.Logger
+	agentInboxFlags *featureflags.AgentInboxState
+	db              *sql.DB
+	hub             *ws.Hub
+	logger          *slog.Logger
 }
 
 // NewFeatureFlagHandler constructs a FeatureFlagHandler.
 func NewFeatureFlagHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *FeatureFlagHandler {
 	return &FeatureFlagHandler{db: db, hub: hub, logger: logger}
+}
+
+func (h *FeatureFlagHandler) refreshAgentInbox(r *http.Request, key string) {
+	if key == featureflags.AgentHumanInbox && h.agentInboxFlags != nil {
+		// The mutation has committed even when the client closes its request.
+		if err := h.agentInboxFlags.Refresh(context.WithoutCancel(r.Context()), h.db); err != nil {
+			h.logger.Warn("refresh agent inbox flag", "error", err)
+		}
+	}
 }
 
 // ── Response types ─────────────────────────────────────────────────────────
@@ -211,6 +223,7 @@ func (h *FeatureFlagHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Instance-global broadcast: workspace omitted because the change
 	// affects every workspace's default. Clients should refetch.
+	h.refreshAgentInbox(r, req.Key)
 	broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()),
 		"feature_flag.created", map[string]string{"key": req.Key})
 
@@ -289,6 +302,7 @@ func (h *FeatureFlagHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.refreshAgentInbox(r, key)
 	broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()),
 		"feature_flag.updated", map[string]string{"key": key})
 
@@ -357,6 +371,7 @@ func (h *FeatureFlagHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.refreshAgentInbox(r, key)
 	broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()),
 		"feature_flag.deleted", map[string]string{"key": key})
 
@@ -438,6 +453,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	h.refreshAgentInbox(r, key)
 	broadcastWorkspaceEvent(h.hub, wsID, "feature_flag.override_set",
 		map[string]string{"key": key})
 
@@ -505,6 +521,7 @@ func (h *FeatureFlagHandler) DeleteOverride(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	h.refreshAgentInbox(r, key)
 	broadcastWorkspaceEvent(h.hub, wsID, "feature_flag.override_cleared",
 		map[string]string{"key": key})
 

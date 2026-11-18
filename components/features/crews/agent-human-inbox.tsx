@@ -15,12 +15,13 @@ import { CrCard, CrNote } from "./cr-card"
 type Entry = { id: string; kind: string; content: string; href: string; state: string; read_at: string | null }
 type Room = { id: string; kind: string; title: string }
 
-export function AgentHumanInbox({ workspaceId, agentId, agentSlug, crewId }: { workspaceId: string; agentId: string; agentSlug: string; crewId?: string | null }) {
+export function AgentHumanInbox({ enabled, workspaceId, agentId, agentSlug, crewId }: { enabled: boolean; workspaceId: string; agentId: string; agentSlug: string; crewId?: string | null }) {
   const { data: session } = useSessionSafe()
   const user = session?.user?.id ?? ""
   const accessMode = useAccessMode()
   // Remounting resets composers and pending request generations on identity or
   // workspace changes; no previous viewer's source text is used as placeholder.
+  if (!enabled) return null
   if (accessMode !== "trusted") return <CrCard title="Human inbox" concept="chat"><CrNote>Human messages are unavailable in this session.</CrNote></CrCard>
   return <HumanInbox key={`${user}:${workspaceId}:${agentId}`} workspaceId={workspaceId} agentId={agentId} agentSlug={agentSlug} crewId={crewId} user={user} />
 }

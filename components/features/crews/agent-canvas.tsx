@@ -129,6 +129,15 @@ export function AgentCanvas({
     }
   }, [agent, fetchAgent]))
 
+  const refreshInboxFlag = useCallback((event: { payload?: Record<string, unknown> }) => {
+    if (event.payload?.key === "agent_human_inbox") void fetchAgent()
+  }, [fetchAgent])
+  useRealtimeEvent("feature_flag.created", refreshInboxFlag)
+  useRealtimeEvent("feature_flag.updated", refreshInboxFlag)
+  useRealtimeEvent("feature_flag.deleted", refreshInboxFlag)
+  useRealtimeEvent("feature_flag.override_set", refreshInboxFlag)
+  useRealtimeEvent("feature_flag.override_cleared", refreshInboxFlag)
+
   // Inbox + cost summary (used by stats strip + InboxBanner).
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
   const [peerMessages, setPeerMessages] = useState<PeerMessageRowType[]>([])
@@ -399,7 +408,7 @@ export function AgentCanvas({
                 </CrCard>
               )}
               <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onStop={isRunning ? handleStop : undefined} cost30d={spend?.byAgent.get(agent.id) ?? null} revision={revision} />
-              <AgentHumanInbox workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id} />
+              <AgentHumanInbox enabled={agent.human_inbox_enabled === true} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id} />
               <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}

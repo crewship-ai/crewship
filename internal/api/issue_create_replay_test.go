@@ -10,6 +10,7 @@ import (
 
 func TestHumanInboxTaskCreateRetryIsOneCanonicalIssue(t *testing.T) {
 	h, user, ws, crew, _, worker := newTestIssueHandler(t)
+	h.agentInboxEnabled = func(w string) bool { return w == ws }
 	call := func(title string) *httptest.ResponseRecorder {
 		req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/crews/"+crew+"/issues", bytes.NewBufferString(`{"title":"`+title+`","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
@@ -47,6 +48,7 @@ func TestHumanInboxTaskCreateRetryIsOneCanonicalIssue(t *testing.T) {
 
 func TestHumanInboxTaskCreateReceiptRollsBackWithMutation(t *testing.T) {
 	h, user, ws, crew, _, worker := newTestIssueHandler(t)
+	h.agentInboxEnabled = func(w string) bool { return w == ws }
 	call := func() *httptest.ResponseRecorder {
 		req := withWorkspaceUser(httptest.NewRequest("POST", "/issues", bytes.NewBufferString(`{"title":"Atomic task","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
@@ -73,6 +75,7 @@ func TestHumanInboxTaskCreateReceiptRollsBackWithMutation(t *testing.T) {
 
 func TestHumanInboxTaskCreateConcurrentRetryAndLiveRevocation(t *testing.T) {
 	h, user, ws, crew, _, worker := newTestIssueHandler(t)
+	h.agentInboxEnabled = func(w string) bool { return w == ws }
 	call := func() *httptest.ResponseRecorder {
 		req := withWorkspaceUser(httptest.NewRequest("POST", "/issues", bytes.NewBufferString(`{"title":"Concurrent task","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
@@ -108,5 +111,23 @@ func TestHumanInboxTaskCreateConcurrentRetryAndLiveRevocation(t *testing.T) {
 	execOrFatal(t, h.db, `UPDATE workspace_members SET role='VIEWER',capabilities='{}' WHERE workspace_id=? AND user_id=?`, ws, user)
 	if rr := call(); rr.Code != 403 {
 		t.Fatalf("stale auth context replay=%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHumanInboxDisabledIssueCreateUsesLegacyBehavior(t *testing.T) {
+	h, user, workspace, crew, _, worker := newTestIssueHandler(t)
+	for range 2 {
+		req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/issues", bytes.NewBufferString(`{"title":"Ordinary task","delegate_agent_id":"`+worker+`"}`)), user, workspace, "OWNER")
+		req.SetPathValue("crewId", crew)
+		req.Header.Set("Idempotency-Key", "ordinary-create")
+		response := httptest.NewRecorder()
+		h.Create(response, req)
+		if response.Code != http.StatusCreated || response.Header().Get("Idempotency-Replayed") != "" {
+			t.Fatalf("ordinary create changed: %d %s", response.Code, response.Body.String())
+		}
+	}
+	var issues, operations int
+	if err := h.db.QueryRow("SELECT (SELECT count(*) FROM missions),(SELECT count(*) FROM agent_operations)").Scan(&issues, &operations); err != nil || issues != 2 || operations != 0 {
+		t.Fatalf("ordinary issues=%d inbox operation receipts=%d: %v", issues, operations, err)
 	}
 }

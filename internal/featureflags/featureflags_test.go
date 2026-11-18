@@ -140,3 +140,26 @@ func TestIsEnabled_UndefinedKeyIsFalse(t *testing.T) {
 		t.Errorf("got true, want false (undefined flag key)")
 	}
 }
+
+func TestAgentInboxState_DefaultOffAndExplicitOverrides(t *testing.T) {
+	db := openTestDB(t)
+	t.Cleanup(func() { _ = db.Close() })
+	var state AgentInboxState
+	insertFlag(t, db, "human-inbox", AgentHumanInbox, false)
+	insertOverride(t, db, "human-inbox", "ws_b", true)
+	if err := state.Refresh(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	if state.Enabled("ws_a") || !state.Enabled("ws_b") {
+		t.Fatal("workspace opt-in changed the default or failed to enable the target")
+	}
+	if _, err := db.Exec("DELETE FROM feature_flag_overrides"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Refresh(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	if state.Enabled("ws_b") {
+		t.Fatal("clearing the override did not disable the feature")
+	}
+}

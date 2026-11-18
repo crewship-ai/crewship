@@ -22,11 +22,12 @@ type MissionStarter interface {
 
 // IssueHandler implements endpoints for the issue tracker (Linear-like).
 type IssueHandler struct {
-	db            *sql.DB
-	hub           *ws.Hub
-	missionEngine MissionStarter
-	logger        *slog.Logger
-	journal       journal.Emitter
+	agentInboxEnabled func(string) bool
+	db                *sql.DB
+	hub               *ws.Hub
+	missionEngine     MissionStarter
+	logger            *slog.Logger
+	journal           journal.Emitter
 	// storagePath powers the F4.5 mission-outcomes-to-crew-memory hook
 	// fired from the review-approve (→ DONE) and cancel (→ CANCELLED)
 	// paths in issue_handler_workflow.go. Set via SetStoragePath after

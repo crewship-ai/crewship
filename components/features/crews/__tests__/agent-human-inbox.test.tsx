@@ -11,9 +11,9 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: (name: string, callback: () => void) => { events.set(name, callback) } }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => accessMode }))
 
-function mount(workspaceId = "ws1") {
+function mount(workspaceId = "ws1", enabled = true) {
   const q = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const tree = (workspace: string) => <QueryClientProvider client={q}><AgentHumanInbox workspaceId={workspace} agentId="agent1" agentSlug="worker" crewId="crew1" /></QueryClientProvider>
+  const tree = (workspace: string) => <QueryClientProvider client={q}><AgentHumanInbox enabled={enabled} workspaceId={workspace} agentId="agent1" agentSlug="worker" crewId="crew1" /></QueryClientProvider>
   return { ...render(tree(workspaceId)), tree }
 }
 const ok = (value: unknown) => ({ ok: true, json: async () => value })
@@ -23,6 +23,14 @@ beforeEach(() => {
 })
 
 describe("agent human Inbox canonical sources", () => {
+  it.each(["trusted", "restricted"])("does not mount or fetch when the flag is off in a %s session", async mode => {
+    accessMode = mode
+    mount("ws1", false)
+    await act(async () => { events.get("inbox.updated")?.() })
+    expect(api).not.toHaveBeenCalled()
+    expect(screen.queryByText("Human inbox")).not.toBeInTheDocument()
+  })
+
   it("hides the inbox and its composers in a workspace with the flag disabled", async () => {
     api.mockResolvedValue({ ok: false, status: 404 })
     mount()

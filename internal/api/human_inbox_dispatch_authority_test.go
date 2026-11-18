@@ -15,6 +15,7 @@ func TestHumanInboxChannelSourceAuthorityAtEveryExecutionBoundary(t *testing.T) 
 		for _, change := range []string{"account_epoch", "membership_regrant", "role_changed", "changed_content"} {
 			t.Run(phase+"/"+change, func(t *testing.T) {
 				h, s, c, u, agent, _ := conversationJobFixture(t)
+				s = s.WithInboxEnabled(func(w string) bool { return w == c.WorkspaceID })
 				ctx := context.Background()
 				job := enqueueConversationJob(t, h, s, c, u, agent, "source-bound-once")
 				assignment := ""

@@ -1846,15 +1846,16 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var ipcCfg *SidecarIPCConfig
 		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
-				GridCraftEnabled: o.gridCraftEnabled,
-				BaseURL:          ipcBaseURL,
-				Token:            internalAPIToken,
-				AgentID:          req.AgentID,
-				AgentSlug:        req.AgentSlug,
-				CrewID:           req.CrewID,
-				WorkspaceID:      req.WorkspaceID,
-				ChatID:           req.ChatID,
-				ContainerID:      req.ContainerID,
+				GridCraftEnabled:  o.gridCraftEnabled,
+				AgentInboxEnabled: o.agentInboxEnabled != nil && o.agentInboxEnabled(req.WorkspaceID),
+				BaseURL:           ipcBaseURL,
+				Token:             internalAPIToken,
+				AgentID:           req.AgentID,
+				AgentSlug:         req.AgentSlug,
+				CrewID:            req.CrewID,
+				WorkspaceID:       req.WorkspaceID,
+				ChatID:            req.ChatID,
+				ContainerID:       req.ContainerID,
 				// #812: the boot agent's own per-agent token. req.CrewMembers
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.

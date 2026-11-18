@@ -22,7 +22,16 @@ var (
 	ErrConflict  = errors.New("client message ID already used with different content")
 )
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db           *sql.DB
+	inboxEnabled func(string) bool
+}
+
+func (s *Store) WithInboxEnabled(enabled func(string) bool) *Store {
+	copy := *s
+	copy.inboxEnabled = enabled
+	return &copy
+}
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
@@ -333,6 +342,12 @@ func (s *Store) Send(ctx context.Context, w, u, id string, in SendInput) (Messag
 			return err
 		}
 		for _, agentID := range in.MentionedAgentIDs {
+			if s.inboxEnabled == nil || !s.inboxEnabled(w) {
+				if _, err := q.ExecContext(ctx, `INSERT INTO workspace_conversation_agent_jobs(id,conversation_id,message_id,agent_id,requested_by_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID(), id, m.ID, agentID, u, m.CreatedAt, m.CreatedAt); err != nil {
+					return err
+				}
+				continue
+			}
 			result, err := q.ExecContext(ctx, `INSERT INTO workspace_conversation_agent_jobs(id,conversation_id,message_id,agent_id,requested_by_user_id,created_at,updated_at,read_authority_json,read_source_sha256)
  SELECT ?,?,?,?,?,?,?,json_object('member_id',wm.id,'member_revision',wm.access_revision,'user_revision',usr.authority_revision),?
  FROM workspace_members wm JOIN users usr ON usr.id=wm.user_id WHERE wm.workspace_id=? AND wm.user_id=? AND usr.suspended_at IS NULL`, newID(), id, m.ID, agentID, u, m.CreatedAt, m.CreatedAt, InboxSourceDigest(m.Content), w, u)

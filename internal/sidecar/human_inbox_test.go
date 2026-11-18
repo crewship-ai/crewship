@@ -43,3 +43,27 @@ func TestAgentInboxReadToolKeepsExactRunProofAndHostRefusal(t *testing.T) {
 		t.Fatalf("forged actor reached host: %d calls=%d", code, calls.Load())
 	}
 }
+
+func TestAgentInboxDiscoveryRequiresEnabledWorkspace(t *testing.T) {
+	s, _ := newRunIdentityServer(t)
+	for _, enabled := range []bool{false, true} {
+		s.ipc.AgentInboxEnabled = enabled
+		w := httptest.NewRecorder()
+		s.respondRoutinesMCPToolsList(w, memoryMCPRequest{})
+		var body struct {
+			Result struct {
+				Tools []struct{ Name string } `json:"tools"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, tool := range body.Result.Tools {
+			found = found || tool.Name == "inbox_read"
+		}
+		if found != enabled {
+			t.Fatalf("advertised inbox_read = %v with enabled = %v", found, enabled)
+		}
+	}
+}

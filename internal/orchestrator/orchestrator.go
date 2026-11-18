@@ -558,6 +558,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	agentInboxEnabled        func(string) bool
 	gridCraftEnabled         bool // startup-only, experimental offline workbook tools
 	hostOutputRoot           string
 	hostOutputCapacityBytes  int64
@@ -1743,3 +1744,9 @@ func (o *Orchestrator) SetFeedbackPreferenceReader(reader func(context.Context, 
 
 // SetGridCraftEnabled is called only during server construction, before runs.
 func (o *Orchestrator) SetGridCraftEnabled(enabled bool) { o.gridCraftEnabled = enabled }
+
+// SetAgentInboxEnabled is wired during host construction. Sidecar discovery
+// receives a snapshot when constructing the run's IPC configuration.
+func (o *Orchestrator) SetAgentInboxEnabled(enabled func(string) bool) {
+	o.agentInboxEnabled = enabled
+}

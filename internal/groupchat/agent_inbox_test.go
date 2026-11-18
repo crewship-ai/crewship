@@ -10,6 +10,7 @@ import (
 func seedInboxJob(t *testing.T) (*Store, *sql.DB, string, string) {
 	t.Helper()
 	s, db, _ := fixture(t)
+	s = s.WithInboxEnabled(func(w string) bool { return w == "w" })
 	ctx := context.Background()
 	c := create(t, s, "channel")
 	if _, err := db.Exec(`INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('target','w','crew','Target','target')`); err != nil {
@@ -137,5 +138,24 @@ func TestChannelMessageReplayAcknowledgesOriginalAfterJobFailure(t *testing.T) {
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_conversation_agent_jobs WHERE message_id=?`, originalID).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("replay dispatched jobs=%d err=%v", n, err)
+	}
+}
+
+func TestAgentInboxDisabledChannelJobsStartWithoutCommitment(t *testing.T) {
+	s, db, _ := fixture(t)
+	chat := create(t, s, "channel")
+	if _, err := db.Exec("INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('target','w','crew','Target','target')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAgent(t.Context(), "w", "u0", chat.ID, "target"); err != nil {
+		t.Fatal(err)
+	}
+	message, _, err := s.Send(t.Context(), "w", "u0", chat.ID, SendInput{ClientID: "off-source", Content: "ordinary human message", MentionedAgentIDs: []string{"target"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var noCommitment bool
+	if err := db.QueryRow("SELECT read_authority_json IS NULL AND read_source_sha256 IS NULL FROM workspace_conversation_agent_jobs WHERE message_id=?", message.ID).Scan(&noCommitment); err != nil || !noCommitment {
+		t.Fatalf("ordinary channel job acquired an inbox commitment: %v", err)
 	}
 }

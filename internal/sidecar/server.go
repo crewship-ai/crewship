@@ -40,7 +40,8 @@ type MemoryConfig struct {
 // ContainerID is the Docker container where this agent is running; forwarded to
 // crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
-	GridCraftEnabled bool `json:"gridcraft_enabled,omitempty"`
+	AgentInboxEnabled bool `json:"agent_inbox_enabled,omitempty"`
+	GridCraftEnabled  bool `json:"gridcraft_enabled,omitempty"`
 	// CrewOnly exposes only read-only fleet telemetry to agent-less scripts.
 	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`

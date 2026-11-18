@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -63,6 +64,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	agentInboxFlags       featureflags.AgentInboxState
 	craftNativeHTTPConfig CraftNativeHTTPConfig
 	craftNativeStartupErr error
 	craftNativeHTTP       *craftNativeHTTP
@@ -916,6 +918,12 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// socketPath etc. are available during route setup.
 	for _, opt := range opts {
 		opt(r)
+	}
+	if err := r.agentInboxFlags.Refresh(context.Background(), db); err != nil && logger != nil {
+		logger.Warn("load agent inbox flag", "error", err)
+	}
+	if r.orch != nil {
+		r.orch.SetAgentInboxEnabled(r.agentInboxFlags.Enabled)
 	}
 	var passwordLimitsErr error
 	r.publicPagePasswords, passwordLimitsErr = r.publicPagePasswords.Resolve()

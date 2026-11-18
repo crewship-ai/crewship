@@ -82,8 +82,9 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 	defer c.Rollback()
 	var state, convID, agentID, userID, workspaceID, kind, title, messageID, assignmentID string
 	var sequence int64
-	err = c.QueryRowContext(ctx, `SELECT j.state,j.conversation_id,COALESCE(j.agent_id,''),COALESCE(j.requested_by_user_id,''),c.workspace_id,c.kind,c.title,j.message_id,COALESCE(j.assignment_id,''),m.sequence
- FROM workspace_conversation_agent_jobs j JOIN workspace_conversations c ON c.id=j.conversation_id JOIN workspace_conversation_messages m ON m.id=j.message_id WHERE j.id=?`, id).Scan(&state, &convID, &agentID, &userID, &workspaceID, &kind, &title, &messageID, &assignmentID, &sequence)
+	var inboxBound bool
+	err = c.QueryRowContext(ctx, `SELECT j.state,j.conversation_id,COALESCE(j.agent_id,''),COALESCE(j.requested_by_user_id,''),c.workspace_id,c.kind,c.title,j.message_id,COALESCE(j.assignment_id,''),m.sequence,j.read_authority_json IS NOT NULL OR j.read_source_sha256 IS NOT NULL
+ FROM workspace_conversation_agent_jobs j JOIN workspace_conversations c ON c.id=j.conversation_id JOIN workspace_conversation_messages m ON m.id=j.message_id WHERE j.id=?`, id).Scan(&state, &convID, &agentID, &userID, &workspaceID, &kind, &title, &messageID, &assignmentID, &sequence, &inboxBound)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -104,7 +105,7 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
  JOIN workspace_conversations c ON c.id=ca.conversation_id
  WHERE a.id=? AND a.workspace_id=? AND cr.workspace_id=a.workspace_id AND a.deleted_at IS NULL AND cr.deleted_at IS NULL AND w.deleted_at IS NULL AND c.deleted_at IS NULL
  AND EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=a.workspace_id AND user_id=?)`, convID, agentID, workspaceID, userID).Scan(&crewID, &slug, &agentStatus)
-	if allowedErr == nil {
+	if allowedErr == nil && inboxBound {
 		if sourceErr := groupchat.ValidateAgentJob(ctx, c, id); errors.Is(sourceErr, groupchat.ErrForbidden) {
 			allowedErr = sql.ErrNoRows
 		} else if sourceErr != nil {

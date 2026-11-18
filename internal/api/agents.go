@@ -20,7 +20,8 @@ type ScheduleUpdater interface {
 // AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 
 type AgentHandler struct {
-	db *sql.DB
+	agentInboxEnabled func(string) bool
+	db                *sql.DB
 	// runStopper stops a deleted agent's live runs (server-wired). Nil in
 	// tests and headless boots: the server's periodic pass still stops them.
 	runStopper AgentRunStopper
@@ -254,6 +255,7 @@ type agentCounts struct {
 }
 
 type agentResponse struct {
+	HumanInboxEnabled          bool                              `json:"human_inbox_enabled,omitempty"`
 	CredentialReadiness        *agentCredentialReadinessResponse `json:"credential_readiness,omitempty"`
 	RestrictedExecutionProfile string                            `json:"restricted_execution_profile"`
 	ID                         string                            `json:"id"`

@@ -262,6 +262,7 @@ type mcpCredFieldEntry struct {
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
 type InternalHandler struct {
+	agentInboxEnabled       func(string) bool
 	documentCreationEnabled bool
 	loginRefresher          runStartRefresher
 	db                      *sql.DB

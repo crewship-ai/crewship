@@ -5,6 +5,14 @@ canonical human sources alongside the existing teammate inbox. The original
 agent inbox endpoint remains a peer/workload summary. Human projection is an
 additive authorized read, not another dispatch queue.
 
+The existing agent detail response returns `human_inbox_enabled: true` only
+when enabled. The overview does not mount the card or fetch its projection
+otherwise. Workspace flag changes refresh the in-memory admission state,
+loaded at server startup. The sidecar advertises inbox read on runs launched
+with the feature enabled. Explicit source reads still verify the live database
+flag and source authority. Previously bound channel jobs retain their original
+authority fence through completion, including after disabling the feature.
+
 ## Sources and delivery
 
 Supported sources are messages mentioning this agent in an existing joined

@@ -897,6 +897,9 @@
             "nullable": true,
             "type": "string"
           },
+          "human_inbox_enabled": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },

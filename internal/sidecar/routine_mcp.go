@@ -268,7 +268,6 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 }, documentCreateMCPCatalog()...), documentDraftMCPCatalog()...)
 
 func init() {
-	routineMCPTools = append(routineMCPTools, memoryMCPToolDescriptor{Name: "inbox_read", Description: "Where the workspace has enabled agent human inbox, read and acknowledge the human message or assigned task that started your current run. The host derives the source from this run. Takes no arguments. The workspace setting or a run without a human inbox source can make this tool unavailable.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
 	routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, designMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, artifactKindGuideMCPCatalog()...)
@@ -372,8 +371,13 @@ func (s *Server) respondRoutinesMCPInitialize(w http.ResponseWriter, req memoryM
 	})
 }
 
+var agentInboxMCPTool = memoryMCPToolDescriptor{Name: "inbox_read", Description: "Where the workspace has enabled agent human inbox, read and acknowledge the human message or assigned task that started your current run. The host derives the source from this run. Takes no arguments. The workspace setting or a run without a human inbox source can make this tool unavailable.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
+
 func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, req memoryMCPRequest) {
 	tools := routineMCPTools
+	if s.ipc != nil && s.ipc.AgentInboxEnabled {
+		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), agentInboxMCPTool)
+	}
 	if s.ipc != nil && s.ipc.GridCraftEnabled {
 		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), gridcraftMCPCatalog()...)
 		tools = append(tools, mooringMCPCatalog()...)
@@ -478,6 +482,10 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		}
 		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID, s.liveRunToken(r))
 	case "inbox_read":
+		if s.ipc == nil || !s.ipc.AgentInboxEnabled {
+			status, bodyBytes = 404, mustJSON(map[string]string{"error": "unknown tool"})
+			break
+		}
 		var args map[string]json.RawMessage
 		if len(params.Arguments) > 0 && (json.Unmarshal(params.Arguments, &args) != nil || len(args) != 0) {
 			status, bodyBytes = 400, mustJSON(map[string]string{"error": "inbox_read takes no arguments"})

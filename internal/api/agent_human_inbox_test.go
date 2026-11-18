@@ -34,7 +34,7 @@ func inboxChannelFixture(t *testing.T) humanInboxFixture {
 	handler, ws, crew, agent, user := newInternalIssueHandler(t)
 	db := handler.db
 	enableHumanInboxFixture(t, db, ws)
-	store := groupchat.New(db)
+	store := groupchat.New(db).WithInboxEnabled(func(w string) bool { return w == ws })
 	channel, err := store.Create(t.Context(), ws, user, groupchat.CreateInput{Kind: "channel", Title: "Human inbox test"})
 	if err != nil {
 		t.Fatal(err)
