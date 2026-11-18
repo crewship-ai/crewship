@@ -277,6 +277,9 @@ const SubkindAuditChainIncident = "audit_chain_incident"
 // for exactly these. Reading it here keeps the vocabulary in the one file that
 // owns it rather than pushing a default back into the producer.
 func CategoryForItem(kind string, payload map[string]interface{}) string {
+	if kind == "failed_run" && payload["subkind"] == "work_run_failure" {
+		return CategoryAgentsError
+	}
 	if kind == "message" {
 		switch sub, _ := payload["subkind"].(string); sub {
 		case SubkindRoutineUpdate:

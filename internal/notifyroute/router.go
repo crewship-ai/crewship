@@ -3,6 +3,7 @@ package notifyroute
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -37,7 +38,8 @@ type Router struct {
 	// journal records outbound delivery attempts so they show up on the
 	// Activity timeline. nil = deliveries stay invisible there (test rigs).
 	// See journal_bridge.go.
-	journal journalEmitter
+	journal        journalEmitter
+	runFailureWake chan struct{}
 }
 
 // NewRouter wires a Router. presence and limiter may be nil (both degrade
@@ -48,15 +50,16 @@ func NewRouter(db *sql.DB, dispatcher *notify.Dispatcher, presence PresenceCheck
 		logger = slog.Default()
 	}
 	return &Router{
-		db:         db,
-		channels:   notify.NewChannelStore(db),
-		prefs:      NewPrefStore(db),
-		deliveries: NewDeliveryStore(db),
-		templates:  notify.NewTemplateStore(db),
-		dispatcher: dispatcher,
-		presence:   presence,
-		limiter:    limiter,
-		logger:     logger,
+		db:             db,
+		channels:       notify.NewChannelStore(db),
+		prefs:          NewPrefStore(db),
+		deliveries:     NewDeliveryStore(db),
+		templates:      notify.NewTemplateStore(db),
+		dispatcher:     dispatcher,
+		presence:       presence,
+		limiter:        limiter,
+		logger:         logger,
+		runFailureWake: make(chan struct{}, 1),
 	}
 }
 
@@ -146,7 +149,9 @@ func (r *Router) route(ctx context.Context, category string, item inbox.Item) {
 				}
 			}
 		}
-		r.routeToUser(ctx, category, item, uid)
+		if err := r.routeToUser(ctx, category, item, uid); err != nil {
+			r.logger.Warn("notifyroute: route to user", "error", err, "user_id", uid)
+		}
 	}
 }
 
@@ -198,21 +203,18 @@ func (r *Router) resolveAudience(ctx context.Context, item inbox.Item) ([]string
 // preference matrix, the admin per-channel category allowlist, the
 // priority floor, and the anti-storm rate gate, then delivers to each
 // channel that clears all four.
-func (r *Router) routeToUser(ctx context.Context, category string, item inbox.Item, uid string) {
+func (r *Router) routeToUser(ctx context.Context, category string, item inbox.Item, uid string) error {
 	channels, err := r.channels.ListForUser(ctx, item.WorkspaceID, uid)
 	if err != nil || len(channels) == 0 {
-		if err != nil {
-			r.logger.Warn("notifyroute: list channels", "error", err, "user_id", uid)
-		}
-		return
+		return err
 	}
 	cells, err := r.prefs.Get(ctx, item.WorkspaceID, uid)
 	if err != nil {
-		r.logger.Warn("notifyroute: get prefs", "error", err, "user_id", uid)
-		return
+		return err
 	}
 	idx := indexCells(cells)
 	dedupKey := category + ":" + item.SourceID
+	var routeErr error
 
 	for _, ch := range channels {
 		if idx.state(category, ch.ID) != "immediate" {
@@ -233,21 +235,16 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 			// allowlist excludes it — worth an auditable dropped_pref row
 			// since it reads as "why didn't my notification arrive?" from
 			// the user's side.
-			if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedPref); err != nil {
-				r.logger.Warn("notifyroute: log dropped_pref (admin allowlist)", "error", err)
-			}
+			routeErr = errors.Join(routeErr, r.deliveries.InsertDropped(ctx, d, StatusDroppedPref))
 		case idx.muted(ch.ID):
-			if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedPref); err != nil {
-				r.logger.Warn("notifyroute: log dropped_pref (channel muted)", "error", err)
-			}
+			routeErr = errors.Join(routeErr, r.deliveries.InsertDropped(ctx, d, StatusDroppedPref))
 		case notify.PriorityRank(item.Priority) < notify.PriorityRank(ch.MinPriority):
-			if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedPref); err != nil {
-				r.logger.Warn("notifyroute: log dropped_pref (priority floor)", "error", err)
-			}
+			routeErr = errors.Join(routeErr, r.deliveries.InsertDropped(ctx, d, StatusDroppedPref))
 		default:
-			r.deliverToChannel(ctx, category, item, uid, ch, dedupKey)
+			routeErr = errors.Join(routeErr, r.deliverToChannel(ctx, category, item, uid, ch, dedupKey))
 		}
 	}
+	return routeErr
 }
 
 // applyTemplate rewrites a message's wording from the operator's template for
@@ -281,7 +278,13 @@ func (r *Router) applyTemplate(ctx context.Context, msg notify.CategoryMessage, 
 
 // deliverToChannel runs the rate gate, writes the outbox row (coalescing
 // on (channel_id, dedup_key)), attempts delivery, and updates the log.
-func (r *Router) deliverToChannel(ctx context.Context, category string, item inbox.Item, uid string, ch notify.Channel, dedupKey string) {
+func (r *Router) deliverToChannel(ctx context.Context, category string, item inbox.Item, uid string, ch notify.Channel, dedupKey string) error {
+	if item.Payload["subkind"] == "work_run_failure" {
+		allowed, err := r.canDeliverRunFailure(ctx, item.WorkspaceID, item.SourceID, uid)
+		if err != nil || !allowed {
+			return err
+		}
+	}
 	// The message is composed FIRST, template included, so everything that
 	// records a title records the one the recipient will actually see. The
 	// outbox row and the Activity timeline used to capture the producer's
@@ -316,20 +319,19 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 
 	if !notify.BypassesRateGate(category) && r.limiter != nil && !r.limiter.Allow(uid, ch.ID, category) {
 		if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedRate); err != nil {
-			r.logger.Warn("notifyroute: log dropped_rate", "error", err)
+			return err
 		}
 		r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
 			ch, category, msg.Title, "rate limit")
-		return
+		return nil
 	}
 
 	id, created, err := r.deliveries.InsertPending(ctx, d)
 	if err != nil {
-		r.logger.Warn("notifyroute: insert pending delivery", "error", err)
-		return
+		return err
 	}
 	if !created {
-		return // coalesced: an identical (channel, dedup_key) delivery already exists
+		return nil // coalesced: an identical (channel, dedup_key) delivery already exists
 	}
 
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
@@ -339,11 +341,12 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		r.logger.Warn("notifyroute: delivery failed", "error", err, "channel_id", ch.ID, "category", category)
 		r.emitDeliveryJournal(ctx, journal.EntryNotificationFailed, journal.SeverityError,
 			ch, category, msg.Title, err.Error())
-		return
+		return nil // the durable delivery row owns retries
 	}
 	if err := r.deliveries.MarkSent(ctx, id); err != nil {
 		r.logger.Warn("notifyroute: mark delivery sent", "error", err)
 	}
 	r.emitDeliveryJournal(ctx, journal.EntryNotificationDelivered, journal.SeverityInfo,
 		ch, category, msg.Title, "")
+	return nil
 }

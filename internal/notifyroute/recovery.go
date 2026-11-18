@@ -92,6 +92,16 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		return false
 	}
 
+	if payload["subkind"] == "work_run_failure" {
+		allowed, err := r.canDeliverRunFailure(ctx, d.WorkspaceID, d.SourceID, d.UserID)
+		if err != nil {
+			r.logger.Warn("notifyroute: recovery: verify run failure audience", "error", err, "delivery_id", d.ID)
+		}
+		if err != nil || !allowed {
+			return false
+		}
+	}
+
 	ch, err := r.channels.GetForDispatch(ctx, d.WorkspaceID, d.ChannelID)
 	if err != nil {
 		_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: channel unavailable: "+err.Error())

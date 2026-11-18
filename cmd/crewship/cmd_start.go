@@ -612,6 +612,7 @@ var startCmd = &cobra.Command{
 			// (wired just below) so only one replica re-delivers.
 			startNotifyRecovery = func(isLeader func() bool) {
 				go notifyRouter.RunRecoveryLoop(ctx, isLeader)
+				go notifyRouter.RunFailureNotices(ctx, isLeader)
 			}
 			logger.Info("notification preference router wired (#1412: category matrix + anti-storm rate gate + outbox recovery)")
 		}
