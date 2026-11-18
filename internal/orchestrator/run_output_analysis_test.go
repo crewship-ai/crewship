@@ -108,18 +108,21 @@ func TestRetainedAnalysisUsesSemanticFailureInsteadOfZeroExit(t *testing.T) {
 }
 
 func TestRetainedAnalysisIgnoresStderrAndRequiresStructuredTerminal(t *testing.T) {
-	o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", `{"type":"system","subtype":"init","session_id":"session-one","model":"model-one"}`+"\n", `{"type":"result","subtype":"success","is_error":false}`, 0)
-	analysis, err := o.AnalyzeRetainedRun(t.Context(), run)
-	if err != nil || !analysis.Unknown || analysis.TerminalObserved || analysis.Metadata["session_id"] != "session-one" {
-		t.Fatalf("analysis=%+v %v", analysis, err)
-	}
-	snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); !errors.Is(err, ErrHostCaptureUnconfirmed) {
-		t.Fatalf("unknown success accepted: %v", err)
-	}
+	t.Run("unstructured stderr", func(t *testing.T) {
+		o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", `{"type":"system","subtype":"init","session_id":"session-one","model":"model-one"}`+"\n", `{"type":"result","subtype":"success","is_error":false}`, 0)
+		analysis, err := o.AnalyzeRetainedRun(t.Context(), run)
+		if err != nil || !analysis.Unknown || analysis.TerminalObserved || analysis.Metadata["session_id"] != "session-one" {
+			t.Fatalf("analysis=%+v %v", analysis, err)
+		}
+		snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); !errors.Is(err, ErrHostCaptureUnconfirmed) {
+			t.Fatalf("unknown success accepted: %v", err)
+		}
+	})
+	t.Run("captured Codex reconnect", checkRetainedCodexCapturedReconnect)
 }
 
 func TestRetainedAcknowledgementRefusesActiveOwnerAndForeignRoot(t *testing.T) {
@@ -213,7 +216,7 @@ func requireProtectedHostTestUID(t *testing.T) {
 	}
 }
 
-func TestRetainedAnalysisCodexCapturedReconnect(t *testing.T) {
+func checkRetainedCodexCapturedReconnect(t *testing.T) {
 	data, err := codexReconnectFixtures.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
 	if err != nil {
 		t.Fatal(err)
