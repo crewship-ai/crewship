@@ -1,0 +1,1 @@
+- **`workspace artifact-policy set` now rejects a missing `--enabled` with usage exit code 2 and no success output.** The validation error previously used the generic exit code, allowing scripts to misread the refused replacement. Both reported limit-only invocations now keep stdout empty, write the diagnostic to stderr and leave the saved policy unchanged.

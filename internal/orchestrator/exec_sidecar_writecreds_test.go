@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -41,6 +43,14 @@ func (f *credExecFake) Exec(_ context.Context, cfg provider.ExecConfig) (*provid
 	f.lastCfg = cfg
 	if len(cfg.Cmd) >= 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
 		f.scriptSeen = cfg.Cmd[2]
+	}
+	if cfg.Stdin != nil {
+		body, err := io.ReadAll(cfg.Stdin)
+		if err != nil {
+			return nil, err
+		}
+		f.scriptSeen = string(body)
+		f.lastCfg.Stdin = strings.NewReader(f.scriptSeen)
 	}
 	if f.execErr != nil {
 		return nil, f.execErr
@@ -289,5 +299,96 @@ func TestWriteCredentialFiles_StillRunningErrors(t *testing.T) {
 		"/secrets/agent-a", "/secrets/shared", false, quietCredLogger())
 	if err == nil || !strings.Contains(err.Error(), "still running") {
 		t.Errorf("running=true after EOF must error; got %v", err)
+	}
+}
+
+// A provider decorator must not turn the safe batched path into a credential
+// argv leak. Routines and queued workers ultimately use the same run setup;
+// this pins the fallback itself regardless of the concrete provider wrapper.
+type credentialWriterDecorator struct{ provider.ContainerProvider }
+
+func TestWriteCredentialFilesNeverPlacesMaterialInArgv(t *testing.T) {
+	for _, decorated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("decorated=%t", decorated), func(t *testing.T) {
+			fake := &credExecFake{}
+			var container provider.ContainerProvider = fake
+			if decorated {
+				container = &credentialWriterDecorator{ContainerProvider: fake}
+			}
+			value := "synthetic-argv-regression-$HOME\nsecond-line\n"
+			credentials := []Credential{{ID: "fixture", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_ARGV_FILE", PlainValue: value}}
+			if err := writeCredentialFiles(t.Context(), container, "ctr-x", "agent-a", credentials, "/secrets/agent-a", "", true, quietCredLogger()); err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(fake.lastCfg.Cmd, " ")
+			encoded := base64.StdEncoding.EncodeToString([]byte(value))
+			if strings.Contains(joined, value) || strings.Contains(joined, encoded) {
+				t.Fatal("credential material reached process argv")
+			}
+			if len(fake.lastCfg.Cmd) != 1 || fake.lastCfg.Cmd[0] != "sh" || fake.lastCfg.Stdin == nil {
+				t.Fatal("credential writer did not use a stdin-only shell")
+			}
+			if !strings.Contains(fake.scriptSeen, encoded) {
+				t.Fatal("stdin lost the exact credential payload")
+			}
+		})
+	}
+}
+
+func TestCredentialBearingAdapterFilesNeverUseArgv(t *testing.T) {
+	for _, path := range []string{".codex/auth.json", ".mcp.json", ".local/share/opencode/auth.json"} {
+		t.Run(path, func(t *testing.T) {
+			fake := &credExecFake{}
+			content := `{"access_token":"synthetic-file-credential"}`
+			if err := writeFileViaContainer(t.Context(), fake, "ctr-x", "/home/agent", path, content, containerFileSecret, quietCredLogger()); err != nil {
+				t.Fatal(err)
+			}
+			if len(fake.lastCfg.Cmd) != 1 || fake.lastCfg.Cmd[0] != "sh" || fake.lastCfg.Stdin == nil {
+				t.Fatal("credential-bearing adapter file used argv instead of stdin")
+			}
+			if !strings.Contains(fake.scriptSeen, base64.StdEncoding.EncodeToString([]byte(content))) {
+				t.Fatal("stdin lost the exact adapter file payload")
+			}
+		})
+	}
+}
+
+func TestRunOrBatchRejectedBatchKeepsCredentialScriptOffArgv(t *testing.T) {
+	fake := &credExecFake{}
+	batch := newPreflightBatch(fake, "batch-container", "1001:1001", quietBatchLogger())
+	// A different container cannot join the batch and must take the safe
+	// fallback without losing its execution identity or working directory.
+	script := "printf '%s' 'synthetic-credential' > auth.json"
+	cfg := provider.ExecConfig{ContainerID: "other-container", User: "1001:1001", WorkingDir: "/work", Cmd: []string{"sh", "-c", script}}
+	if err := runOrBatch(t.Context(), batch, "file:auth.json", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.lastCfg.Cmd) != 1 || fake.lastCfg.Cmd[0] != "sh" || fake.scriptSeen != script {
+		t.Fatal("rejected batch did not deliver the intact script over stdin")
+	}
+	if fake.lastCfg.ContainerID != cfg.ContainerID || fake.lastCfg.User != cfg.User || fake.lastCfg.WorkingDir != cfg.WorkingDir {
+		t.Fatal("stdin fallback changed execution identity or working directory")
+	}
+}
+
+func TestRunOrBatchRejectsCredentialScriptWithExistingStdin(t *testing.T) {
+	for _, mode := range []string{"direct", "rejected-batch", "decorated-batch"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &credExecFake{}
+			var container provider.ContainerProvider = fake
+			if mode != "direct" {
+				container = newPreflightBatch(fake, "batch-container", "1001:1001", quietBatchLogger())
+				if mode == "decorated-batch" {
+					container = &credentialWriterDecorator{ContainerProvider: container}
+				}
+			}
+			cfg := provider.ExecConfig{ContainerID: "other-container", User: "1001:1001", Cmd: []string{"sh", "-c", "printf '%s' 'synthetic-credential' > auth.json"}, Stdin: strings.NewReader("caller-owned-input")}
+			if err := runOrBatch(t.Context(), container, "file:auth.json", cfg); err == nil {
+				t.Fatal("ambiguous shell script and existing stdin were accepted")
+			}
+			if fake.execCalls != 0 {
+				t.Fatal("credential script reached exec despite occupied stdin")
+			}
+		})
 	}
 }

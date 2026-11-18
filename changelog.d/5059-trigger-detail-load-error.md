@@ -1,0 +1,1 @@
+- **Trigger detail no longer claims that a trigger does not exist when its list fails to load.** A missing row used to render the not-found page even when loading had failed. The detail now shows the same retryable load error as the trigger list, and reserves not-found for a successful load without that trigger.
