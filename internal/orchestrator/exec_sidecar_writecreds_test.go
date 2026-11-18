@@ -370,3 +370,25 @@ func TestRunOrBatchRejectedBatchKeepsCredentialScriptOffArgv(t *testing.T) {
 		t.Fatal("stdin fallback changed execution identity or working directory")
 	}
 }
+
+func TestRunOrBatchRejectsCredentialScriptWithExistingStdin(t *testing.T) {
+	for _, mode := range []string{"direct", "rejected-batch", "decorated-batch"} {
+		t.Run(mode, func(t *testing.T) {
+			fake := &credExecFake{}
+			var container provider.ContainerProvider = fake
+			if mode != "direct" {
+				container = newPreflightBatch(fake, "batch-container", "1001:1001", quietBatchLogger())
+				if mode == "decorated-batch" {
+					container = &credentialWriterDecorator{ContainerProvider: container}
+				}
+			}
+			cfg := provider.ExecConfig{ContainerID: "other-container", User: "1001:1001", Cmd: []string{"sh", "-c", "printf '%s' 'synthetic-credential' > auth.json"}, Stdin: strings.NewReader("caller-owned-input")}
+			if err := runOrBatch(t.Context(), container, "file:auth.json", cfg); err == nil {
+				t.Fatal("ambiguous shell script and existing stdin were accepted")
+			}
+			if fake.execCalls != 0 {
+				t.Fatal("credential script reached exec despite occupied stdin")
+			}
+		})
+	}
+}

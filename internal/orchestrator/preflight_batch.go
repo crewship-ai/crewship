@@ -410,7 +410,10 @@ func runOrBatch(ctx context.Context, container provider.ContainerProvider, name 
 		b.add(name, cfg.WorkingDir, cfg.Cmd[2])
 		return nil
 	}
-	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" && cfg.Stdin == nil {
+	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
+		if cfg.Stdin != nil {
+			return fmt.Errorf("%s: shell script cannot share stdin with caller input", name)
+		}
 		cfg.Stdin = strings.NewReader(cfg.Cmd[2])
 		cfg.Cmd = []string{"sh"}
 	}
