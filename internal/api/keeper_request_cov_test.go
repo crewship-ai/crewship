@@ -17,7 +17,7 @@ import (
 // keeper_request_cov_test.go covers the remaining HandleRequest
 // branches: input validation, credential_name resolution, DB-error
 // 500s, the evaluate-error deny fallback, risk clamping, non-fatal
-// insert/update/journal failures, the ESCALATE→inbox projection, and
+// persistence failures, best-effort journal fan-out, the ESCALATE→inbox projection, and
 // the broadcaster notification. Helpers are prefixed covKReq.
 
 // covKReqErrEvaluator always fails evaluation, driving the
@@ -227,32 +227,37 @@ func TestCovKReq_InsertFailure_FailsClosed(t *testing.T) {
 	}
 }
 
-// TestCovKReq_UpdateDecisionFailure_NonFatal lets the INSERT succeed but
-// fails the decision UPDATE.
-func TestCovKReq_UpdateDecisionFailure_NonFatal(t *testing.T) {
+// TestCovKReq_UpdateDecisionFailure_FailClosed lets the INSERT succeed but
+// rejects the decision UPDATE: no ALLOW response or lease may escape.
+func TestCovKReq_UpdateDecisionFailure_FailClosed(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+	setSecurityLevel(t, db, credID, int(keeper.SecurityLevelL3))
+	enableAutoLease(t, db, wsID, 900)
 	execOrFatal(t, db, `CREATE TRIGGER covkreq_block_upd BEFORE UPDATE ON keeper_requests
 		BEGIN SELECT RAISE(ABORT, 'covkreq forced update failure'); END`)
-	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
-		Decision: string(keeper.DecisionAllow), Reason: "ok", RiskScore: 3,
-	}}
+	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{Decision: string(keeper.DecisionAllow), Reason: "ok", RiskScore: 3}}
 	h := newKeeperHandlerWithGK(t, db, gk)
-	rr := doKeeperRequest(h, keeperRequestBody{
-		RequestingAgentID: agentID, RequestingCrewID: crewID, WorkspaceID: wsID,
-		CredentialID: credID, Intent: "rotate the deploy key",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	rr := doKeeperRequest(h, keeperRequestBody{RequestingAgentID: agentID, RequestingCrewID: crewID, WorkspaceID: wsID, CredentialID: credID, Intent: "rotate the deploy key"})
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "audit persistence failed") {
+		t.Errorf("audit UPDATE failure must refuse authorization: status=%d", rr.Code)
 	}
-	// Row stays PENDING because the UPDATE was rejected.
-	var decision string
-	res := covKReqDecode(t, rr.Body.Bytes())
-	if err := db.QueryRow(`SELECT decision FROM keeper_requests WHERE id = ?`, res.RequestID).Scan(&decision); err != nil {
-		t.Fatalf("read row: %v", err)
+	var decision, expiry string
+	if err := db.QueryRow(`SELECT decision FROM keeper_requests WHERE requesting_agent_id=? AND credential_id=? ORDER BY created_at DESC LIMIT 1`, agentID, credID).Scan(&decision); err != nil {
+		t.Fatal(err)
 	}
 	if decision != "PENDING" {
-		t.Errorf("decision column = %q, want PENDING (update blocked)", decision)
+		t.Errorf("decision=%q, want unchanged PENDING", decision)
+	}
+	if err := db.QueryRow(`SELECT COALESCE(expires_at,'') FROM agent_credentials WHERE agent_id=? AND credential_id=?`, agentID, credID).Scan(&expiry); err != nil {
+		t.Fatal(err)
+	}
+	if expiry != "" {
+		t.Error("failed decision persistence still issued a lease")
+	}
+	var allows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keeper_request_events WHERE state='ALLOW'`).Scan(&allows); err != nil || allows != 0 {
+		t.Errorf("failed decision committed ALLOW ledger: %d %v", allows, err)
 	}
 }
 
