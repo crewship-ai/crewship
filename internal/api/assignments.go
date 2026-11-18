@@ -301,6 +301,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			EnvVarName:     d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			OAuthPrimary:   d.Type == CredTypeOAuth2,
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,

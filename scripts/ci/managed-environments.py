@@ -34,6 +34,10 @@ CLI_TESTS = {'cmd/crewship': {'TestKeeperAgentCLIVaultSidecarStandardTool'},
 }}
 CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 PACKAGING_TESTS = {'internal/devcontainer': {'TestCodexNativePackaging'}}
+SDK_TESTS = {
+    'internal/provider/docker': {'TestAgentCLIRealDockerCleanAndRetainedUpgrade'},
+    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab', 'TestNativeContainerOutputCancellationAndOverflow', 'TestNativeCredentialFixtureUsesProductionBatchStdin'},
+}
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},
@@ -157,7 +161,7 @@ def host_source_inventory_errors(root='.'):
     return errors
 
 REQUIRED = {(PREFIX + package, name)
-            for suites in (TESTS, HOST_TESTS, CLI_TESTS, PACKAGING_TESTS)
+            for suites in (TESTS, HOST_TESTS, CLI_TESTS, PACKAGING_TESTS, SDK_TESTS)
             for package, names in suites.items() for name in names}
 REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter)
                 for adapter in CLI_ADAPTERS)
@@ -177,6 +181,10 @@ REQUIRED.add((PREFIX + 'internal/orchestrator',
               'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped/exact-session-targets'))
 REQUIRED.update((PREFIX + 'internal/devcontainer', 'TestCodexNativePackaging/' + mode)
                 for mode in ('clean', 'upgrade'))
+REQUIRED.update((PREFIX + 'internal/provider/docker', 'TestAgentCLIRealDockerCleanAndRetainedUpgrade/' + mode)
+                for mode in ('clean', 'retained-upgrade'))
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeContainerOutputCancellationAndOverflow/' + mode)
+                for mode in ('cancel', 'overflow'))
 HOST_UID = 65534
 
 
@@ -229,11 +237,12 @@ def commands(go_binary='go'):
             ({'internal/orchestrator': TESTS['internal/orchestrator']},
              ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local']),
             (CLI_TESTS, []),
-            (PACKAGING_TESTS, [])):
+            (PACKAGING_TESTS, []),
+            (SDK_TESTS, [])):
         pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
                                  for name in sorted(names)) + ')$'
         command = prefix + [go_binary, 'test', '-tags', 'integration', '-p', '1', '-count=1',
-                            '-timeout=' + ('10m' if packages is PACKAGING_TESTS else ('8m' if prefix else '3m')), '-json', '-run', pattern]
+                            '-timeout=' + ('10m' if packages is PACKAGING_TESTS else ('5m' if packages is SDK_TESTS else ('8m' if prefix else '3m'))), '-json', '-run', pattern]
         command.extend('./' + package for package in packages)
         if prefix and native:
             command.extend(['-args', '-codex-outer-native-artifact=' + native])

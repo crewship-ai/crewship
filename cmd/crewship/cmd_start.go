@@ -24,6 +24,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/admission"
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/automation"
+	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/chatnotify"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -1732,19 +1733,23 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		catalog = quota.Client{Socket: cfg.Container.QuotaHelperSocket, Namespace: cfg.Container.QuotaHelperNamespace}
 	}
 	return docker.Config{
-		QuotaCatalog:      catalog,
-		RuntimeImage:      cfg.Container.RuntimeImage,
-		DefaultRuntime:    cfg.Container.DefaultRuntime,
-		EgressFenceCrews:  cfg.Container.EgressFenceCrews,
-		CrewNetworkCrews:  cfg.Container.CrewNetworkCrews,
-		CrewNetworkPool:   cfg.Container.CrewNetworkPool,
-		Network:           cfg.Container.Network,
-		InstanceID:        cfg.Container.InstanceID,
-		OutputBasePath:    cfg.Storage.BasePath,
-		ContainerPrefix:   cfg.Container.ContainerPrefix,
-		SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-		EntrypointPath:    cfg.Container.EntrypointPath,
-		Admission:         gate,
+		QuotaCatalog:             catalog,
+		RuntimeImage:             cfg.Container.RuntimeImage,
+		DefaultRuntime:           cfg.Container.DefaultRuntime,
+		EgressFenceCrews:         cfg.Container.EgressFenceCrews,
+		CrewNetworkCrews:         cfg.Container.CrewNetworkCrews,
+		CrewNetworkPool:          cfg.Container.CrewNetworkPool,
+		Network:                  cfg.Container.Network,
+		InstanceID:               cfg.Container.InstanceID,
+		OutputBasePath:           cfg.Storage.BasePath,
+		ContainerPrefix:          cfg.Container.ContainerPrefix,
+		AgentCLIBinaryPath:       cfg.Container.AgentCLIBinaryPath,
+		RequireAgentCLI:          true,
+		ExpectedAgentCLICommit:   buildinfo.Resolve(version, commit, date).Commit,
+		RequiredAgentCLICommands: agentSDKCommandPaths(rootCmd),
+		SidecarBinaryPath:        cfg.Container.SidecarBinaryPath,
+		EntrypointPath:           cfg.Container.EntrypointPath,
+		Admission:                gate,
 	}
 }
 
