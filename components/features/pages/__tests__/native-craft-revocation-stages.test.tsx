@@ -104,6 +104,10 @@ async function editWhileOffline(){
  act(()=>options.at(-1)!.onChanged('typed','doc'))
  await advance(3_000)
  server.dropStream()
+ // Establish the captured offline draft before starting T0. Its hash runs
+ // on real crypto threads; advancing fake timers cannot finish retirement.
+ await settle(()=>journal.persist.mock.calls.at(-1)?.[1]===true)
+ expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(true)
 }
 async function advance(ms:number){let left=ms;while(left>0){const step=Math.min(250,left);await act(async()=>{await vi.advanceTimersByTimeAsync(step)});left-=step}}
 // Hashing runs on real crypto threads, so waiting for it takes real time too.
@@ -333,7 +337,7 @@ describe('a draft kept after write loss',()=>{
  it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
   await opened()
   // The capture hashes with real crypto, which fake time does not move on a busy host.
-  const settled=async(final:boolean)=>{for(let i=0;i<200&&journal.persist.mock.calls.at(-1)?.[1]!==final;i++){await advance(50)}}
+  const settled=async(final:boolean)=>{await settle(()=>journal.persist.mock.calls.at(-1)?.[1]===final)}
   act(()=>options.at(-1)!.onChanged('typed','doc'))
   await settled(false)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(false)
