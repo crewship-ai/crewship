@@ -167,7 +167,7 @@ func rollbackTo(ctx context.Context, deps ServerUpdateDeps, rollback func([]stri
 		deps.Log("Rolling back to the previous binary…")
 	}
 
-	if err := rollback(result.Replaced); err != nil {
+	if err := restoreInstallerUpdate(result, rollback); err != nil {
 		hint := ""
 		if postMigration {
 			hint = "\n" + snapshotRestoreNow

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestFullInstallerPreparesOnlyExistingCompanions(t *testing.T) {
+func TestFullInstallerKeepsOptionalCompanionsAndAddsAgentCLI(t *testing.T) {
 	t.Setenv("CREWSHIP_SKIP_SIGNATURE_VERIFY", "")
 	f := newSigGateFixture(t, true)
 	files := map[string]string{"crewship": "new server"}
@@ -44,12 +44,16 @@ func TestFullInstallerPreparesOnlyExistingCompanions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Replaced, []string{executable, installed}) {
+	if !reflect.DeepEqual(result.Replaced, []string{executable, installed, filepath.Join(dir, "crewship-agent-cli")}) {
 		t.Fatalf("incorrect companion selection: %#v", result)
 	}
 	assertUpdateFile(t, executable, "new server")
 	assertUpdateFile(t, installed, "new "+companions[0])
 	for _, name := range companions[1:] {
+		if name == "crewship-agent-cli" {
+			assertUpdateFile(t, filepath.Join(dir, name), "new "+name)
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Fatalf("uninstalled companion introduced: %s %v", name, err)
 		}
@@ -185,5 +189,153 @@ func TestFailedInstallerPreparationDoesNotTouchExistingBinary(t *testing.T) {
 				t.Fatalf("prepare changed backups: %v", err)
 			}
 		})
+	}
+}
+
+// Upgrade onboarding must introduce a newly bundled runtime client even when
+// the old full installation had no such file. A failed post-update sanity
+// check must restore the old server AND the client's previous absence.
+func TestFullInstallerIntroducesAgentCLIAndRestoresItsAbsence(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIGNATURE_VERIFY", "")
+	fixture := newSigGateFixture(t, true)
+	archive := buildTarGz(t, map[string]string{"crewship": "new server", "crewship-agent-cli": "new native client"})
+	asset := AssetNameForTag("v9.9.9", false)
+	checksums := []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), asset))
+	pki := newTestPKI(t, testIdentity, testIssuer)
+	signatureVerifyOpts.Roots = pki.rootPool
+	fixture.assets[asset] = archive
+	fixture.assets["checksums.txt"] = checksums
+	fixture.assets["checksums.txt.sig"] = []byte(pki.sign(t, checksums))
+	fixture.assets["checksums.txt.pem"] = pki.leafPEM
+	directory := t.TempDir()
+	server, client := filepath.Join(directory, "legacy-server"), filepath.Join(directory, "crewship-agent-cli")
+	writeUpdateFixture(t, server, "old server")
+	prepared, err := PrepareInstallerUpdate(t.Context(), "v9.9.9", server, false, "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUpdateFile(t, server, "old server")
+	if _, err := os.Lstat(client); !os.IsNotExist(err) {
+		t.Fatal("prepare mutated the installation")
+	}
+	result, err := prepared.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUpdateFile(t, client, "new native client")
+	if !reflect.DeepEqual(result.Replaced, []string{server, client}) {
+		t.Fatal("upgrade did not track the new runtime companion in its rollback set")
+	}
+	if err := RestoreInstallerUpdate(result); err != nil {
+		t.Fatal(err)
+	}
+	assertUpdateFile(t, server, "old server")
+	if _, err := os.Lstat(client); !os.IsNotExist(err) {
+		t.Fatal("rollback did not restore the runtime client's previous absence")
+	}
+}
+
+func TestNewUpdateTargetDoesNotClobberConcurrentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crewship-agent-cli")
+	writeUpdateFixture(t, path, "concurrent installer")
+	created, err := atomicCreateUpdateTarget(path, []byte("replacement"))
+	if err == nil || created != nil {
+		t.Fatal("exclusive new-file publication clobbered an existing target")
+	}
+	assertUpdateFile(t, path, "concurrent installer")
+}
+
+func TestInstallerRollbackRejectsUntrackedDeletion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unrelated")
+	writeUpdateFixture(t, path, "retained")
+	if err := RestoreInstallerUpdate(&SelfUpdateResult{Created: []string{path}}); err == nil {
+		t.Fatal("rollback accepted a created path outside its committed transaction")
+	}
+	assertUpdateFile(t, path, "retained")
+}
+
+func TestPreparedUpdateRejectsAliasedTargetsBeforeBackup(t *testing.T) {
+	for _, hardlink := range []bool{false, true} {
+		t.Run(fmt.Sprintf("hardlink=%t", hardlink), func(t *testing.T) {
+			dir := t.TempDir()
+			server := filepath.Join(dir, "server")
+			writeUpdateFixture(t, server, "old server")
+			client := server
+			if hardlink {
+				client = filepath.Join(dir, "crewship-agent-cli")
+				if err := os.Link(server, client); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prepared := &PreparedUpdate{targets: []payloadTarget{{path: server, data: []byte("new server")}, {path: client, data: []byte("native client")}}}
+			if _, err := prepared.Commit(); err == nil {
+				t.Fatal("update accepted overlapping server/client destinations")
+			}
+			assertUpdateFile(t, server, "old server")
+			if _, err := os.Lstat(server + ".bak"); !os.IsNotExist(err) {
+				t.Fatal("invalid transaction mutated backups")
+			}
+		})
+	}
+}
+
+func TestInstallerRollbackRetainsReplacementAfterCommit(t *testing.T) {
+	dir := t.TempDir()
+	server, client := filepath.Join(dir, "server"), filepath.Join(dir, "crewship-agent-cli")
+	writeUpdateFixture(t, server, "old server")
+	p := &PreparedUpdate{targets: []payloadTarget{{path: server, data: []byte("new server")}, {path: client, data: []byte("new client"), create: true}}}
+	result, err := p.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(dir, "other-installer")
+	writeUpdateFixture(t, replacement, "another installer's client")
+	if err := os.Rename(replacement, client); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreInstallerUpdate(result); err == nil {
+		t.Fatal("rollback did not report changed new-file identity")
+	}
+	assertUpdateFile(t, client, "another installer's client")
+	assertUpdateFile(t, server, "old server")
+}
+
+func TestPreparedUpdateRejectsBackupPathAsTarget(t *testing.T) {
+	dir := t.TempDir()
+	client := filepath.Join(dir, "crewship-agent-cli")
+	server := client + ".bak"
+	writeUpdateFixture(t, server, "old server")
+	writeUpdateFixture(t, client, "old client")
+	prepared := &PreparedUpdate{targets: []payloadTarget{{path: server, data: []byte("new server")}, {path: client, data: []byte("new client")}}}
+	if _, err := prepared.Commit(); err == nil {
+		t.Fatal("accepted target overlapping another target's backup")
+	}
+	assertUpdateFile(t, server, "old server")
+	assertUpdateFile(t, client, "old client")
+	if _, err := os.Lstat(server + ".bak"); !os.IsNotExist(err) {
+		t.Fatal("alias refusal touched backups")
+	}
+}
+
+func TestFullInstallerRequiresNativeClientBeforeMutating(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIGNATURE_VERIFY", "")
+	fixture := newSigGateFixture(t, true)
+	archive := buildTarGz(t, map[string]string{"crewship": "new server"})
+	asset := AssetNameForTag("v9.9.9", false)
+	checksums := []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), asset))
+	pki := newTestPKI(t, testIdentity, testIssuer)
+	signatureVerifyOpts.Roots = pki.rootPool
+	fixture.assets[asset] = archive
+	fixture.assets["checksums.txt"] = checksums
+	fixture.assets["checksums.txt.sig"] = []byte(pki.sign(t, checksums))
+	fixture.assets["checksums.txt.pem"] = pki.leafPEM
+	server := filepath.Join(t.TempDir(), "server")
+	writeUpdateFixture(t, server, "old server")
+	if _, err := PrepareInstallerUpdate(t.Context(), "v9.9.9", server, false, "1.0.0"); err == nil {
+		t.Fatal("accepted full archive missing required native client")
+	}
+	assertUpdateFile(t, server, "old server")
+	if _, err := os.Lstat(server + ".bak"); !os.IsNotExist(err) {
+		t.Fatal("prepare touched backups")
 	}
 }

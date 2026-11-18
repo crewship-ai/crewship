@@ -150,6 +150,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      post:
+        - scripts/stage-agent-cli.sh "{{ .Target }}" "{{ .Path }}"
     ldflags:
       - -s -w
       - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
@@ -199,6 +202,9 @@ archives:
     # autodetectSidecarPaths looks for next to the binary; strip_parent drops
     # the scripts/ prefix so it lands at the archive root as ./entrypoint.sh.
     files:
+      - src: dist/crewship-cli_linux_{{ .Arch }}*/crewship-agent-cli
+        dst: .
+        strip_parent: true
       - LICENSE*
       - README*
       - CHANGELOG*
@@ -226,6 +232,9 @@ archives:
       - crewship-darwin
     formats: [tar.gz]
     files:
+      - src: dist/crewship-cli_linux_{{ .Arch }}*/crewship-agent-cli
+        dst: .
+        strip_parent: true
       - LICENSE*
       - README*
       - CHANGELOG*
@@ -251,6 +260,9 @@ archives:
       - crewship-windows
     formats: [zip]
     files:
+      - src: dist/crewship-cli_linux_{{ .Arch }}*/crewship-agent-cli
+        dst: .
+        strip_parent: true
       - LICENSE*
       - README*
       - CHANGELOG*
@@ -405,6 +417,7 @@ brews:
     install: |
       bin.install "crewship"
       libexec.install "crewship-sidecar"
+      libexec.install "crewship-agent-cli"
       libexec.install "entrypoint.sh"
     test: |
       system "#{bin}/crewship", "version"
@@ -466,6 +479,10 @@ nfpms:
     # would pollute it, so that one lands in libexec instead (mirrors #920).
     bindir: /usr/bin
     contents:
+      - src: dist/crewship-cli_linux_{{ .Arch }}*/crewship-agent-cli
+        dst: /usr/libexec/crewship/crewship-agent-cli
+        file_info:
+          mode: 0755
       # Distribution legal files (scripts/gen-license-bundle.sh): project
       # LICENSE/NOTICE/THIRD-PARTY-NOTICES.md plus dependency texts. The
       # FHS home for package license material on both deb and rpm.
