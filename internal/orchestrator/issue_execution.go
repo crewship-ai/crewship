@@ -41,7 +41,7 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 	if err != nil {
 		return true, err
 	}
-	if status != "IN_PROGRESS" || mode == "human" {
+	if (status != "IN_PROGRESS" && status != "REVIEW") || mode == "human" {
 		return true, nil
 	}
 	now := tsformat.Format(time.Now())
@@ -145,7 +145,7 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 		if err = tx.Commit(); err != nil {
 			return true, err
 		}
-		e.broadcastMissionStatus(ms, "IN_PROGRESS")
+		e.broadcastMissionStatus(ms, status)
 		return true, nil
 	}
 	var pending, total int
@@ -204,7 +204,7 @@ The summary must state what you checked and specific corrections or remaining bl
 	if err = tx.Commit(); err != nil {
 		return true, err
 	}
-	e.broadcastMissionStatus(ms, "IN_PROGRESS")
+	e.broadcastMissionStatus(ms, status)
 	return true, nil
 }
 
@@ -254,7 +254,7 @@ func (e *MissionEngine) settleIssueExecution(ctx context.Context, tx *sql.Tx, ms
 	if _, err := tx.ExecContext(ctx, `UPDATE issue_executions SET stage=?,verdict=?,review_note=?,updated_at=? WHERE id=?`, stage, stage, note, now, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET status=?,updated_at=?,completed_at=CASE WHEN ?='DONE' THEN ? ELSE NULL END WHERE id=? AND status='IN_PROGRESS'`, status, now, status, now, ms.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE missions SET status=?,updated_at=?,completed_at=CASE WHEN ?='DONE' THEN ? ELSE NULL END WHERE id=? AND status IN ('IN_PROGRESS','REVIEW')`, status, now, status, now, ms.ID); err != nil {
 		return err
 	}
 	if err := e.issueExecutionComment(ctx, tx, ms.ID, ms.LeadAgentID, note, now); err != nil {

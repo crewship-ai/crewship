@@ -385,6 +385,27 @@ func (e *MissionEngine) missionTick(ctx context.Context, ms *missionState) (stop
 		return false
 	}
 
+	if status == "REVIEW" {
+		var active bool
+		err := e.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_executions
+			WHERE mission_id=? AND stage IN ('working','reviewing'))`, ms.ID).Scan(&active)
+		if err != nil {
+			e.logger.Error("check execution under client review", "mission_id", ms.ID, "error", err)
+			return false
+		}
+		if !active {
+			return true
+		}
+		if _, err := e.checkIssueExecution(ctx, ms); err != nil {
+			e.logger.Error("issue execution tick", "mission_id", ms.ID, "error", err)
+			return false
+		}
+		if err := e.scheduleReadyTasks(ctx, ms, true); err != nil {
+			e.logger.Error("schedule issue execution under client review", "mission_id", ms.ID, "error", err)
+		}
+		return false
+	}
+
 	// Mission is no longer in progress -- stop orchestrating
 	if status != "IN_PROGRESS" {
 		e.logger.Info("mission no longer in progress", "mission_id", ms.ID, "status", status)

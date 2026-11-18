@@ -14331,6 +14331,7 @@
             "type": "integer"
           },
           "client_review_required": {
+            "description": "Requires human acceptance. Automated completion moves the issue to REVIEW while this policy applies.",
             "type": "boolean"
           },
           "code_links": {

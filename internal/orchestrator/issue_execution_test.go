@@ -107,3 +107,27 @@ func TestIssueExecutionRejectsMissingOutcomeAndStaleApproval(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueExecutionInReviewContinuesToHumanAcceptance(t *testing.T) {
+	e, ms, db := executionFixture(t)
+	mustExec(t, db, `UPDATE issue_work SET client_review_required=1;
+		UPDATE missions SET status='REVIEW' WHERE id='issue'`)
+	if _, err := e.checkIssueExecution(t.Context(), ms); err != nil {
+		t.Fatal(err)
+	}
+	var stage string
+	if err := db.QueryRow(`SELECT stage FROM issue_executions WHERE id='execution'`).Scan(&stage); err != nil || stage != "reviewing" {
+		t.Fatalf("execution stage=%q err=%v", stage, err)
+	}
+	finishReview(t, db, "approve", OutcomeSucceeded)
+	if stop := e.missionTick(t.Context(), ms); stop {
+		t.Fatal("active review execution stopped before settlement")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT m.status,x.stage FROM missions m JOIN issue_executions x ON x.mission_id=m.id WHERE x.id='execution'`).Scan(&status, &stage); err != nil || status != "REVIEW" || stage != "accepted" {
+		t.Fatalf("status=%q stage=%q err=%v", status, stage, err)
+	}
+	if stop := e.missionTick(t.Context(), ms); !stop {
+		t.Fatal("mission loop kept running after lead review settled")
+	}
+}
