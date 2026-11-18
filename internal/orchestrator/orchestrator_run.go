@@ -533,6 +533,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return err
 	}
 	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
+	if err := o.admitCodexSandbox(ctx, &req, runtimeUse); err != nil {
+		return err
+	}
 	if err := o.admitManagedLaunch(ctx, &req, runtimeUse); err != nil {
 		return err
 	}
@@ -811,14 +814,24 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if req.managedLaunch != nil {
 		// Re-read stored authority after preflight, then attest immediately
 		// before the durable creation gate. A changed build requires a new run.
-		fresh, err := o.managedLaunchResolver(execCtx, req.WorkspaceID, req.CrewID, req.CLIAdapter)
+		fresh, err := o.currentManagedDescriptor(execCtx, req)
 		if err == nil && (fresh == nil || fresh.ImageID != req.managedLaunch.ImageID || fresh.RevisionID != req.managedLaunch.RevisionID || fresh.LockSHA256 != req.managedLaunch.LockSHA256 || fresh.Artifact != req.managedLaunch.Artifact || fresh.Version != req.managedLaunch.Version || fresh.Binary != req.managedLaunch.Binary) {
 			err = fmt.Errorf("managed launch: build authority changed during preflight")
 		}
 		if err == nil {
-			err = o.attestManagedLaunch(execCtx, req.ContainerID, *req.managedLaunch)
+			if req.codexOuterSandbox {
+				err = o.attestCodexOuterSandbox(execCtx, req)
+			} else {
+				err = o.attestManagedLaunch(execCtx, req.ContainerID, *req.managedLaunch)
+			}
+		}
+		if err == nil && req.codexOuterSandbox {
+			err = o.recordCodexSandbox(execCtx, req, "admitted")
 		}
 		if err != nil {
+			if req.codexOuterSandbox {
+				err = o.denyCodexSandbox(ctx, req, err)
+			}
 			o.failRun(ctx, req, runState.ID, "error")
 			refused := fmt.Errorf("%w: %w", ErrExecRefused, err)
 			_, _ = j.Emit(ctx, JournalEntry{WorkspaceID: req.WorkspaceID, CrewID: req.CrewID, AgentID: req.AgentID, MissionID: req.MissionID,

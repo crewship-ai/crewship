@@ -18,6 +18,12 @@ import (
 )
 
 func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
+	return managedLaunchResolverFor(db, false)
+}
+
+// The outer-isolation opt-in qualifies the selected Codex, without banning
+// other adapters from the crew or weakening the existing static pilot.
+func managedLaunchResolverFor(db *sql.DB, mixed bool) orchestrator.ManagedLaunchResolver {
 	return func(ctx context.Context, workspace, crew, adapter string) (*managedlaunch.Descriptor, error) {
 		denied := errors.New("managed launch: qualified exact pin and current image revision required")
 		cli, ok := devcontainer.AdapterCLIFor(adapter)
@@ -42,7 +48,7 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 				rows.Close()
 				return nil, denied
 			}
-			if value != "CODEX_CLI" {
+			if !mixed && value != "CODEX_CLI" {
 				rows.Close()
 				return nil, denied
 			}
@@ -59,6 +65,15 @@ func managedLaunchResolver(db *sql.DB) orchestrator.ManagedLaunchResolver {
 			return nil, denied
 		}
 		requested, err := devcontainer.RequestedToolchain(nil, miseRaw, []string{adapter})
+		if mixed && err == nil {
+			selected := requested[:0]
+			for _, tool := range requested {
+				if tool.Binary == cli.Binary {
+					selected = append(selected, tool)
+				}
+			}
+			requested = selected
+		}
 		if err != nil || len(requested) != 1 || !requested[0].Exact {
 			return nil, denied
 		}

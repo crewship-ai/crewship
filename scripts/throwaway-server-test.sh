@@ -194,13 +194,15 @@ fi
 
 cmd_start envok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
   --env CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-  --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true \
+  --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true --env CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=true \
   --env "CREWSHIP_NEXTJS_URL=http://localhost:$FAKE_PORT" --page-projects >/dev/null 2>&1
 check "fake server answered healthz (cmd_start returned)" "$(manifest_get "$tmp/state/envok" state)" running
 check "allowlisted --env reaches the server process" \
   "$(grep -c '^CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000' "$FAKE_SERVER_ENV")" 1
 check "signup + public-URL feature settings reach the server process" \
   "$(grep -cE "^(CREWSHIP_ALLOW_SIGNUP=true|CREWSHIP_NEXTJS_URL=http://localhost:$FAKE_PORT)\$" "$FAKE_SERVER_ENV")" 2
+check "explicit private fixture endpoint ceiling reaches only the owned server" \
+  "$(grep -c '^CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=true$' "$FAKE_SERVER_ENV")" 1
 check "fixed identity keys still reach the server process" \
   "$(grep -c "^CREWSHIP_DATA_DIR=$tmp/state/envok/data" "$FAKE_SERVER_ENV")" 1
 check "--page-projects config lands under the instance dir" \

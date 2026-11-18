@@ -9,6 +9,10 @@ import (
 
 const SafePath = "/usr/local/bin:/usr/bin:/bin"
 
+// Only child tools use this path; the main Codex always uses its verified FD.
+// Crew tools are writable and are deliberately not claimed to be attested.
+const OuterToolPath = SafePath + ":/opt/crew-tools/bin:/opt/mise/data/shims"
+
 var envKeyPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,127}$`)
 
 func AllowedEnvKey(key string) bool {
@@ -69,5 +73,8 @@ func SelectedEnvironment(d Descriptor, inherited []string) ([]string, error) {
 		return nil, errors.New("managed launch: missing authoritative environment")
 	}
 	values, _, err := Environment(selected)
+	if err == nil && d.OuterSandbox {
+		values[0] = "PATH=" + OuterToolPath
+	}
 	return values, err
 }

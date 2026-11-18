@@ -880,6 +880,22 @@ jobs:
             sudo apt-get install -y --no-install-recommends tmux
           fi
           tmux -V
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prepare pinned real native Codex fixture
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/codex-outer-native"
+          mkdir -p "$artifact_dir"
+          printf '{"private":true}\n' > "$artifact_dir/package.json"
+          pnpm --dir "$artifact_dir" add --ignore-scripts --save-exact @openai/codex@0.169.0
+          native=$(find "$artifact_dir/node_modules" -type f -path '*/vendor/x86_64-unknown-linux-musl/bin/codex' -print -quit)
+          test -n "$native" && test -x "$native"
+          printf 'CREWSHIP_TEST_CODEX_NATIVE=%s\n' "$native" >> "$GITHUB_ENV"
       - name: Require executed Docker and protected capture fixtures
         timeout-minutes: 24
         # Existing fixtures retain their privilege profiles. Protected capture

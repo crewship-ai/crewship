@@ -24,9 +24,10 @@ for this pilot; recreating crew runtimes cannot correct that host UID collision.
 Before selecting a crew, use the existing CLI environment flow:
 
 1. Set an exact Codex pin in `crew config <crew> --mise <file>` and resolve/apply its
-   native lock with `crew lock-resolve <file>` / `crew lock-apply <file> <resolution>`.
+   native lock with `crew provision lock-resolve <file>` /
+   `crew provision lock-apply <file> <resolution>`.
 2. Build the environment with `crew start` or `crew provision` and inspect its
-   immutable build revision with `crew revisions <crew>`.
+   immutable build revision with `crew provision revisions <crew>`.
 3. The executable must reside at a canonical image path below `/opt` or `/usr`,
    owned by root or UID 1001, executable, and not writable by group/others. The
    read-only root and mount checks prevent UID 1001 from replacing image files. Sealing a shim
