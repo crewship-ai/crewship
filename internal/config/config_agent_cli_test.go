@@ -48,3 +48,33 @@ func TestRuntimeCompanionDiscoveryIncludesPackagedAgentCLI(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeAgentCLIExplicitOverrideSurvivesDiscovery(t *testing.T) {
+	root := t.TempDir()
+	override := filepath.Join(root, "operator-selected-client")
+	t.Setenv("CREWSHIP_AGENT_CLI_PATH", override)
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
+	cfg := Default()
+	applyEnvOverrides(cfg)
+	if err := resolveSidecarPaths(cfg, root, ""); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Container.AgentCLIBinaryPath != override {
+		t.Fatal("agent CLI override was lost during runtime discovery")
+	}
+}
+
+func TestRuntimeAgentCLIDiscoveryRejectsDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "crewship-agent-cli"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
+	if err := resolveSidecarPaths(cfg, root, ""); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Container.AgentCLIBinaryPath == filepath.Join(root, "crewship-agent-cli") {
+		t.Fatal("a directory was accepted as the runtime CLI artifact")
+	}
+}
