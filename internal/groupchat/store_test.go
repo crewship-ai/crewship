@@ -100,7 +100,7 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 	if _, err = db.Exec(string(inboxMigration)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`CREATE INDEX idx_agent_inbox_conversation_jobs ON workspace_conversation_agent_jobs(agent_id,created_at DESC,id DESC)`); err != nil {
+	if _, err = db.Exec(`CREATE INDEX idx_agent_inbox_conversation_jobs ON workspace_conversation_agent_jobs(agent_id,created_at DESC,id DESC) WHERE agent_id IS NOT NULL`); err != nil {
 		t.Fatal(err)
 	}
 
