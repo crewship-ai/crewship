@@ -386,7 +386,7 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 		}
 		return false, errors.Join(err, inspectErr)
 	}
-	probe := directProbe + "tmux kill-session -t '" + session + "' >/dev/null 2>&1; " + tmuxSessionProbe(session)
+	probe := directProbe + "tmux kill-session -t '=" + session + "' >/dev/null 2>&1; " + tmuxSessionProbe(session)
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		// Exec cannot enter a removed/stopped container. Confirm that

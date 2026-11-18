@@ -32,6 +32,13 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
             errors = managed.host_source_inventory_errors(root)
             self.assertTrue(any(name in error for error in errors))
 
+    def test_exact_tmux_target_receipt_is_required_despite_green_parent(self):
+        key = (managed.PREFIX + 'internal/orchestrator',
+               'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped/exact-session-targets')
+        self.assertIn(key, managed.REQUIRED)
+        events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(events, 0))
+
     def test_native_tmux_requires_shell_ownership_cancellation_and_bootstrap_receipts(self):
         package = managed.PREFIX + 'internal/orchestrator'
         for shell in ('dash', 'busybox'):

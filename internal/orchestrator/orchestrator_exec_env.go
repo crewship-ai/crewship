@@ -322,7 +322,7 @@ exit "$EX"
 	// error must not start a duplicate producer. UNKNOWN keeps the wrapper live
 	// for the existing lifecycle stop/hold authority instead of cleaning HOME.
 	wrapper := fmt.Sprintf(`umask 077
-tmux kill-session -t '%[1]s' 2>/dev/null
+tmux kill-session -t '=%[1]s' 2>/dev/null
 rm -f '%[4]s' '%[3]s'
 mkfifo '%[4]s' || exit 1
 exec 3<> '%[4]s'
@@ -380,9 +380,10 @@ func tmuxExecDir(agentSlug, runID string) string {
 // A failed client query is not evidence of absence. A live server's roster
 // must confirm that this exact session is missing; otherwise retain UNKNOWN.
 // Callers supply only names built from validated agent slugs and run IDs.
+// The leading = disables tmux target prefix matching against neighboring runs.
 func tmuxSessionProbe(session string) string {
 	return fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
-elif tmux has-session -t '%[1]s' 2>/dev/null; then echo PRESENT;
+elif tmux has-session -t '=%[1]s' 2>/dev/null; then echo PRESENT;
 elif crewship_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); then
  case "
 $crewship_sessions

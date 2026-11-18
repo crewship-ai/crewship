@@ -280,7 +280,7 @@ func TestT07_CancellingBDoesNotNameA(t *testing.T) {
 	if strings.Contains(fromB, TmuxSessionName(slug, "run-a")) {
 		t.Errorf("run B's setup names run A's session:\n%s", fromB)
 	}
-	if !strings.Contains(strings.Join(wrapperB, " "), "tmux kill-session -t '"+TmuxSessionName(slug, "run-b")+"'") {
+	if !strings.Contains(strings.Join(wrapperB, " "), "tmux kill-session -t '="+TmuxSessionName(slug, "run-b")+"'") {
 		t.Error("run B's wrapper does not kill its OWN session first")
 	}
 	// A's wrapper still reads A's own exit file, so A's outcome is its own.
