@@ -429,10 +429,6 @@ func NewServer(cfg ServerConfig) *Server {
 		})
 	}
 
-	if cfg.IPC != nil && cfg.IPC.AgentRunKey != "" {
-		s.runs.ensureDurable(cfg.IPC, cfg.Logger)
-	}
-
 	// #1385: fingerprint the crew-bound IPC token so /health can advertise
 	// which master minted it. Empty when no IPC token is configured (crew-less
 	// or standalone sidecar), which the server reads as "nothing to compare".

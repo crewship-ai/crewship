@@ -107,8 +107,6 @@ func TestAgentInboxGrantSurvivesSidecarRestartAndRevocation(t *testing.T) {
 	t.Setenv(runStateDirEnv, t.TempDir())
 	s, key := newRunIdentityServer(t)
 	s.ipc.ContainerID = "inbox-container"
-	s.runs = newRunRegistry()
-	s.runs.ensureDurable(s.ipc, s.logger)
 	bearer := internaltoken.DeriveAgentRunToken(key, s.ipc.WorkspaceID, "agent-peer", "grant-run")
 	call := httptest.NewRequest(http.MethodPost, "/agent/run/inbox-grant", nil)
 	call.Header.Set("Authorization", "Bearer "+bearer)
@@ -119,13 +117,11 @@ func TestAgentInboxGrantSurvivesSidecarRestartAndRevocation(t *testing.T) {
 		t.Fatalf("grant registration returned %d", reg.Code)
 	}
 	recovered := &Server{ipc: s.ipc, runs: newRunRegistry()}
-	recovered.runs.ensureDurable(recovered.ipc, recovered.logger)
 	if !recovered.humanInboxDiscovered(call) {
 		t.Fatal("live run lost its discovery grant after replay")
 	}
 	recovered.runs.end("grant-run")
 	afterEnd := &Server{ipc: s.ipc, runs: newRunRegistry()}
-	afterEnd.runs.ensureDurable(afterEnd.ipc, afterEnd.logger)
 	if afterEnd.humanInboxDiscovered(call) {
 		t.Fatal("revoked run retained discovery after replay")
 	}

@@ -17,6 +17,9 @@ func (s *Server) humanInboxDiscovered(r *http.Request) bool {
 	if !ok || ws != s.ipc.WorkspaceID {
 		return false
 	}
+	// Match existing run authentication: replay locally after a verified token
+	// arrives. Other token consumers keep their original first-use setup.
+	s.runs.ensureDurable(s.ipc, s.logger)
 	st, known := s.runs.lookup(run)
 	return known && st.HumanInboxGranted && st.EndedAt.IsZero() && s.runs.current(r.Context(), run)
 }

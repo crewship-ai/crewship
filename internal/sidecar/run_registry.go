@@ -489,9 +489,8 @@ func safeStateName(s string) string {
 // ensureDurable attaches the journal and the authority, replaying the journal
 // before the registry answers its first admission question.
 //
-// NewServer restores the registry before tool discovery. Both identity
-// paths also call this so embedded servers cannot admit a token before
-// replay. The journal is initialized once per process.
+// Called from the identity paths and from verified inbox discovery. The
+// journal is initialized once per process, on first authenticated use.
 func (r *runRegistry) ensureDurable(ipc *IPCConfig, logger *slog.Logger) {
 	r.initOnce.Do(func() {
 		r.mu.Lock()
