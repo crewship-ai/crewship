@@ -181,7 +181,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		},
 		"POST /api/v1/inbox/bulk":            {Request: inboxBulk, Response: anyObject()},
 		"DELETE /api/v1/inbox":               {Response: object(map[string]any{"deleted": integer()})},
-		"GET /api/v1/agents/{agentId}/inbox": {Response: object(map[string]any{"approvals_pending": integer(), "assignments_open": integer(), "escalations_open": integer(), "peer_messages": array(anyObject()), "cost_usd_this_month": map[string]any{"type": "number"}, "llm_calls_this_month": integer(), "tokens_used_this_month": integer()})},
+		"GET /api/v1/agents/{agentId}/inbox": {Response: object(map[string]any{"approvals_pending": integer(), "assignments_open": map[string]any{"type": "integer", "description": "Assignments routed to this agent in PENDING, QUEUED, or RUNNING state, regardless of case."}, "escalations_open": integer(), "peer_messages": array(anyObject()), "cost_usd_this_month": map[string]any{"type": "number"}, "llm_calls_this_month": integer(), "tokens_used_this_month": integer()})},
 	}
 	audit := map[string]DomainSchema{
 		"GET /api/v1/audit": {Response: object(map[string]any{"data": array(auditEntry), "pagination": pagination})},
