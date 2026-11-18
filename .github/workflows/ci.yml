@@ -884,9 +884,10 @@ jobs:
           tar -xOf "$native_mise_dir/mise.tar.gz" mise/bin/mise > "$native_mise_dir/mise"
           chmod 0755 "$native_mise_dir/mise"
           cat > "$native_mise_dir/Dockerfile" <<'DOCKERFILE'
-          FROM alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+          FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
           COPY --chmod=0755 mise /usr/local/bin/mise
           DOCKERFILE
+          docker pull node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
           native_mise_tag="crewship-native-mise-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker build --network none --pull=false --tag "$native_mise_tag" "$native_mise_dir"
           native_mise_image=$(docker image inspect --format '{{.Id}}' "$native_mise_tag")
