@@ -220,7 +220,82 @@ and the saving depends on what a fresh build downloads.
 
 ### The agent's PATH
 
-The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin`, `/opt/crewship/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. At container start the runtime merges three sources into one PATH — these directories, the build's aggregated `containerEnv` PATH (feature-declared directories and the image's own, with `${containerEnv:PATH}` expanded), and the login PATH captured at build time — so nothing a feature or a profile script added is lost, and a captured login PATH that does not know about mise's shims cannot hide them. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
+Provisioning, Docker runtime creation, explicit Apple runtime PATH and the
+interactive terminal use `devcontainer.NativeToolPath` and the single
+`AgentToolPathDirs` list. The list covers user-local bin, Crewship bin, mise
+shims, persistent crew-tools, pipx and npm-global feature bins. The generated
+POSIX login hook follows the same policy and is checked against that function.
+
+The policy preserves the relative order of existing PATH entries, removes
+duplicates and prepends only missing shared directories. For example, an
+operator PATH with `/opt/mise/data/shims` before `/home/agent/.local/bin` keeps
+that precedence. The listed fallback order applies only to missing entries;
+it does not move existing entries into a fixed order. Docker merges the
+aggregated container PATH with captured login contributions before applying
+this policy. Provisioned Apple images carry the same image ENV; an explicit
+runtime PATH is completed by the same function. An already completed runtime
+PATH is unchanged when a terminal opens, so inherited agent exec and terminal
+exec select the same executable for that PATH.
+
+At Docker container creation, sources containing only shared tool directories
+also receive the image PATH as the final source (or the standard system PATH
+when image metadata is unavailable). This preserves recovery of system/image
+utilities when a captured login PATH contains only tool shims. The check uses
+the shared list, so crew-tools is now included in this native-only recovery.
+A source containing a genuinely custom directory keeps its explicit PATH
+restriction instead of acquiring image directories. Existing source order is
+preserved in either case.
+
+⚠️ **Behaviour change for agent and routine runs, not only terminals:** Docker
+no longer prepends pipx/npm-global unconditionally ahead of image and declared
+PATH entries. Newly provisioned image defaults can select the mise version of
+a command that previously resolved to an npm/pipx feature installation. This
+takes effect when the changed image/runtime is activated through normal
+rebuild/recreation. A crew intentionally using a feature-installed version
+must explicitly retain its preferred order in `containerEnv.PATH`; preserving
+existing entries does not preserve Docker's former unconditional prefix.
+
+The matching-selection guarantee is limited to containers created by the new
+server with the completed runtime PATH, inherited by non-login exec and the
+terminal before any shell startup customization. Existing containers keep
+their immutable environment: the terminal can add a missing crew-tools path
+while an agent exec still inherits an old PATH without it. Recreating from a
+legacy image also retains that image's inputs; a missing npm-global entry can
+be prepended ahead of existing mise shims. Its order can therefore differ from
+a newly provisioned image. Server restart alone does not migrate these
+environments, and no same-binary guarantee is made across image generations.
+For Apple, normalization happens only for an explicitly supplied runtime PATH;
+otherwise the image environment is inherited.
+
+The default-off [managed-launch pilot](/specs/managed-cli-launch) and opt-in [Codex outer-isolation child tools](/specs/codex-outer-sandbox) intentionally use restricted PATH policies outside this general tool-availability contract.
+
+The interactive terminal opens non-login Bash and reads only PATH from
+container inspect metadata. No probe process runs inside the container and no
+agent-run environment is copied. If inspection fails or the provider does not
+support it, the terminal logs a warning and supplies only TERM and HOME,
+**omitting PATH** so exec inherits the complete container PATH, including
+system sbin and feature paths. This degraded path cannot repair missing
+entries in a legacy container, but it does not replace a usable inherited PATH.
+
+New images install `/etc/profile.d/zz-crewship-tools.sh` from the same directory
+list for POSIX login shells. Adding stable mise shims does not remove inherited
+installation directories or prove how a production runtime constructed PATH.
+The default missing-directory order still puts persistent user binaries before
+mise shims; general pin precedence remains open in
+[#5459](https://github.com/crewship-ai/crewship/issues/5459). Preserving an
+explicit operator order does not resolve that separate issue.
+
+Changing the generated hook invalidates crew image cache keys. The next provision
+builds a new crew image even with unchanged declarations; underlying feature
+and Docker/BuildKit layers may be reused. Restarting the server does not rebuild
+every running container. Existing images need reprovisioning for the hook.
+Global mise installation readiness excludes project WORKDIR/config discovery.
+
+Non-login startup omits login-only exports, functions and completion. Feature
+compatibility and actual production agent login-shell acceptance remain open
+in [#5458](https://github.com/crewship-ai/crewship/issues/5458) and
+[#5452](https://github.com/crewship-ai/crewship/issues/5452); native-tool version
+checks alone do not satisfy those acceptance requirements.
 
 ### Adapter CLIs are installed and verified
 

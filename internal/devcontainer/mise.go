@@ -468,6 +468,10 @@ const MiseShimsDir = miseRoot + "/data/shims"
 // miseShimsDir keeps the older name for the verification below.
 const miseShimsDir = MiseShimsDir
 
+// Keep project WORKDIR/config/trust out of image-global installation readiness.
+const miseMissingInstallCheck = `cd / || exit $?; missing=$(MISE_CEILING_PATHS=/ mise ls --global --missing --no-header) || exit $?; ` +
+	`[ -z "$missing" ] || { printf 'missing mise installations: %s\n' "$missing"; exit 1; }; `
+
 // verifyMiseShims fails when any shim mise just wrote does not resolve.
 func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) error {
 	// `[ -L ]` before `[ -e ]` is what keeps an empty directory from failing
@@ -478,7 +482,8 @@ func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) err
 	// than the one this check exists for.
 	stdout, exitCode, err := exec(ctx, containerID, []string{
 		"sh", "-c",
-		`broken=""; for s in ` + miseShimsDir + `/*; do ` +
+		miseMissingInstallCheck +
+			`broken=""; for s in ` + miseShimsDir + `/*; do ` +
 			`[ -e "$s" ] && continue; ` +
 			`[ -L "$s" ] || continue; ` +
 			`broken="$broken $(basename "$s")"; done; ` +
@@ -488,7 +493,7 @@ func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) err
 		return fmt.Errorf("%w: verify shims: %v", ErrMiseInstallFailed, err)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("%w: shims do not resolve (dangling:%s) — the pinned versions would be "+
+		return fmt.Errorf("%w: tool availability check failed (%s) — the pinned versions would be "+
 			"silently replaced by whatever the base image ships", ErrMiseInstallFailed, strings.TrimSpace(stdout))
 	}
 	return nil

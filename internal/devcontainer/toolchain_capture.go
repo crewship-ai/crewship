@@ -40,7 +40,7 @@ func writeToolchainInventory(ctx context.Context, containerID string, bins []str
 	}
 	searchPath := containerEnv["PATH"]
 	if searchPath == "" {
-		searchPath = strings.Join(AgentToolPathDirs, ":") + ":${containerEnv:PATH}"
+		searchPath = NativeToolPath("${containerEnv:PATH}")
 	}
 	searchPath = strings.ReplaceAll(searchPath, "${PATH}", "${containerEnv:PATH}")
 	parts := strings.Split(searchPath, "${containerEnv:PATH}")

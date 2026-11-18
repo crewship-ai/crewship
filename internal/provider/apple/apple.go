@@ -84,6 +84,24 @@ func (p *Provider) ContainerUser(ctx context.Context, containerID string) (strin
 	return user, nil
 }
 
+// ContainerPath reads only PATH from the container CLI inspect payload.
+func (p *Provider) ContainerPath(ctx context.Context, id string) (string, error) {
+	info, err := p.inspectContainer(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("inspect container PATH: %w", err)
+	}
+	return info.ConfiguredPath(), nil
+}
+
+func (c containerJSON) ConfiguredPath() string {
+	for _, item := range c.Configuration.InitProcess.Environment {
+		if strings.HasPrefix(item, "PATH=") {
+			return strings.TrimPrefix(item, "PATH=")
+		}
+	}
+	return ""
+}
+
 // containerUserCacheTTL bounds how long a container's run-as user is trusted
 // without re-reading it.
 //
@@ -268,7 +286,8 @@ type containerJSON struct {
 		// InitProcess.User is the container's run-as user — the only place the
 		// payload records it. See containerUser for the union it arrives as.
 		InitProcess struct {
-			User containerUser `json:"user"`
+			User        containerUser `json:"user"`
+			Environment []string      `json:"environment"`
 		} `json:"initProcess"`
 	} `json:"configuration"`
 }

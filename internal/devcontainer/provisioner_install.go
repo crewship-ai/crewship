@@ -379,7 +379,7 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 	}
 	search := strings.TrimSpace(pathValue)
 	if search == "" {
-		search = strings.Join(AgentToolPathDirs, ":") + ":${containerEnv:PATH}"
+		search = NativeToolPath("${containerEnv:PATH}")
 	}
 	search = strings.ReplaceAll(search, "${containerEnv:PATH}", "$PATH")
 	search = strings.ReplaceAll(search, "${PATH}", "$PATH")
@@ -535,7 +535,9 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 	content := strings.Join(lines, "\n") + "\n"
 
 	// Append to /etc/environment (preserves existing content).
-	cmd := []string{"bash", "-c", fmt.Sprintf("printf '%%s' %q >> /etc/environment", content)}
+	cmd := []string{"bash", "-c", fmt.Sprintf("printf '%%s' %q >> /etc/environment", content) +
+		" && mkdir -p /etc/profile.d && printf '%s' " + shellQuote(AgentToolProfile()) +
+		" > /etc/profile.d/zz-crewship-tools.sh && chmod 0644 /etc/profile.d/zz-crewship-tools.sh"}
 	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("writing containerEnv: %w", err)
