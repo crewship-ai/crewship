@@ -33,6 +33,14 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
             self.assertTrue(managed.failures(events, 0))
         command = next(c for c in managed.commands() if root in c[c.index('-run') + 1])
         self.assertNotIn('sudo', command)
+    def test_native_mise_packaging_requires_clean_and_upgrade_receipts(self):
+        package = managed.PREFIX + 'internal/devcontainer'
+        root = 'TestCodexNativePackaging'
+        for name in (root, root + '/clean', root + '/upgrade'):
+            key = (package, name)
+            self.assertIn(key, managed.REQUIRED)
+            events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+            self.assertTrue(managed.failures(events, 0))
 
     def test_all_guarded_host_fixture_sources_are_mandatory(self):
         root = Path(__file__).resolve().parents[2]
