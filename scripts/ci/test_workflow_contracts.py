@@ -40,6 +40,22 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('await chromium.launch(', tests)
         self.assertIn('frontend-test-shards', self.job(ci, 'frontend-test'))
 
+    def test_clean_installer_has_bounded_pull_build_and_cleanup_daylight(self):
+        lane = self.job(self.text('ci.yml'), 'release-rehearsal')
+        install = self.step(lane, 'Install full release in a fresh Linux container')
+        cap = re.search(r'timeout-minutes: (\d+)', install)
+        self.assertIsNotNone(cap, 'installer step can exhaust the job before owned cleanup')
+        pull = self.step(lane, 'Prepare pinned clean installer fixture')
+        self.assertRegex(pull, r'timeout-minutes: 3\n')
+        self.assertIn('timeout --kill-after=15s 150s docker pull ', pull)
+        build = int(re.search(r'timeout (\d+)s go build ', install).group(1))
+        execute = re.search(r'timeout --signal=TERM --kill-after=(\d+)s (\d+)m ', install)
+        grace, runtime = map(int, execute.groups())
+        # The fixture has its own 8m deadline and a 30s scoped cleanup budget.
+        self.assertGreaterEqual(runtime * 60, 8 * 60 + 30)
+        self.assertGreaterEqual(int(cap.group(1)) * 60 - build - runtime * 60 - grace, 15)
+        self.assertLessEqual(int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1)), 35)
+
     def test_every_workflow_seed_names_its_server(self):
         # The CLI refuses a seed without --server, so a bare call fails every
         # attempt: the throwaway chat specs did not run for weeks (#2768).
