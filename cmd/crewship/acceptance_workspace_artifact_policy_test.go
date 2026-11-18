@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
@@ -39,7 +42,13 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
-	server := httptest.NewServer(router)
+	var policyWrites atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/artifact-creation-policy") {
+			policyWrites.Add(1)
+		}
+		router.ServeHTTP(w, r)
+	}))
 	t.Cleanup(server.Close)
 	config := filepath.Join(t.TempDir(), "cli.yaml")
 	if err := os.WriteFile(config, []byte("server: "+server.URL+"\nworkspace: "+workspace+"\ntoken: "+token+"\nformat: json\n"), 0600); err != nil {
@@ -63,12 +72,13 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 		} `json:"limits"`
 		SaveRequiresRunToken *bool `json:"save_requires_run_token"`
 	}
-	read := func() {
+	read := func() []byte {
 		t.Helper()
 		output, err := run("show")
 		if err != nil || json.Unmarshal([]byte(output), &policy) != nil {
 			t.Fatalf("show: %v %s", err, output)
 		}
+		return []byte(output)
 	}
 	read()
 	if policy.Enabled || policy.Version != 0 || policy.CrewIDs == nil || len(policy.CrewIDs) != 0 {
@@ -164,18 +174,20 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 
 	// Missing --enabled is a local usage error: exit 2, diagnostics only on
 	// stderr, no success JSON on stdout and no request that changes the policy.
-	before, err := json.Marshal(policy)
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := read()
+	currentVersion := strconv.FormatInt(policy.Version, 10)
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
 		{"create limit", []string{"set", "--base-version", "0", "--chat-run-create-limit", "21"}},
 		{"all limits and run token", []string{"set", "--base-version", "0", "--chat-run-create-limit", "2", "--run-read-limit", "5", "--crew-hourly-page-limit", "10", "--save-requires-run-token=true"}},
+		// With a current version, valid limits and an explicit allowlist,
+		// neither CAS nor another validation can conceal an accidental write.
+		{"current version and otherwise valid input", []string{"set", "--base-version", currentVersion, "--clear-crews", "--chat-run-create-limit", "2", "--run-read-limit", "5", "--crew-hourly-page-limit", "10", "--save-requires-run-token=true"}},
 	} {
 		t.Run("missing enabled/"+tc.name, func(t *testing.T) {
+			writesBefore := policyWrites.Load()
 			command := exec.Command(binary, append([]string{"workspace", "artifact-policy"}, tc.args...)...)
 			command.Env = append(os.Environ(), "CREWSHIP_CONFIG="+config, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1")
 			var stdout, stderr bytes.Buffer
@@ -191,11 +203,10 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Fatalf("rejected input wrote stdout: %s", stdout.String())
 			}
-			read()
-			after, err := json.Marshal(policy)
-			if err != nil {
-				t.Fatal(err)
+			if got := policyWrites.Load() - writesBefore; got != 0 {
+				t.Fatalf("rejected input sent %d policy PUT requests", got)
 			}
+			after := read()
 			if !bytes.Equal(after, before) {
 				t.Fatalf("rejected input changed policy: before=%s after=%s", before, after)
 			}
