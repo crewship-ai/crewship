@@ -20,6 +20,7 @@ from contextlib import contextmanager
 PREFIX = 'github.com/crewship-ai/crewship/'
 CLI_TESTS = {'internal/orchestrator': {
     'TestNativeCLIShellEnvironment',
+    'TestNativeVaultCLITrioProtocols',
     'TestNativeTmuxCurrentRunCannotInheritRevokedToken',
     'TestNativeTmuxFallbackStreamsFailure',
     'TestNativeTmuxFreshServerRunSettles',
@@ -160,6 +161,8 @@ REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironmen
                 for adapter in CLI_ADAPTERS)
 REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter + '/' + mode)
                 for adapter in CLI_ADAPTERS for mode in ('direct', 'tmux', 'fallback'))
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeVaultCLITrioProtocols/' + adapter)
+                for adapter in CLI_ADAPTERS)
 REQUIRED.update((PREFIX + 'internal/orchestrator', name + '/' + shell)
                 for name in ('TestNativeTmuxReaderKernelOwnership',
                              'TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner',
