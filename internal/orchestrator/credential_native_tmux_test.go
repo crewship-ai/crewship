@@ -40,17 +40,25 @@ func (c *nativeTmuxHostFixture) Exec(ctx context.Context, cfg provider.ExecConfi
 	return &provider.ExecResult{ExecID: "completed-fixture", Reader: io.NopCloser(strings.NewReader(string(out)))}, nil
 }
 
-func nativeTmuxCLICommand(t *testing.T, ctx context.Context, argv, env []string, home string, failNewSession bool) *exec.Cmd {
+func nativeTmuxSocketRoot(t *testing.T) string {
 	t.Helper()
-	socketRoot := filepath.Join(home, "tmux-sockets")
-	if err := os.Mkdir(socketRoot, 0700); err != nil {
+	// UNIX socket names must fit even when Go's test/subtest name is long.
+	root, err := os.MkdirTemp("/tmp", "crewship-tmux-")
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	return root
+}
+
+func nativeTmuxCLICommand(t *testing.T, ctx context.Context, argv, env []string, home string, failNewSession bool) *exec.Cmd {
+	t.Helper()
+	socketRoot := nativeTmuxSocketRoot(t)
 	baseEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMUX_TMPDIR=" + socketRoot, "TMUX="}
 	seed := exec.CommandContext(ctx, "tmux", "-f", "/dev/null", "new-session", "-d", "-s", "fixture-seed", "sleep 90")
 	seed.Env = append(append([]string(nil), baseEnv...), "NATIVE_REVOKED_TOKEN=synthetic-old-token")
-	if err := seed.Run(); err != nil {
-		t.Fatal("start private native CLI tmux server", err)
+	if out, err := seed.CombinedOutput(); err != nil {
+		t.Fatalf("start private native CLI tmux server: %v %s", err, out)
 	}
 	privateDir := ""
 	t.Cleanup(func() {
@@ -70,8 +78,8 @@ func nativeTmuxCLICommand(t *testing.T, ctx context.Context, argv, env []string,
 	container.inspectResult.exitCode = 0
 	o := New(container, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runID := fmt.Sprintf("native-cli-tmux-%d-%d", os.Getpid(), time.Now().UnixNano())
-	privateDir = tmuxExecDir("fixture", runID)
-	wrapper, err := o.setupTmuxExec(ctx, "private-cli-fixture", argv, "fixture", runID, env)
+	privateDir = filepath.Join(home, ".crewship-tmux")
+	wrapper, err := o.setupTmuxExecAt(ctx, "private-cli-fixture", argv, "fixture", runID, env, privateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,34 +113,50 @@ func nativeTmuxMissingClientEnv(t *testing.T, env []string, home string) []strin
 }
 
 func TestNativeTmuxMissingSnapshotCannotSucceed(t *testing.T) {
+	for _, tc := range []struct{ mode, missing string }{{"tmux", "env"}, {"fallback", "env"}, {"fallback", "run.sh"}} {
+		t.Run(tc.mode+"/"+tc.missing, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			home := t.TempDir()
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+			cmd := nativeTmuxCLICommand(t, ctx, []string{"sh", "-c", "printf UNEXPECTED_TOOL"}, env, home, tc.mode == "fallback")
+			privateDir := filepath.Join(home, ".crewship-tmux")
+			if err := os.Remove(filepath.Join(privateDir, tc.missing)); err != nil {
+				t.Fatal(err)
+			}
+			out, err := cmd.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatal("bootstrap failure did not settle before timeout")
+			}
+			if err == nil {
+				t.Fatal("tmux bootstrap reported success without starting the tool")
+			}
+			if strings.Contains(string(out), "UNEXPECTED_TOOL") {
+				t.Fatal("tool started despite a missing native snapshot/script")
+			}
+			if _, err := os.Stat(privateDir); !os.IsNotExist(err) {
+				t.Fatal("failed bootstrap retained its directory")
+			}
+		})
+	}
+}
+
+func TestNativeTmuxFallbackStreamsFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	home := t.TempDir()
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMUX_TMPDIR=" + home, "TMUX="}
-	c := &nativeTmuxHostFixture{baseEnv: env}
-	c.inspectResult.exitCode = 0
-	o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	runID := fmt.Sprintf("native-tmux-missing-%d-%d", os.Getpid(), time.Now().UnixNano())
-	privateDir := tmuxExecDir("fixture", runID)
-	t.Cleanup(func() { os.RemoveAll(privateDir) })
-	wrapper, err := o.setupTmuxExec(ctx, "private-fixture", []string{"sh", "-c", "printf UNEXPECTED_TOOL"}, "fixture", runID, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(derivedPaths("fixture", runID)["env file"]); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(ctx, wrapper[0], wrapper[1:]...)
-	cmd.Env = nativeTmuxMissingClientEnv(t, env, home)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+	cmd := nativeTmuxCLICommand(t, ctx, []string{"sh", "-c", "printf NATIVE_FAILURE_STREAMED; exit 17"}, env, home, true)
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("tmux fallback reported success without starting the tool")
+	if ctx.Err() != nil {
+		t.Fatal("direct fallback blocked instead of streaming")
 	}
-	if strings.Contains(string(out), "UNEXPECTED_TOOL") {
-		t.Fatal("tool started despite a missing native environment snapshot")
+	failure, ok := err.(*exec.ExitError)
+	if !ok || failure.ExitCode() != 123 || !strings.Contains(string(out), "NATIVE_FAILURE_STREAMED") {
+		t.Fatal("fallback lost its output or the xargs nonzero exit receipt")
 	}
-	if _, err := os.Stat(privateDir); !os.IsNotExist(err) {
-		t.Fatal("failed bootstrap retained the private run directory")
+	if _, err := os.Stat(filepath.Join(home, ".crewship-tmux")); !os.IsNotExist(err) {
+		t.Fatal("failed fallback retained bootstrap files")
 	}
 }
 
@@ -143,7 +167,7 @@ func TestNativeTmuxRefusesExistingSetupDirectory(t *testing.T) {
 			defer cancel()
 			home := t.TempDir()
 			runID := fmt.Sprintf("native-tmux-collision-%d-%d", os.Getpid(), time.Now().UnixNano())
-			privateDir := tmuxExecDir("fixture", runID)
+			privateDir := filepath.Join(home, ".crewship-tmux")
 			target := privateDir
 			if symlink {
 				target = t.TempDir()
@@ -165,7 +189,7 @@ func TestNativeTmuxRefusesExistingSetupDirectory(t *testing.T) {
 			c := &nativeTmuxHostFixture{baseEnv: env}
 			c.inspectResult.exitCode = 0
 			o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-			if _, err := o.setupTmuxExec(ctx, "private-fixture", []string{"true"}, "fixture", runID, env); err == nil {
+			if _, err := o.setupTmuxExecAt(ctx, "private-fixture", []string{"true"}, "fixture", runID, env, privateDir); err == nil {
 				t.Fatal("existing directory or symlink was reused")
 			}
 			got, err := os.ReadFile(sentinel)
@@ -179,6 +203,85 @@ func TestNativeTmuxRefusesExistingSetupDirectory(t *testing.T) {
 	}
 }
 
+func TestNativeTmuxRefusalTeardownPreservesOutsideHome(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelled=%t", cancelled), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			home, outside := t.TempDir(), t.TempDir()
+			sentinel := filepath.Join(outside, "foreign-sentinel")
+			if err := os.WriteFile(sentinel, []byte("preserve-fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			privateDir := filepath.Join(home, ".crewship-tmux")
+			if err := os.Symlink(outside, privateDir); err != nil {
+				t.Fatal(err)
+			}
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+			c := &nativeTmuxHostFixture{baseEnv: env}
+			o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			runID := fmt.Sprintf("native-tmux-teardown-%d-%d", os.Getpid(), time.Now().UnixNano())
+			if _, err := o.setupTmuxExecAt(ctx, "private-fixture", []string{"true"}, "fixture", runID, env, privateDir); err == nil {
+				t.Fatal("symlink setup was accepted")
+			}
+			t.Cleanup(func() { os.Remove(directRunPIDFile(runID)) })
+			argv := []string{"sh", "-c", "printf DIRECT_FALLBACK_RAN"}
+			if cancelled {
+				argv = []string{"/bin/sleep", "60"}
+			}
+			command := directRunCommand(runID, argv)
+			direct := exec.CommandContext(ctx, command[0], command[1:]...)
+			direct.Env = env
+			if cancelled {
+				if err := direct.Start(); err != nil {
+					t.Fatal(err)
+				}
+				deadline := time.Now().Add(3 * time.Second)
+				for {
+					if _, err := os.Stat(directRunPIDFile(runID)); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("direct fallback did not publish its run identity")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				stop := exec.CommandContext(ctx, "sh", "-c", directRunProbe(runID, true))
+				stop.Env = env
+				out, err := stop.CombinedOutput()
+				if err != nil || strings.Contains(string(out), "UNKNOWN") {
+					t.Fatal("native stop could not verify the fixture's process group")
+				}
+				if err := direct.Wait(); err == nil || ctx.Err() != nil {
+					t.Fatal("direct fallback cancellation was not confirmed")
+				}
+			} else if out, err := direct.CombinedOutput(); err != nil || !strings.Contains(string(out), "DIRECT_FALLBACK_RAN") {
+				t.Fatal("native direct fallback did not complete")
+			}
+			// Execute the production HOME teardown with only its canonical
+			// fixture root remapped. Refuse future extra deletion targets here.
+			canonical := agentHomeDir("fixture", runID)
+			cleanup := buildRunHomeCleanupScript("fixture", runID)
+			if cleanup != "rm -rf '"+canonical+"'" {
+				t.Fatal("fixture cannot safely remap this cleanup program")
+			}
+			cleanup = strings.Replace(cleanup, canonical, home, 1)
+			remove := exec.CommandContext(ctx, "/bin/sh")
+			remove.Env = env
+			remove.Stdin = strings.NewReader(cleanup)
+			if err := remove.Run(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(home); !os.IsNotExist(err) {
+				t.Fatal("settled run retained its HOME")
+			}
+			if got, err := os.ReadFile(sentinel); err != nil || string(got) != "preserve-fixture" {
+				t.Fatal("run teardown followed a symlink outside its owned HOME")
+			}
+		})
+	}
+}
+
 func TestNativeTmuxCurrentRunCannotInheritRevokedToken(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Fatal("native tmux credential qualification requires tmux")
@@ -186,10 +289,11 @@ func TestNativeTmuxCurrentRunCannotInheritRevokedToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	t.Setenv("TMUX_TMPDIR", root)
+	socketRoot := nativeTmuxSocketRoot(t)
+	t.Setenv("TMUX_TMPDIR", socketRoot)
 	t.Setenv("TMUX", "")
 	t.Setenv("HOME", root)
-	baseEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "TMUX_TMPDIR=" + root, "TMUX="}
+	baseEnv := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "TMUX_TMPDIR=" + socketRoot, "TMUX="}
 	bin := filepath.Join(root, "bin")
 	if err := os.Mkdir(bin, 0700); err != nil {
 		t.Fatal(err)
@@ -235,21 +339,21 @@ func TestNativeTmuxCurrentRunCannotInheritRevokedToken(t *testing.T) {
 	container.inspectResult.exitCode = 0
 	o := New(container, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runID := fmt.Sprintf("native-tmux-%d-%d", os.Getpid(), time.Now().UnixNano())
-	privateDir = tmuxExecDir("fixture", runID)
+	privateDir = filepath.Join(root, ".crewship-tmux")
 	const opaque = "fixture 'quoted'\n$HOME stays literal\n"
 	opaqueHash := fmt.Sprintf("%x", sha256.Sum256([]byte(opaque)))
 	// PATH deliberately comes only from the image/fresh-exec fixture.
-	env := []string{"HOME=" + root, "TMUX_TMPDIR=" + root, "NATIVE_CURRENT_TOKEN=synthetic-current-token", "NATIVE_CURRENT_PATH=" + file, "NATIVE_CURRENT_OPAQUE=" + opaque}
+	env := []string{"HOME=" + root, "TMUX_TMPDIR=" + socketRoot, "NATIVE_CURRENT_TOKEN=synthetic-current-token", "NATIVE_CURRENT_PATH=" + file, "NATIVE_CURRENT_OPAQUE=" + opaque}
 	command := `test -z "${NATIVE_REVOKED_TOKEN+x}" && test -z "${NATIVE_REVOKED_PATH+x}" && test "$NATIVE_CURRENT_TOKEN" = synthetic-current-token && test "$(cat "$NATIVE_CURRENT_PATH")" = synthetic-file && native-tmux-tool && sh -c 'test "$NATIVE_CURRENT_TOKEN" = synthetic-current-token' && test "$(printf %s "$NATIVE_CURRENT_OPAQUE" | sha256sum | cut -d' ' -f1)" = ` + opaqueHash + ` && printf NATIVE_TMUX_OK`
-	wrapper, err := o.setupTmuxExec(ctx, "private-host-fixture", []string{"sh", "-c", command}, "fixture", runID, env)
+	wrapper, err := o.setupTmuxExecAt(ctx, "private-host-fixture", []string{"sh", "-c", command}, "fixture", runID, env, privateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(privateDir); err != nil || info.Mode().Perm() != 0700 {
 		t.Fatal("native tmux directory must be private mode0700")
 	}
-	for _, kind := range []string{"env file", "args file"} {
-		info, err := os.Stat(derivedPaths("fixture", runID)[kind])
+	for _, kind := range []string{"env", "args"} {
+		info, err := os.Stat(filepath.Join(privateDir, kind))
 		if err != nil || info.Mode().Perm() != 0600 {
 			t.Errorf("native tmux %s must be private mode0600", kind)
 		}
@@ -275,8 +379,8 @@ func TestNativeTmuxCurrentRunCannotInheritRevokedToken(t *testing.T) {
 	if _, err := os.Stat(shellMarker); !os.IsNotExist(err) {
 		t.Fatal("tmux invoked its inherited default-shell instead of direct argv")
 	}
-	for _, kind := range []string{"env file", "args file", "inner script", "FIFO", "exit file"} {
-		if _, err := os.Stat(derivedPaths("fixture", runID)[kind]); !os.IsNotExist(err) {
+	for _, kind := range []string{"env", "args", "run.sh", "output.fifo", "exit"} {
+		if _, err := os.Stat(filepath.Join(privateDir, kind)); !os.IsNotExist(err) {
 			t.Errorf("tmux %s survived completed run", kind)
 		}
 	}

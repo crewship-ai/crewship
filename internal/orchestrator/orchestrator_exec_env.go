@@ -152,6 +152,13 @@ func (o *Orchestrator) InvalidateTmuxCache(containerID string) {
 // outright. The kill-session is still here and still unconditional — it just
 // names this run's own session now, which no other run can be using.
 func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug, runID string, env []string) ([]string, error) {
+	return o.setupTmuxExecAt(ctx, containerID, cmd, agentSlug, runID, env, tmuxExecDir(agentSlug, runID))
+}
+
+// setupTmuxExecAt shares the production bootstrap with isolated host fixtures.
+// Production always supplies the canonical per-run HOME child above; no agent
+// environment or request field selects an arbitrary cleanup directory.
+func (o *Orchestrator) setupTmuxExecAt(ctx context.Context, containerID string, cmd []string, agentSlug, runID string, env []string, privateDir string) ([]string, error) {
 	// Fail closed rather than build a path out of an unchecked id. In a real
 	// run ensureRunID has already vetted this, so reaching here means a caller
 	// built an ExecConfig outside RunAgent — the one case where a bad id would
@@ -175,7 +182,7 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	} else {
 		checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
 			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1"},
+			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1 && /usr/bin/env -i /bin/sh -c 'exit 0'"},
 			User:        "1001:1001",
 		})
 		if checkErr != nil {
@@ -197,15 +204,14 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		}
 	}
 
-	// One run-scoped stem for all six file names and the wait-for channel, so
-	// none of them can drift back to being slug-keyed one at a time.
+	// Bootstrap files live inside the HOME this run already owns. Existing
+	// run-home settlement therefore covers failure/cancellation without guessing
+	// ownership of a separate predictable /tmp directory.
 	session := TmuxSessionName(agentSlug, runID)
-	privateDir := tmuxExecDir(agentSlug, runID)
 	argsFile := privateDir + "/args"
 	scriptFile := privateDir + "/run.sh"
 	fifo := privateDir + "/output.fifo"
 	exitFile := privateDir + "/exit"
-	doneSignal := session + "-done"
 	envFile := privateDir + "/env"
 
 	// One setup exec writes the args, fresh environment and inner script.
@@ -250,9 +256,22 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	// instruction, so the credentials are already gone by the time anything
 	// can kill it. The wrapper's own cleanup stays as a belt-and-braces pass —
 	// `rm -f` on an already-unlinked file is a no-op that exits 0.
-	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\nrm -f '%s'\n"+
-		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\nrm -f '%s'\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
-		envFile, envFile, argsFile, fifo, argsFile, exitFile, fifo, doneSignal)
+	// Hold the FIFO writer for the whole shell lifetime, including bootstrap
+	// failure and the exit-receipt trap. EOF therefore means the receipt has
+	// been written. Direct fallback streams to its caller without a FIFO.
+	scriptContent := fmt.Sprintf(`#!/bin/sh
+trap 'EC=$?; /bin/rm -f "%s" "%s"; printf "%%s\n" "$EC" > "%s"' 0
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+if [ "${1:-}" != direct ]; then exec > '%s' 2>&1; fi
+. '%s'
+rm -f '%s'
+EX=0
+xargs -0 stdbuf -oL < '%s' || EX=$?
+rm -f '%s'
+exit "$EX"
+`, envFile, argsFile, exitFile, fifo, envFile, envFile, argsFile, argsFile)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
 
 	// Refuse an existing directory instead of reusing a file or following a
@@ -290,14 +309,12 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		"tmux kill-session -t '%s' 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
 			"if tmux new-session -d -s '%s' -x 200 -y 50 /usr/bin/env -i /bin/sh '%s'; then "+
 			"cat '%s' 2>/dev/null; "+
-			"tmux wait-for '%s' 2>/dev/null || true; "+
-			"else /usr/bin/env -i /bin/sh '%s'; fi; "+
-			"EC=0; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
+			"else /usr/bin/env -i /bin/sh '%s' direct; fi; "+
+			"EC=1; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
 			"rm -rf -- '%s'; exit $EC",
 		session, fifo, exitFile, fifo,
 		session, scriptFile,
 		fifo,
-		doneSignal,
 		scriptFile,
 		exitFile, exitFile, exitFile,
 		privateDir,
@@ -305,8 +322,7 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	return []string{"sh", "-c", wrapper}, nil
 }
 
-// tmuxExecDir owns only the temporary files of one validated run. It is also
-// removed by retained run-home cleanup after failure or confirmed cancellation.
+// tmuxExecDir is inside one run's canonical HOME and shares its retained cleanup.
 func tmuxExecDir(agentSlug, runID string) string {
-	return "/tmp/" + TmuxSessionName(agentSlug, runID) + ".exec"
+	return agentHomeDir(agentSlug, runID) + "/.crewship-tmux"
 }

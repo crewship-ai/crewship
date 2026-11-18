@@ -85,7 +85,6 @@ func t07Paths(slug, runID string) map[string]string {
 		"inner script": directory + "/run.sh",
 		"FIFO":         directory + "/output.fifo",
 		"exit file":    directory + "/exit",
-		"wait-for":     session + "-done",
 		"HOME":         agentHomeDir(slug, runID),
 		"output dir":   agentRunOutputDir(slug, runID),
 		"secrets dir":  agentSecretsDir(slug, runID),
@@ -285,7 +284,7 @@ func TestT07_CancellingBDoesNotNameA(t *testing.T) {
 		t.Error("run B's wrapper does not kill its OWN session first")
 	}
 	// A's wrapper still reads A's own exit file, so A's outcome is its own.
-	if !strings.Contains(strings.Join(wrapperA, " "), "/tmp/"+TmuxSessionName(slug, "run-a")+".exit") {
+	if !strings.Contains(strings.Join(wrapperA, " "), tmuxExecDir(slug, "run-a")+"/exit") {
 		t.Error("run A's wrapper lost its own exit file")
 	}
 	// And A's credentials never appear anywhere in B's setup.

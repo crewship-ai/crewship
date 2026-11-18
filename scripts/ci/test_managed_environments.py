@@ -67,7 +67,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertEqual(launcher[-1], './internal/orchestrator')
         self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestCodexOuterActualNativeDocker|TestManagedLaunchRealDocker)$')
         self.assertNotIn('sudo', cli)
-        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxRefusesExistingSetupDirectory)$')
+        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy

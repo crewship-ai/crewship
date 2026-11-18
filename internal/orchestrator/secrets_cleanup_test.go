@@ -72,13 +72,13 @@ func TestBuildRunHomeCleanupScript(t *testing.T) {
 		slug, run string
 		want      string
 	}{
-		{"simple", "writer", "run-a", "rm -rf '/crew/runs/writer/run-a' '/tmp/agent-writer-run-a.exec'"},
+		{"simple", "writer", "run-a", "rm -rf '/crew/runs/writer/run-a'"},
 		// The onboarding setup crew's slugs lead with an underscore. The
 		// secrets cleanup's stricter charset refuses those, which would have
 		// meant the one crew every new install runs never cleaned up a run
 		// home — so this one uses validSlugRe instead.
 		{"leading underscore accepted", "_crewship-setup-guide", "run-a",
-			"rm -rf '/crew/runs/_crewship-setup-guide/run-a' '/tmp/agent-_crewship-setup-guide-run-a.exec'"},
+			"rm -rf '/crew/runs/_crewship-setup-guide/run-a'"},
 		{"empty slug refused", "", "run-a", ""},
 		{"traversal refused", "../agents", "run-a", ""},
 		{"quote injection refused", "a'b", "run-a", ""},

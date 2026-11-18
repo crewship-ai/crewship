@@ -244,7 +244,6 @@ func derivedPaths(slug, runID string) map[string]string {
 		"inner script": directory + "/run.sh",
 		"FIFO":         directory + "/output.fifo",
 		"exit file":    directory + "/exit",
-		"wait-for":     session + "-done",
 	}
 }
 
