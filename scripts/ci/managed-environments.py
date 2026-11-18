@@ -35,7 +35,7 @@ CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 PACKAGING_TESTS = {'internal/devcontainer': {'TestCodexNativePackaging'}}
 SDK_TESTS = {
     'internal/provider/docker': {'TestAgentCLIRealDockerCleanAndRetainedUpgrade'},
-    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab'},
+    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab', 'TestNativeContainerOutputCancellationAndOverflow', 'TestNativeCredentialFixtureUsesProductionBatchStdin'},
 }
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
@@ -182,6 +182,8 @@ REQUIRED.update((PREFIX + 'internal/devcontainer', 'TestCodexNativePackaging/' +
                 for mode in ('clean', 'upgrade'))
 REQUIRED.update((PREFIX + 'internal/provider/docker', 'TestAgentCLIRealDockerCleanAndRetainedUpgrade/' + mode)
                 for mode in ('clean', 'retained-upgrade'))
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeContainerOutputCancellationAndOverflow/' + mode)
+                for mode in ('cancel', 'overflow'))
 HOST_UID = 65534
 
 

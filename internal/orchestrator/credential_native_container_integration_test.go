@@ -27,6 +27,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -265,24 +266,29 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, err := io.ReadAll(io.LimitReader(result.Reader, 64<<10))
-		result.Reader.Close()
+		out, err := readNativeContainerOutput(ctx, result.Reader)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal("container output did not complete safely", err)
 		}
-		running, code, err := ctr.ExecInspect(ctx, result.ExecID)
-		for err == nil && running {
-			select {
-			case <-ctx.Done():
-				t.Fatal("fixture exec did not settle")
-			case <-time.After(20 * time.Millisecond):
-			}
-			running, code, err = ctr.ExecInspect(ctx, result.ExecID)
-		}
+		code, err := provider.WaitExecExit(ctx, ctr, result.ExecID, time.Second)
 		if err != nil || code != 0 {
 			t.Fatalf("container command failed (output withheld): code=%d error=%v", code, err)
 		}
 		return out
+	}
+	var probe buildinfo.AgentRuntimeProbe
+	if err := json.Unmarshal(run([]string{"/usr/local/bin/crewship", "agent-runtime-probe"}, nil, nil), &probe); err != nil {
+		t.Fatal("runtime SDK probe did not decode")
+	}
+	artifact, err := os.Open(sdk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.New()
+	_, hashErr := io.Copy(digest, artifact)
+	artifact.Close()
+	if hashErr != nil || probe.Protocol != 1 || probe.Commit != commit || probe.OS != "linux" || probe.Arch != runtime.GOARCH || probe.SHA256 != hex.EncodeToString(digest.Sum(nil)) {
+		t.Fatal("executing SDK did not match the fixture source artifact")
 	}
 	// Install only a standard test tool, never a credential helper or credential.
 	var archive bytes.Buffer
@@ -323,7 +329,7 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 	}
 	env = filtered
 	env = append(env, "HOME=/home/agent", "GLAB_CONFIG_DIR=/home/agent/fixture-glab", "GITLAB_HOST="+ctr.HostAddress()+fmt.Sprintf(":%d", port), "GLAB_API_PROTOCOL=http", "GLAB_CHECK_UPDATE=false", "GLAB_SEND_TELEMETRY=false", "GLAB_NO_PROMPT=true", "XDG_CONFIG_DIRS=/home/agent/fixture-system-config", "NO_PROXY=*", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=")
-	run([]string{"sh", "-c", fmt.Sprintf(`set -eu; test "$(sha256sum "$NATIVE_CONTAINER_FILE" | cut -d ' ' -f1)" = %x; test "$(sha256sum "$NATIVE_CONTAINER_LOGIN_PASSWORD" | cut -d ' ' -f1)" = %x; test "$(cat "$NATIVE_CONTAINER_LOGIN_USERNAME")" = fixture-user; test "$(stat -c %%a "$NATIVE_CONTAINER_LOGIN_PASSWORD")" = 400; sh -c 'test -f "$NATIVE_CONTAINER_FILE" && test -f "$NATIVE_CONTAINER_LOGIN_PASSWORD"'`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)))}, env, nil)
+	run([]string{"sh", "-c", fmt.Sprintf(`set -eu; test "$(id -u)" = 1001; test "$(sha256sum "$NATIVE_CONTAINER_FILE" | cut -d ' ' -f1)" = %x; test "$(sha256sum "$NATIVE_CONTAINER_LOGIN_PASSWORD" | cut -d ' ' -f1)" = %x; test "$(cat "$NATIVE_CONTAINER_LOGIN_USERNAME")" = fixture-user; test "$(stat -c %%a "$NATIVE_CONTAINER_LOGIN_PASSWORD")" = 400; test "$(stat -c %%a "$NATIVE_CONTAINER_LOGIN_USERNAME")" = 400; test "$(stat -c %%a "$NATIVE_CONTAINER_FILE")" = 400; sh -c 'test -f "$NATIVE_CONTAINER_FILE" && test -f "$NATIVE_CONTAINER_LOGIN_PASSWORD"'`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)))}, env, nil)
 	out := run([]string{"/opt/crew-tools/fixture-glab", "api", "user"}, env, nil)
 	if !bytes.Contains(out, []byte("fixture-container-user")) || authenticated.Load() != 1 {
 		t.Fatal("standard glab did not authenticate from native runtime env")
@@ -335,5 +341,41 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 		t.Fatal("native fixture grant cleanup failed")
 	}
 	run([]string{"rm", "-rf", secrets}, nil, nil)
-	t.Logf("native Vault->crew->glab PASS container=%s image=%s source=%s UID=1001; GENERIC_SECRET and USERPASS byte/permission checks PASS; no model CLI shell qualification", id, image.ID, commit)
+	t.Logf("native Vault->crew->glab PASS container=%s image=%s source=%s sdk_sha256=%s UID=1001; GENERIC_SECRET and USERPASS byte/permission checks PASS; no model CLI shell qualification", id, image.ID, commit, probe.SHA256)
+}
+
+// Close the attached stream on cancellation so the test can reach its scoped
+// cleanup, instead of waiting for the outer go-test process timeout.
+func readNativeContainerOutput(ctx context.Context, reader io.ReadCloser) ([]byte, error) {
+	stop := context.AfterFunc(ctx, func() { reader.Close() })
+	defer stop()
+	defer reader.Close()
+	const limit = 64 << 10
+	out, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > limit {
+		return nil, fmt.Errorf("fixture output exceeded bound")
+	}
+	return out, nil
+}
+func TestNativeContainerOutputCancellationAndOverflow(t *testing.T) {
+	t.Run("cancel", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		defer cancel()
+		reader, writer := io.Pipe()
+		defer writer.Close()
+		if _, err := readNativeContainerOutput(ctx, reader); err == nil {
+			t.Fatal("cancelled silent stream accepted")
+		}
+	})
+	t.Run("overflow", func(t *testing.T) {
+		if _, err := readNativeContainerOutput(t.Context(), io.NopCloser(strings.NewReader(strings.Repeat("x", (64<<10)+1)))); err == nil {
+			t.Fatal("truncated fixture output accepted")
+		}
+	})
 }
