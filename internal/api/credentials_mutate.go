@@ -1217,6 +1217,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A crew account rule exists only while the account may serve that crew.
+	if err := pruneBedrockCrewRules(r.Context(), tx, credID); err != nil {
+		tx.Rollback()
+		replyInternalError(w, h.logger, "prune Bedrock crew account rules", err)
+		return
+	}
 
 	// Inline value rewrite (Vercel-parity quick rotation) is logically
 	// a rotation — no grace overlap, but the timeline must still see

@@ -28,6 +28,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -441,29 +442,19 @@ func validateEndpointURL(value string) string {
 // Update path's merged-payload validation so the messages stay
 // byte-identical.
 //
-// PEM gate keeps obviously-wrong pastes out of the vault — the most
-// common mistake is pasting an OpenSSH public key (ssh-rsa AAAA...)
-// into the private-key field. We don't fully parse the key here;
-// ssh.ParsePrivateKey lives in the sidecar's mount path where a bad
-// key surfaces as a container-start error the operator can correlate.
+// Parsing is shared with native material normalization. Validation errors never
+// contain a credential value. The stored text is preserved; canonical text is
+// rendered only when delivered to the native file.
 func credentialValueShapeError(credType CredentialType, value string) string {
-	switch credType {
-	case CredTypeSSHKey:
-		if !looksLikePEM(value, "PRIVATE KEY") {
-			return "ssh key must be a PEM-encoded private key (begins with -----BEGIN ... PRIVATE KEY-----)"
-		}
-	case CredTypeCertificate:
-		if !looksLikePEM(value, "CERTIFICATE") {
-			return "certificate must be PEM-encoded (begins with -----BEGIN CERTIFICATE-----)"
-		}
+	if err := credpolicy.ValidateFileValue(credType, value); err != nil {
+		return err.Error()
 	}
 	return ""
 }
 
 // looksLikePEM is a deliberately cheap structural check, not a parser.
-// Real PEM validation happens at mount time in the sidecar — this is
-// just there to catch finger-slip mistakes (wrong field, wrong key
-// type) at submit time instead of at agent-run time.
+// Native writes use ValidateFileValue instead; this structural helper is
+// retained for the legacy marker regression coverage.
 //
 // `marker` is the PEM type label, e.g. "PRIVATE KEY" or "CERTIFICATE".
 // For private keys we accept both "PRIVATE KEY" and "RSA PRIVATE KEY"

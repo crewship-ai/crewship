@@ -288,9 +288,13 @@ func runHostCaptureDockerQualification(t *testing.T, scenario string, stopTarget
 			t.Fatal("probe flag absent from built sidecar")
 		}
 		binary = bytes.ReplaceAll(binary, currentFlag, oldFlag)
-		if err = os.WriteFile(cfg.SidecarBinaryPath, binary, 0755); err != nil {
+		// Model an old deployment with its own source/generation; never mutate
+		// a digest-addressed launcher still bound by another runtime.
+		oldSource := filepath.Join(root, "old-sidecar")
+		if err = os.WriteFile(oldSource, binary, 0755); err != nil {
 			t.Fatal(err)
 		}
+		cfg = stageRuntimeArtifacts(Config{OutputBasePath: filepath.Join(root, "data"), SidecarBinaryPath: oldSource, EntrypointPath: entrypoint}, quietLogger())
 	}
 	p := &Provider{client: cli, cfg: cfg, logger: quietLogger()}
 	p.detected.Host = cli.DaemonHost()

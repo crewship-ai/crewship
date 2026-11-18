@@ -433,16 +433,17 @@ type crewResponse struct {
 	// AllowPrivateEndpoints (#961) opts this crew into reaching a
 	// private/LAN model endpoint (RFC1918/loopback); link-local/metadata
 	// stay blocked regardless. Default false = strict SSRF fence.
-	AllowPrivateEndpoints bool                 `json:"allow_private_endpoints"`
-	MCPConfigJSON         *string              `json:"mcp_config_json,omitempty"`
-	EscalationConfig      *string              `json:"escalation_config,omitempty"`
-	RuntimeImage          *string              `json:"runtime_image,omitempty"`
-	DevcontainerConfig    *string              `json:"devcontainer_config,omitempty"`
-	MiseConfig            *string              `json:"mise_config,omitempty"`
-	ServicesJSON          *publicServiceConfig `json:"services_json,omitempty"`
-	CachedImage           *string              `json:"cached_image,omitempty"`
-	ConfigHash            *string              `json:"config_hash,omitempty"`
-	IssuePrefix           *string              `json:"issue_prefix"`
+	AllowPrivateEndpoints  bool                 `json:"allow_private_endpoints"`
+	AllowCodexOuterSandbox bool                 `json:"allow_codex_outer_sandbox"`
+	MCPConfigJSON          *string              `json:"mcp_config_json,omitempty"`
+	EscalationConfig       *string              `json:"escalation_config,omitempty"`
+	RuntimeImage           *string              `json:"runtime_image,omitempty"`
+	DevcontainerConfig     *string              `json:"devcontainer_config,omitempty"`
+	MiseConfig             *string              `json:"mise_config,omitempty"`
+	ServicesJSON           *publicServiceConfig `json:"services_json,omitempty"`
+	CachedImage            *string              `json:"cached_image,omitempty"`
+	ConfigHash             *string              `json:"config_hash,omitempty"`
+	IssuePrefix            *string              `json:"issue_prefix"`
 	// MaxEphemeralAgents is the per-crew quota enforced by the hire
 	// flow (see agents_hire.go). Surfaced on the crew response so the
 	// PR-G policy panel can render + PATCH it without a second fetch.
@@ -476,7 +477,7 @@ func scanCrewRow(sc interface{ Scan(...any) error }, c *crewResponse, withIssueP
 	dest := make([]any, 0, 28)
 	dest = append(dest, &c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints,
+		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON, &c.AllowPrivateEndpoints, &c.AllowCodexOuterSandbox,
 		&c.MCPConfigJSON, &c.EscalationConfig)
 	if withIssuePrefix {
 		dest = append(dest, &c.IssuePrefix)

@@ -18,6 +18,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/base64"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"strings"
 	"testing"
 )
@@ -123,7 +124,7 @@ func TestPreparePreflightDirs_OAuthMCPBindingDoesNotAbortAFileCredRun(t *testing
 		delivered.WriteString(strings.Join(e.cfg.Cmd, " "))
 	}
 	joined := delivered.String()
-	for name, value := range map[string]string{"GH_TOKEN": cliToken, "DEPLOY_KEY": sshKey} {
+	for name, value := range map[string]string{"GH_TOKEN": cliToken, "DEPLOY_KEY": credpolicy.FileValue("SSH_KEY", sshKey)} {
 		if !strings.Contains(joined, base64.StdEncoding.EncodeToString([]byte(value))) {
 			t.Errorf("%s never reached the container — the run started but the "+
 				"credential batch is still being abandoned", name)

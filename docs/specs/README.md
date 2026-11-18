@@ -78,6 +78,7 @@ public contract here. Superseded a spec? Move it to
   read-only restricted native mounts.
 
 - [Managed CLI launch](managed-cli-launch.md): explicit static native pilot, executable hashes and lock-bound admission.
+- [Codex outer isolation](codex-outer-sandbox.md): default-off crew consent, actual runtime controls, trusted launcher enforcement and qualification limits.
 
 ## Storage and lifecycle
 

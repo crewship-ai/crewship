@@ -1,0 +1,1 @@
+- **Credential create/update could report authentication success for an unsupported test (#5470).** The CLI now distinguishes a successful supported probe from structural acceptance or an older response without probe support metadata, warns when authentication remains unverified, and preserves invalid-key confirmation behavior.

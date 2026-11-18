@@ -77,14 +77,14 @@ func (rec *t07Recorder) textFor(runID string) string {
 // silent cross-run collision.
 func t07Paths(slug, runID string) map[string]string {
 	session := TmuxSessionName(slug, runID)
+	directory := tmuxExecDir(slug, runID)
 	return map[string]string{
 		"tmux session": session,
-		"args file":    "/tmp/" + session + ".args",
-		"env file":     "/tmp/" + session + ".env",
-		"inner script": "/tmp/" + session + ".sh",
-		"FIFO":         "/tmp/" + session + ".fifo",
-		"exit file":    "/tmp/" + session + ".exit",
-		"wait-for":     session + "-done",
+		"args file":    directory + "/args",
+		"env file":     directory + "/env",
+		"inner script": directory + "/run.sh",
+		"FIFO":         directory + "/output.fifo",
+		"exit file":    directory + "/exit",
 		"HOME":         agentHomeDir(slug, runID),
 		"output dir":   agentRunOutputDir(slug, runID),
 		"secrets dir":  agentSecretsDir(slug, runID),
@@ -280,11 +280,11 @@ func TestT07_CancellingBDoesNotNameA(t *testing.T) {
 	if strings.Contains(fromB, TmuxSessionName(slug, "run-a")) {
 		t.Errorf("run B's setup names run A's session:\n%s", fromB)
 	}
-	if !strings.Contains(strings.Join(wrapperB, " "), "tmux kill-session -t '"+TmuxSessionName(slug, "run-b")+"'") {
+	if !strings.Contains(strings.Join(wrapperB, " "), "tmux kill-session -t '="+TmuxSessionName(slug, "run-b")+"'") {
 		t.Error("run B's wrapper does not kill its OWN session first")
 	}
 	// A's wrapper still reads A's own exit file, so A's outcome is its own.
-	if !strings.Contains(strings.Join(wrapperA, " "), "/tmp/"+TmuxSessionName(slug, "run-a")+".exit") {
+	if !strings.Contains(strings.Join(wrapperA, " "), tmuxExecDir(slug, "run-a")+"/exit") {
 		t.Error("run A's wrapper lost its own exit file")
 	}
 	// And A's credentials never appear anywhere in B's setup.

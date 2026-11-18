@@ -146,7 +146,7 @@ func TestCovCMCreate_SSHKeyPEMSuccess(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	pem := pemFixture("OPENSSH PRIVATE KEY", "abc123")
+	pem, _, _, _ := validCredentialPEMs(t)
 	body, _ := json.Marshal(map[string]any{
 		"name": "sshk", "value": pem, "type": "SSH_KEY",
 	})

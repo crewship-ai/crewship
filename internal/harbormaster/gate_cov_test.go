@@ -299,26 +299,22 @@ func TestGate_DeadlineRaceReturnsActualDecision(t *testing.T) {
 	ctx := context.Background()
 	rec := &hookEmitter{}
 
-	var approveOnce sync.Once
-	hooked := &hookEmitter{hookOn: journal.EntryApprovalRequest, hook: func() {
-		// Approve out-of-band well before the 1s client deadline. The huge
-		// PollInterval guarantees no poll observes it first — only the
-		// deadline-fire re-check can.
-		time.AfterFunc(100*time.Millisecond, func() {
-			approveOnce.Do(func() {
-				rows, err := List(ctx, db, "ws_test", StatusPending, 10)
-				if err != nil || len(rows) == 0 {
-					t.Errorf("list pending: %v (%d rows)", err, len(rows))
-					return
-				}
-				if err := Decide(ctx, db, rec, "ws_test", rows[0].ID, StatusApproved, "alice", "late"); err != nil {
-					t.Errorf("decide: %v", err)
-				}
-			})
-		})
-	}}
+	// Publish the competing approval exactly when the timeout UPDATE runs.
+	// RAISE(IGNORE) preserves the trigger's update while making the outer
+	// UPDATE affect zero rows, forcing Gate's deadline re-check. No timer
+	// callback can lose a scheduler race or outlive this test.
+	if _, err := db.Exec(`CREATE TRIGGER approve_on_deadline
+		BEFORE UPDATE OF status ON approvals_queue
+		WHEN OLD.status = 'pending' AND NEW.status = 'timeout'
+		BEGIN
+			UPDATE approvals_queue SET status = 'approved', decided_by = 'alice', decision_comment = 'late'
+			WHERE id = OLD.id;
+			SELECT RAISE(IGNORE);
+		END;`); err != nil {
+		t.Fatal(err)
+	}
 
-	dec, err := Gate(ctx, db, hooked, NewEvaluatorWithDefaults(), GateInput{
+	dec, err := Gate(ctx, db, rec, NewEvaluatorWithDefaults(), GateInput{
 		Mode:         ModeSync,
 		Tool:         "deploy_prod",
 		WorkspaceID:  "ws_test",
@@ -331,6 +327,12 @@ func TestGate_DeadlineRaceReturnsActualDecision(t *testing.T) {
 	}
 	if !dec.Approved || dec.TimedOut {
 		t.Fatalf("expected the real approval, not a timeout: %+v", dec)
+	}
+	if dec.Comment != "late" {
+		t.Errorf("decision comment = %q, want late", dec.Comment)
+	}
+	if rec.hasType(journal.EntryApprovalTimeout) {
+		t.Error("approved request emitted a false timeout")
 	}
 	if dec.DecidedBy != "alice" {
 		t.Errorf("decided_by = %q, want alice", dec.DecidedBy)

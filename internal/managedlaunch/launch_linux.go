@@ -61,6 +61,11 @@ func Launch(encoded string, args []string) error {
 	// Read-only root and mount attestation prevent in-place inode writes.
 	// Execute the exact descriptor whose bytes were verified, never reopen
 	// its pathname (which could now resolve to a different inode).
+	if d.OuterSandbox {
+		if err := assertOuterKernelControls(); err != nil {
+			return err
+		}
+	}
 	return execVerifiedFile(f, argv, env)
 }
 

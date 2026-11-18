@@ -66,3 +66,32 @@ for (const scenario of [
     expect(reveals).toBe(1)
   })
 }
+
+// Same isolated static-export fixture as reveal; this never reads a real value.
+test("Native delivery Activity shows its run without claiming authentication", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const credential = { id: "native-delivery", name: "Synthetic SSH fixture", type: "SSH_KEY", provider: "NONE", status: "ACTIVE", scope: "WORKSPACE", tags: [], crew_ids: [], agent_names: [], last_used_at: null, last_used_ips: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", security_level: 3, sensitivity: "STANDARD", _count_agent_credentials: 0 }
+  const common = { agent_id: "fixture-agent", actor_kind: "agent", actor_id: "fixture-agent", actor_name: "Fixture agent", ip_address: null, occurred_at: "2026-09-01T00:00:00Z" }
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname
+    let body: unknown = []
+    if (path === "/api/auth/session") body = { user: { id: "user", email: "fixture@example.test" }, expires: "2099-01-01T00:00:00Z" }
+    else if (path === "/api/v1/workspaces") body = [{ id: "ws", name: "Fixture", slug: "fixture", currentUserRole: "OWNER", currentUserCapabilities: [] }]
+    else if (path === "/api/v1/credentials") body = [credential]
+    else if (path === "/api/v1/credentials/native-delivery") body = credential
+    else if (path === "/api/v1/credentials/native-delivery/access/me") body = { actions: { read: { state: "allowed", reason: "role" }, edit: { state: "allowed", reason: "role" } } }
+    else if (path === "/api/v1/credentials/native-delivery/audit") body = [
+      { ...common, id: "delivered", event_type: "DELIVERED", metadata: { channel: "file", run_id: "msg_123_fixture", authentication: "unknown", value: "never-render-synthetic-secret" } },
+      { ...common, id: "fetch", event_type: "USE", metadata: { source: "sidecar_fetch" } },
+    ]
+    else if (/settings|config|health/.test(path)) body = {}
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+  })
+  await page.goto("/credentials?id=native-delivery&tab=activity")
+  const entity = page.locator("[data-slot=secret-page]")
+  await expect(entity.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true")
+  await expect(entity.getByText("Run msg_123_fixture", { exact: true })).toBeVisible()
+  await expect(entity.getByText("File delivered · Authentication unverified", { exact: true })).toBeVisible()
+  await expect(entity.getByText("Sidecar fetch · Authentication unverified", { exact: true })).toBeVisible()
+  await expect(page.getByText("never-render-synthetic-secret")).toHaveCount(0)
+})

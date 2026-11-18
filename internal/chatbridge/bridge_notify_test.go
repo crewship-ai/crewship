@@ -115,7 +115,7 @@ func (c *detachedReplyContainer) ExecInspect(_ context.Context, id string) (bool
 	return id == "agent-exec", 0, nil
 }
 func (c *detachedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM $group_separator") {
+	if len(cfg.Env) == 0 && strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM $group_separator") {
 		if c.onStop != nil {
 			c.onStop()
 		}
@@ -126,7 +126,7 @@ func (c *detachedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConf
 		return &provider.ExecResult{ExecID: "stop", Reader: io.NopCloser(strings.NewReader(out))}, nil
 	}
 	// The runtime exits on the first subsequent watcher probe.
-	if strings.Contains(strings.Join(cfg.Cmd, " "), "command -v tmux") {
+	if len(cfg.Env) == 0 && strings.Contains(strings.Join(cfg.Cmd, " "), "command -v tmux") {
 		return &provider.ExecResult{ExecID: "probe", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
 	}
 	return c.scriptedContainer.Exec(ctx, cfg)
@@ -194,7 +194,7 @@ type unconfirmedReplyContainer struct {
 }
 
 func (c *unconfirmedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Env) > 0 && c.cancel != nil {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil && c.cancel != nil {
 		c.cancel()
 	}
 	return c.scriptedContainer.Exec(ctx, cfg)

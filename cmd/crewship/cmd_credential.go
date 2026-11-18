@@ -470,23 +470,12 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 	return "", cli.NotFoundf("credential %q not found", nameOrID)
 }
 
-// testCredentialValue validates a credential value against the provider API.
-// Returns (valid, errorMessage). Skips the test only where there is genuinely
-// nothing to ask: an opaque SECRET, or no provider to ask.
-//
-// It used to short-circuit sk-ant-oat tokens here too, on the claim that OAuth
-// tokens "cannot be validated via API". That claim was wrong on the server
-// (probeAnthropicCredential authenticates exactly this shape against
-// /v1/messages) and the server side has been fixed — but this branch made the
-// fix invisible from the CLI, which is where `crewship credential create`
-// reports to the operator. Creating a credential with a fabricated
-// sk-ant-oat value printed "Key validated successfully" having contacted
-// nothing.
-//
-// A check that cannot run must not report success. Here it can run, so it does.
-func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, string) {
+// testCredentialValue returns (valid, authenticationSupported, errorMessage).
+// Structural acceptance is distinct from a successful authentication probe.
+// Older responses without supported also cannot substantiate authentication.
+func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, bool, string) {
 	if credType == "SECRET" || provider == "" || provider == "NONE" {
-		return true, ""
+		return true, false, ""
 	}
 
 	body := map[string]interface{}{
@@ -496,21 +485,22 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 	}
 	resp, err := client.Post("/api/v1/credentials/test", body)
 	if err != nil {
-		return false, "test request failed: " + err.Error()
+		return false, false, "test request failed: " + err.Error()
 	}
 	defer resp.Body.Close()
 	if err := cli.CheckError(resp); err != nil {
-		return false, "test request failed: " + err.Error()
+		return false, false, "test request failed: " + err.Error()
 	}
 
 	var result struct {
-		Valid bool   `json:"valid" yaml:"valid"`
-		Error string `json:"error" yaml:"error"`
+		Valid     bool   `json:"valid" yaml:"valid"`
+		Supported bool   `json:"supported" yaml:"supported"`
+		Error     string `json:"error" yaml:"error"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
-		return false, "failed to read test result"
+		return false, false, "failed to read test result"
 	}
-	return result.Valid, result.Error
+	return result.Valid, result.Supported, result.Error
 }
 
 // confirmInvalidKey prompts the user to confirm saving an invalid credential.
@@ -884,8 +874,10 @@ func init() {
 	credListCmd.Flags().Int("offset", 0, "Rows to skip before the first one shown (positional paging; not with --all/--cursor)")
 
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
-	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL|PROVIDER_LOGIN (required)")
+	credCreateCmd.Flags().String("type", "", "Type: SECRET|GENERIC_SECRET|CLI_TOKEN|USERPASS|SSH_KEY|CERTIFICATE|API_KEY|AI_CLI_TOKEN|PROVIDER_LOGIN|OAUTH2|ENDPOINT_URL (required)")
 	credCreateCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp())
+	credCreateCmd.Flags().String("username", "", "Username for USERPASS credentials (required for that type)")
+	credCreateCmd.Flags().Bool("password-stdin", false, "Read the USERPASS password from stdin verbatim; never put passwords in command arguments")
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("from-file", "", "Read the value from a file — the whole ~/.codex/auth.json for a ChatGPT login (--type PROVIDER_LOGIN --provider OPENAI)")
@@ -911,6 +903,8 @@ func init() {
 
 	credCreateCmd.Flags().String("folder", "", "File the credential in this Vault folder (name, Parent/Child path or id)")
 	credUpdateCmd.Flags().String("folder", "", "Move the credential to this Vault folder; pass an empty value to take it out of its folder. Moving into or out of a folder with a reveal policy or tier floor needs OWNER or ADMIN")
+	credUpdateCmd.Flags().String("username", "", "Replace the USERPASS username identifier")
+	credUpdateCmd.Flags().Bool("password-stdin", false, "Read a USERPASS password from stdin verbatim")
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
@@ -934,6 +928,7 @@ func init() {
 	credDefaultEnvVarCmd.Flags().String("provider", "", "Provider: GITHUB|GITLAB|VERCEL|AWS|KUBERNETES (required)")
 
 	credRotateCmd.Flags().String("value", "", "New credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
+	credRotateCmd.Flags().Bool("password-stdin", false, "Read a USERPASS password from stdin verbatim")
 	credRotateCmd.Flags().Bool("value-stdin", false, "Read new value from stdin (secure)")
 	credRotateCmd.Flags().String("auth-token", "", "Endpoint-storing credentials only (type ENDPOINT_URL, or a provider whose endpoint comes from the credential): new bearer token, merged over the stored value so the endpoint and headers survive. Prefer --auth-token-stdin: an argument is visible to anything that can read the process table")
 	credRotateCmd.Flags().Bool("auth-token-stdin", false, "Read the new bearer token from stdin instead of --auth-token, so it never appears in argv")

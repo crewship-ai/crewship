@@ -1,0 +1,28 @@
+# OSV Scanner exceptions for the root lockfiles (go.mod, pnpm-lock.yaml);
+# see .github/workflows/security.yml, job osv-scan. osv-scanner reads the
+# osv-scanner.toml next to each lockfile, so tools/pages-build/osv-scanner.toml
+# carries the same entry for that lockfile.
+#
+# Every entry is time-boxed: when ignoreUntil passes, the advisory blocks the
+# gate again. Extend only with a fresh justification; remove the entry once a
+# fixed version is in the lockfiles. Keep ignoreUntil at most 90 days ahead;
+# a CI check of that shape is tracked in #5453.
+
+[[IgnoredVulns]]
+# picomatch ReDoS through single-branch repeated extglobs (#5449). Rescored
+# High on 2026-11-17; every version up to 4.0.7 is affected and no fixed
+# version is published.
+#
+# Reach: build and test tooling (vite, vitest, rollup plugins,
+# tinyglobby/fdir, @parcel/watcher); it is not in the Go binary or the
+# embedded UI bundle. The one place it sees patterns we do not write is the
+# Pages preview builder (tools/pages-build): user source may call
+# import.meta.glob. That compile runs in a throwaway container with 1 CPU,
+# 1 GiB, no network and a 120 s KILL (internal/pagebuild/docker.go). The
+# instance has one Pages build slot (internal/api/pages_build.go) and other
+# builds get 429 while it is busy, so a signed-in user resubmitting such a
+# build can keep Pages previews unavailable; any slow build already can.
+# The server process itself is not affected.
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17T00:00:00Z
+reason = "picomatch ReDoS, no fix published; build tooling and the sandboxed Pages builder only (#5449)"

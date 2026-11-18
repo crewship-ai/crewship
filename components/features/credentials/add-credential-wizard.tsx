@@ -48,6 +48,7 @@ import { runnerFits } from "@/lib/credentials/provider-logins"
 import { bedrockAccountValue, bedrockEntryError, bedrockModels } from "@/lib/credentials/bedrock"
 import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
+import { BedrockAccountFields } from "./bedrock-account-fields"
 import {
   brandColor, detectBrandFromName, detectBrandFromValue, getBrand,
 } from "@/lib/credential-providers/registry"
@@ -295,9 +296,10 @@ export function AddCredentialWizard({
   const pasteDetection = React.useMemo(() => detectPastedValue(pasteDraft), [pasteDraft])
   function takePasted(value: string) {
     const det = detectPastedValue(value)
-    setItemTypeKey("TOKEN")
+    const pemLabel = value.match(/^\s*-----BEGIN ([A-Z0-9 ]+)-----/)?.[1]
+    setItemTypeKey(pemLabel?.endsWith("PRIVATE KEY") ? "SSH_KEY" : pemLabel === "CERTIFICATE" ? "CERTIFICATE" : "TOKEN")
     setChosenType(true)
-    setPrimaryValue(value.trim())
+    setPrimaryValue(value)
     setExtras({})
     setCustom([])
     if (det && !nameTouched.current) setName(det.suggestedName)
@@ -1051,10 +1053,8 @@ export function AddCredentialWizard({
                 )}
                 </div>
                 {isBedrock && <div className="space-y-3">
-                  <CreateSurfaceField label="AWS region" htmlFor="bedrock-region"><Input id="bedrock-region" value={extras.bedrock_region ?? ""} placeholder="eu-central-1" onChange={(e) => setExtras({...extras,bedrock_region:e.target.value})} /></CreateSurfaceField>
-                  <CreateSurfaceField label="Permitted Bedrock model IDs" htmlFor="bedrock-models"><Textarea id="bedrock-models" value={extras.bedrock_models ?? ""} placeholder="eu.anthropic.claude-opus-5-5" onChange={(e) => setExtras({...extras,bedrock_models:e.target.value})} /><CardNote>Enter native model IDs, one per line. Use the exact regional inference profile ID available in your AWS account.</CardNote></CreateSurfaceField>
-                  <CreateSurfaceField label="Key expires at" htmlFor="bedrock-expiry"><Input id="bedrock-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} /></CreateSurfaceField>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={bedrockEUOnly} onChange={(e) => setExtras({...extras,bedrock_eu_only:String(e.target.checked)})} />Restrict OpenCode to EU Bedrock profiles</label>
+                  <BedrockAccountFields region={extras.bedrock_region ?? ""} models={extras.bedrock_models ?? ""} euOnly={bedrockEUOnly} onChange={(next) => setExtras({...extras, ...(next.region !== undefined ? {bedrock_region: next.region} : {}), ...(next.models !== undefined ? {bedrock_models: next.models} : {}), ...(next.euOnly !== undefined ? {bedrock_eu_only: String(next.euOnly)} : {})})} />
+                  <CreateSurfaceField label="Key expires at" htmlFor="bedrock-expiry" hint="Optional. Leave empty for a long-term key; short-term keys stop working at this time."><Input id="bedrock-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} /></CreateSurfaceField>
                   <CardNote>Bedrock API key authentication · automatic renewal is not available. Test makes a minimal billable request to each permitted model. Saving alone does not verify model access.</CardNote>
                 </div>}
                 {attempted && valueError && <p role="alert" className="text-xs text-destructive">{valueError}</p>}

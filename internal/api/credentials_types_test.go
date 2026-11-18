@@ -1,8 +1,18 @@
 package api
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // pemFixture builds a fake PEM block at runtime. Used by tests so the
@@ -20,16 +30,7 @@ func TestValidateCredentialPayload(t *testing.T) {
 	username := "user@gmail.com"
 	emptyUsername := "   "
 
-	// PEM fixtures are assembled at runtime so the obvious "BEGIN ...
-	// PRIVATE KEY" literal never appears contiguously in source —
-	// otherwise gitleaks' private-key rule treats the test data as a
-	// real leaked key and blocks the commit. The bodies are deliberately
-	// truncated ("…" placeholders) so even if a future scanner is
-	// smarter, there's nothing to actually decrypt.
-	sshPEM := pemFixture("OPENSSH PRIVATE KEY", "b3BlbnNzaC1rZXktdjEAAAAA…")
-	rsaPEM := pemFixture("RSA PRIVATE KEY", "MIIEpAIBAAKCAQEA0Z3VS5…")
-	pkcs8PEM := pemFixture("PRIVATE KEY", "MIIEvAIBADANBgkqhkiG9w0…")
-	certPEM := pemFixture("CERTIFICATE", "MIIDazCCAlOgAwIBAgIUJTd…")
+	sshPEM, rsaPEM, pkcs8PEM, certPEM := validCredentialPEMs(t)
 
 	// Common mistake we explicitly want to catch: pasting a public key
 	// where a private key is expected.
@@ -454,4 +455,31 @@ func TestLooksLikePEM(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Generate synthetic material at runtime; no private key is committed.
+func validCredentialPEMs(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(key, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "fixture"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(block)), string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey)})), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})), string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
