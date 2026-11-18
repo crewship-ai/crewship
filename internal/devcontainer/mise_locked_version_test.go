@@ -19,3 +19,21 @@ func TestManagedLockedVersionRequiresCanonicalNativeEvidence(t *testing.T) {
 		t.Fatalf("native version=%s %v", version, err)
 	}
 }
+
+// Native mise2026.11.9 creates v4 locks; v4 adds npm provenance without
+// changing the canonical tool/version tables needed by managed launch.
+func TestManagedLockedVersionAcceptsNativeV4AndRejectsUnknownSchemas(t *testing.T) {
+	for _, schema := range []string{"3", "4"} {
+		raw := "lockfile_version = " + schema + "\n[[tools.codex]]\nversion = \"0.169.0\"\nbackend = \"aqua:openai/codex\"\nspecifiers = [\"0.169.0\"]\n[tools.codex.\"platforms.linux-x64\"]\nchecksum = \"sha256:synthetic-fixture\"\nurl = \"https://example.invalid/codex.tar.gz\"\n"
+		got, err := LockedToolVersion(&MiseLockBundle{SchemaVersion: 1, Files: map[string]string{"mise.lock": raw}}, "codex")
+		if err != nil || got != "0.169.0" {
+			t.Fatalf("native schema%s: version=%q err=%v", schema, got, err)
+		}
+	}
+	for _, header := range []string{"lockfile_version = 5", "lockfile_version = 40", "lockfile_version = 0", "lockfile_version = 4\nlockfile_version = 3"} {
+		raw := header + "\n[[tools.codex]]\nversion = \"0.169.0\"\n"
+		if _, err := LockedToolVersion(&MiseLockBundle{SchemaVersion: 1, Files: map[string]string{"mise.lock": raw}}, "codex"); err == nil {
+			t.Fatalf("unsupported/ambiguous schema accepted: %s", header)
+		}
+	}
+}
