@@ -107,6 +107,7 @@ with the same `crewship crew provision` / `crewship crew rebuild` commands.
     make build:sidecar
     # Produces:
     #   ./crewship-sidecar        (the Go binary)
+    #   ./crewship-agent-cli      (matching static Linux native client)
     #   ./entrypoint.sh           (init script, copied from scripts/entrypoint.sh)
     ```
 
@@ -121,6 +122,16 @@ with the same `crewship crew provision` / `crewship crew rebuild` commands.
     - `/usr/local/share/crewship/entrypoint.sh`
 
     Override explicitly with `CREWSHIP_SIDECAR_PATH` / `CREWSHIP_ENTRYPOINT_PATH`.
+
+    The packaged native client is discovered beside the server or in the
+    installation's libexec directory. `CREWSHIP_AGENT_CLI_PATH` selects an
+    explicit trusted copy. The Docker runtime binds a digest-named generation
+    read-only at `/usr/local/bin/crewship`; a different build or missing native
+    command refuses readiness. Existing runtimes wait for their active crew
+    uses to finish before recreation, preserving named home/tools volumes.
+    Read-only SDK delivery does not isolate agents that share UID 1001, nor
+    hide credential values from a process that can read their env or files.
+
   </Step>
 
   <Step title="Verify fail-fast is in effect">
@@ -969,3 +980,16 @@ offering controls that would discard it. Edit that configuration through your
 Crew manifest or CLI; the raw runtime editor keeps unsupported source read-only.
 Supported JSON edits preserve other fields, including environment, lock and
 CLI-check policy. A rejected raw edit applies neither configuration document.
+
+Full-server self-update requires the archive to include `crewship-agent-cli`.
+It rejects incomplete archives and older full archives without this companion
+before changing installed files. Rollback restores the previous server and the
+previous absence of a newly introduced companion. CLI-only updates keep their
+existing archive contract.
+
+The native client runtime qualification currently covers Linux hosts with the
+Docker provider. It supplies the canonical `/usr/local/bin/crewship` executable
+needed by native Keeper commands; agents do not install or update their own
+copy. Windows host ACL custody, Docker Desktop host path qualification and the
+Apple container provider require separate platform qualification. Packaging a
+Linux companion in an archive does not establish those runtime guarantees.

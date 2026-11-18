@@ -79,6 +79,7 @@ current HTTP boundary and acceptance limitations.
 | `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
 | `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |
 | `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute host path to `entrypoint.sh`. |
+| `CREWSHIP_AGENT_CLI_PATH` | autodetected | Trusted host path to the matching static Linux `crewship-agent-cli` companion. Full distributions bundle it; the runtime stages an immutable generation and verifies its actual executing digest, source commit and required commands before reporting readiness. |
 | `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast autodetect (tests only — never set in production). |
 | `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE` | (unset — fail closed) | Set to `1`/`true` to let a crew container start from a **known-stale** local image — whether the registry pull failed or the pull succeeded but the local tag could not be moved onto it. See [Runtime image pinning](#runtime-image-pinning) below. |
 

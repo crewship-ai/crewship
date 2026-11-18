@@ -11,6 +11,7 @@ it is safe against a shared development instance.
 | --- | --- | --- |
 | Start development | `./dev.sh start` | Starts the instance's Go/Next.js services; use `status` to inspect first |
 | Build a release-style binary | `make build` | Builds and embeds the UI, then builds Go |
+| Stage a released agent client | `scripts/stage-agent-cli.sh TARGET BINARY` | GoReleaser post-build hook only: copies the already built Linux CLI beside its artifact as `crewship-agent-cli`; ignores Darwin/Windows targets. Does not install or provision a running container. |
 | Mooring dev release assets | `python3 scripts/build-mooring-runtime.py --release-dev EXACT_SHA` | In a clean committed Linux source tree, build the pinned Rust runtime, WASM SDK and isolated WordCraft editor. Requires the pinned Rust/WASM toolchain and frozen pnpm install. Fetches only pinned public source/font inputs and locked WordCraft dependencies; includes licenses. Writes only ignored generated assets; enables no environment or route. Build output requires separate application and authorization acceptance. |
 | Mooring build isolation checks | `python3 -m unittest discover -s scripts -p test_build_mooring_runtime.py` | Synthetic owned Git repositories, bounded tool archives and execution of a flat editor package with a real WASM snippet import. Requires Node.js; no network, Rust compiler or live environment. |
 | Fast pre-push checks | `bash scripts/verify.sh quick` | CI helper tests, toolchain/build-path checks and workflow lint; not the full test suite |
@@ -256,3 +257,14 @@ reload requires both confirmed server text and a ready visible renderer. Receipt
 and native-text checks establish data evidence; screenshots are review artifacts
 and **are not automatic glyph or GPU paint verification**. Passing this harness
 does not qualify the wider command catalog or collaborative editing.
+
+`acceptance-trigger-detail-browser.mjs` is invoked by the Linux-only
+`TestTriggerDetailLoadErrorBrowser` fixture (`trigger_detail_browser` or
+compile-only `conformance`). After building the static export, run it with
+`CREWSHIP_TRIGGER_DETAIL_BROWSER=1` and the provisioned Chromium cache through
+`PLAYWRIGHT_BROWSERS_PATH`. It uses a migrated synthetic database, authenticated
+session and the real Router. Browser interception injects only HTTP/transport
+failures; Retry and successful not-found use real API reads. The same scenario
+runs in the PR Incoming webhook lifecycle. It creates no containers or execution
+runtime. `CREWSHIP_TRIGGER_DETAIL_OUTPUT` selects private reports/screenshots;
+fixture session proofs stay in a temporary mode-0600 file removed by the test.

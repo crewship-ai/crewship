@@ -1,0 +1,1 @@
+- **`issue get` and `issue list` machine output now preserves `workspace_id`.** The CLI's issue type omitted the field while decoding the API response, so JSON and YAML output lost the workspace association. The shared issue output type now round-trips the API value for both commands.

@@ -117,10 +117,15 @@ else ifeq ($(UNAME_M),amd64)
 else
   SIDECAR_GOARCH := $(shell go env GOARCH)
 endif
-build\:sidecar:
+build\:sidecar: build\:agent-cli
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(SIDECAR_GOARCH) go build -trimpath -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
 	cp scripts/entrypoint.sh ./entrypoint.sh
 	chmod +x ./entrypoint.sh
+
+# Agents run Linux even when the daemon runs on macOS/Windows. Build the
+# version-matched static client as a separately named runtime companion.
+build\:agent-cli:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(SIDECAR_GOARCH) $(GO_BUILD) -tags clionly -o crewship-agent-cli ./cmd/crewship
 
 # === Test & Lint ===
 

@@ -585,6 +585,11 @@ start_go() {
     err "Sidecar build failed -- check errors above"
     return 1
   fi
+  log "Building native agent Crewship CLI..."
+  if ! (cd "$PROJECT_DIR" && CGO_ENABLED=0 GOOS=linux GOARCH="$sidecar_goarch" go build -tags clionly -ldflags "$stamp_ldflags" -o "${bin_dir}/crewship-agent-cli" ./cmd/crewship) 2>&1; then
+    err "Agent CLI build failed -- check errors above"
+    return 1
+  fi
   cp "$PROJECT_DIR/scripts/entrypoint.sh" "${bin_dir}/entrypoint.sh"
   chmod +x "${bin_dir}/entrypoint.sh"
 
@@ -622,6 +627,7 @@ start_go() {
     # path), so the no-.env.local case is unchanged.
     export CREWSHIP_SIDECAR_PATH="$fresh_sidecar"
     export CREWSHIP_ENTRYPOINT_PATH="$fresh_entrypoint"
+    export CREWSHIP_AGENT_CLI_PATH="${bin_dir}/crewship-agent-cli"
     export CREWSHIP_LOG_LEVEL="${CREWSHIP_LOG_LEVEL-debug}"
     # Auto-detect container runtime; fall back to --no-docker if none found
     # Supports Docker, Podman, and Apple Containers (macOS 26+)
