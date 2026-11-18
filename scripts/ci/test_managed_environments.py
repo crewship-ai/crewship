@@ -10,6 +10,16 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_keeper_runtime_requires_real_crew_sidecar_and_native_cli_receipt(self):
+        name = 'TestNativeKeeperRealCrewContainer'
+        key = (managed.PREFIX + 'internal/orchestrator', name)
+        self.assertIn(key, managed.REQUIRED)
+        missing = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(missing, 0))
+        command = next(c for c in managed.commands() if name in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('./internal/orchestrator', command)
+
     def test_native_keeper_cli_flow_is_required_without_privilege_escalation(self):
         name = 'TestKeeperAgentCLIVaultSidecarStandardTool'
         key = (managed.PREFIX + 'cmd/crewship', name)

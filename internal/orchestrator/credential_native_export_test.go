@@ -74,3 +74,9 @@ func TestNativeCredentialFixtureUsesProductionBatchStdin(t *testing.T) {
 		t.Fatal("fixture used credential-bearing argv instead of production batch stdin")
 	}
 }
+
+// Delegates to production startup as UID1002. This test seam does not exist in
+// product builds and does not implement a separate credential transport.
+func NativeKeeperSidecarForTest(ctx context.Context, ctr provider.ContainerProvider, containerID string, ipc *SidecarIPCConfig, members []SidecarCrewMember, logger *slog.Logger) error {
+	return startSidecar(ctx, ctr, containerID, nil, nil, ipc, nil, members, nil, nil, "native-keeper-fixture", logger)
+}

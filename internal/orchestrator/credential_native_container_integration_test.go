@@ -29,6 +29,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
@@ -40,7 +42,11 @@ import (
 // This test executes standard glab INSIDE a real production crew runtime.
 // It qualifies direct token authentication and file bytes/permissions, not model
 // CLI shell adapters, Keeper, SSH, certificates or the full lifecycle matrix.
-func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
+func TestNativeVaultRealCrewContainerGlab(t *testing.T) { testNativeVaultCrewContainer(t, false) }
+
+func TestNativeKeeperRealCrewContainer(t *testing.T) { testNativeVaultCrewContainer(t, true) }
+
+func testNativeVaultCrewContainer(t *testing.T, keeperMode bool) {
 	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 	daemon, err := client.New(client.FromEnv)
@@ -119,12 +125,27 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 		seed(`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,status,cli_adapter,llm_provider,llm_model,tool_profile,timeout_seconds,memory_enabled,created_at) VALUES(?,?,'native-crew',?,?,'AGENT','IDLE','CLAUDE_CODE','ANTHROPIC','claude-sonnet-5-5','CODING',60,0,datetime('now'))`, id, workspace, id, id)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", logger, api.WithInternalToken(master))
+	keeperExecutor := &nativeKeeperRuntimeProxy{}
+	options := []api.RouterOption{api.WithInternalToken(master)}
+	if keeperMode {
+		options = append(options, api.WithKeeperConfig(&config.KeeperConfig{Enabled: true}), api.WithKeeperGatekeeper(gatekeeper.New(nativeCrewKeeperJudge{}, "fixture", logger)), api.WithKeeperSecrets(nativeCrewKeeperEmptyCache{}), api.WithKeeperContainer(keeperExecutor))
+	}
+	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", logger, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(router)
+	server := httptest.NewUnstartedServer(router)
+	if keeperMode {
+		listening, err := net.Listen("tcp4", "0.0.0.0:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.Listener.Close()
+		server.Listener = listening
+	}
+	server.Start()
 	defer server.Close()
+	defer router.Shutdown()
 	config := filepath.Join(install, "cli.yaml")
 	if err := os.WriteFile(config, []byte("server: "+server.URL+"\nworkspace: "+workspace+"\ntoken: "+humanToken+"\nformat: json\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -184,8 +205,10 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 		t.Fatal("native grants did not enforce resolver agent boundary")
 	}
 	var authenticated atomic.Int32
+	var acceptedToken atomic.Value
+	acceptedToken.Store(toolToken)
 	fixture := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v4/user" || (r.Header.Get("PRIVATE-TOKEN") != toolToken && r.Header.Get("Authorization") != "Bearer "+toolToken) {
+		if r.URL.Path != "/api/v4/user" || (r.Header.Get("PRIVATE-TOKEN") != acceptedToken.Load().(string) && r.Header.Get("Authorization") != "Bearer "+acceptedToken.Load().(string)) {
 			http.Error(w, "fixture authentication required", 401)
 			return
 		}
@@ -206,12 +229,20 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctr, err := dockerprovider.New(ctx, dockerprovider.Config{InstanceID: prefix, ContainerPrefix: prefix, OutputBasePath: t.TempDir(), Network: "bridge", RuntimeImage: image.ID, SidecarBinaryPath: sidecar, EntrypointPath: entrypoint, AgentCLIBinaryPath: sdk, RequireAgentCLI: true, ExpectedAgentCLICommit: commit, RequiredAgentCLICommands: []string{"version", "commands"}}, logger)
+	requiredCLI := []string{"version", "commands"}
+	if keeperMode {
+		requiredCLI = append(requiredCLI, "keeper request", "keeper execute", "keeper request-status")
+	}
+	ctr, err := dockerprovider.New(ctx, dockerprovider.Config{InstanceID: prefix, ContainerPrefix: prefix, OutputBasePath: t.TempDir(), Network: "bridge", RuntimeImage: image.ID, SidecarBinaryPath: sidecar, EntrypointPath: entrypoint, AgentCLIBinaryPath: sdk, RequireAgentCLI: true, ExpectedAgentCLICommit: commit, RequiredAgentCLICommands: requiredCLI}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ctr.Close() })
+	keeperExecutor.ContainerProvider = ctr
 	crew := provider.CrewConfig{ID: "native-crew", Slug: "native", CachedImage: image.ID}
+	if keeperMode {
+		crew.ContainerEnv = map[string]string{"GITLAB_HOST": ctr.HostAddress() + fmt.Sprintf(":%d", listener.Addr().(*net.TCPAddr).Port), "GLAB_API_PROTOCOL": "http", "GLAB_CONFIG_DIR": "/home/agent/fixture-keeper-glab", "GLAB_CHECK_UPDATE": "false", "GLAB_SEND_TELEMETRY": "false", "GLAB_NO_PROMPT": "true", "NO_PROXY": "*", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
+	}
 	// Reserve exact, initially absent fixture identities; never list or prune.
 	ownedVolumes := []string{prefix + "-home-" + crew.Slug + "-" + crew.ID, prefix + "-tools-" + crew.Slug + "-" + crew.ID}
 	for _, name := range ownedVolumes {
@@ -333,6 +364,9 @@ func TestNativeVaultRealCrewContainerGlab(t *testing.T) {
 	out := run([]string{"/opt/crew-tools/fixture-glab", "api", "user"}, env, nil)
 	if !bytes.Contains(out, []byte("fixture-container-user")) || authenticated.Load() != 1 {
 		t.Fatal("standard glab did not authenticate from native runtime env")
+	}
+	if keeperMode {
+		nativeKeeperCrewScenario(t, ctx, db, ctr, keeperExecutor, id, crew.ID, workspace, agent, peer, master, cli, server.Listener.Addr().(*net.TCPAddr).Port, &acceptedToken, &authenticated)
 	}
 	for _, credential := range creds {
 		cli("", "credential", "unassign", credential.ID, agent)
