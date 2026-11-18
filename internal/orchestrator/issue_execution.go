@@ -35,8 +35,8 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 	var brief, work, currentBrief, currentWork, attempt int
 	var clientReview bool
 	err = tx.QueryRowContext(ctx, `SELECT x.stage,x.reviewer_agent_id,COALESCE(x.review_task_id,''),x.brief_revision,x.work_revision,x.attempt,
- m.status,m.title,COALESCE(m.description,''),w.mode,w.brief_revision,w.revision,w.client_review_required,COALESCE(x.routine_run_id,''),x.created_at
- FROM issue_executions x JOIN missions m ON m.id=x.mission_id JOIN issue_work w ON w.mission_id=m.id WHERE x.id=?`, id).
+ m.status,m.title,COALESCE(m.description,''),COALESCE(w.mode,'agent'),COALESCE(w.brief_revision,x.brief_revision),COALESCE(w.revision,x.work_revision),COALESCE(w.client_review_required,1),COALESCE(x.routine_run_id,''),x.created_at
+ FROM issue_executions x JOIN missions m ON m.id=x.mission_id LEFT JOIN issue_work w ON w.mission_id=m.id WHERE x.id=?`, id).
 		Scan(&stage, &reviewer, &reviewTask, &brief, &work, &attempt, &status, &title, &description, &mode, &currentBrief, &currentWork, &clientReview, &routineRun, &created)
 	if err != nil {
 		return true, err

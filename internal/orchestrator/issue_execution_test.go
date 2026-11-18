@@ -110,7 +110,7 @@ func TestIssueExecutionRejectsMissingOutcomeAndStaleApproval(t *testing.T) {
 
 func TestIssueExecutionInReviewContinuesToHumanAcceptance(t *testing.T) {
 	e, ms, db := executionFixture(t)
-	mustExec(t, db, `UPDATE issue_work SET client_review_required=1;
+	mustExec(t, db, `DELETE FROM issue_work WHERE mission_id='issue';
 		UPDATE missions SET status='REVIEW' WHERE id='issue'`)
 	if _, err := e.checkIssueExecution(t.Context(), ms); err != nil {
 		t.Fatal(err)
@@ -129,5 +129,26 @@ func TestIssueExecutionInReviewContinuesToHumanAcceptance(t *testing.T) {
 	}
 	if stop := e.missionTick(t.Context(), ms); !stop {
 		t.Fatal("mission loop kept running after lead review settled")
+	}
+}
+
+func TestIssueExecutionDeadlineOnlyClosesActiveReview(t *testing.T) {
+	for _, stage := range []string{"working", "accepted"} {
+		t.Run(stage, func(t *testing.T) {
+			e, ms, db := executionFixture(t)
+			mustExec(t, db, `UPDATE missions SET status='REVIEW' WHERE id='issue'`)
+			mustExec(t, db, `UPDATE issue_executions SET stage=? WHERE id='execution'`, stage)
+			if err := e.finalizeMission(t.Context(), ms, "FAILED", "mission_timeout"); err != nil {
+				t.Fatal(err)
+			}
+			want := "REVIEW"
+			if stage == "working" {
+				want = "FAILED"
+			}
+			var status string
+			if err := db.QueryRow(`SELECT status FROM missions WHERE id='issue'`).Scan(&status); err != nil || status != want {
+				t.Fatalf("status=%q want %q err=%v", status, want, err)
+			}
+		})
 	}
 }

@@ -29,9 +29,8 @@ func (h *IssueHandler) loadIssueExecution(ctx context.Context, issue *issueRespo
 	// A mission with no issue_work row is not an error. The row arrives from
 	// the migration's backfill and the AFTER INSERT trigger, so anything that
 	// writes a mission around those — a restore, a mission_type flipped by an
-	// UPDATE — leaves a row this read must survive. Degrading to the zero
-	// values keeps the whole issue readable; returning ErrNoRows would turn
-	// every such detail request into a 500.
+	// UPDATE — leaves a row this read must survive. Keep the issue readable using the default acceptance policy.
+	issue.ClientReviewRequired = true
 	if err := h.db.QueryRowContext(ctx, `SELECT brief_revision,client_review_required FROM issue_work WHERE mission_id=?`, issue.ID).Scan(&issue.BriefRevision, &issue.ClientReviewRequired); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

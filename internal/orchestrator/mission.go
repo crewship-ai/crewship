@@ -330,13 +330,6 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 			// values. This deferred path runs outside the tick's writer, so
 			// it must wait for a backup window before changing protected rows.
 			err := quiesce.Do(context.WithoutCancel(ctx), func(cleanCtx context.Context) error {
-				now := time.Now().UTC().Format(time.RFC3339)
-				if _, err := e.db.ExecContext(cleanCtx,
-					`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
-                     WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
-					now, now, ms.ID); err != nil {
-					return err
-				}
 				return e.finalizeMission(cleanCtx, ms, "FAILED", "mission_timeout")
 			})
 			if err != nil {
@@ -584,19 +577,35 @@ func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) 
 		map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status})
 }
 
-// finalizeMission moves a mission out of IN_PROGRESS into a terminal status,
-// stamping completed_at/updated_at, then broadcasts the transition and writes
-// the matching progress event. The `AND status = 'IN_PROGRESS'` guard keeps a
-// concurrent finalizer from double-transitioning. eventType is the
-// ProgressEvent type — "mission_"+newStatus on the completion paths,
-// "mission_timeout" on the mission-deadline path. On a DB error the broadcast
-// and progress event are skipped and the raw error is returned for the caller
-// to wrap.
+// finalizeMission saves the terminal status before publishing the transition.
+// A deadline also stops a REVIEW issue while its execution is still active.
 func (e *MissionEngine) finalizeMission(ctx context.Context, ms *missionState, newStatus, eventType string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := e.db.ExecContext(ctx,
-		`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
-		newStatus, now, now, ms.ID); err != nil {
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	deadline := eventType == "mission_timeout"
+	result, err := tx.ExecContext(ctx, `UPDATE missions SET status = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND (status = 'IN_PROGRESS' OR (? AND status = 'REVIEW' AND EXISTS (
+			SELECT 1 FROM issue_executions WHERE mission_id = missions.id AND stage IN ('working','reviewing')
+		)))`, newStatus, now, now, ms.ID, deadline)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return err
+	}
+	if deadline {
+		if _, err = tx.ExecContext(ctx, `UPDATE mission_tasks SET status = 'FAILED',
+			error_message = 'mission timed out', updated_at = ?, completed_at = ?
+			WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`, now, now, ms.ID); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	e.broadcastMissionStatus(ms, newStatus)

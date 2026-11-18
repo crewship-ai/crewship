@@ -66,7 +66,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	var missionID, status, mode string
 	var revision, brief int
 	var submitted sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT m.id,m.status,w.mode,w.revision,w.brief_revision,w.submitted_brief_revision FROM missions m JOIN issue_work w ON w.mission_id=m.id WHERE m.identifier=? AND m.crew_id=? AND m.workspace_id=?`, ident, crewID, wsID).Scan(&missionID, &status, &mode, &revision, &brief, &submitted)
+	err = tx.QueryRowContext(ctx, `SELECT m.id,m.status,COALESCE(w.mode,'agent'),COALESCE(w.revision,0),COALESCE(w.brief_revision,0),w.submitted_brief_revision FROM missions m LEFT JOIN issue_work w ON w.mission_id=m.id WHERE m.mission_type='issue' AND m.identifier=? AND m.crew_id=? AND m.workspace_id=?`, ident, crewID, wsID).Scan(&missionID, &status, &mode, &revision, &brief, &submitted)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeProblem(w, r, 404, "Issue not found")
 		return
