@@ -1,16 +1,17 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "feb58b24be3d01e82b67e037f46755aaacbb8e3d90fce6202b9f7b44af4655db",
+    ".github/workflows/ci.yml": "0dd2b8bd0d9585bbbd6ebedce00d0b086c5be238da76f6f7ee8619fa503e3d43",
     ".github/workflows/security.yml": "524bfd3b795eafa4bfb391b2970e13fd83526b46a7fd9b9446610823910a5f39",
     ".github/workflows/codeql.yml": "f09dc28205bf4fdeca83a7638db3fdd028b2006149b83907bbaeb304dc04d0b8",
     "scripts/ci/plan.py": "73d74490ca98a8029b3f3781e93a955f5a52e51948e1d8dcb50108f67d366aa7",
-    "scripts/ci/verdict.py": "f4fe254c500b8879100154d08387f02e7b7650cfb32611610c7218e9dbe289d0"
+    "scripts/ci/verdict.py": "2144dc3263c20b2a59cf33998e52131ace5876e515e3e8961fea904c9e7c9400"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
       "context": "CI Result",
       "required_jobs": [
+        "agent-sdk-windows",
         "binary",
         "changes",
         "cli-command-smoke",
