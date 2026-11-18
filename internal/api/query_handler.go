@@ -270,7 +270,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	// A blocking pre-hook can run while the crew roster changes. Admission
 	// must recheck the exact resolved IDs in the transaction that writes.
-	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, fromAgentID, body.CrewID, target.ID, body.CrewID) {
+	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, fromAgentID, body.CrewID, target.ID, body.CrewID, true) {
 		return
 	}
 	originID := runauthority.OriginIDFromContext(r.Context())

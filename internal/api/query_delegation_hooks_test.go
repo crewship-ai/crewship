@@ -317,13 +317,17 @@ func TestQueryCreate_PrePeerConversationJoinedErrorReportsTheDispatchFailure(t *
 	}
 }
 
-func TestQueryCreateRefusesMembershipRevokedDuringPreHook(t *testing.T) {
+func TestQueryCreateRechecksAdmissionAfterPreHook(t *testing.T) {
 	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
-	for _, agent := range []string{"from1", "to1"} {
-		t.Run(agent, func(t *testing.T) {
+	for _, tc := range []struct{ name, change, agent string }{
+		{"sender removed", "UPDATE agents SET deleted_at=datetime('now') WHERE id=?", "from1"},
+		{"target removed", "UPDATE agents SET deleted_at=datetime('now') WHERE id=?", "to1"},
+		{"target held", "UPDATE agents SET status='PENDING_REVIEW' WHERE id=?", "to1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			h, ws, body := newPeerQueryRig(t)
 			hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if _, err := h.db.Exec("UPDATE agents SET deleted_at=datetime('now') WHERE id=?", agent); err != nil {
+				if _, err := h.db.Exec(tc.change, tc.agent); err != nil {
 					t.Error(err)
 					w.WriteHeader(http.StatusInternalServerError)
 					return
@@ -340,7 +344,7 @@ func TestQueryCreateRefusesMembershipRevokedDuringPreHook(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.Create(rec, httptest.NewRequest(http.MethodPost, "/api/v1/internal/queries", body))
 			if rec.Code != http.StatusForbidden {
-				t.Fatalf("revoked member: %d %s", rec.Code, rec.Body.String())
+				t.Fatalf("changed admission: %d %s", rec.Code, rec.Body.String())
 			}
 			var n int
 			if err := h.db.QueryRow("SELECT COUNT(*) FROM peer_conversations").Scan(&n); err != nil || n != 0 {

@@ -429,7 +429,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, assignedByID, assignerCrewID, target.ID, body.CrewID) {
+	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, assignedByID, assignerCrewID, target.ID, body.CrewID, false) {
 		return
 	}
 	if assignerCrewID != body.CrewID {
