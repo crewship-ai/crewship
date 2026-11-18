@@ -3028,3 +3028,17 @@ jobs:
           [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
           (cd dist && sha256sum -c checksums.txt)
           python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
+      - name: Install full release in a fresh Linux container
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          archives=(dist/crewship_*_linux_amd64.tar.gz)
+          [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
+          installer_artifacts=$(mktemp -d "$RUNNER_TEMP/crewship-installer.XXXXXX")
+          trap 'rm -rf "$installer_artifacts"' EXIT
+          tar -xzf "${archives[0]}" -C "$installer_artifacts"
+          docker pull node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+          go run ./scripts/ci/installer-qualification \
+            --artifact-dir "$installer_artifacts" \
+            --installer "$PWD/scripts/install.sh" --revision "$SHA"
