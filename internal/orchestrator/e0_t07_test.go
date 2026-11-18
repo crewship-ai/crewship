@@ -77,13 +77,14 @@ func (rec *t07Recorder) textFor(runID string) string {
 // silent cross-run collision.
 func t07Paths(slug, runID string) map[string]string {
 	session := TmuxSessionName(slug, runID)
+	directory := tmuxExecDir(slug, runID)
 	return map[string]string{
 		"tmux session": session,
-		"args file":    "/tmp/" + session + ".args",
-		"env file":     "/tmp/" + session + ".env",
-		"inner script": "/tmp/" + session + ".sh",
-		"FIFO":         "/tmp/" + session + ".fifo",
-		"exit file":    "/tmp/" + session + ".exit",
+		"args file":    directory + "/args",
+		"env file":     directory + "/env",
+		"inner script": directory + "/run.sh",
+		"FIFO":         directory + "/output.fifo",
+		"exit file":    directory + "/exit",
 		"wait-for":     session + "-done",
 		"HOME":         agentHomeDir(slug, runID),
 		"output dir":   agentRunOutputDir(slug, runID),

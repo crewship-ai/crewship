@@ -5,8 +5,6 @@ package orchestrator
 // egress allowlist) and the tmux-wrapped exec setup (cache + writer of
 // args / env / inner-script files inside the crew container).
 //
-// All function signatures and receivers are unchanged; this is a pure
-// file move.
 
 import (
 	"context"
@@ -158,8 +156,8 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	// run ensureRunID has already vetted this, so reaching here means a caller
 	// built an ExecConfig outside RunAgent — the one case where a bad id would
 	// otherwise reach a shell.
-	if !ValidRunID(runID) {
-		return nil, fmt.Errorf("invalid run id for tmux session: %q", runID)
+	if !ValidRunID(runID) || !validSlugRe.MatchString(agentSlug) {
+		return nil, fmt.Errorf("invalid agent slug or run id for tmux session")
 	}
 	// Pre-check: fail fast if tmux is not installed in the container. Custom
 	// base images (debian:bookworm-slim, ubuntu:24.04) don't ship with tmux.
@@ -202,18 +200,15 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	// One run-scoped stem for all six file names and the wait-for channel, so
 	// none of them can drift back to being slug-keyed one at a time.
 	session := TmuxSessionName(agentSlug, runID)
-	argsFile := fmt.Sprintf("/tmp/%s.args", session)
-	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
-	fifo := fmt.Sprintf("/tmp/%s.fifo", session)
-	exitFile := fmt.Sprintf("/tmp/%s.exit", session)
+	privateDir := tmuxExecDir(agentSlug, runID)
+	argsFile := privateDir + "/args"
+	scriptFile := privateDir + "/run.sh"
+	fifo := privateDir + "/output.fifo"
+	exitFile := privateDir + "/exit"
 	doneSignal := session + "-done"
-	envFile := fmt.Sprintf("/tmp/%s.env", session)
+	envFile := privateDir + "/env"
 
-	// Compute the three file payloads up front. They are independent, so a
-	// single batched exec (below) writes all of them in one round-trip rather
-	// than three sequential ExecCreate+ExecStart+attach+drain cycles — this is
-	// the hottest path (every agent message). Mirrors the batched-write idiom
-	// in exec_sidecar.go's prepMemoryDirs.
+	// One setup exec writes the args, fresh environment and inner script.
 
 	// Args: null-separated command args.
 	var argsBuf []byte
@@ -223,29 +218,10 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	}
 	argsEncoded := base64.StdEncoding.EncodeToString(argsBuf)
 
-	// Env: sourceable shell script of `export KEY='VALUE'` lines.
-	var envScript strings.Builder
-	for _, e := range env {
-		if idx := strings.IndexByte(e, '='); idx > 0 {
-			key := e[:idx]
-			// Only allow safe env var names ([A-Za-z_][A-Za-z0-9_]*) to prevent
-			// shell injection via crafted key names in the sourced export script.
-			safe := true
-			for i, c := range key {
-				if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || (i > 0 && c >= '0' && c <= '9')) {
-					safe = false
-					break
-				}
-			}
-			if !safe || len(key) == 0 {
-				continue
-			}
-			val := e[idx+1:]
-			escaped := strings.ReplaceAll(val, "'", "'\\''")
-			envScript.WriteString(fmt.Sprintf("export %s='%s'\n", key, escaped))
-		}
-	}
-	envEncoded := base64.StdEncoding.EncodeToString([]byte(envScript.String()))
+	// Snapshot the fresh container exec environment, including image PATH/mise
+	// and this run's overrides. Export output from the same POSIX shell can be
+	// sourced without serializing a secret into process arguments. An existing
+	// tmux server's environment is deliberately excluded from the target CLI.
 
 	// Inner script: source env, DELETE the env file, then run the command via
 	// xargs and delete the args file once xargs has consumed it.
@@ -279,21 +255,23 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		envFile, envFile, argsFile, fifo, argsFile, exitFile, fifo, doneSignal)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
 
-	// Single batched write: decode all three files and chmod the script in one
-	// exec. Base64 output is alphanumerics plus '+', '/' and '=' — never a
-	// single quote — so single-quoting each payload is safe. `&&` chains the
-	// steps so any decode failure aborts the rest, and the returned exec error
-	// surfaces the same kind of wrapped error any single write would have.
+	// Refuse an existing directory instead of reusing a file or following a
+	// symlink. The trap owns only the fresh directory created by this script.
+	// Every payload travels on stdin; credential values never enter argv.
 	writeCmd := fmt.Sprintf(
-		"printf '%%s' '%s' | base64 -d > '%s' && "+
-			"printf '%%s' '%s' | base64 -d > '%s' && "+
-			"printf '%%s' '%s' | base64 -d > '%s' && chmod +x '%s'",
-		argsEncoded, argsFile,
-		envEncoded, envFile,
+		"set -eu\numask 077\nmkdir -m 700 '%s'\n"+
+			"trap \"rm -rf -- '%s'\" 0\ntrap 'exit 1' HUP INT TERM\nset -C\n"+
+			"printf '%%s' '%s' | base64 -d > '%s'\n"+
+			"export -p > '%s'\n"+
+			"printf '%%s' '%s' | base64 -d > '%s'\nchmod 700 '%s'\n"+
+			"trap - 0 HUP INT TERM\n",
+		privateDir, privateDir, argsEncoded, argsFile, envFile,
 		scriptEncoded, scriptFile, scriptFile)
 	writeResult, err := o.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", writeCmd},
+		Cmd:         []string{"/bin/sh", "-s"},
+		Stdin:       strings.NewReader(writeCmd),
+		Env:         env,
 		User:        "1001:1001",
 	})
 	if err != nil {
@@ -301,25 +279,34 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	}
 	io.Copy(io.Discard, writeResult.Reader)
 	writeResult.Reader.Close()
+	if code, err := provider.WaitExecExit(ctx, o.container, writeResult.ExecID, execProbeTimeout); err != nil || code != 0 {
+		return nil, fmt.Errorf("write tmux exec files did not complete successfully")
+	}
 
-	// Step 4: Return outer wrapper. Uses session-scoped kill (not kill-server)
-	// to avoid disrupting other agent sessions in the same crew container.
-	// If tmux new-session fails, falls back to direct exec via sh.
+	// Multiargv tmux direct-exec avoids the server's inherited default-shell.
+	// Both launch paths start the target shell with a clean environment before
+	// loading the fresh snapshot. Only this run's session may be stopped.
 	wrapper := fmt.Sprintf(
 		"tmux kill-session -t '%s' 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
-			"if tmux new-session -d -s '%s' -x 200 -y 50 'sh %s'; then "+
+			"if tmux new-session -d -s '%s' -x 200 -y 50 /usr/bin/env -i /bin/sh '%s'; then "+
 			"cat '%s' 2>/dev/null; "+
 			"tmux wait-for '%s' 2>/dev/null || true; "+
-			"else sh '%s'; fi; "+
+			"else /usr/bin/env -i /bin/sh '%s'; fi; "+
 			"EC=0; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
-			"rm -f '%s' '%s' '%s'; exit $EC",
+			"rm -rf -- '%s'; exit $EC",
 		session, fifo, exitFile, fifo,
 		session, scriptFile,
 		fifo,
 		doneSignal,
 		scriptFile,
 		exitFile, exitFile, exitFile,
-		scriptFile, argsFile, envFile,
+		privateDir,
 	)
 	return []string{"sh", "-c", wrapper}, nil
+}
+
+// tmuxExecDir owns only the temporary files of one validated run. It is also
+// removed by retained run-home cleanup after failure or confirmed cancellation.
+func tmuxExecDir(agentSlug, runID string) string {
+	return "/tmp/" + TmuxSessionName(agentSlug, runID) + ".exec"
 }

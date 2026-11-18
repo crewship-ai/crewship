@@ -255,7 +255,7 @@ func buildRunHomeCleanupScript(agentSlug, runID string) string {
 	if !validSlugRe.MatchString(agentSlug) || !ValidRunID(runID) {
 		return ""
 	}
-	return "rm -rf '" + containerRunHomeRoot + "/" + agentSlug + "/" + runID + "'"
+	return "rm -rf '" + containerRunHomeRoot + "/" + agentSlug + "/" + runID + "' '" + tmuxExecDir(agentSlug, runID) + "'"
 }
 
 // cleanupRunHome removes /crew/runs/<slug>/<runID> from the container, exec'd

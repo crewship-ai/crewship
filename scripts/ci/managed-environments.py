@@ -18,7 +18,7 @@ import tempfile
 from contextlib import contextmanager
 
 PREFIX = 'github.com/crewship-ai/crewship/'
-CLI_TESTS = {'internal/orchestrator': {'TestNativeCLIShellEnvironment'}}
+CLI_TESTS = {'internal/orchestrator': {'TestNativeCLIShellEnvironment', 'TestNativeTmuxCurrentRunCannotInheritRevokedToken', 'TestNativeTmuxMissingSnapshotCannotSucceed', 'TestNativeTmuxRefusesExistingSetupDirectory'}}
 CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
@@ -147,6 +147,8 @@ REQUIRED = {(PREFIX + package, name)
             for package, names in suites.items() for name in names}
 REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter)
                 for adapter in CLI_ADAPTERS)
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter + '/' + mode)
+                for adapter in CLI_ADAPTERS for mode in ('direct', 'tmux', 'fallback'))
 HOST_UID = 65534
 
 
