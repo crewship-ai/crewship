@@ -98,7 +98,7 @@ func TestCredCreateCmd_ValueStdin(t *testing.T) {
 	}
 	var body map[string]any
 	clitest.MustDecodeJSONBody(stub.CallsFor("POST", "/api/v1/credentials")[0].Body, &body)
-	if body["value"] != "stdin-secret" {
+	if body["value"] != "stdin-secret\n" {
 		t.Errorf("stdin value not used: %v", body["value"])
 	}
 }
@@ -241,7 +241,8 @@ func TestCredUpdateCmd_MetadataFetchFailsStillUpdates(t *testing.T) {
 }
 
 func TestCredUpdateCmd_StdinEmptyRejected(t *testing.T) {
-	covStub(t)
+	stub := covStub(t)
+	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, clitest.JSONResponse(200, map[string]string{"type": "CLI_TOKEN"}))
 	covResetFlags(t, credUpdateCmd)
 	covWithStdin(t, "") // EOF — scanner.Scan() returns false
 	covSetFlags(t, credUpdateCmd, map[string]string{"value-stdin": "true"})
@@ -252,7 +253,8 @@ func TestCredUpdateCmd_StdinEmptyRejected(t *testing.T) {
 }
 
 func TestCredUpdateCmd_StdinBlankLineRejected(t *testing.T) {
-	covStub(t)
+	stub := covStub(t)
+	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, clitest.JSONResponse(200, map[string]string{"type": "CLI_TOKEN"}))
 	covResetFlags(t, credUpdateCmd)
 	covWithStdin(t, "\n") // a scanned-but-empty line
 	covSetFlags(t, credUpdateCmd, map[string]string{"value-stdin": "true"})
@@ -326,6 +328,7 @@ func TestCredRotateCmd_HappyPath(t *testing.T) {
 
 func TestCredRotateCmd_ValueStdin(t *testing.T) {
 	stub := covStub(t)
+	stub.OnGet("/api/v1/credentials/"+covCredIDCli3, clitest.JSONResponse(200, map[string]string{"type": "CLI_TOKEN"}))
 	covResetFlags(t, credRotateCmd)
 	stub.OnPost("/api/v1/credentials/"+covCredIDCli3+"/rotate",
 		clitest.JSONResponse(200, map[string]any{"id": "rot2", "status": "ACTIVE"}))
@@ -436,4 +439,24 @@ func TestCredDeleteCmd(t *testing.T) {
 			t.Fatalf("expected conflict error, got %v", err)
 		}
 	})
+}
+
+func TestCredCreateCmd_UserpassNativeInput(t *testing.T) {
+	stub := covStub(t)
+	covResetFlags(t, credCreateCmd)
+	stub.OnPost("/api/v1/credentials", clitest.JSONResponse(201, map[string]string{"id": covCredIDCli3, "name": "login"}))
+	covWithStdin(t, "synthetic-password\r\n")
+	covSetFlags(t, credCreateCmd, map[string]string{"name": "login", "type": "USERPASS", "provider": "NONE", "username": "fixture-user", "password-stdin": "true"})
+	out, err := captureStdout(t, func() error { return credCreateCmd.RunE(credCreateCmd, nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(stub.CallsFor("POST", "/api/v1/credentials")[0].Body, &body)
+	if body["username"] != "fixture-user" || body["value"] != "synthetic-password\r\n" {
+		t.Fatal("USERPASS fields were not preserved")
+	}
+	if strings.Contains(out, "Key validated successfully") || strings.Contains(out, "synthetic-password") {
+		t.Fatal("misleading validation or secret in output")
+	}
 }

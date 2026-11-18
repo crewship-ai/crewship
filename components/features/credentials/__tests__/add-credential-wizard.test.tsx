@@ -121,6 +121,15 @@ describe("step 1 — the shape decides the form, not the brand", () => {
 // Harbor 2 step 1: "Paste the value, or pick the type". Recognition happens in
 // the browser; nothing is sent until Save. Prefixes followed by filler only.
 describe("paste to start", () => {
+  it.each(["OPENSSH PRIVATE KEY", "CERTIFICATE"])("keeps the final LF and shape of pasted %s", (label) => {
+    renderWizard()
+    const value = "-----" + "BEGIN " + label + "-----\nsynthetic\n-----END " + label + "-----\n"
+    fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(document.getElementById("cred-primary")).toHaveValue(value)
+    expect(screen.queryByLabelText(/^token$/i)).not.toBeInTheDocument()
+  })
+
   it("recognises a Stripe-shaped key, says so, and fills the name when you Continue", () => {
     renderWizard()
     fireEvent.change(screen.getByLabelText(/paste the value/i), { target: { value: "sk_live_" + "x".repeat(24) } })

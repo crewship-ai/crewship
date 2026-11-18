@@ -97,8 +97,7 @@ func covCMDupdate(t *testing.T, h *CredentialHandler, userID, wsID, credID, role
 func TestCovCMDCreate_PerTypeHappyPaths(t *testing.T) {
 	t.Parallel()
 
-	pemKey := pemFixture("OPENSSH PRIVATE KEY", "b3BlbnNzaC1rZXktdjEAAAAA")
-	pemCert := pemFixture("CERTIFICATE", "MIIDazCCAlOgAwIBAgIUJTd")
+	pemKey, _, _, pemCert := validCredentialPEMs(t)
 
 	cases := []struct {
 		name      string

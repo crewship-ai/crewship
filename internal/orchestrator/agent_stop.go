@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -80,6 +81,7 @@ func (o *Orchestrator) agentStopRequested(runID string) bool {
 // closes its creation gate before signalling; disconnecting a stream alone is
 // never reported as a stopped process.
 type agentRunControl struct {
+	outerManaged      atomic.Bool
 	mu                sync.Mutex
 	agentID           string
 	location          RunLocation

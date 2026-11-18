@@ -16,7 +16,6 @@ package main
 // disclosure endpoint wearing a different name.
 
 import (
-	"bufio"
 	"fmt"
 	"net/http"
 	"os"
@@ -133,10 +132,17 @@ Examples:
 		flags := cmd.Flags()
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")
+		if valueStdin && flags.Changed("value") {
+			return fmt.Errorf("--value and --value-stdin are mutually exclusive")
+		}
 		if valueStdin {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				value = scanner.Text()
+			var err error
+			// Named parts are opaque, even when their parent is a token.
+			// Preserve PEM/JSON and terminal line endings; reject unsupported
+			// input before JSON serialization can rewrite its bytes.
+			value, err = readCredentialValue(os.Stdin, "stdin")
+			if err != nil {
+				return err
 			}
 		}
 		if value == "" {

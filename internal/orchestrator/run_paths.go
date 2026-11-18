@@ -295,7 +295,7 @@ type RunLocation struct {
 
 func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (bool, error) {
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
-	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
+	if containerID == "" || !validSlugRe.MatchString(agentSlug) || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
 	run, host, stateErr := o.hostRunAt(ctx, location)
@@ -316,9 +316,7 @@ func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (
 		}
 		return false, errors.Join(err, inspectErr)
 	}
-	probe := directProbe + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
-		"elif tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; " +
-		"else echo ABSENT; fi"
+	probe := directProbe + tmuxSessionProbe(session)
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		return false, fmt.Errorf("probe run %s: %w", runID, err)
@@ -358,7 +356,7 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 
 func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (bool, error) {
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
-	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
+	if containerID == "" || !validSlugRe.MatchString(agentSlug) || !ValidRunID(runID) {
 		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
 	run, host, stateErr := o.hostRunAt(ctx, location)
@@ -388,9 +386,7 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 		}
 		return false, errors.Join(err, inspectErr)
 	}
-	probe := directProbe + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
-		"tmux kill-session -t '" + session + "' >/dev/null 2>&1; " +
-		"if tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; else echo ABSENT; fi; fi"
+	probe := directProbe + "tmux kill-session -t '=" + session + "' >/dev/null 2>&1; " + tmuxSessionProbe(session)
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		// Exec cannot enter a removed/stopped container. Confirm that

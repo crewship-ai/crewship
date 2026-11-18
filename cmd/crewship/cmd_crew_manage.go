@@ -318,6 +318,10 @@ var crewUpdateCmd = &cobra.Command{
 			v, _ := flags.GetString("network-mode")
 			body["network_mode"] = v
 		}
+		if flags.Changed("allow-codex-outer-sandbox") {
+			v, _ := flags.GetBool("allow-codex-outer-sandbox")
+			body["allow_codex_outer_sandbox"] = v
+		}
 		if flags.Changed("allow-private-endpoints") {
 			v, _ := flags.GetBool("allow-private-endpoints")
 			body["allow_private_endpoints"] = v
@@ -385,10 +389,18 @@ var crewUpdateCmd = &cobra.Command{
 		// is accepted, and this is the only place the operator hears about
 		// it before the first OOM-killed run.
 		var updated struct {
-			Warnings []string `json:"warnings" yaml:"warnings"`
+			Warnings               []string `json:"warnings" yaml:"warnings"`
+			AllowCodexOuterSandbox *bool    `json:"allow_codex_outer_sandbox" yaml:"allow_codex_outer_sandbox"`
 		}
 		if err := cli.ReadJSON(resp, &updated); err != nil {
 			return err
+		}
+
+		if flags.Changed("allow-codex-outer-sandbox") {
+			want, _ := flags.GetBool("allow-codex-outer-sandbox")
+			if updated.AllowCodexOuterSandbox == nil || *updated.AllowCodexOuterSandbox != want {
+				return fmt.Errorf("server did not acknowledge Codex outer-isolation consent; upgrade the server before using this flag")
+			}
 		}
 
 		cli.PrintSuccess("Crew updated successfully.")
@@ -611,6 +623,7 @@ func init() {
 	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode (supports *.example.com wildcards)")
 	crewUpdateCmd.Flags().Bool("allow-package-registries", false, "Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains")
 	crewUpdateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
+	crewUpdateCmd.Flags().Bool("allow-codex-outer-sandbox", false, "Opt this crew into qualified outer-container isolation for Codex only (OWNER/ADMIN); requires immutable runtime preflight")
 	crewUpdateCmd.Flags().String("issue-prefix", "", "Issue identifier prefix, e.g. ENG for ENG-42; must match ^[A-Za-z0-9_-]{1,16}$ (empty string clears it: identifiers then use the first three letters of the slug)")
 
 	crewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

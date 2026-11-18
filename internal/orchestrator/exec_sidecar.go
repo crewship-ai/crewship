@@ -395,10 +395,11 @@ func PreRunInstallPackages(
 // subdir). Pulled out so tests can assert the expansion shape without
 // going through a container exec.
 type credFileSpec struct {
-	EnvVar string // .env mapping key (e.g. GMAIL_USERNAME, GITHUB_SSH_PATH)
-	Value  string // raw cleartext bytes to write to the file
-	Path   string // absolute path inside the container, e.g. /secrets/agent/ssh/github
-	Mode   string // octal string for chmod, e.g. "0400" or "0600"
+	ValueType string // primary key/certificate type only; parts remain opaque
+	EnvVar    string // .env mapping key (e.g. GMAIL_USERNAME, GITHUB_SSH_PATH)
+	Value     string // raw cleartext bytes to write to the file
+	Path      string // absolute path inside the container, e.g. /secrets/agent/ssh/github
+	Mode      string // octal string for chmod, e.g. "0400" or "0600"
 }
 
 // credNameSkip is one credential — or one part of one — that was NOT written
@@ -465,7 +466,7 @@ type credNameSkip struct {
 // unusable name so the caller can report it. A skipped credential's name is
 // never checked — see the ordering note in the loop (#1652). Empty input yields
 // ("", 0, nil, nil) so callers can early-exit without a noop exec.
-func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, []credNameSkip, error) {
+func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled bool) ([]credFileSpec, []string, []credNameSkip, error) {
 	var specs []credFileSpec
 	var envLines []string
 	var skipped []credNameSkip
@@ -548,7 +549,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			// data-shape regression we'd rather surface than silently
 			// inject "" as the username.
 			if c.Username == "" {
-				return "", 0, skipped, fmt.Errorf("USERPASS credential %q missing username", c.EnvVarName)
+				return nil, nil, skipped, fmt.Errorf("USERPASS credential %q missing username", c.EnvVarName)
 			}
 			userPath := secretsAgentDir + "/" + c.EnvVarName + "_USERNAME"
 			passPath := secretsAgentDir + "/" + c.EnvVarName + "_PASSWORD"
@@ -569,7 +570,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			// KEY FILE" surprises when the agent runs ssh interactively.
 			path := secretsAgentDir + "/ssh/" + c.EnvVarName
 			specs = append(specs, credFileSpec{
-				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0600",
+				ValueType: c.Type, EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0600",
 			})
 			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
 
@@ -579,7 +580,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			// SSH_KEY for consistency.
 			path := secretsAgentDir + "/certs/" + c.EnvVarName + ".pem"
 			specs = append(specs, credFileSpec{
-				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
+				ValueType: c.Type, EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
 			})
 			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
 
@@ -642,6 +643,23 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 		}
 	}
 
+	names := make(map[string]bool)
+	for _, line := range envLines {
+		name, _, _ := strings.Cut(line, "=")
+		if names[name] {
+			return nil, nil, skipped, fmt.Errorf("credential delivery name collision: %s", name)
+		}
+		names[name] = true
+	}
+	return specs, envLines, skipped, nil
+}
+
+func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, []credNameSkip, error) {
+	specs, envLines, skipped, err := buildCredFilePlan(creds, secretsAgentDir, keeperEnabled)
+	if err != nil {
+		return "", 0, skipped, err
+	}
+
 	if len(specs) == 0 {
 		return "", 0, skipped, nil
 	}
@@ -684,7 +702,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 		// `rm -f` neutralises any pre-planted symlink (see TOCTOU
 		// note on the script-parts block above) before the redirect
 		// follows-or-creates.
-		valB64 := base64.StdEncoding.EncodeToString([]byte(s.Value))
+		valB64 := base64.StdEncoding.EncodeToString([]byte(credpolicy.FileValue(s.ValueType, s.Value)))
 		scriptParts = append(scriptParts,
 			fmt.Sprintf("rm -f %s", s.Path),
 			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, s.Path),

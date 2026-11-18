@@ -406,11 +406,12 @@ func TestCredentialRead_TestableOnBothScanPaths(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	// seedCredentialEnc writes provider GITHUB — probeable, so both paths must
-	// say so. A provider with no probe is covered by TestProbeSupported_GoldenSet;
+	// A scalar GITHUB API key is probeable, so both paths must say so. The
+	// generic seed helper defaults to SECRET, which must not enter token probes.
+	// A provider with no probe is covered by TestProbeSupported_GoldenSet;
 	// what is at stake here is the two paths agreeing, not the value itself.
 	const credID = "cred-testable-both"
-	seedCredentialEnc(t, db, wsID, userID, credID, "GH_TOKEN", "ghp_secret")
+	seedCredentialEncTyped(t, db, wsID, userID, credID, "GH_TOKEN", "ghp_secret", string(CredTypeAPIKey))
 
 	listReq := httptest.NewRequest("GET", "/api/v1/credentials", nil)
 	listReq = listReq.WithContext(withWorkspace(listReq.Context(), wsID, "OWNER"))

@@ -336,6 +336,7 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |
 | `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |
+| `--allow-codex-outer-sandbox` | `bool` | `false` | OWNER/ADMIN consent for this crew’s Codex to use qualified outer-container isolation. Exact immutable build, actual runtime preflight and durable audit are required. MINIMAL remains read-only; other adapters are unchanged. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
 | `--issue-prefix` | `string` | | Prefix for this crew's issue identifiers — `ENG` gives `ENG-42`. Must match `^[A-Za-z0-9_-]{1,16}$`. Pass an empty string to clear it, after which identifiers use the first three letters of the crew slug upper-cased. See [Issue prefixes](#issue-prefixes). |
 

@@ -1370,3 +1370,39 @@ describe("a sidecar read", () => {
     expect(screen.queryByText("system")).not.toBeInTheDocument()
   })
 })
+
+// Delivery proves material reached a run; it does not prove remote authentication.
+describe("native delivery evidence", () => {
+  beforeEach(() => { defaultTab = "activity" })
+  function audit(event_type: string, metadata: unknown) {
+    h.apiFetch.mockImplementation(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () => String(url).includes("/audit") ? [{
+        id: "delivery-fixture", event_type, agent_id: "agent_fixture", ip_address: null,
+        metadata, occurred_at: "2026-08-10T10:00:00Z",
+      }] : [],
+    }))
+  }
+  it("shows a delivered file's run and leaves authentication unverified", async () => {
+    audit("DELIVERED", { run_id: "msg_123_fixture", channel: "file", authentication: "unknown", value: "never-render-synthetic-secret" })
+    renderSheet()
+    const row = (await screen.findByText("DELIVERED")).closest("li")!
+    expect(within(row).getByText("Run msg_123_fixture")).toBeInTheDocument()
+    expect(within(row).getByText("File delivered · Authentication unverified")).toBeInTheDocument()
+    expect(screen.queryByText("never-render-synthetic-secret")).not.toBeInTheDocument()
+  })
+  it("identifies legacy sidecar fetches without assigning a consuming run", async () => {
+    audit("USE", { source: "sidecar_fetch", run_id: "not-a-consuming-run" })
+    renderSheet()
+    const row = (await screen.findByText("USE")).closest("li")!
+    expect(within(row).getByText("Sidecar fetch · Authentication unverified")).toBeInTheDocument()
+    expect(screen.queryByText("Run not-a-consuming-run")).not.toBeInTheDocument()
+  })
+  it.each([null, { run_id: { value: "synthetic-secret" } }, { run_id: "bad\nsynthetic-secret", channel: "file" }])("does not dump malformed or arbitrary metadata: %j", async (metadata) => {
+    audit("DELIVERED", metadata)
+    renderSheet()
+    await screen.findByText("DELIVERED")
+    expect(screen.queryByText(/Run /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/synthetic-secret/)).not.toBeInTheDocument()
+  })
+})

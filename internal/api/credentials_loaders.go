@@ -241,3 +241,23 @@ func (h *CredentialHandler) setCrewIDs(ctx context.Context, tx *sql.Tx, credenti
 	}
 	return nil
 }
+
+// pruneBedrockCrewRules removes the persistent Bedrock crew account rules
+// (CREW bindings with a bedrock_model) of a CREW-scoped account for crews it
+// is no longer shared with. Bindings materialized from a removed rule go with
+// it (ON DELETE CASCADE); explicit per-agent assignments are not rules and
+// stay. Without this, unsharing an account from a crew would still hand it to
+// the crew's next hire.
+func pruneBedrockCrewRules(ctx context.Context, tx *sql.Tx, credentialID string) error {
+	_, err := tx.ExecContext(ctx, `
+		DELETE FROM credential_bindings
+		WHERE credential_id = ? AND scope = 'CREW' AND slot = 'AWS_BEARER_TOKEN_BEDROCK'
+		  AND bedrock_model IS NOT NULL
+		  AND (SELECT scope FROM credentials WHERE id = ?) = 'CREW'
+		  AND crew_id NOT IN (SELECT crew_id FROM credential_crews WHERE credential_id = ?)`,
+		credentialID, credentialID, credentialID)
+	if err != nil {
+		return fmt.Errorf("pruneBedrockCrewRules: credential %q: %w", credentialID, err)
+	}
+	return nil
+}

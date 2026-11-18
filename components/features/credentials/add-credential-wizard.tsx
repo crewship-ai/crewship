@@ -296,9 +296,10 @@ export function AddCredentialWizard({
   const pasteDetection = React.useMemo(() => detectPastedValue(pasteDraft), [pasteDraft])
   function takePasted(value: string) {
     const det = detectPastedValue(value)
-    setItemTypeKey("TOKEN")
+    const pemLabel = value.match(/^\s*-----BEGIN ([A-Z0-9 ]+)-----/)?.[1]
+    setItemTypeKey(pemLabel?.endsWith("PRIVATE KEY") ? "SSH_KEY" : pemLabel === "CERTIFICATE" ? "CERTIFICATE" : "TOKEN")
     setChosenType(true)
-    setPrimaryValue(value.trim())
+    setPrimaryValue(value)
     setExtras({})
     setCustom([])
     if (det && !nameTouched.current) setName(det.suggestedName)

@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+// ContainerTempMount and ContainerSecretsMount name guest mount destinations,
+// not host filesystem roots. Keep runtime creation/qualification terminology
+// distinct from the host Paths below; never resolve these as host data dirs.
+const (
+	ContainerTempMount    = "/tmp"
+	ContainerSecretsMount = "/secrets"
+)
+
 // defaultPaths carries the OS-appropriate default filesystem locations for
 // the mutable state the daemon owns. Unix keeps the historical FHS literals
 // (deb/rpm packaging, cmd_start's defaulted-boltpath sentinel, and years of

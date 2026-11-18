@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -256,6 +257,13 @@ func (s failingCancellationState) Set(context.Context, string, string, []byte) e
 	return errors.New("runtime state disk unavailable")
 }
 func TestDeletedAgentStopRequiresDurableCancellation(t *testing.T) {
+	// Prove absence with an answering empty server roster. A failed tmux
+	// client alone is UNKNOWN and must not acknowledge durable cancellation.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte("#!/bin/sh\ncase \"$1\" in list-sessions) exit 0;; *) exit 1;; esac\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	state := newMemState()
 	run := RunState{ID: NewRunID(), AgentID: "gone", AgentSlug: "gone", ContainerID: "test", Status: "running"}
 	raw, err := json.Marshal(run)

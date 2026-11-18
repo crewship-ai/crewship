@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -532,6 +533,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return err
 	}
 	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
+	if err := o.admitCodexSandbox(ctx, &req, runtimeUse); err != nil {
+		return err
+	}
 	if err := o.admitManagedLaunch(ctx, &req, runtimeUse); err != nil {
 		return err
 	}
@@ -810,14 +814,24 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if req.managedLaunch != nil {
 		// Re-read stored authority after preflight, then attest immediately
 		// before the durable creation gate. A changed build requires a new run.
-		fresh, err := o.managedLaunchResolver(execCtx, req.WorkspaceID, req.CrewID, req.CLIAdapter)
+		fresh, err := o.currentManagedDescriptor(execCtx, req)
 		if err == nil && (fresh == nil || fresh.ImageID != req.managedLaunch.ImageID || fresh.RevisionID != req.managedLaunch.RevisionID || fresh.LockSHA256 != req.managedLaunch.LockSHA256 || fresh.Artifact != req.managedLaunch.Artifact || fresh.Version != req.managedLaunch.Version || fresh.Binary != req.managedLaunch.Binary) {
 			err = fmt.Errorf("managed launch: build authority changed during preflight")
 		}
 		if err == nil {
-			err = o.attestManagedLaunch(execCtx, req.ContainerID, *req.managedLaunch)
+			if req.codexOuterSandbox {
+				err = o.attestCodexOuterSandbox(execCtx, req)
+			} else {
+				err = o.attestManagedLaunch(execCtx, req.ContainerID, *req.managedLaunch)
+			}
+		}
+		if err == nil && req.codexOuterSandbox {
+			err = o.recordCodexSandbox(execCtx, req, "admitted")
 		}
 		if err != nil {
+			if req.codexOuterSandbox {
+				err = o.denyCodexSandbox(ctx, req, err)
+			}
 			o.failRun(ctx, req, runState.ID, "error")
 			refused := fmt.Errorf("%w: %w", ErrExecRefused, err)
 			_, _ = j.Emit(ctx, JournalEntry{WorkspaceID: req.WorkspaceID, CrewID: req.CrewID, AgentID: req.AgentID, MissionID: req.MissionID,
@@ -1962,16 +1976,8 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		}
 		o.loggerForRun(*req).Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
 
-		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
-		// Claude Code expands from the process environment. With sidecar enabled
-		// credentials normally skip env vars (they go via stdin instead), but
-		// MCP env references still need the actual values in the exec env.
-		// #1362: reuse the keeperEnabled read taken under o.mu.RLock at the top
-		// of ensureSidecar (L830). injectMCPCredentialEnvVars is the third
-		// credential-delivery path and must withhold SECRETs under Keeper too.
-		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 	} else {
-		env = BuildEnvVars(*req, cred)
+		env = BuildEnvVars(*req, cred, keeperEnabled)
 		// #1754: a worker sub-agent skips STARTING a sidecar (the crew's is
 		// already listening on 127.0.0.1:9119 in this same container) and used
 		// to be given no per-agent token either — so every call it made to that
@@ -2000,6 +2006,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
 		}
 	}
+
+	// Explicit MCP references are an intentional env channel on both adapter
+	// and worker execs, under the same policy and Keeper state as native files.
+	env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 
 	return env, nil
 }
@@ -2180,6 +2190,12 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
 	}
+	var credentialEnvErr error
+	env, credentialEnvErr = appendCredentialFileEnv(env, req.Credentials, secretsAgentDir, keeperEnabled, collectRequestMCPEnvRefs(req))
+	if credentialEnvErr != nil {
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare credential environment: %w", credentialEnvErr)
+	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
@@ -2273,6 +2289,13 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	if hasMCP && batch.stepFailed(preflightStepMCPConfig) {
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, flushErr)
+	}
+
+	if fileCreds {
+		if err := o.recordNativeCredentialDeliveries(ctx, req, keeperEnabled); err != nil {
+			o.failRun(ctx, req, runID, "error")
+			return nil, "", err
+		}
 	}
 
 	return env, workDir, nil
@@ -2414,8 +2437,10 @@ func shortID(id string) string {
 // one package away, which is how it was missed here.
 func collectSecretValues(req AgentRunRequest) []string {
 	var secretValues []string
+	seenSecret := make(map[string]bool)
 	addSecret := func(v string) {
-		if strings.TrimSpace(v) != "" {
+		if strings.TrimSpace(v) != "" && !seenSecret[v] {
+			seenSecret[v] = true
 			secretValues = append(secretValues, v)
 		}
 	}
@@ -2442,6 +2467,12 @@ func collectSecretValues(req AgentRunRequest) []string {
 	}
 	for _, c := range req.Credentials {
 		addSecret(c.PlainValue)
+		addSecret(credpolicy.FileValue(c.Type, c.PlainValue))
+		for _, field := range c.Fields {
+			if field.IsSecret {
+				addSecret(field.Value)
+			}
+		}
 		// A rotation's grace value (#1882) is the previous secret, held for
 		// the sidecar's 401 replay; it is exactly as secret as the current one.
 		addSecret(c.GraceToken)
