@@ -125,7 +125,18 @@ func (c *covContainer) CopyToContainer(_ context.Context, _ string, _ string, _ 
 
 var _ provider.ContainerProvider = (*covContainer)(nil)
 
-func covScript(cfg provider.ExecConfig) string { return strings.Join(cfg.Cmd, " ") }
+// covScript inspects both shell transports without consuming a recorded reader.
+func covScript(cfg provider.ExecConfig) string {
+	if cfg.Stdin != nil {
+		if seeker, ok := cfg.Stdin.(io.ReadSeeker); ok {
+			pos, _ := seeker.Seek(0, io.SeekCurrent)
+			body, _ := io.ReadAll(seeker)
+			_, _ = seeker.Seek(pos, io.SeekStart)
+			return string(body)
+		}
+	}
+	return strings.Join(cfg.Cmd, " ")
+}
 
 // covStdin drains cfg.Stdin. SINGLE USE — the reader is consumed. Call it once
 // per route invocation and reuse the string.
