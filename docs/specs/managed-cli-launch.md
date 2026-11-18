@@ -149,7 +149,8 @@ image without starting it for inspection. A separate read-only, network-disabled
 runtime executes the actual native binary through the static launcher with
 `--version`. It makes no authentication or model requests. CI prepares the
 builder using the SHA-256-pinned mise 2026.11.9 musl artifact and immutable
-Alpine base. Packaging gets a separate non-root ten-minute command; existing
+Bookworm glibc base (the supported product runtime family). Packaging gets a
+separate non-root ten-minute command; existing
 fixture privilege profiles and timeouts stay unchanged. Missing/skipped clean
 or upgrade execution fails the required lane.
 
