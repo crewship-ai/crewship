@@ -14,10 +14,32 @@ package orchestrator
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"log/slog"
 	"strings"
 	"testing"
 )
+
+func TestDeliveredNormalizedMaterialAndPartsAreScrubbed(t *testing.T) {
+	for _, typ := range []string{"SSH_KEY", "CERTIFICATE"} {
+		original := "synthetic-line-one\r\nsynthetic-line-two\r\n"
+		normalized := strings.ReplaceAll(original, "\r\n", "\n")
+		part := "synthetic-secret-part-value"
+		req := AgentRunRequest{Credentials: []Credential{{Type: typ, PlainValue: original, Fields: []CredentialField{{IsSecret: true, Value: part}}}}}
+		for _, secret := range []string{original, normalized, part} {
+			for _, value := range []string{secret, base64.StdEncoding.EncodeToString([]byte(secret)), hex.EncodeToString([]byte(secret))} {
+				o := &Orchestrator{logger: slog.Default()}
+				var out strings.Builder
+				wrapped, flush := o.wrapScrubHandler(func(event AgentEvent) { out.WriteString(event.Content) }, collectSecretValues(req))
+				wrapped(AgentEvent{Type: "tool_result", Content: value})
+				flush()
+				if strings.Contains(out.String(), value) || !strings.Contains(out.String(), "[REDACTED") {
+					t.Fatalf("delivered %s representation escaped redaction", typ)
+				}
+			}
+		}
+	}
+}
 
 func TestWrapScrubHandler_CustomSecretValueRedacted(t *testing.T) {
 	// Deliberately prefix-less: no built-in pattern (sk-*, ghp_, AKIA…)

@@ -1,46 +1,80 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// readValueStdin reads a credential value piped on stdin — the WHOLE of it.
-//
-// It replaces a bufio.Scanner that took the first line, which was right for
-// every value the command had seen (keys are one line) and silently wrong
-// for the first one that was not: a Codex `auth.json` piped from disk
-// arrived as `{` and the server refused it as truncated JSON (#2428). A PEM
-// key on --value-stdin would have met the same fate. Only the trailing
-// newline a shell or an editor appends is trimmed; interior newlines are
-// the value's own.
-//
-// Bounded to the server's own cap (internal/api/credentials_types.go
-// maxCredentialValueLen), one optional line ending and a sentinel byte:
-// a value the server would refuse is
-// refused here without buffering an unbounded pipe first.
-func readValueStdin() (string, error) {
-	return readCredentialValue(os.Stdin, "stdin")
+// readValueStdin preserves opaque and multiline values. For token types only,
+// accept one terminal line ending added by a shell pipe.
+func readValueStdin(credentialType string) (string, error) {
+	value, err := readCredentialValueLimit(os.Stdin, "stdin", 64*1024+2)
+	if err != nil {
+		return "", err
+	}
+
+	return credentialStdinValue(credentialType, value)
+}
+
+func credentialStdinValue(credentialType, value string) (string, error) {
+	switch credentialType {
+	case "API_KEY", "CLI_TOKEN", "AI_CLI_TOKEN", "OAUTH2", "ENDPOINT_URL", "PROVIDER_LOGIN":
+		if strings.HasSuffix(value, "\n") {
+			value = strings.TrimSuffix(strings.TrimSuffix(value, "\n"), "\r")
+		}
+	}
+	if len(value) > 64*1024 {
+		return "", fmt.Errorf("stdin value is too long (max 65536 bytes)")
+	}
+	return value, nil
+}
+
+// Existing credentials take their import semantics from server metadata, never
+// from the secret's shape. The GET returns no secret value.
+func readExistingCredentialStdin(client *cli.Client, id string, expectedType ...string) (string, error) {
+	resp, err := client.Get("/api/v1/credentials/" + id)
+	if err != nil {
+		return "", err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+	var meta struct {
+		Type string `json:"type" yaml:"type"`
+	}
+	if err := cli.ReadJSON(resp, &meta); err != nil {
+		return "", err
+	}
+	if len(expectedType) > 0 && meta.Type != expectedType[0] {
+		return "", fmt.Errorf("--password-stdin requires an existing USERPASS credential")
+	}
+	return readValueStdin(meta.Type)
 }
 
 // readCredentialValue applies the same bounded import contract to files and stdin.
 func readCredentialValue(input io.Reader, source string) (string, error) {
-	const maxValueStdinBytes = 64 * 1024
-	b, err := io.ReadAll(io.LimitReader(input, maxValueStdinBytes+3))
+	return readCredentialValueLimit(input, source, 64*1024)
+}
+
+func readCredentialValueLimit(input io.Reader, source string, maxValueStdinBytes int64) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(input, maxValueStdinBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read value from %s: %w", source, err)
 	}
-	if len(b) > maxValueStdinBytes+2 {
+	if int64(len(b)) > maxValueStdinBytes {
 		return "", fmt.Errorf("%s value is too long (max %d bytes)", source, maxValueStdinBytes)
 	}
-	value := string(b)
-	if strings.HasSuffix(value, "\n") {
-		value = strings.TrimSuffix(strings.TrimSuffix(value, "\n"), "\r")
+	if bytes.IndexByte(b, 0) >= 0 {
+		return "", fmt.Errorf("%s contains NUL bytes; binary input is not supported by this CLI; supply UTF-8 text without NUL bytes", source)
 	}
-	if len(value) > maxValueStdinBytes {
-		return "", fmt.Errorf("%s value is too long (max %d bytes)", source, maxValueStdinBytes)
+	if !utf8.Valid(b) {
+		return "", fmt.Errorf("%s contains non-UTF-8 bytes; binary input is not supported by this CLI; supply UTF-8 text without NUL bytes", source)
 	}
-	return value, nil
+	return string(b), nil
 }

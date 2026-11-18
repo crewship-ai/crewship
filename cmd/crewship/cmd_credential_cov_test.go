@@ -63,7 +63,7 @@ func TestResolveCredentialID(t *testing.T) {
 func TestTestCredentialValue(t *testing.T) {
 	t.Run("skips SECRET type", func(t *testing.T) {
 		covStub(t)
-		valid, msg := testCredentialValue(newAPIClient(), "GITHUB", "SECRET", "v")
+		valid, _, msg := testCredentialValue(newAPIClient(), "GITHUB", "SECRET", "v")
 		if !valid || msg != "" {
 			t.Errorf("SECRET should skip validation: valid=%v msg=%q", valid, msg)
 		}
@@ -71,7 +71,7 @@ func TestTestCredentialValue(t *testing.T) {
 	t.Run("skips NONE / empty provider", func(t *testing.T) {
 		covStub(t)
 		for _, p := range []string{"", "NONE"} {
-			if valid, _ := testCredentialValue(newAPIClient(), p, "API_KEY", "v"); !valid {
+			if valid, _, _ := testCredentialValue(newAPIClient(), p, "API_KEY", "v"); !valid {
 				t.Errorf("provider %q should skip validation", p)
 			}
 		}
@@ -90,7 +90,7 @@ func TestTestCredentialValue(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost("/api/v1/credentials/test",
 			clitest.JSONResponse(200, map[string]any{"valid": false, "error": "401 from provider"}))
-		valid, msg := testCredentialValue(newAPIClient(), "ANTHROPIC", "API_KEY", "sk-ant-oat-xyz")
+		valid, _, msg := testCredentialValue(newAPIClient(), "ANTHROPIC", "API_KEY", "sk-ant-oat-xyz")
 		if valid || msg != "401 from provider" {
 			t.Errorf("got valid=%v msg=%q, want the stubbed server response to be honored", valid, msg)
 		}
@@ -108,7 +108,7 @@ func TestTestCredentialValue(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost("/api/v1/credentials/test",
 			clitest.JSONResponse(200, map[string]any{"valid": false, "error": "401 from provider"}))
-		valid, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "ghp_x")
+		valid, _, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "ghp_x")
 		if valid || msg != "401 from provider" {
 			t.Errorf("got valid=%v msg=%q", valid, msg)
 		}
@@ -125,7 +125,7 @@ func TestTestCredentialValue(t *testing.T) {
 	t.Run("server error", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost("/api/v1/credentials/test", clitest.ErrorResponse(500, "validator down"))
-		valid, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
+		valid, _, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
 		if valid || !strings.Contains(msg, "test request failed") {
 			t.Errorf("got valid=%v msg=%q", valid, msg)
 		}
@@ -133,7 +133,7 @@ func TestTestCredentialValue(t *testing.T) {
 	t.Run("malformed response body", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost("/api/v1/credentials/test", clitest.TextResponse(200, "not json"))
-		valid, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
+		valid, _, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
 		if valid || msg != "failed to read test result" {
 			t.Errorf("got valid=%v msg=%q", valid, msg)
 		}
@@ -141,7 +141,7 @@ func TestTestCredentialValue(t *testing.T) {
 	t.Run("transport error", func(t *testing.T) {
 		covStub(t)
 		cliCfg.Server = "http://127.0.0.1:1"
-		valid, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
+		valid, _, msg := testCredentialValue(newAPIClient(), "GITHUB", "API_KEY", "v")
 		if valid || !strings.Contains(msg, "test request failed") {
 			t.Errorf("got valid=%v msg=%q", valid, msg)
 		}

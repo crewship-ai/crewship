@@ -9,6 +9,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Credential tests cannot send file/login material to API-token probes (#5466).** Probe dispatch now checks the credential type, preserves metered provider-login and dedicated Claude OAuth checks, refuses unknown types, and reports unsupported checks without an authentication-success audit claim. Native CLI create/update apply the same policy.
+- **Tmux runs use their own native credential environment (#5467).** Existing server-only token/path variables are excluded from the target CLI, image PATH/mise settings are preserved, and setup payloads move from process arguments to stdin. Run-private files are created with restricted permissions and removed after the run settles.
+
+- **Multiline credential parts no longer stop at the first line (#5463).** `credential field set --value-stdin` preserves complete UTF-8 PEM/JSON and final line endings within 64 KiB, rejects unsupported binary input and refuses conflicting value flags. Native certificate `key_pem` onboarding can use stdin without exposing the key in arguments.
+
+- **Codex can opt into qualified outer-container isolation per crew (#5460).** OWNER/ADMIN consent, immutable exact-build authority, actual runtime attestation and durable run audit are required. The static launcher enforces effective UID, no-new-privileges, seccomp and zero capabilities before Codex executes. MINIMAL remains read-only and other adapters retain their provider.
+- ⚠️ **Behaviour change:** the legacy global Codex `danger-full-access` override no longer authorizes execution without the crew opt-in and qualified runtime. New runtimes stage immutable launcher generations when supported; running ordinary crews are not stopped for a path-only change. Mutable or missing launcher evidence refuses outer mode with a recreation requirement.
+
+- **Native Vault credentials were present on disk but missing from agent shells.** File paths now accompany the runtime environment without sourcing `.env` or replacing direct CLI tokens. SSH keys and certificates repair CRLF and a missing final LF on delivery, including existing stored values.
+- **SSH key imports could lose their final newline.** File imports preserve every byte, opaque stdin remains unchanged, and key/certificate validation parses actual material. The Vault paste wizard preserves the value and recognizes key/certificate shapes. USERPASS creation accepts `--username` and `--password-stdin`; skipped authentication checks no longer report a successful test.
+- ⚠️ **Behaviour change:** malformed or encrypted private keys and malformed certificate chains are rejected when written; duplicate native delivery names fail closed instead of overwriting another file.
+
+
 - **Bedrock peer queries reuse the running crew sidecar (#5427).** A missing exact peer account is resolved through a bounded sidecar-only host request, without restarting its parent or exporting a key to the agent. Incomplete Bedrock usage is retained as unknown or a partial lower bound, and the Local AI seed installs managed OpenCode 2. Separate AWS infrastructure credentials remain available through approved Keeper executions; ambient AWS/MCP authentication stays isolated from inference.
 
 - **Choosing Preview in a Docs code block always requests its render (#5436).** Earlier queued previews can no longer consume the page budget and pause the block the reader explicitly chose. Automatic previews still respect that budget, and typing keeps the source visible.

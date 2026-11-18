@@ -175,7 +175,7 @@ func TestCrewListCountsGoldenFixture(t *testing.T) {
 	// there is nothing to explain when the answer is yes; these crews are all
 	// on a nil provider, so it is absent here.
 	wantKeys := []string{
-		"_count", "allow_private_endpoints", "allowed_domains", "avatar_style",
+		"_count", "allow_codex_outer_sandbox", "allow_private_endpoints", "allowed_domains", "avatar_style",
 		"color", "container_cpus", "container_memory_mb", "container_ttl_hours",
 		"created_at", "description", "icon", "id", "issue_prefix",
 		"max_ephemeral_agents", "name", "network_mode", "network_mode_enforced",

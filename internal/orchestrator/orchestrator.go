@@ -65,8 +65,9 @@ type AgentRunRequest struct {
 	// returns even when a detached process still needs the container.
 	RuntimeUse *provider.RuntimeUse
 	// Set by RunAgent from provider inspection, never a caller's desired image.
-	runtimeImageID string
-	managedLaunch  *managedlaunch.Descriptor
+	runtimeImageID    string
+	managedLaunch     *managedlaunch.Descriptor
+	codexOuterSandbox bool
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -559,6 +560,7 @@ type Orchestrator struct {
 	hostOutputCapacityRuns   int
 	managedLaunchCrews       map[string]bool
 	managedLaunchResolver    ManagedLaunchResolver
+	codexSandboxPolicy       CodexSandboxPolicyResolver
 	runRecoveryMu            sync.Mutex // serializes recovered publication with local admission
 	agentRuns                sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader          func(context.Context, string, string) (string, error)

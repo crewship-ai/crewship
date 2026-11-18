@@ -112,10 +112,23 @@ For the legacy Claude demo, set `SEED_ANTHROPIC_API_KEY` instead of
 `SEED_CODEX_AUTH_FILE`. The Codex variable is a path to a private `0600`
 file outside Git; never put the contents of `auth.json` in `.env.local`.
 
-On an isolated development crew container whose Linux user-namespace sandbox
-cannot start, the operator can set `CREWSHIP_CODEX_SANDBOX_MODE=danger-full-access`
-for Codex runs. Leave it unset when the normal sandbox works; this setting
-changes Codex's isolation inside the crew container, not the seed data.
+When nested Linux user namespaces are unavailable, use the explicit
+OWNER/ADMIN-controlled crew setting, not a global sandbox override:
+
+```bash
+crewship crew update <crew> --allow-codex-outer-sandbox=true
+```
+
+This setting alone does not authorize execution: the crew needs an exact
+Codex pin/native lock, a qualified immutable environment revision and a recreated
+runtime with an immutable launcher. Runtime preflight must prove the outer
+container controls and persist a crew/agent/run audit. Missing evidence refuses
+the run. MINIMAL stays read-only; other adapters are unchanged. See the
+[outer-isolation contract](https://github.com/crewship-ai/crewship/blob/main/docs/specs/codex-outer-sandbox.md).
+
+The legacy `CREWSHIP_CODEX_SANDBOX_MODE=danger-full-access` variable without
+qualified crew consent now refuses Codex execution with a migration message.
+Remove that variable instead of enabling unsandboxed execution server-wide.
 
 With `SEED_GITHUB_TOKEN` set, the seed creates a workspace `GH_TOKEN` mounted
 as a 0400 file the in-container `gh` CLI reads directly. Without it no

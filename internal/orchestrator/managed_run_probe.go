@@ -22,7 +22,7 @@ func (o *Orchestrator) knownManagedRunLocation(location RunLocation) bool {
 	if value, ok := o.agentRuns.Load(location.RunID); ok {
 		owner := value.(*agentRunControl)
 		if owner.location.ContainerID == location.ContainerID && owner.location.AgentSlug == location.AgentSlug {
-			known = known || owner.location.Managed
+			known = known || owner.location.Managed || owner.outerManaged.Load()
 		}
 	}
 	// HOME-based StopRun/RunIsAlive callers can outlive agentRuns while a
