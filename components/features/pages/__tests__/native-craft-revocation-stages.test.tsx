@@ -104,10 +104,13 @@ async function editWhileOffline(){
  act(()=>options.at(-1)!.onChanged('typed','doc'))
  await advance(3_000)
  server.dropStream()
- // Establish the captured offline draft before starting T0. Its hash runs
- // on real crypto threads; advancing fake timers cannot finish retirement.
- await settle(()=>journal.persist.mock.calls.at(-1)?.[1]===true)
- expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(true)
+ // Let the normal reauthorization detect the disconnected browser, then
+ // establish the captured-copy state before T0. persist precedes hashing;
+ // only this public post-retirement state confirms capture has finished.
+ await advance(NATIVE_REAUTHORIZE_INTERVAL_MS)
+ const captured=()=>screen.getByRole('status').textContent?.includes('Editor disconnected · the captured local copy is kept')===true
+ await settle(captured)
+ expect(captured()).toBe(true)
 }
 async function advance(ms:number){let left=ms;while(left>0){const step=Math.min(250,left);await act(async()=>{await vi.advanceTimersByTimeAsync(step)});left-=step}}
 // Hashing runs on real crypto threads, so waiting for it takes real time too.
@@ -212,6 +215,32 @@ describe('silent stream',()=>{
  })
 })
 describe('offline',()=>{
+ it('does not finish offline setup while the final capture hash is held',async()=>{
+  await opened()
+  let release=()=>{},started=()=>{}
+  const held=new Promise<void>(resolve=>{release=resolve})
+  const finalHash=new Promise<void>(resolve=>{started=resolve})
+  const digest=crypto.subtle.digest.bind(crypto.subtle)
+  const hashing=vi.spyOn(crypto.subtle,'digest').mockImplementation(async(...args)=>{
+   if(journal.persist.mock.calls.at(-1)?.[1]===true){started();await held}
+   return digest(...args)
+  })
+  let finished=false
+  const setup=editWhileOffline().then(()=>{finished=true})
+  try{
+   // No real-time delay races the fixture: the held hash or an incorrectly
+   // early helper return decides which stage we reached.
+   await Promise.race([finalHash,setup.then(()=>{throw Error('offline setup returned before final capture hashing')})])
+   expect(finished).toBe(false)
+   expect(screen.getByRole('status')).not.toHaveTextContent('Editor disconnected · the captured local copy is kept')
+   release()
+   await setup
+   expect(screen.getByRole('status')).toHaveTextContent('Editor disconnected · the captured local copy is kept')
+  }finally{
+   release();hashing.mockRestore()
+   await Promise.allSettled([setup])
+  }
+ })
  it('cannot learn revocation: keeps the draft unread and unoffered, and on reconnect reads nothing before verified admission',async()=>{
   await opened()
   await editWhileOffline()
