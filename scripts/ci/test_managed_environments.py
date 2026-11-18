@@ -10,6 +10,27 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_keeper_runtime_requires_real_crew_sidecar_and_native_cli_receipt(self):
+        name = 'TestNativeKeeperRealCrewContainer'
+        key = (managed.PREFIX + 'internal/orchestrator', name)
+        self.assertIn(key, managed.REQUIRED)
+        missing = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(missing, 0))
+        command = next(c for c in managed.commands() if name in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('./internal/orchestrator', command)
+
+    def test_native_keeper_cli_flow_is_required_without_privilege_escalation(self):
+        name = 'TestKeeperAgentCLIVaultSidecarStandardTool'
+        key = (managed.PREFIX + 'cmd/crewship', name)
+        self.assertIn(key, managed.REQUIRED)
+        command = next(c for c in managed.commands() if name in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('integration', command)
+        self.assertIn('./cmd/crewship', command)
+        events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(events, 0))
+
     def test_real_agent_sdk_requires_clean_and_retained_upgrade_without_sudo(self):
         name = 'TestAgentCLIRealDockerCleanAndRetainedUpgrade'
         package = managed.PREFIX + 'internal/provider/docker'
@@ -133,7 +154,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertIn('-timeout=3m', cli)
         self.assertIn('-timeout=8m', launcher)
         self.assertNotIn('sudo', cli)
-        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory|TestNativeVaultCLITrioProtocols)$')
+        self.assertEqual(cli[cli.index('-run') + 1], '^(TestKeeperAgentCLIVaultSidecarStandardTool|TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory|TestNativeVaultCLITrioProtocols)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy

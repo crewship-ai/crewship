@@ -1104,8 +1104,8 @@ func TestCovOHCBuildKeeperBlock(t *testing.T) {
 	if !strings.Contains(block, "DB_PW") {
 		t.Errorf("keeper block missing secret env name: %q", block)
 	}
-	if !strings.Contains(block, "agent_slug\":\"bot\"") {
-		t.Errorf("keeper block missing agent_slug: %q", block)
+	if !strings.Contains(block, "crewship keeper request") || strings.Contains(block, "agent_slug") {
+		t.Error("keeper block must use native run-derived identity instead of a model-supplied slug")
 	}
 	withholdKeeperSecretValues(creds)
 	if creds[0].Value != "" {

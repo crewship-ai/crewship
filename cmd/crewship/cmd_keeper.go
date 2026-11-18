@@ -20,7 +20,7 @@ import (
 // command combines both layers and is the mutation surface for governance.
 var keeperCmd = &cobra.Command{
 	Use:   "keeper",
-	Short: "Keeper watchdog status and governance settings",
+	Short: "Keeper agent access, watchdog status and governance settings",
 	Long: `Inspect and configure the Keeper security watchdog for the current
 workspace.
 
@@ -597,6 +597,9 @@ func init() {
 	keeperCmd.AddCommand(keeperRequestsCmd)
 	keeperCmd.AddCommand(keeperWatchCmd)
 	keeperCmd.AddCommand(keeperSecondApproverCmd)
+	for _, operation := range []string{"request", "execute", "request-status"} {
+		keeperCmd.AddCommand(newKeeperAgentCommand(operation))
+	}
 
 	rootCmd.AddCommand(keeperCmd)
 }

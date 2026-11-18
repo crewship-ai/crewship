@@ -2355,8 +2355,11 @@ func TestBuildKeeperBlock(t *testing.T) {
 	if !strings.Contains(got, "SECRET_TOK") {
 		t.Errorf("block missing env var: %q", got)
 	}
-	if !strings.Contains(got, "agent-y") {
-		t.Errorf("block missing agent slug: %q", got)
+	if strings.Contains(got, "agent-y") {
+		t.Error("native Keeper recipe must obtain acting identity from the run capability, not a model-supplied slug")
+	}
+	if !strings.Contains(got, "credential ID: c1") || strings.Contains(got, "should-be-hidden") {
+		t.Error("Keeper block must list credential identity without the value")
 	}
 }
 
