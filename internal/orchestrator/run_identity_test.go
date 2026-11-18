@@ -329,10 +329,10 @@ func TestSetupTmuxExec_StartingBLeavesARunning(t *testing.T) {
 	// The kill-session is still there — item 3 of the E0 cut keeps it and
 	// makes it harmless rather than removing it — and it targets B.
 	joinedB := strings.Join(wrapperB, " ")
-	if !strings.Contains(joinedB, "tmux kill-session -t '"+TmuxSessionName("eva", "run-b")+"'") {
+	if !strings.Contains(joinedB, "tmux kill-session -t '="+TmuxSessionName("eva", "run-b")+"'") {
 		t.Errorf("run B's wrapper does not kill its OWN session first:\n%s", joinedB)
 	}
-	if strings.Contains(joinedB, "kill-session -t '"+TmuxSessionName("eva", "run-a")+"'") {
+	if strings.Contains(joinedB, "kill-session -t '="+TmuxSessionName("eva", "run-a")+"'") {
 		t.Errorf("run B's wrapper kills run A's session:\n%s", joinedB)
 	}
 	// And A's own wrapper still reads A's argv and A's exit code.
