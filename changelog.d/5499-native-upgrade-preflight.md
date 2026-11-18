@@ -1,0 +1,1 @@
+- **Inspect native credential alias conflicts before activating an upgrade (#5499).** The candidate full-server CLI reads retained SQLite metadata without migrations or decryption, reports affected agents and credential IDs, and flags legacy Codex sandbox settings without crew consent. Missing configuration assertions or incomplete metadata produce an explicit unknown result.
