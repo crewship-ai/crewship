@@ -274,6 +274,13 @@ go run ./scripts/docker-api-surface          # check; exit 1 on drift
 go run ./scripts/docker-api-surface -list    # print every call site
 ```
 
+The declared callers also include the standalone release acceptance tool in
+`scripts/ci/installer-qualification`. It is not imported by the server or shipped
+in runtime archives. On its isolated CI runner it uses only existing
+`ContainerCreate`, `ContainerInspect`, `ContainerStart`, `ContainerWait` and
+`ContainerRemove` endpoints for one owned disposable installer container. This
+caller declaration adds no Engine endpoint or production proxy permission.
+
 The check reads the exported method set of `*client.Client` by reflection, finds
 every call site in the packages that import the Docker SDK, and compares the
 result with `scripts/docker-api-surface/allowlist.go`. It fails when:
