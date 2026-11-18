@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/buildinfo"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,5 +147,47 @@ func TestAgentCLIUpgradeDefersWhileCrewRuntimeIsHeld(t *testing.T) {
 	current := daemon.crewContainer()
 	if current == nil || current.labels["crewship.agent-cli-sha256"] != p.cfg.agentCLIArtifact.SHA256 {
 		t.Fatal("replacement runtime lacks its complete SDK generation digest")
+	}
+}
+
+func TestAgentCLIProbeRejectsStaleOrIncompleteClient(t *testing.T) {
+	artifact := &runtimestage.AgentCLIArtifact{SHA256: strings.Repeat("a", 64), Arch: "amd64"}
+	commit := strings.Repeat("b", 40)
+	valid := buildinfo.AgentRuntimeProbe{Protocol: 1, SHA256: artifact.SHA256, OS: "linux", Arch: "amd64", Commit: commit, Version: "fixture", Commands: []string{"commands", "version"}}
+	if err := validateAgentCLIProbe(valid, artifact, commit, []string{"version", "commands"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"protocol", "hash", "os", "arch", "commit", "unknown-commit", "missing-command", "duplicate-command", "invalid-command"} {
+		t.Run(kind, func(t *testing.T) {
+			probe := valid
+			probe.Commands = append([]string(nil), valid.Commands...)
+			expected := commit
+			switch kind {
+			case "protocol":
+				probe.Protocol = 2
+			case "hash":
+				probe.SHA256 = strings.Repeat("c", 64)
+			case "os":
+				probe.OS = "darwin"
+			case "arch":
+				probe.Arch = "arm64"
+			case "commit":
+				probe.Commit = strings.Repeat("d", 40)
+			case "unknown-commit":
+				expected = ""
+			case "missing-command":
+				probe.Commands = []string{"commands"}
+			case "duplicate-command":
+				probe.Commands = append(probe.Commands, "version")
+			case "invalid-command":
+				probe.Commands = append(probe.Commands, "invalid\nmetadata")
+			}
+			if err := validateAgentCLIProbe(probe, artifact, expected, []string{"version", "commands"}); err == nil {
+				t.Fatal("unqualified native CLI probe was admitted")
+			}
+		})
+	}
+	if err := validateAgentCLIProbe(valid, artifact, commit, []string{"keeper execute"}); err == nil {
+		t.Fatal("backend advertised native Keeper on a client without that command")
 	}
 }
