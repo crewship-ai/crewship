@@ -10,6 +10,17 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_native_keeper_cli_flow_is_required_without_privilege_escalation(self):
+        name = 'TestKeeperAgentCLIVaultSidecarStandardTool'
+        key = (managed.PREFIX + 'cmd/crewship', name)
+        self.assertIn(key, managed.REQUIRED)
+        command = next(c for c in managed.commands() if name in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+        self.assertIn('integration', command)
+        self.assertIn('./cmd/crewship', command)
+        events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+        self.assertTrue(managed.failures(events, 0))
+
     def test_actual_cli_trio_requires_each_shell_subtest_and_nonroot_execution(self):
         expected = {'CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE'}
         package = managed.PREFIX + 'internal/orchestrator'
@@ -109,7 +120,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertIn('-timeout=3m', cli)
         self.assertIn('-timeout=8m', launcher)
         self.assertNotIn('sudo', cli)
-        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory|TestNativeVaultCLITrioProtocols)$')
+        self.assertEqual(cli[cli.index('-run') + 1], '^(TestKeeperAgentCLIVaultSidecarStandardTool|TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory|TestNativeVaultCLITrioProtocols)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy

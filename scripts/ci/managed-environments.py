@@ -18,7 +18,8 @@ import tempfile
 from contextlib import contextmanager
 
 PREFIX = 'github.com/crewship-ai/crewship/'
-CLI_TESTS = {'internal/orchestrator': {
+CLI_TESTS = {'cmd/crewship': {'TestKeeperAgentCLIVaultSidecarStandardTool'},
+             'internal/orchestrator': {
     'TestNativeCLIShellEnvironment',
     'TestNativeVaultCLITrioProtocols',
     'TestNativeTmuxCurrentRunCannotInheritRevokedToken',
