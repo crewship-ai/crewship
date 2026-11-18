@@ -65,7 +65,7 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string, vault ...
 	} else if adapter == "CODEX_CLI" {
 		privateKey = strings.TrimSuffix(privateKey, "\n")
 	}
-	var sshAuthenticated, basicAuthenticated, tokenAuthenticated, gitlabAuthenticated, mtlsAuthenticated atomic.Int32
+	var sshAuthenticated, basicAuthenticated, tokenAuthenticated, oauthAuthenticated, gitlabAuthenticated, mtlsAuthenticated atomic.Int32
 	port := startNativeSSHFixtureObserved(t, signer, func() { sshAuthenticated.Add(1) })
 	known := filepath.Join(home, "fixture-known-hosts")
 	if err := os.WriteFile(known, []byte(knownhosts.Line([]string{fmt.Sprintf("[127.0.0.1]:%d", port)}, signer.PublicKey())+"\n"), 0600); err != nil {
@@ -75,6 +75,15 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string, vault ...
 	password := "fixture-password-$HOME\n"
 	basicPassword := "fixture-curl-password-$HOME"
 	basic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth" {
+			if r.Header.Get("Authorization") != "Bearer fixture-oauth-access" {
+				http.Error(w, "fixture OAuth access token required", http.StatusUnauthorized)
+				return
+			}
+			oauthAuthenticated.Add(1)
+			fmt.Fprint(w, "fixture-oauth-authenticated")
+			return
+		}
 		if r.URL.Path == "/api/v4/user" {
 			if r.Header.Get("PRIVATE-TOKEN") != "fixture-glab-token" && r.Header.Get("Authorization") != "Bearer fixture-glab-token" {
 				http.Error(w, "fixture GitLab authentication required", http.StatusUnauthorized)
@@ -140,6 +149,7 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string, vault ...
 		t.Fatal(err)
 	}
 	req := AgentRunRequest{AgentSlug: "fixture", RunID: "fixture-run", CLIAdapter: adapter, ToolProfile: "FULL", UserMessage: "Run the fixture shell tool once and report its result.", LLMModel: "gpt-5-mini", Credentials: []Credential{
+		{ID: "oauth-access", Type: "OAUTH2", Provider: "GITHUB", EnvVarName: "NATIVE_TEST_OAUTH_ACCESS", PlainValue: "fixture-oauth-access"},
 		{ID: "gitlab-token", Type: "CLI_TOKEN", EnvVarName: "GITLAB_TOKEN", PlainValue: "fixture-glab-token"},
 		{ID: "token", Type: "CLI_TOKEN", EnvVarName: "NATIVE_TEST_TOKEN", PlainValue: "fixture-token-value"},
 		{ID: "file", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_TEST_SECRET_FILE", PlainValue: generic},
@@ -176,12 +186,14 @@ test "$(stat -c %%a "$NATIVE_TEST_LOGIN_PASSWORD")" = 400
 test "$(stat -c %%a "$NATIVE_TEST_CERT_PATH")" = 400
 test "$(stat -c %%a "$NATIVE_TEST_CERT_KEY_PEM")" = 400
 sh -c 'test "$NATIVE_TEST_TOKEN" = fixture-token-value && test -f "$NATIVE_TEST_SECRET_FILE" && test -f "$NATIVE_TEST_LOGIN_PASSWORD" && test -f "$NATIVE_TEST_SSH_KEY_PATH"'
+sh -c 'test "$NATIVE_TEST_OAUTH_ACCESS" = fixture-oauth-access'
 test "$(ssh -F /dev/null -i "$NATIVE_TEST_SSH_KEY_PATH" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o ClearAllForwardings=yes -o ConnectTimeout=3 -o UserKnownHostsFile="$NATIVE_TEST_KNOWN_HOSTS" -p %d fixture@127.0.0.1 whoami)" = 'fixture\native-user'
 test "$(curl --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 --cacert "$NATIVE_TEST_CA_FILE" --cert "$NATIVE_TEST_CERT_PATH" --key "$NATIVE_TEST_CERT_KEY_PEM" "$NATIVE_TEST_MTLS_URL")" = fixture-mtls-authenticated
 # curl reads this synthetic login through its native stdin configuration;
 # neither the password nor its expansion is passed as a process argument.
 test "$(printf 'user = "%%s:%%s"\n' "$(cat "$NATIVE_TEST_BASIC_LOGIN_USERNAME")" "$(cat "$NATIVE_TEST_BASIC_LOGIN_PASSWORD")" | curl --config - --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_BASIC_URL")" = fixture-basic-authenticated
 test "$(printf 'Authorization: Bearer %%s\n' "$NATIVE_TEST_TOKEN" | curl --header @- --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_TOKEN_URL")" = fixture-token-authenticated
+test "$(printf 'Authorization: Bearer %%s\n' "$NATIVE_TEST_OAUTH_ACCESS" | curl --header @- --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_OAUTH_URL")" = fixture-oauth-authenticated
 test "$("$NATIVE_TEST_GLAB_BINARY" api user)" = '{"id":1,"username":"fixture-glab-user"}'
 printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)), port)
 	var passed atomic.Bool
@@ -295,6 +307,7 @@ printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([
 	env = overrideEnv(env, "NATIVE_TEST_MTLS_URL", mtls.URL)
 	env = overrideEnv(env, "NATIVE_TEST_BASIC_URL", basic.URL)
 	env = overrideEnv(env, "NATIVE_TEST_TOKEN_URL", basic.URL+"/token")
+	env = overrideEnv(env, "NATIVE_TEST_OAUTH_URL", basic.URL+"/oauth")
 	gitlabHost := strings.TrimPrefix(basic.URL, "http://")
 	env = overrideEnv(env, "NATIVE_TEST_GITLAB_HOST", gitlabHost)
 	env = overrideEnv(env, "GITLAB_HOST", gitlabHost)
@@ -375,7 +388,7 @@ printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([
 	if err != nil || !passed.Load() {
 		t.Fatalf("native %s shell did not verify credential delivery (calls=%d): %v\n%s", adapter, calls.Load(), err, out)
 	}
-	for protocol, count := range map[string]int32{"ssh": sshAuthenticated.Load(), "basic": basicAuthenticated.Load(), "bearer": tokenAuthenticated.Load(), "gitlab": gitlabAuthenticated.Load(), "mtls": mtlsAuthenticated.Load()} {
+	for protocol, count := range map[string]int32{"ssh": sshAuthenticated.Load(), "basic": basicAuthenticated.Load(), "bearer": tokenAuthenticated.Load(), "oauth": oauthAuthenticated.Load(), "gitlab": gitlabAuthenticated.Load(), "mtls": mtlsAuthenticated.Load()} {
 		if count == 0 {
 			t.Errorf("no authenticated %s request reached the fixture service", protocol)
 		}
