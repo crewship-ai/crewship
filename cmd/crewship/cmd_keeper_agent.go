@@ -56,14 +56,14 @@ func newKeeperAgentCommand(operation string) *cobra.Command {
 }
 
 type keeperAgentReply struct {
-	RequestID          string  `json:"request_id"`
-	Decision           string  `json:"decision"`
-	Reason             string  `json:"reason,omitempty"`
-	RiskScore          int     `json:"risk_score"`
-	Output             string  `json:"output,omitempty"`
-	ExitCode           *int    `json:"exit_code,omitempty"`
-	RequestType        string  `json:"request_type,omitempty"`
-	ApprovalConsumedAt *string `json:"approval_consumed_at,omitempty"`
+	RequestID          string  `json:"request_id" yaml:"request_id"`
+	Decision           string  `json:"decision" yaml:"decision"`
+	Reason             string  `json:"reason,omitempty" yaml:"reason,omitempty"`
+	RiskScore          int     `json:"risk_score" yaml:"risk_score"`
+	Output             string  `json:"output,omitempty" yaml:"output,omitempty"`
+	ExitCode           *int    `json:"exit_code,omitempty" yaml:"exit_code,omitempty"`
+	RequestType        string  `json:"request_type,omitempty" yaml:"request_type,omitempty"`
+	ApprovalConsumedAt *string `json:"approval_consumed_at,omitempty" yaml:"approval_consumed_at,omitempty"`
 }
 
 func keeperAgentRequest(cmd *cobra.Command, operation, argument string) error {
@@ -157,15 +157,18 @@ func keeperAgentRequest(cmd *cobra.Command, operation, argument string) error {
 	if err != nil || len(raw) > responseLimit {
 		return keeperAgentResponseFailure(operation, "bounded Keeper response unavailable; inspect before retrying")
 	}
-	var reply struct {
-		keeperAgentReply
-		ID string `json:"id"`
-	}
+	var reply keeperAgentReply
 	if json.Unmarshal(raw, &reply) != nil {
 		return keeperAgentResponseFailure(operation, "invalid Keeper response")
 	}
 	if operation == "request-status" {
-		reply.RequestID = reply.ID
+		var status struct {
+			ID string `json:"id" yaml:"id"`
+		}
+		if json.Unmarshal(raw, &status) != nil {
+			return keeperAgentResponseFailure(operation, "invalid Keeper status response")
+		}
+		reply.RequestID = status.ID
 		if reply.Decision == "" {
 			reply.Decision = "PENDING"
 		}
@@ -186,7 +189,7 @@ func keeperAgentRequest(cmd *cobra.Command, operation, argument string) error {
 	safe := scrubber.New()
 	reply.Reason = safe.Scrub(strings.ReplaceAll(reply.Reason, token, "[REDACTED]"))
 	reply.Output = safe.Scrub(strings.ReplaceAll(reply.Output, token, "[REDACTED]"))
-	if err := json.NewEncoder(cmd.OutOrStdout()).Encode(reply.keeperAgentReply); err != nil {
+	if err := json.NewEncoder(cmd.OutOrStdout()).Encode(reply); err != nil {
 		return err
 	}
 	if reply.Decision == "DENY" {

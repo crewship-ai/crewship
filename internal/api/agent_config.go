@@ -1745,19 +1745,19 @@ func withholdKeeperSecretValues(creds []mcpCredEntry) {
 // buildKeeperBlock builds the [CREDENTIAL ACCESS CONTROL] system prompt section
 // for agents with Keeper-guarded SECRET credentials. Returns empty string if no
 // SECRET credentials exist.
-func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntry) string {
+func (h *InternalHandler) buildKeeperBlock(_ string, creds []mcpCredEntry) string {
 	// Read-only: list the Keeper-gated credential names for the prompt. The
 	// actual value withholding is done once, explicitly, by
 	// withholdKeeperSecretValues at the resolver chokepoint — not as a side
 	// effect here — so the invariant is testable and can't be lost in a refactor
 	// of this prompt builder. Gated set is table-driven (internal/credpolicy).
-	var secretCreds []string
+	var secretCreds []mcpCredEntry
 	for i := range creds {
 		// A handle-only credential (#2376) is listed here whatever its type:
 		// /keeper/execute is the only way it can be used, so the block that
 		// teaches that call is where its name belongs.
 		if credpolicy.IsKeeperGated(creds[i].Type) || creds[i].HandleOnly {
-			secretCreds = append(secretCreds, creds[i].EnvVar)
+			secretCreds = append(secretCreds, creds[i])
 		}
 	}
 	if len(secretCreds) == 0 {
@@ -1767,31 +1767,32 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	var keeperBlock strings.Builder
 	keeperBlock.WriteString("[CREDENTIAL ACCESS CONTROL — KEEPER]\n")
 	keeperBlock.WriteString("Some credentials require explicit approval before use.\n")
-	keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them\n")
-	keeperBlock.WriteString("(auth comes from the fd-3 config — never -H, see SIDECAR AUTH above):\n\n")
-	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
-	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}' \\\n", agentSlug)
-	keeperBlock.WriteString("    -K /dev/fd/3 3<<AUTH\n")
-	keeperBlock.WriteString("header = \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\"\n")
-	keeperBlock.WriteString("AUTH\n\n")
+	keeperBlock.WriteString("These credentials are withheld from your startup environment and files.\n")
+	keeperBlock.WriteString("Use the native Crewship CLI; it authenticates the current run automatically.\n")
+	keeperBlock.WriteString("Use the credential ID listed below, rather than guessing a credential name from its slot:\n\n")
+	keeperBlock.WriteString("  crewship keeper request CREDENTIAL_ID --id --intent 'purpose of access'\n\n")
 	keeperBlock.WriteString("The Keeper (AI gatekeeper) evaluates the request and replies with ALLOW, DENY or ESCALATE.\n")
 	keeperBlock.WriteString("The reply is a decision only — it never carries the credential value, and no Keeper\n")
 	keeperBlock.WriteString("endpoint will ever hand you one. Do not try to parse a secret out of it.\n")
-	keeperBlock.WriteString("  ALLOW    — approved; use the credential via /keeper/execute below.\n")
+	keeperBlock.WriteString("  ALLOW    — authorization for the evaluated operation; execute still evaluates its command.\n")
 	keeperBlock.WriteString("  DENY     — do NOT retry; explain to the user why access was denied.\n")
 	keeperBlock.WriteString("  ESCALATE — a human was asked to approve; tell the user it is pending.\n\n")
 	keeperBlock.WriteString("This is how you USE an approved credential — the value is injected server-side,\n")
-	keeperBlock.WriteString("your command runs in this container, and the value is scrubbed from the output:\n")
-	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
-	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}' \\\n", agentSlug)
-	keeperBlock.WriteString("    -K /dev/fd/3 3<<AUTH\n")
-	keeperBlock.WriteString("header = \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\"\n")
-	keeperBlock.WriteString("AUTH\n\n")
+	keeperBlock.WriteString("your command runs in this container via /keeper/execute, and its output is scrubbed:\n")
+	keeperBlock.WriteString("  printf '%s\\n' 'COMMAND_USING_ASSIGNED_SLOT' | crewship keeper execute CREDENTIAL_ID --id --intent 'purpose of access' --command-stdin\n\n")
+	keeperBlock.WriteString("Prefer standard tools that read the assigned environment slot. Never paste a credential value into a command.\n")
+	keeperBlock.WriteString("Poll an escalation with: crewship keeper request-status REQUEST_ID\n")
+	keeperBlock.WriteString("After human approval of an execute request, retry its IDENTICAL command with --approval-request-id REQUEST_ID.\n")
+	keeperBlock.WriteString("An access-request approval is not an execute approval. Approval binding and replay protection remain server-side.\n")
+	keeperBlock.WriteString("A CLI ALLOW or exit zero alone does not prove remote authentication. Inspect the tool's actual result.\n")
+	keeperBlock.WriteString("A lost/cancelled reply has an unknown execution outcome: inspect before retrying.\n\n")
 	keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")
-	for _, name := range secretCreds {
-		fmt.Fprintf(&keeperBlock, "  - %s\n", name)
+	for _, cred := range secretCreds {
+		if cred.ID == "" {
+			fmt.Fprintf(&keeperBlock, "  - %s; credential ID unavailable — ask the operator to repair its assignment\n", cred.EnvVar)
+		} else {
+			fmt.Fprintf(&keeperBlock, "  - %s; credential ID: %s\n", cred.EnvVar, cred.ID)
+		}
 	}
 	keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
 	return keeperBlock.String()

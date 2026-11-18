@@ -38,7 +38,7 @@ func keeperBlockFixture(t *testing.T) string {
 	t.Helper()
 	h := covCfgHandler(nil)
 	block := h.buildKeeperBlock("ada", []mcpCredEntry{
-		{Type: "SECRET", EnvVar: "PROD_DB_PASSWORD", Value: "v1"},
+		{ID: "cnativecredential000000001", Type: "SECRET", EnvVar: "PROD_DB_PASSWORD", Value: "v1"},
 	})
 	if block == "" {
 		t.Fatal("expected a keeper block for a batch containing a SECRET")
@@ -87,70 +87,24 @@ func TestKeeperBlock_NoBearerHeaderFlag(t *testing.T) {
 	}
 }
 
-// keeperAuthConfigDirective is the curl config line, matched literally.
-const keeperAuthConfigDirective = `header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"`
-
-// splitKeeperRecipes cuts the block into one segment per curl invocation, so a
-// recipe's flags, heredoc and terminator all land together and nothing bleeds
-// into its neighbour. Mirrors splitRecipes in
-// internal/orchestrator/prompt_token_argv_test.go.
-func splitKeeperRecipes(block string) []string {
-	parts := strings.Split(block, "curl ")
-	segments := make([]string, 0, len(parts))
-	for _, p := range parts[1:] { // parts[0] is the prose before the first curl
-		segments = append(segments, "curl "+p)
-	}
-	return segments
-}
-
-// countKeeperLines counts lines equal to want. The heredoc terminator has to be
-// at column 0 — an indented `AUTH` does not end a `<<AUTH` heredoc — so a
-// substring match would accept a recipe the shell will not.
-func countKeeperLines(s, want string) int {
-	n := 0
-	for _, line := range strings.Split(s, "\n") {
-		if line == want {
-			n++
-		}
-	}
-	return n
-}
-
-// Structural check on the replacement, asserted PER RECIPE.
-//
-// The first version of this test counted each token across the WHOLE block, so
-// the totals could be conserved while the wiring was broken: strip the redirect
-// off /keeper/request, duplicate it on /keeper/execute, and the counts are
-// unchanged while the first recipe 401s in production. CodeRabbit caught it and
-// the mutation confirmed it. Each recipe now has to carry its own complete
-// wiring — one config directive, one -K, one redirect, one terminator.
-func TestKeeperBlock_AuthHeaderIsReadFromACurlConfigOnFD3(t *testing.T) {
+// Native CLI owns the bearer header. Prompt recipes must never ask the shell
+// to expand it, even when a future example adds a different authenticated call.
+func TestKeeperBlock_UsesNativeCLIWithoutTokenExpansion(t *testing.T) {
 	block := keeperBlockFixture(t)
-
-	authenticated := 0
-	for i, segment := range splitKeeperRecipes(block) {
-		config := strings.Count(segment, keeperAuthConfigDirective)
-		flag := strings.Count(segment, "-K /dev/fd/3")
-		redirect := strings.Count(segment, "3<<AUTH")
-		terminator := countKeeperLines(segment, "AUTH")
-
-		if config+flag+redirect+terminator == 0 {
-			continue // an unauthenticated call, if one is ever added
-		}
-		authenticated++
-
-		if config != 1 || flag != 1 || redirect != 1 || terminator != 1 {
-			t.Errorf("keeper recipe %d has incomplete fd-3 auth wiring "+
-				"(config=%d, -K /dev/fd/3=%d, 3<<AUTH=%d, AUTH terminator=%d; each must be 1). "+
-				"Every authenticated recipe needs its own, whatever the block-wide totals say:\n%s",
-				i+1, config, flag, redirect, terminator, segment)
+	for _, command := range []string{"crewship keeper request ", "crewship keeper execute ", "crewship keeper request-status "} {
+		if !strings.Contains(block, command) {
+			t.Errorf("missing native recipe %q", command)
 		}
 	}
-
-	// Pins the population: the per-recipe check above would pass a recipe whose
-	// auth was deleted wholesale, since all-zero reads as "unauthenticated".
-	if authenticated != 2 {
-		t.Errorf("expected both keeper recipes (/keeper/request and /keeper/execute) to "+
-			"authenticate via a curl config; found %d that do", authenticated)
+	for _, unsafe := range []string{"curl ", "$CREWSHIP_AGENT_TOKEN", "${CREWSHIP_AGENT_TOKEN}", "Authorization:"} {
+		if strings.Contains(block, unsafe) {
+			t.Errorf("native Keeper prompt delegates authentication material to shell: %q", unsafe)
+		}
+	}
+	if !strings.Contains(block, "--command-stdin") {
+		t.Error("execute must read command through stdin")
+	}
+	if !strings.Contains(block, "--id") || !strings.Contains(block, "cnativecredential000000001") {
+		t.Error("native recipes must use the assigned credential identity")
 	}
 }

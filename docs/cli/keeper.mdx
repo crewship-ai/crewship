@@ -483,12 +483,15 @@ keeper
 ├── disable
 ├── enable
 ├── eval [--candidate --endpoint --explain --incumbent --limit --passes --tolerance]
+├── execute <credential-name> [--id --intent --command-stdin --approval-request-id --task-id]
 ├── findings: test
 ├── health
 ├── history <request-id>
 ├── judge: models [--endpoint] | test [--credential --endpoint --model --provider]
 ├── model: clear | get | set [--credential --model --provider]
 ├── profile: get | reset | set [--consistency-samples --escalate-from --evidence --evidence-facts --hard-gate --precedent --precedent-n --prompt-budget]
+├── request <credential-name> [--id --intent --approval-request-id --task-id]
+├── request-status <request-id>
 ├── requests [--limit --offset]
 ├── resolve <request-id> [--adjudicator --decision --reason]
 ├── review: run <slot> [--agent --crew --failure --skill --tool --tool-args --trigger]
