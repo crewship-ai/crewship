@@ -336,6 +336,8 @@ func TestCovII2UpdateStatus_NoOp(t *testing.T) {
 func TestCovII2UpdateStatus_DoneSetsCompletedAt(t *testing.T) {
 	h, db, wsID, crewID, leadID := covII2NewIssueHandler(t)
 	issueID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "IN_PROGRESS")
+	// A system-driven DONE remains terminal for work configured without review.
+	execOrFatal(t, db, `UPDATE issue_work SET client_review_required=0 WHERE mission_id=?`, issueID)
 
 	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","status":"DONE"}`)
 	req := httptest.NewRequest("PATCH", "/", body)
