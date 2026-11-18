@@ -99,7 +99,7 @@ const frame=()=>document.querySelector('iframe') as HTMLIFrameElement|null
 const contentVisible=()=>{const f=frame();return Boolean(f&&f.style.visibility!=='hidden'&&f.style.opacity!=='0')}
 const offered=()=>screen.queryAllByRole('button',{name:'Keep a copy'}).length>0
 /** An unconfirmed edit is captured locally while the network is already gone. */
-async function editWhileOffline(){
+async function editWhileOffline(beforeRetirementWait?:()=>void){
  server.reachable=false
  act(()=>options.at(-1)!.onChanged('typed','doc'))
  await advance(3_000)
@@ -108,6 +108,7 @@ async function editWhileOffline(){
  // establish the captured-copy state before T0. persist precedes hashing;
  // only this public post-retirement state confirms capture has finished.
  await advance(NATIVE_REAUTHORIZE_INTERVAL_MS)
+ beforeRetirementWait?.()
  const captured=()=>screen.getByRole('status').textContent?.includes('Editor disconnected · the captured local copy is kept')===true
  await settle(captured)
  expect(captured()).toBe(true)
@@ -217,20 +218,24 @@ describe('silent stream',()=>{
 describe('offline',()=>{
  it('does not finish offline setup while the final capture hash is held',async()=>{
   await opened()
-  let release=()=>{},started=()=>{}
+  let release=()=>{},started=()=>{},waiting=()=>{}
   const held=new Promise<void>(resolve=>{release=resolve})
   const finalHash=new Promise<void>(resolve=>{started=resolve})
+  const retirementWait=new Promise<void>(resolve=>{waiting=resolve})
   const digest=crypto.subtle.digest.bind(crypto.subtle)
   const hashing=vi.spyOn(crypto.subtle,'digest').mockImplementation(async(...args)=>{
    if(journal.persist.mock.calls.at(-1)?.[1]===true){started();await held}
    return digest(...args)
   })
   let finished=false
-  const setup=editWhileOffline().then(()=>{finished=true})
+  const setup=editWhileOffline(waiting).then(()=>{finished=true})
   try{
    // No real-time delay races the fixture: the held hash or an incorrectly
    // early helper return decides which stage we reached.
-   await Promise.race([finalHash,setup.then(()=>{throw Error('offline setup returned before final capture hashing')})])
+   await Promise.race([Promise.all([finalHash,retirementWait]),setup.then(()=>{throw Error('offline setup returned before final capture hashing and retirement wait')})])
+   // Keep hashing held until the fake-time advance has finished. A helper
+   // missing its public retirement barrier must now settle and be detected.
+   await Promise.resolve();await Promise.resolve()
    expect(finished).toBe(false)
    expect(screen.getByRole('status')).not.toHaveTextContent('Editor disconnected · the captured local copy is kept')
    release()
