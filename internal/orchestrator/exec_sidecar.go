@@ -540,6 +540,7 @@ func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled
 			continue
 		}
 
+		primaryAliases := credpolicy.FileAliases(c.Type, c.EnvVarName, nil)
 		switch c.Type {
 		case "USERPASS":
 			// Username is cleartext on the Credential struct; password
@@ -558,8 +559,8 @@ func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled
 				credFileSpec{EnvVar: c.EnvVarName + "_PASSWORD", Value: c.PlainValue, Path: passPath, Mode: "0400"},
 			)
 			envLines = append(envLines,
-				c.EnvVarName+"_USERNAME="+userPath,
-				c.EnvVarName+"_PASSWORD="+passPath,
+				primaryAliases[0]+"="+userPath,
+				primaryAliases[1]+"="+passPath,
 			)
 
 		case "SSH_KEY":
@@ -572,7 +573,7 @@ func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled
 			specs = append(specs, credFileSpec{
 				ValueType: c.Type, EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0600",
 			})
-			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
+			envLines = append(envLines, primaryAliases[0]+"="+path)
 
 		case "CERTIFICATE":
 			// Certs aren't keys — 0400 read-only is fine and stricter
@@ -582,7 +583,7 @@ func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled
 			specs = append(specs, credFileSpec{
 				ValueType: c.Type, EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
 			})
-			envLines = append(envLines, c.EnvVarName+"_PATH="+path)
+			envLines = append(envLines, primaryAliases[0]+"="+path)
 
 		default:
 			// SECRET, CLI_TOKEN, GENERIC_SECRET — and any future Delivery=file
@@ -597,7 +598,7 @@ func buildCredFilePlan(creds []Credential, secretsAgentDir string, keeperEnabled
 			specs = append(specs, credFileSpec{
 				EnvVar: c.EnvVarName, Value: c.PlainValue, Path: path, Mode: "0400",
 			})
-			envLines = append(envLines, c.EnvVarName+"="+path)
+			envLines = append(envLines, primaryAliases[0]+"="+path)
 		}
 
 		// Multi-part credentials (PRD-CREDENTIALS-V2 §2.2). USERPASS already
