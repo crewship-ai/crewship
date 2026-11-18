@@ -1,0 +1,1 @@
+- **Agent completion could bypass required human review:** ⚠️ **Behaviour change:** an automated DONE request for work requiring acceptance succeeds with effective status REVIEW, preserving the current execution. Authorized humans can still explicitly accept the work.

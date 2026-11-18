@@ -113,23 +113,9 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		internalError(w, r, h.logger, "start routine: commit", err)
 		return
 	}
-	fail := func(cause error) {
-		ctx := context.Background()
-		stamp := tsformat.Format(time.Now())
-		// Guard the execution so a late error cannot overwrite a human handoff.
-		_, updateErr := h.db.ExecContext(ctx, `UPDATE missions SET status='FAILED',updated_at=? WHERE id=? AND status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM issue_executions WHERE id=? AND stage='working')`, stamp, missionID, executionID)
-		if updateErr != nil {
-			h.logger.Error("issue routine failure state", "error", updateErr)
-		}
-		_, _ = h.db.ExecContext(ctx, `UPDATE issue_executions SET stage='failed',review_note=?,updated_at=? WHERE id=? AND stage='working'`, cause.Error(), stamp, executionID)
-		h.broadcastIssueEvent(WorkspaceIDFromContext(r.Context()), "issue.updated", map[string]string{"id": missionID, "identifier": ident})
-	}
+	dispatch := h.boundRoutineDispatch(runID, executionID, missionID, ident, WorkspaceIDFromContext(r.Context()))
 	body, _ := json.Marshal(map[string]any{"inputs": inputs, "triggered_via": "issue", "triggered_by_id": ident, "metadata": map[string]string{"issue_execution_id": executionID, "issue_id": missionID}})
-	request := r.Clone(context.WithValue(r.Context(), issueRoutineDispatchKey{}, issueRoutineDispatch{RunID: runID, Failed: fail, Active: func(ctx context.Context) bool {
-		var active bool
-		err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_executions x JOIN missions m ON m.id=x.mission_id JOIN issue_work w ON w.mission_id=m.id WHERE x.id=? AND x.stage='working' AND m.status='IN_PROGRESS' AND w.mode='agent')`, executionID).Scan(&active)
-		return err == nil && active
-	}}))
+	request := r.Clone(context.WithValue(r.Context(), issueRoutineDispatchKey{}, dispatch))
 	request.Header.Del("Idempotency-Key")
 	request.SetPathValue("slug", slug)
 	request.Body = io.NopCloser(bytes.NewReader(body))
@@ -137,7 +123,7 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 	response := &issueRoutineResponse{header: make(http.Header)}
 	h.routines.Run(response, request)
 	if response.code >= 400 {
-		fail(fmt.Errorf("routine start rejected: %s", response.body.String()))
+		dispatch.Failed(fmt.Errorf("routine start rejected: %s", response.body.String()))
 		for key, values := range response.header {
 			w.Header()[key] = values
 		}
@@ -160,7 +146,7 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		go func() {
 			defer finish()
 			if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
-				fail(err)
+				dispatch.Failed(err)
 			}
 		}()
 	}
@@ -201,5 +187,55 @@ func readIssueRunInputs(body io.Reader) issueRunInputs {
 func mergeIssueRunInputs(inputs map[string]any, run issueRunInputs) {
 	for name, value := range run.values {
 		inputs[name] = value
+	}
+}
+
+// Both the watchdog and failure path fence against the exact execution and
+// its brief/work revisions. A client review request leaves it running.
+func (h *IssueHandler) boundRoutineDispatch(runID, executionID, missionID, ident, workspaceID string) issueRoutineDispatch {
+	const activeExecution = `SELECT 1 FROM issue_executions x JOIN missions m ON m.id=x.mission_id
+		LEFT JOIN issue_work w ON w.mission_id=m.id
+		WHERE x.id=? AND x.stage='working' AND m.status IN ('IN_PROGRESS','REVIEW')
+		AND COALESCE(w.mode,'agent')='agent'
+		AND x.work_revision=COALESCE(w.revision,x.work_revision)
+		AND x.brief_revision=COALESCE(w.brief_revision,x.brief_revision)`
+	return issueRoutineDispatch{
+		RunID: runID,
+		Active: func(ctx context.Context) bool {
+			var active bool
+			err := h.db.QueryRowContext(ctx, `SELECT EXISTS(`+activeExecution+`)`, executionID).Scan(&active)
+			return err == nil && active
+		},
+		Failed: func(cause error) {
+			ctx := context.Background()
+			stamp := tsformat.Format(time.Now())
+			err := func() error {
+				tx, err := h.db.BeginTx(ctx, nil)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				result, err := tx.ExecContext(ctx, `UPDATE missions SET status='FAILED',updated_at=?
+					WHERE id=? AND EXISTS(`+activeExecution+` AND m.id=missions.id)`, stamp, missionID, executionID)
+				if err != nil {
+					return err
+				}
+				changed, err := result.RowsAffected()
+				if err != nil || changed == 0 {
+					return err
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE issue_executions SET review_note=? WHERE id=? AND stage='failed'`, cause.Error(), executionID); err != nil {
+					return err
+				}
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+				h.broadcastIssueEvent(workspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
+				return nil
+			}()
+			if err != nil {
+				h.logger.Error("issue routine failure state", "error", err)
+			}
+		},
 	}
 }

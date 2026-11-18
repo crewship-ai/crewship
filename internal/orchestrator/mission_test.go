@@ -36,7 +36,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
 			author_agent_id TEXT, created_by_user_id TEXT,
 			created_at TEXT, updated_at TEXT, completed_at TEXT);
-		CREATE TABLE mission_tasks (completion_assignment_id TEXT, id TEXT PRIMARY KEY, mission_id TEXT, assigned_agent_id TEXT,
+		CREATE TABLE mission_tasks (issue_execution_id TEXT, completion_assignment_id TEXT, id TEXT PRIMARY KEY, mission_id TEXT, assigned_agent_id TEXT,
 			title TEXT, description TEXT, status TEXT DEFAULT 'PENDING', task_order INTEGER DEFAULT 0,
 			depends_on TEXT DEFAULT '[]', iteration INTEGER DEFAULT 1, max_iterations INTEGER,
 			result_summary TEXT, output_path TEXT, error_message TEXT, assignment_id TEXT,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -664,10 +665,11 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Find the issue
-	var missionID, currentStatus, crewID string
+	var missionID, crewID string
+	var currentStatus string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status, crew_id FROM missions WHERE identifier = ? AND workspace_id = ?`,
-		ident, req.WorkspaceID).Scan(&missionID, &currentStatus, &crewID)
+		`SELECT id, crew_id FROM missions WHERE identifier = ? AND workspace_id = ?`,
+		ident, req.WorkspaceID).Scan(&missionID, &crewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -719,25 +721,6 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	ub := newUpdate()
 	statusChanged := false
 
-	if req.Status != "" && req.Status != currentStatus {
-		allowed := validIssueTransitions[currentStatus]
-		valid := false
-		for _, a := range allowed {
-			if a == req.Status {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			writeProblem(w, r, http.StatusBadRequest, issueTransitionRefusal(currentStatus, req.Status))
-			return
-		}
-		ub.Set("status", req.Status)
-		statusChanged = true
-		if req.Status == "DONE" || req.Status == "CANCELLED" || req.Status == "DUPLICATE" {
-			ub.Set("completed_at", time.Now().UTC().Format(time.RFC3339))
-		}
-	}
 	if req.Priority != "" {
 		ub.Set("priority", req.Priority)
 	}
@@ -825,7 +808,8 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// Set inside the transaction, read after it commits, by the @mention
 	// trigger. Empty means no inline comment was written, so nothing to parse.
 	var inlineCommentID string
-	operationResult := map[string]string{"status": "ok"}
+	operationResult := map[string]any{"status": "ok"}
+	effectiveStatus := req.Status
 
 	var evs []issueEvent
 	ev := func(action issueAction, details string) {
@@ -834,26 +818,6 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			RunID:  req.AuthorRunID,
 			Action: action, Details: details,
 		})
-	}
-	if !ub.Empty() {
-		if statusChanged {
-			evs = append(evs, issueEvent{
-				MissionID: missionID, ActorType: actorType, ActorID: actorID,
-				// The run that caused it. This is the pointer the composition
-				// depth cap resolves; without it every automation hop opens a
-				// fresh budget and the cap is unreachable.
-				RunID:   req.AuthorRunID,
-				Action:  actionStatusChanged,
-				Details: currentStatus + " → " + req.Status,
-				From:    currentStatus, To: req.Status,
-			})
-		}
-		if req.Priority != "" {
-			ev(actionPriorityChanged, req.Priority)
-		}
-		if assigneeChanged {
-			ev(actionAssigneeChanged, "assignee_id: "+*req.AssigneeID)
-		}
 	}
 
 	// The column update, the label replacement and the comment go in ONE
@@ -868,7 +832,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// label bug, ten lines below it — and this PR makes the comment the agent's
 	// primary way of reporting progress to a human. "Moved to IN_PROGRESS" with
 	// the explanation silently dropped is worse than the whole call failing.
-	if !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" {
+	if req.Status != "" || !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" {
 		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w, r, h.logger, "begin issue update tx", err)
@@ -887,15 +851,47 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if req.Status != "" || req.AssigneeID != nil {
-			var held bool
-			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
+			var mode string
+			var reviewRequired bool
+			if err := tx.QueryRowContext(r.Context(), `
+				SELECT m.status, COALESCE(w.mode, ''), COALESCE(w.client_review_required, 1)
+				FROM missions m LEFT JOIN issue_work w ON w.mission_id=m.id
+				WHERE m.id=?`, missionID).Scan(&currentStatus, &mode, &reviewRequired); err != nil {
 				internalError(w, r, h.logger, "issue work guard", err)
 				return
 			}
-			if held {
+			if mode == "human" {
 				writeProblem(w, r, 409, "This issue is held by a human. Post findings as a comment; the human decides when to hand it back.")
 				return
 			}
+			if req.Status == "DONE" && reviewRequired && currentStatus != "DONE" {
+				effectiveStatus = "REVIEW"
+				operationResult["status"] = effectiveStatus
+				operationResult["acceptance_required"] = true
+			}
+		}
+		if effectiveStatus != "" && effectiveStatus != currentStatus {
+			if !slices.Contains(validIssueTransitions[currentStatus], effectiveStatus) {
+				writeProblem(w, r, http.StatusBadRequest, issueTransitionRefusal(currentStatus, effectiveStatus))
+				return
+			}
+			ub.Set("status", effectiveStatus)
+			statusChanged = true
+			switch effectiveStatus {
+			case "DONE", "CANCELLED", "DUPLICATE":
+				ub.Set("completed_at", time.Now().UTC().Format(time.RFC3339))
+			}
+			evs = append(evs, issueEvent{
+				MissionID: missionID, ActorType: actorType, ActorID: actorID, RunID: req.AuthorRunID,
+				Action: actionStatusChanged, Details: currentStatus + " → " + effectiveStatus,
+				From: currentStatus, To: effectiveStatus,
+			})
+		}
+		if req.Priority != "" {
+			ev(actionPriorityChanged, req.Priority)
+		}
+		if assigneeChanged {
+			ev(actionAssigneeChanged, "assignee_id: "+*req.AssigneeID)
 		}
 
 		if !ub.Empty() {
@@ -1004,7 +1000,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	if statusChanged {
 		broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.status_changed", map[string]string{
 			"id": missionID, "identifier": ident, "crew_id": crewID,
-			"status": req.Status, "from": currentStatus, "to": req.Status,
+			"status": effectiveStatus, "from": currentStatus, "to": effectiveStatus,
 		})
 	}
 

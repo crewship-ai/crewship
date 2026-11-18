@@ -123,3 +123,21 @@ func TestLeadPlanningIdentityRejectsStaleStoppedOrHumanTick(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueReviewBeforeFirstTickKeepsLeadPlanning(t *testing.T) {
+	db := testutil.MigratedSQLDB(t)
+	ws, crew, lead, _ := fkMissionSeed(t, db)
+	mission := fkMission(t, db, "planning-in-review", ws, crew, lead, "IN_PROGRESS")
+	fkMissionExec(t, db, `UPDATE missions SET mission_type='issue',status='REVIEW' WHERE id=?`, mission.ID)
+	fkMissionExec(t, db, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+		VALUES('review-planning-execution',?,0,0,'working',?,datetime('now'),datetime('now'))`, mission.ID, lead)
+	engine := fkEngine(t, db)
+	if stop := engine.missionTick(t.Context(), mission); stop {
+		t.Fatal("active issue review stopped the planning tick")
+	}
+	var status, assignment string
+	if err := db.QueryRow(`SELECT m.status,a.id FROM missions m JOIN assignments a ON a.id=m.planning_assignment_id
+		WHERE m.id=? AND a.lead_planning=1`, mission.ID).Scan(&status, &assignment); err != nil || status != "REVIEW" || assignment == "" {
+		t.Fatalf("review status=%q planning assignment=%q err=%v", status, assignment, err)
+	}
+}

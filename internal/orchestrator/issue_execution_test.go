@@ -17,7 +17,6 @@ func executionFixture(t *testing.T) (*MissionEngine, *missionState, *sql.DB) {
  CREATE UNIQUE INDEX active_execution ON issue_executions(mission_id) WHERE stage IN ('working','reviewing');
  CREATE TABLE issue_work(mission_id TEXT PRIMARY KEY,revision INTEGER,brief_revision INTEGER,mode TEXT,client_review_required INTEGER);
  ALTER TABLE assignments ADD COLUMN issue_execution_id TEXT;
- ALTER TABLE mission_tasks ADD COLUMN issue_execution_id TEXT;
  INSERT INTO issue_work VALUES('issue',0,0,'agent',0);
  INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at) VALUES('execution','issue',0,0,'working','agent-lead','2026-09-08');
  INSERT INTO assignments(id,workspace_id,chat_id,assigned_by_id,assigned_to_id,status,outcome,result_summary,issue_execution_id,created_at)
@@ -105,5 +104,63 @@ func TestIssueExecutionRejectsMissingOutcomeAndStaleApproval(t *testing.T) {
 				t.Fatal("invalid evidence accepted")
 			}
 		})
+	}
+}
+
+func TestIssueExecutionInReviewContinuesToHumanAcceptance(t *testing.T) {
+	e, ms, db := executionFixture(t)
+	mustExec(t, db, `DELETE FROM issue_work WHERE mission_id='issue';
+		UPDATE missions SET status='REVIEW' WHERE id='issue'`)
+	if _, err := e.checkIssueExecution(t.Context(), ms); err != nil {
+		t.Fatal(err)
+	}
+	var stage string
+	if err := db.QueryRow(`SELECT stage FROM issue_executions WHERE id='execution'`).Scan(&stage); err != nil || stage != "reviewing" {
+		t.Fatalf("execution stage=%q err=%v", stage, err)
+	}
+	finishReview(t, db, "approve", OutcomeSucceeded)
+	if stop := e.missionTick(t.Context(), ms); stop {
+		t.Fatal("active review execution stopped before settlement")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT m.status,x.stage FROM missions m JOIN issue_executions x ON x.mission_id=m.id WHERE x.id='execution'`).Scan(&status, &stage); err != nil || status != "REVIEW" || stage != "accepted" {
+		t.Fatalf("status=%q stage=%q err=%v", status, stage, err)
+	}
+	if stop := e.missionTick(t.Context(), ms); !stop {
+		t.Fatal("mission loop kept running after lead review settled")
+	}
+}
+
+func TestIssueExecutionDeadlineOnlyClosesActiveReview(t *testing.T) {
+	for _, stage := range []string{"working", "accepted"} {
+		t.Run(stage, func(t *testing.T) {
+			e, ms, db := executionFixture(t)
+			mustExec(t, db, `UPDATE missions SET status='REVIEW' WHERE id='issue'`)
+			mustExec(t, db, `UPDATE issue_executions SET stage=? WHERE id='execution'`, stage)
+			if err := e.finalizeMission(t.Context(), ms, "FAILED", "mission_timeout"); err != nil {
+				t.Fatal(err)
+			}
+			want := "REVIEW"
+			if stage == "working" {
+				want = "FAILED"
+			}
+			var status string
+			if err := db.QueryRow(`SELECT status FROM missions WHERE id='issue'`).Scan(&status); err != nil || status != want {
+				t.Fatalf("status=%q want %q err=%v", status, want, err)
+			}
+		})
+	}
+}
+
+func TestIssueExecutionTaskApprovalContinuesInReview(t *testing.T) {
+	e, _, db := executionFixture(t)
+	mustExec(t, db, `UPDATE missions SET status='REVIEW' WHERE id='issue'`)
+	mustExec(t, db, `INSERT INTO mission_tasks(id,mission_id,status,issue_execution_id) VALUES
+		('linked','issue','AWAITING_APPROVAL','execution'),('unlinked','issue','AWAITING_APPROVAL',NULL)`)
+	if err := e.ApproveTask(t.Context(), "linked", "operator", true, "reviewed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApproveTask(t.Context(), "unlinked", "operator", true, "reviewed"); err == nil {
+		t.Fatal("approved unrelated task in client review")
 	}
 }

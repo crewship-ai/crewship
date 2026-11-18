@@ -1,7 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -202,8 +206,20 @@ func TestIssueDetail_SurvivesMissingWorkRow(t *testing.T) {
 	if _, err := h.db.Exec(`DELETE FROM issue_work WHERE mission_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
+	execOrFatal(t, h.db, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+		VALUES('restored-exec',?,8,13,'accepted',?,'2026-09-08','2026-09-08')`, id, lead)
+	execOrFatal(t, h.db, `UPDATE missions SET status='REVIEW' WHERE id=?`, id)
 	rec := httptest.NewRecorder()
 	h.Get(rec, covIWReq(user, ws, "OWNER", "GET", "", crew, "ENG-82"))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var detail issueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil || !detail.ClientReviewRequired || detail.BriefRevision != 13 {
+		t.Fatalf("expected default review policy in issue detail: %s (%v)", rec.Body.String(), err)
+	}
+	rec = httptest.NewRecorder()
+	h.Review(rec, covIWReq(user, ws, "OWNER", "POST", `{"action":"approve","brief_revision":13,"revision":0}`, crew, "ENG-82"))
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
@@ -248,5 +264,36 @@ func TestIssueDelete_SurvivesAnIssueThatRan(t *testing.T) {
 	}
 	if left != 0 {
 		t.Fatalf("issue still present after delete")
+	}
+}
+
+func TestBoundRoutineDispatchSurvivesReviewAndFencesFailure(t *testing.T) {
+	for _, next := range []string{"FAILED", "DONE"} {
+		t.Run(next, func(t *testing.T) {
+			h, _, ws, crew, lead, _ := newTestIssueHandler(t)
+			id := seedIssue(t, h.db, ws, crew, lead, "ENG-89", "IN_PROGRESS")
+			execOrFatal(t, h.db, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+				SELECT 'routine-exec',mission_id,revision,brief_revision,'working',?,'2026-09-08','2026-09-08' FROM issue_work WHERE mission_id=?`, lead, id)
+			dispatch := h.boundRoutineDispatch("run", "routine-exec", id, "ENG-89", ws)
+			body := fmt.Sprintf(`{"workspace_id":%q,"agent_id":%q,"status":"DONE"}`, ws, lead)
+			req := withInternalCrewToken(httptest.NewRequest("PATCH", "/api/v1/internal/issues/ENG-89", strings.NewReader(body)), ws, crew)
+			req.SetPathValue("identifier", "ENG-89")
+			rec := httptest.NewRecorder()
+			NewInternalIssueHandler(h.db, nil, newTestLogger()).UpdateStatus(rec, req)
+			if rec.Code != 200 || !dispatch.Active(t.Context()) {
+				t.Fatalf("watchdog lost the active routine: %d %s", rec.Code, rec.Body.String())
+			}
+			if next == "DONE" {
+				execOrFatal(t, h.db, `UPDATE missions SET status='DONE' WHERE id=?`, id)
+			}
+			dispatch.Failed(errors.New("routine failed"))
+			var status, stage, note string
+			if err := h.db.QueryRow(`SELECT m.status,x.stage,x.review_note FROM missions m JOIN issue_executions x ON x.mission_id=m.id WHERE m.id=?`, id).Scan(&status, &stage, &note); err != nil {
+				t.Fatal(err)
+			}
+			if status != next || (next == "FAILED" && (stage != "failed" || note != "routine failed")) {
+				t.Fatalf("status=%q want %q stage=%q note=%q", status, next, stage, note)
+			}
+		})
 	}
 }

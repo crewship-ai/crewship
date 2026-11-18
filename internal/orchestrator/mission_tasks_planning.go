@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -100,16 +101,20 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 		return fmt.Errorf("userID is required for approval audit trail")
 	}
 
+	const mayApprove = `EXISTS(SELECT 1 FROM missions m WHERE m.id=mission_tasks.mission_id
+		AND (m.status='IN_PROGRESS' OR (m.status='REVIEW' AND EXISTS(
+			SELECT 1 FROM issue_executions x WHERE x.id=mission_tasks.issue_execution_id
+			AND x.mission_id=m.id AND x.stage IN ('working','reviewing')))))`
 	var currentStatus, missionID, missionStatus string
+	var allowed bool
 	if err := e.db.QueryRowContext(ctx,
-		`SELECT mt.status, mt.mission_id, m.status
-		 FROM mission_tasks mt JOIN missions m ON m.id = mt.mission_id
-		 WHERE mt.id = ?`, taskID).Scan(&currentStatus, &missionID, &missionStatus); err != nil {
+		`SELECT mission_tasks.status,mission_tasks.mission_id,m.status,`+mayApprove+
+			` FROM mission_tasks JOIN missions m ON m.id=mission_tasks.mission_id WHERE mission_tasks.id=?`,
+		taskID).Scan(&currentStatus, &missionID, &missionStatus, &allowed); err != nil {
 		return fmt.Errorf("lookup task %s: %w", taskID, err)
 	}
-
-	if missionStatus != "IN_PROGRESS" {
-		return fmt.Errorf("%w: mission is %s, approvals only allowed when IN_PROGRESS", ErrInvalidTaskStatus, missionStatus)
+	if !allowed {
+		return fmt.Errorf("%w: mission is %s, approvals require active work", ErrInvalidTaskStatus, missionStatus)
 	}
 	if currentStatus != "AWAITING_APPROVAL" {
 		return fmt.Errorf("%w: task %s is %s, expected AWAITING_APPROVAL", ErrInvalidTaskStatus, taskID, currentStatus)
@@ -125,7 +130,7 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 
 	res, err := e.db.ExecContext(ctx,
 		`UPDATE mission_tasks SET status = ?, approval_status = ?, approved_by = ?, approved_at = ?,
-		 evaluation_notes = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'`,
+		 evaluation_notes = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL' AND `+mayApprove,
 		newStatus, approvalStatus, userID, now, notes, now, now, taskID)
 	if err != nil {
 		return fmt.Errorf("update task %s approval: %w", taskID, err)
@@ -283,23 +288,20 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	// Reserve the mission's durable planning identity before inserting either
 	// domain or work rows. This write serializes concurrent engine instances;
 	// process-local planningDispatched is only a scheduling optimization.
-	reserved, err := tx.ExecContext(ctx, `UPDATE missions SET planning_assignment_id = ?
-		WHERE id = ? AND workspace_id = ? AND status = 'IN_PROGRESS' AND planning_assignment_id IS NULL`,
-		assignmentID, ms.ID, ms.WorkspaceID)
-	if err != nil {
+	const planningAllowed = `(status='IN_PROGRESS' OR (status='REVIEW' AND EXISTS(
+		SELECT 1 FROM issue_executions x WHERE x.mission_id=missions.id
+		AND x.stage='working' AND x.routine_run_id IS NULL)))`
+	var missionStatus string
+	err = tx.QueryRowContext(ctx, `UPDATE missions SET planning_assignment_id = ?
+		WHERE id=? AND workspace_id=? AND planning_assignment_id IS NULL AND `+planningAllowed+` RETURNING status`,
+		assignmentID, ms.ID, ms.WorkspaceID).Scan(&missionStatus)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("reserve planning assignment: %w", err)
 	}
-	created, err := reserved.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read planning reservation: %w", err)
-	}
-	if created == 0 {
-		var missionStatus string
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM missions WHERE id=? AND workspace_id=?`, ms.ID, ms.WorkspaceID).Scan(&missionStatus); err != nil {
-			return fmt.Errorf("read planning mission authority: %w", err)
-		}
-		if missionStatus != "IN_PROGRESS" {
-			return fmt.Errorf("mission %s is %s: planning admission refused", ms.ID, missionStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM missions WHERE id=? AND workspace_id=? AND `+planningAllowed,
+			ms.ID, ms.WorkspaceID).Scan(&missionStatus); err != nil {
+			return fmt.Errorf("mission %s: planning admission refused: %w", ms.ID, err)
 		}
 		var existingID string
 		if err := tx.QueryRowContext(ctx, `SELECT a.id FROM missions m
@@ -394,7 +396,7 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		}()
 	}
 
-	e.broadcastMissionStatus(ms, "IN_PROGRESS")
+	e.broadcastMissionStatus(ms, missionStatus)
 	return nil
 }
 

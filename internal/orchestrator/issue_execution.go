@@ -35,13 +35,13 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 	var brief, work, currentBrief, currentWork, attempt int
 	var clientReview bool
 	err = tx.QueryRowContext(ctx, `SELECT x.stage,x.reviewer_agent_id,COALESCE(x.review_task_id,''),x.brief_revision,x.work_revision,x.attempt,
- m.status,m.title,COALESCE(m.description,''),w.mode,w.brief_revision,w.revision,w.client_review_required,COALESCE(x.routine_run_id,''),x.created_at
- FROM issue_executions x JOIN missions m ON m.id=x.mission_id JOIN issue_work w ON w.mission_id=m.id WHERE x.id=?`, id).
+ m.status,m.title,COALESCE(m.description,''),COALESCE(w.mode,'agent'),COALESCE(w.brief_revision,x.brief_revision),COALESCE(w.revision,x.work_revision),COALESCE(w.client_review_required,1),COALESCE(x.routine_run_id,''),x.created_at
+ FROM issue_executions x JOIN missions m ON m.id=x.mission_id LEFT JOIN issue_work w ON w.mission_id=m.id WHERE x.id=?`, id).
 		Scan(&stage, &reviewer, &reviewTask, &brief, &work, &attempt, &status, &title, &description, &mode, &currentBrief, &currentWork, &clientReview, &routineRun, &created)
 	if err != nil {
 		return true, err
 	}
-	if status != "IN_PROGRESS" || mode == "human" {
+	if (status != "IN_PROGRESS" && status != "REVIEW") || mode == "human" {
 		return true, nil
 	}
 	now := tsformat.Format(time.Now())
@@ -145,7 +145,7 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 		if err = tx.Commit(); err != nil {
 			return true, err
 		}
-		e.broadcastMissionStatus(ms, "IN_PROGRESS")
+		e.broadcastMissionStatus(ms, status)
 		return true, nil
 	}
 	var pending, total int
@@ -204,7 +204,7 @@ The summary must state what you checked and specific corrections or remaining bl
 	if err = tx.Commit(); err != nil {
 		return true, err
 	}
-	e.broadcastMissionStatus(ms, "IN_PROGRESS")
+	e.broadcastMissionStatus(ms, status)
 	return true, nil
 }
 
@@ -254,7 +254,7 @@ func (e *MissionEngine) settleIssueExecution(ctx context.Context, tx *sql.Tx, ms
 	if _, err := tx.ExecContext(ctx, `UPDATE issue_executions SET stage=?,verdict=?,review_note=?,updated_at=? WHERE id=?`, stage, stage, note, now, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET status=?,updated_at=?,completed_at=CASE WHEN ?='DONE' THEN ? ELSE NULL END WHERE id=? AND status='IN_PROGRESS'`, status, now, status, now, ms.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE missions SET status=?,updated_at=?,completed_at=CASE WHEN ?='DONE' THEN ? ELSE NULL END WHERE id=? AND status IN ('IN_PROGRESS','REVIEW')`, status, now, status, now, ms.ID); err != nil {
 		return err
 	}
 	if err := e.issueExecutionComment(ctx, tx, ms.ID, ms.LeadAgentID, note, now); err != nil {
