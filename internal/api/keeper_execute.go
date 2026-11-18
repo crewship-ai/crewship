@@ -741,27 +741,43 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// #1373: mint the lease on the ALLOW, before the secret is fetched and
-	// injected. Placed AFTER the re-validation above so we only ever lease a
-	// grant that is genuinely still live, and BEFORE the injection so the audit
-	// order reads "lease issued → secret injected" rather than the reverse.
-	//
-	// Safe against self-denial: issueCredentialLease only ever writes an expiry
-	// in the future (and never shortens a longer existing lease), so the request
-	// currently being served cannot be invalidated by its own lease.
+	// Revoke the pending decision durably if run authority disappears before
+	// execution. A refusal must not leave a misleading PENDING audit row.
+	denyUnavailableRun := func() {
+		reason := "keeper calling run ended or unavailable"
+		err := updateKeeperDecisionWithTransition(r.Context(), h.db,
+			`UPDATE keeper_requests SET decision='DENY',reason=?,decided_at=? WHERE id=?`,
+			[]any{reason, time.Now().UTC().Format(time.RFC3339), reqID},
+			keeperTransition{RequestID: reqID, WorkspaceID: body.WorkspaceID, State: "DENY", RequestType: string(keeper.RequestTypeExecute), AgentID: body.RequestingAgentID, CrewID: body.RequestingCrewID, CredentialID: body.CredentialID, Intent: body.Intent, Reason: reason, ActorType: keeperActorSystem, ActorID: "keeper-run-admission"})
+		if err != nil {
+			h.logger.Error("keeper execute: persist admission refusal", "error", err)
+			replyError(w, http.StatusInternalServerError, "audit persistence failed")
+			return
+		}
+		h.emitExecuteDecision(r.Context(), body, reqID, agentName, credName, "DENY", reason, gkResp.RiskScore, secLevel, nil, approvedVia, journal.ActorSystem, "keeper-run-admission")
+		replyError(w, http.StatusForbidden, "keeper calling run unavailable")
+	}
+
+	// Admission, lease mutation and its Vault audit share one write transaction.
+	// The command itself remains a later external side effect.
 	execGov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
-	issueCredentialLease(r.Context(), h.db, h.logger, h.journal, leaseIssueInput{
-		WorkspaceID:    body.WorkspaceID,
-		CrewID:         body.RequestingCrewID,
-		AgentID:        body.RequestingAgentID,
-		AgentName:      agentName,
-		CredentialID:   body.CredentialID,
-		CredentialName: credName,
-		SecurityLevel:  secLevel,
-		Source:         leaseSourceKeeperAllow,
-		RequestID:      reqID,
-		TTLSeconds:     execGov.AutoLeaseSeconds,
+	leaseInput := leaseIssueInput{WorkspaceID: body.WorkspaceID, CrewID: body.RequestingCrewID, AgentID: body.RequestingAgentID, AgentName: agentName, CredentialID: body.CredentialID, CredentialName: credName, SecurityLevel: secLevel, Source: leaseSourceKeeperAllow, RequestID: reqID, TTLSeconds: execGov.AutoLeaseSeconds}
+	var leaseEffect keeperLeaseEffect
+	admissionErr := withKeeperRunAdmission(r.Context(), h.db, keeperTransition{RequestID: reqID, WorkspaceID: body.WorkspaceID, AgentID: body.RequestingAgentID, CrewID: body.RequestingCrewID}, func(tx *sql.Tx) error {
+		var err error
+		leaseEffect, err = issueKeeperLeaseTx(r.Context(), tx, leaseInput)
+		return err
 	})
+	if errors.Is(admissionErr, errKeeperRunScope) {
+		denyUnavailableRun()
+		return
+	}
+	if admissionErr != nil {
+		h.logger.Error("keeper execute: admission failed", "error", admissionErr)
+		replyError(w, http.StatusInternalServerError, "audit persistence failed")
+		return
+	}
+	leaseEffect.emit(r.Context(), h.journal, h.logger)
 
 	plainValue, found := h.secrets.Get(body.CredentialID)
 	if !found {
@@ -864,7 +880,12 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// A judgement may outlive its originating run. Never execute on its behalf
 	// after the durable terminal event has been recorded.
 	if err := validateKeeperRunTx(execCtx, h.db, body.WorkspaceID, body.RequestingAgentID, body.RequestingCrewID, body.RequestingRunID); err != nil {
-		replyError(w, http.StatusForbidden, "keeper calling run unavailable")
+		if errors.Is(err, errKeeperRunScope) {
+			denyUnavailableRun()
+		} else {
+			h.logger.Error("keeper execute: final admission failed", "error", err)
+			replyError(w, http.StatusInternalServerError, "keeper admission unavailable")
+		}
 		return
 	}
 

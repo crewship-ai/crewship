@@ -421,11 +421,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	// #1369: the in-place UPDATE to the decision now rides a transaction that also
 	// appends the transition to the append-only ledger, so the PENDING→decided
-	// step is recorded rather than overwritten. Failure stays logged (not fatal):
-	// the gatekeeper has already decided and the response below reports that
-	// decision — turning a bookkeeping failure into a 500 would flip the agent's
-	// semantics from "decided" to "retry", which is the wrong recovery for an
-	// outcome that has already happened.
+	// step is recorded rather than overwritten. Persistence failure is fatal
+	// before an ALLOW or lease can escape; no command side effect exists yet.
 	// The ledger says WHO. An approval-consumed ALLOW is a human decision
 	// exercised by the agent's retry — recording the keeper as its author
 	// would tell the audit trail the model granted what a person did.
@@ -437,53 +434,51 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		decidedActorType, decidedActorID = keeperActorSystem, "keeper-run-admission"
 	}
 
-	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
-		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
-		keeperTransition{
-			RequestID:    reqID,
-			WorkspaceID:  body.WorkspaceID,
-			State:        gkResp.Decision,
-			RequestType:  string(keeper.RequestTypeAccess),
-			AgentID:      body.RequestingAgentID,
-			CrewID:       body.RequestingCrewID,
-			CredentialID: body.CredentialID,
-			Intent:       body.Intent,
-			Reason:       gkResp.Reason,
-			RiskScore:    &gkResp.RiskScore,
-			ActorType:    decidedActorType,
-			ActorID:      decidedActorID,
-		}); err != nil {
-		h.logger.Error("keeper: update request decision", "error", err)
+	// Resolve configuration before acquiring the admission write transaction.
+	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
+	leaseInput := leaseIssueInput{WorkspaceID: body.WorkspaceID, CrewID: body.RequestingCrewID, AgentID: body.RequestingAgentID, AgentName: agentName, CredentialID: body.CredentialID, CredentialName: credName, SecurityLevel: secLevel, Source: leaseSourceKeeperAllow, RequestID: reqID, TTLSeconds: gov.AutoLeaseSeconds}
+	judgeProfile := nullIfEmpty(h.judgeProfileStamp())
+	var committedLease keeperLeaseEffect
+	persistDecision := func() error {
+		statement := `UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`
+		args := []any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now, nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), judgeProfile, reqID}
+		tr := keeperTransition{RequestID: reqID, WorkspaceID: body.WorkspaceID, State: gkResp.Decision, RequestType: string(keeper.RequestTypeAccess), AgentID: body.RequestingAgentID, CrewID: body.RequestingCrewID, CredentialID: body.CredentialID, Intent: body.Intent, Reason: gkResp.Reason, RiskScore: &gkResp.RiskScore, ActorType: decidedActorType, ActorID: decidedActorID}
+		if gkResp.Decision != string(keeper.DecisionAllow) {
+			return updateKeeperDecisionWithTransition(r.Context(), h.db, statement, args, tr)
+		}
+		var effect keeperLeaseEffect
+		err := withKeeperRunAdmission(r.Context(), h.db, tr, func(tx *sql.Tx) error {
+			if _, err := tx.ExecContext(r.Context(), statement, args...); err != nil {
+				return err
+			}
+			if err := appendKeeperTransitionTx(r.Context(), tx, tr); err != nil {
+				return err
+			}
+			var err error
+			effect, err = issueKeeperLeaseTx(r.Context(), tx, leaseInput)
+			return err
+		})
+		if err == nil {
+			committedLease = effect
+		}
+		return err
+	}
+	persistErr := persistDecision()
+	if errors.Is(persistErr, errKeeperRunScope) {
+		// The ALLOW/lease transaction rolled back. Record the refusal in its
+		// own transaction; never publish a rolled-back lease notification.
+		runUnavailable = true
+		gkResp.Decision = string(keeper.DecisionDeny)
+		gkResp.Reason = "keeper calling run ended or unavailable"
+		decidedActorType, decidedActorID = keeperActorSystem, "keeper-run-admission"
+		persistErr = persistDecision()
+	}
+	if persistErr != nil {
+		h.logger.Error("keeper: update request decision", "error", persistErr)
 		replyError(w, http.StatusInternalServerError, "audit persistence failed")
 		return
 	}
-
-	// #1373: an ALLOW is an APPROVAL, and an approval is what mints a lease.
-	// Re-issue the requesting agent's grant as a short-lived lease so access
-	// decays instead of persisting — opt-in per workspace (auto_lease_seconds,
-	// default 0 = off) and L3/L4 only. Done before the journal/inbox fan-out so
-	// the lease exists by the time the decision is visible; best-effort, so a
-	// lease-write hiccup never turns an ALLOW into a 500.
-	//
-	// gov is resolved further down for the inbox routing; do it here because the
-	// lease TTL lives on the same row and one Resolve serves both.
-	gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
-	if gkResp.Decision == string(keeper.DecisionAllow) {
-		issueCredentialLease(r.Context(), h.db, h.logger, h.journal, leaseIssueInput{
-			WorkspaceID:    body.WorkspaceID,
-			CrewID:         body.RequestingCrewID,
-			AgentID:        body.RequestingAgentID,
-			AgentName:      agentName,
-			CredentialID:   body.CredentialID,
-			CredentialName: credName,
-			SecurityLevel:  secLevel,
-			Source:         leaseSourceKeeperAllow,
-			RequestID:      reqID,
-			TTLSeconds:     gov.AutoLeaseSeconds,
-		})
-	}
+	committedLease.emit(r.Context(), h.journal, h.logger)
 
 	// Emit keeper.decision so the Timeline shows the verdict alongside
 	// the request. Severity escalates to warn for DENY because a denied
