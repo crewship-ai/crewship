@@ -22,6 +22,18 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertNotIn('sudo', command)
         self.assertIn('./internal/orchestrator', command)
 
+    def test_vault_pipeline_requires_each_actual_cli_not_only_parent_pass(self):
+        package = managed.PREFIX + 'internal/orchestrator'
+        root = 'TestNativeVaultCLITrioProtocols'
+        self.assertIn((package, root), managed.REQUIRED)
+        for adapter in ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE'):
+            key = (package, root + '/' + adapter)
+            self.assertIn(key, managed.REQUIRED)
+            events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+            self.assertTrue(managed.failures(events, 0))
+        command = next(c for c in managed.commands() if root in c[c.index('-run') + 1])
+        self.assertNotIn('sudo', command)
+
     def test_all_guarded_host_fixture_sources_are_mandatory(self):
         root = Path(__file__).resolve().parents[2]
         self.assertEqual(managed.host_source_inventory_errors(root), [])

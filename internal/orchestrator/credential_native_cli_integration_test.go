@@ -42,7 +42,7 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 	}
 }
 
-func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string) {
+func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string, vault ...func([]Credential) []Credential) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	home := t.TempDir()
@@ -74,6 +74,15 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string) {
 	password := "fixture-password-$HOME\n"
 	basicPassword := "fixture-curl-password-$HOME"
 	basic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v4/user" {
+			if r.Header.Get("PRIVATE-TOKEN") != "fixture-glab-token" && r.Header.Get("Authorization") != "Bearer fixture-glab-token" {
+				http.Error(w, "fixture GitLab authentication required", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"id":1,"username":"fixture-glab-user"}`)
+			return
+		}
 		if r.URL.Path == "/token" {
 			if r.Header.Get("Authorization") != "Bearer fixture-token-value" {
 				http.Error(w, "fixture token required", http.StatusUnauthorized)
@@ -126,6 +135,7 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string) {
 		t.Fatal(err)
 	}
 	req := AgentRunRequest{AgentSlug: "fixture", RunID: "fixture-run", CLIAdapter: adapter, ToolProfile: "FULL", UserMessage: "Run the fixture shell tool once and report its result.", LLMModel: "gpt-5-mini", Credentials: []Credential{
+		{ID: "gitlab-token", Type: "CLI_TOKEN", EnvVarName: "GITLAB_TOKEN", PlainValue: "fixture-glab-token"},
 		{ID: "token", Type: "CLI_TOKEN", EnvVarName: "NATIVE_TEST_TOKEN", PlainValue: "fixture-token-value"},
 		{ID: "file", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_TEST_SECRET_FILE", PlainValue: generic},
 		{ID: "key", Type: "SSH_KEY", EnvVarName: "NATIVE_TEST_SSH_KEY", PlainValue: privateKey},
@@ -133,6 +143,9 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string) {
 		{ID: "basic-login", Type: "USERPASS", EnvVarName: "NATIVE_TEST_BASIC_LOGIN", Username: "fixture-user", PlainValue: basicPassword},
 		{ID: "certificate", Type: "CERTIFICATE", EnvVarName: "NATIVE_TEST_CERT", PlainValue: strings.ReplaceAll(certPEM, "\n", "\r\n"), Fields: []CredentialField{{EnvVar: "NATIVE_TEST_CERT_KEY_PEM", Value: keyPEM, IsSecret: true}}},
 	}}
+	if len(vault) > 0 {
+		req.Credentials = vault[0](req.Credentials)
+	}
 	script, _, _, err := buildCredFileScript(req.Credentials, home, true)
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +177,7 @@ test "$(curl --silent --show-error --fail --noproxy '*' --connect-timeout 3 --ma
 # neither the password nor its expansion is passed as a process argument.
 test "$(printf 'user = "%%s:%%s"\n' "$(cat "$NATIVE_TEST_BASIC_LOGIN_USERNAME")" "$(cat "$NATIVE_TEST_BASIC_LOGIN_PASSWORD")" | curl --config - --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_BASIC_URL")" = fixture-basic-authenticated
 test "$(printf 'Authorization: Bearer %%s\n' "$NATIVE_TEST_TOKEN" | curl --header @- --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_TOKEN_URL")" = fixture-token-authenticated
+test "$(glab api --hostname "$NATIVE_TEST_GITLAB_URL" user)" = '{"id":1,"username":"fixture-glab-user"}'
 printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)), port)
 	var passed atomic.Bool
 	var calls atomic.Int32
@@ -276,6 +290,9 @@ printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([
 	env = overrideEnv(env, "NATIVE_TEST_MTLS_URL", mtls.URL)
 	env = overrideEnv(env, "NATIVE_TEST_BASIC_URL", basic.URL)
 	env = overrideEnv(env, "NATIVE_TEST_TOKEN_URL", basic.URL+"/token")
+	env = overrideEnv(env, "NATIVE_TEST_GITLAB_URL", basic.URL)
+	env = overrideEnv(env, "GLAB_CONFIG_DIR", filepath.Join(home, "glab"))
+	env = append(env, "GLAB_CHECK_UPDATE=false", "GLAB_SEND_TELEMETRY=false", "GLAB_NO_PROMPT=true")
 	if err := os.MkdirAll(filepath.Join(home, "codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -311,6 +328,13 @@ printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([
 		encoded, _ := json.Marshal(configuration)
 		env = overrideEnv(env, "OPENCODE_CONFIG_CONTENT", string(encoded))
 		argv = (opencodeAdapter{}).BuildCommand(req)
+	}
+	glabVersion := exec.CommandContext(ctx, "glab", "version")
+	glabVersion.Env = env
+	if out, err := glabVersion.Output(); err != nil {
+		t.Fatal("required native glab unavailable", err)
+	} else {
+		t.Logf("native GitLab CLI version: %s", strings.TrimSpace(string(out)))
 	}
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
