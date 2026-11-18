@@ -215,9 +215,13 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 	idx := indexCells(cells)
 	dedupKey := category + ":" + item.SourceID
 	var routeErr error
+	sourceKind := item.Kind
+	if item.Payload["subkind"] == privateWorkFailureSource {
+		sourceKind = privateWorkFailureSource
+	}
 
 	for _, ch := range channels {
-		if item.Payload["subkind"] == "work_run_failure" && (ch.Scope != notify.ScopeUser || ch.OwnerUserID != uid) {
+		if sourceKind == privateWorkFailureSource && (ch.Scope != notify.ScopeUser || ch.OwnerUserID != uid) {
 			continue
 		}
 		if idx.state(category, ch.ID) != "immediate" {
@@ -230,7 +234,7 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 		d := Delivery{
 			WorkspaceID: item.WorkspaceID, ChannelID: ch.ID, UserID: uid,
 			Category: category, DedupKey: dedupKey,
-			SourceKind: item.Kind, SourceID: item.SourceID, Title: item.Title,
+			SourceKind: sourceKind, SourceID: item.SourceID, Title: item.Title,
 		}
 		switch {
 		case !ch.AllowsCategory(category):
@@ -282,7 +286,10 @@ func (r *Router) applyTemplate(ctx context.Context, msg notify.CategoryMessage, 
 // deliverToChannel runs the rate gate, writes the outbox row (coalescing
 // on (channel_id, dedup_key)), attempts delivery, and updates the log.
 func (r *Router) deliverToChannel(ctx context.Context, category string, item inbox.Item, uid string, ch notify.Channel, dedupKey string) error {
-	if item.Payload["subkind"] == "work_run_failure" {
+	sourceKind := item.Kind
+	privateFailure := item.Payload["subkind"] == privateWorkFailureSource
+	if privateFailure {
+		sourceKind = privateWorkFailureSource
 		allowed, err := r.canDeliverRunFailure(ctx, item.WorkspaceID, item.SourceID, uid)
 		if err != nil || !allowed {
 			return err
@@ -315,7 +322,7 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		UserID:      uid,
 		Category:    category,
 		DedupKey:    dedupKey,
-		SourceKind:  item.Kind,
+		SourceKind:  sourceKind,
 		SourceID:    item.SourceID,
 		Title:       msg.Title,
 	}
@@ -324,8 +331,10 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedRate); err != nil {
 			return err
 		}
-		r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
-			ch, category, msg.Title, "rate limit")
+		if !privateFailure {
+			r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
+				ch, category, msg.Title, "rate limit")
+		}
 		return nil
 	}
 
@@ -338,18 +347,25 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 	}
 
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
-		if merr := r.deliveries.MarkFailed(ctx, id, err.Error()); merr != nil {
+		reason := err.Error()
+		if privateFailure {
+			reason = "personal notification delivery failed"
+		} else {
+			r.logger.Warn("notifyroute: delivery failed", "error", err, "channel_id", ch.ID, "category", category)
+			r.emitDeliveryJournal(ctx, journal.EntryNotificationFailed, journal.SeverityError,
+				ch, category, msg.Title, reason)
+		}
+		if merr := r.deliveries.MarkFailed(ctx, id, reason); merr != nil {
 			r.logger.Warn("notifyroute: mark delivery failed", "error", merr)
 		}
-		r.logger.Warn("notifyroute: delivery failed", "error", err, "channel_id", ch.ID, "category", category)
-		r.emitDeliveryJournal(ctx, journal.EntryNotificationFailed, journal.SeverityError,
-			ch, category, msg.Title, err.Error())
 		return nil // the durable delivery row owns retries
 	}
 	if err := r.deliveries.MarkSent(ctx, id); err != nil {
 		r.logger.Warn("notifyroute: mark delivery sent", "error", err)
 	}
-	r.emitDeliveryJournal(ctx, journal.EntryNotificationDelivered, journal.SeverityInfo,
-		ch, category, msg.Title, "")
+	if !privateFailure {
+		r.emitDeliveryJournal(ctx, journal.EntryNotificationDelivered, journal.SeverityInfo,
+			ch, category, msg.Title, "")
+	}
 	return nil
 }

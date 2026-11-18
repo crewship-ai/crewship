@@ -2,6 +2,8 @@ package notifyroute
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -10,8 +12,9 @@ import (
 )
 
 const runFailureNoticeBatch = 100
+const privateWorkFailureSource = "work_run_failure"
 
-const pendingRunFailureNotices = `SELECT id,run_id,projected FROM run_failure_notice_outbox
+const pendingRunFailureNotices = `SELECT id,run_id FROM run_failure_notice_outbox
 WHERE id>(SELECT watermark FROM run_failure_notice_state WHERE id=1)
 ORDER BY id LIMIT ?`
 
@@ -52,14 +55,13 @@ func (r *Router) drainRunFailureNotices(ctx context.Context) error {
 		return err
 	}
 	type event struct {
-		id        int64
-		run       string
-		projected bool
+		id  int64
+		run string
 	}
 	var pending []event
 	for rows.Next() {
 		var e event
-		if err = rows.Scan(&e.id, &e.run, &e.projected); err != nil {
+		if err = rows.Scan(&e.id, &e.run); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -78,7 +80,7 @@ func (r *Router) drainRunFailureNotices(ctx context.Context) error {
 		err := func() error {
 			defer write.Leave()
 			writeCtx := write.Context()
-			if err := r.projectRunFailureNotice(writeCtx, e.id, e.run, e.projected); err != nil {
+			if err := r.projectRunFailureNotice(writeCtx, e.id, e.run); err != nil {
 				return err
 			}
 			_, err := r.db.ExecContext(writeCtx, `UPDATE run_failure_notice_state SET watermark=max(watermark,?) WHERE id=1`, e.id)
@@ -91,12 +93,22 @@ func (r *Router) drainRunFailureNotices(ctx context.Context) error {
 	return nil
 }
 
-func (r *Router) projectRunFailureNotice(ctx context.Context, outboxID int64, run string, projected bool) error {
+func (r *Router) projectRunFailureNotice(ctx context.Context, outboxID int64, run string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// A previous drain may have projected this source since the batch was
+	// read. A deleted inbox card must stay deleted after that handoff.
+	var projected bool
+	err = tx.QueryRowContext(ctx, `SELECT projected FROM run_failure_notice_outbox WHERE id=? AND run_id=?`, outboxID, run).Scan(&projected)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	source, allowed, err := resolveRunFailureNotice(ctx, tx, run)
 	if err != nil || !allowed {
 		return err
@@ -106,7 +118,7 @@ func (r *Router) projectRunFailureNotice(ctx context.Context, outboxID int64, ru
 		TargetUserID: source.UserID, Title: "Agent run failed", SenderType: "system",
 		SenderName: "Runs", Priority: "high",
 		BodyMD:  "The agent run ended unsuccessfully. Open run history to see the failure before retrying.",
-		Payload: map[string]any{"subkind": "work_run_failure"},
+		Payload: map[string]any{"subkind": privateWorkFailureSource},
 	}
 	if projected {
 		var visible bool

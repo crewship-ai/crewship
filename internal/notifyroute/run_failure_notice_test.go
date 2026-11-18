@@ -73,6 +73,9 @@ func checkRunFailureNoticeRetry(t *testing.T, revoke bool) {
 	if user != "u_member" || strings.Contains(body+payload, sensitive) {
 		t.Fatalf("unexpected audience or disclosure: user=%s body=%s payload=%s", user, body, payload)
 	}
+	if rows, err := r.deliveries.List(t.Context(), "ws1", ListFilter{}); err != nil || len(rows) != 0 {
+		t.Fatalf("private work delivery in workspace audit: count=%d err=%v", len(rows), err)
+	}
 	var deliveryID string
 	if err := db.QueryRow(`SELECT id FROM notification_deliveries WHERE source_id=? AND status='failed'`, id).Scan(&deliveryID); err != nil {
 		t.Fatal(err)
@@ -105,6 +108,17 @@ func checkRunFailureNoticeRetry(t *testing.T, revoke bool) {
 	var watermark int64
 	if err := db.QueryRow(`SELECT watermark FROM run_failure_notice_state WHERE id=1`).Scan(&watermark); err != nil || watermark == 0 {
 		t.Fatalf("watermark=%d err=%v", watermark, err)
+	}
+	if _, err := db.Exec(`DELETE FROM inbox_items WHERE source_id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	// Model a drain that read the event before the first writer committed.
+	if err := restarted.projectRunFailureNotice(t.Context(), watermark, id); err != nil {
+		t.Fatal(err)
+	}
+	var cards int
+	if err := db.QueryRow(`SELECT count(*) FROM inbox_items WHERE source_id=?`, id).Scan(&cards); err != nil || cards != 0 {
+		t.Fatalf("stale outbox reader recreated dismissed card: count=%d err=%v", cards, err)
 	}
 }
 

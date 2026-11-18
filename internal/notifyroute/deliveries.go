@@ -184,15 +184,15 @@ type ListFilter struct {
 
 // List returns a workspace's delivery-log rows, newest first — backs
 // GET /api/v1/notification-deliveries. Read-only, no secrets involved
-// (the log never stores a channel's URL/token, only ids).
+// Private work notices stay in the recipient's inbox and internal retry queue.
 func (s *DeliveryStore) List(ctx context.Context, workspaceID string, f ListFilter) ([]Delivery, error) {
 	q := `
 SELECT id, workspace_id, channel_id, COALESCE(user_id,''), category, dedup_key,
        COALESCE(source_kind,''), COALESCE(source_id,''), COALESCE(title,''),
        status, COALESCE(error,''), attempts, created_at, updated_at, COALESCE(sent_at,'')
 FROM notification_deliveries
-WHERE workspace_id = ?`
-	args := []any{workspaceID}
+WHERE workspace_id = ? AND COALESCE(source_kind,'') <> ?`
+	args := []any{workspaceID, privateWorkFailureSource}
 	if f.Status != "" {
 		q += ` AND status = ?`
 		args = append(args, f.Status)

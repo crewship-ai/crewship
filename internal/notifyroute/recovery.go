@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/quiesce"
@@ -73,7 +74,12 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 	if derive, ok := sourceDeriverFor(d.SourceKind); ok {
 		return r.recoverDerived(ctx, d, derive)
 	}
-	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, d.SourceKind, d.SourceID)
+	workFailure := d.SourceKind == privateWorkFailureSource
+	inboxKind := d.SourceKind
+	if workFailure {
+		inboxKind = inbox.KindFailedRun
+	}
+	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, inboxKind, d.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Source inbox item is gone — nothing left to render. Bump the
@@ -92,7 +98,6 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		return false
 	}
 
-	workFailure := payload["subkind"] == "work_run_failure"
 	if workFailure {
 		allowed, err := r.canDeliverRunFailure(ctx, d.WorkspaceID, d.SourceID, d.UserID)
 		if err != nil {
@@ -134,23 +139,24 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 
 	// Same derivation as the live path, so a recovered delivery carries the
 	// same links and variables the original attempt would have.
-	links, vars := notificationFacts(d.SourceKind, payload)
+	links, vars := notificationFacts(inboxKind, payload)
 	msg := notify.CategoryMessage{
 		WorkspaceID: d.WorkspaceID,
 		Category:    d.Category,
 		Title:       d.Title,
 		Body:        body,
 		Priority:    priority,
-		SourceKind:  d.SourceKind,
+		SourceKind:  inboxKind,
 		SourceID:    d.SourceID,
 		Links:       links,
 		Vars:        vars,
 	}
-	if workFailure {
-		msg = r.applyTemplate(ctx, msg, ch.ID)
-	}
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
-		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {
+		reason := err.Error()
+		if workFailure {
+			reason = "personal notification delivery failed"
+		}
+		if merr := r.deliveries.MarkFailed(ctx, d.ID, reason); merr != nil {
 			r.logger.Warn("notifyroute: recovery: mark failed", "error", merr, "delivery_id", d.ID)
 		}
 		return false
