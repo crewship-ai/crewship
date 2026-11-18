@@ -21,6 +21,13 @@ type CredentialUpgradeAgent struct {
 }
 
 type CredentialUpgradeReport struct {
+	// Candidate provenance is supplied by the offline CLI inspector. The
+	// metadata loader itself never infers a running build from its shell.
+	SourceBuild        string `json:"source_build" yaml:"source_build"`
+	TargetBuild        string `json:"target_build" yaml:"target_build"`
+	ConfigurationKnown bool   `json:"configuration_known" yaml:"configuration_known"`
+	TargetBuildKnown   bool   `json:"target_build_known" yaml:"target_build_known"`
+
 	Ready               bool                     `json:"ready" yaml:"ready"`
 	State               string                   `json:"state" yaml:"state"`
 	WorkspaceID         string                   `json:"workspace_id" yaml:"workspace_id"`

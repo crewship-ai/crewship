@@ -49,12 +49,10 @@ func init() {
 				report.State = "UNKNOWN"
 			}
 		}
-		return struct {
-			*api.CredentialUpgradeReport `json:",inline" yaml:",inline"`
-			SourceBuild                  string `json:"source_build" yaml:"source_build"`
-			TargetBuild                  string `json:"target_build" yaml:"target_build"`
-			ConfigurationKnown           bool   `json:"configuration_known" yaml:"configuration_known"`
-			TargetBuildKnown             bool   `json:"target_build_known" yaml:"target_build_known"`
-		}{report, in.SourceBuild, target, in.ConfigurationKnown, targetKnown}, nil
+		report.SourceBuild = in.SourceBuild
+		report.TargetBuild = target
+		report.ConfigurationKnown = in.ConfigurationKnown
+		report.TargetBuildKnown = targetKnown
+		return report, nil
 	}
 }
