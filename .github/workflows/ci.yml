@@ -901,6 +901,17 @@ jobs:
           printf '%s\n' "$artifact_dir/node_modules/@anthropic-ai/claude-code-linux-x64" >> "$GITHUB_PATH"
           test -x "$artifact_dir/node_modules/@opencode/cli-linux-x64-baseline/bin/opencode"
           printf '%s\n' "$artifact_dir/node_modules/@opencode/cli-linux-x64-baseline/bin" >> "$GITHUB_PATH"
+      - name: Prepare checksummed native GitLab CLI fixture
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          glab_bin="$RUNNER_TEMP/native-glab-fixture"
+          mkdir -p "$glab_bin"
+          GOSUMDB=sum.golang.org GOBIN="$glab_bin" go install gitlab.com/gitlab-org/cli/cmd/glab@v1.130.0
+          test -x "$glab_bin/glab"
+          go version -m "$glab_bin/glab" | awk '$1 == "mod" { if ($2 != "gitlab.com/gitlab-org/cli" || $3 != "v1.130.0") exit 1; print; found=1 } END { if (!found) exit 1 }'
+          printf '%s\n' "$glab_bin" >> "$GITHUB_PATH"
       - name: Require executed Docker and protected capture fixtures
         timeout-minutes: 24
         # Existing fixtures retain their privilege profiles. Protected capture
