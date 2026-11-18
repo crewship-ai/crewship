@@ -245,7 +245,7 @@ install_binary() {
 install_companions() {
   extract_dir=$1
   dst_dir=$2
-  for name in crewship-sidecar entrypoint.sh; do
+  for name in crewship-sidecar crewship-agent-cli entrypoint.sh; do
     if [ -f "${extract_dir}/${name}" ]; then
       install_file "${extract_dir}/${name}" "$dst_dir" "$name"
     fi
