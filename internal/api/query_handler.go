@@ -770,6 +770,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			EnvVarName:     d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			OAuthPrimary:   d.Type == CredTypeOAuth2,
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,

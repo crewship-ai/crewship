@@ -131,7 +131,7 @@ func TestNativeOAuthVaultToStandardCurl(t *testing.T) {
 		}))
 		defer fixture.Close()
 		creds := resolve(agent)
-		if len(creds) != 1 || creds[0].PlainValue != value || creds[0].EnvVarName != "NATIVE_OAUTH_ACCESS" {
+		if len(creds) != 1 || creds[0].PlainValue != value || creds[0].EnvVarName != "NATIVE_OAUTH_ACCESS" || !creds[0].OAuthPrimary {
 			t.Fatal("native OAuth resolution changed bytes or slot")
 		}
 		for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI", "OPENCODE"} {

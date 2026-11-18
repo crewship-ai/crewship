@@ -149,7 +149,7 @@ func testNativeCLIShellEnvironment(t *testing.T, adapter, mode string, vault ...
 		t.Fatal(err)
 	}
 	req := AgentRunRequest{AgentSlug: "fixture", RunID: "fixture-run", CLIAdapter: adapter, ToolProfile: "FULL", UserMessage: "Run the fixture shell tool once and report its result.", LLMModel: "gpt-5-mini", Credentials: []Credential{
-		{ID: "oauth-access", Type: "OAUTH2", Provider: "GITHUB", EnvVarName: "NATIVE_TEST_OAUTH_ACCESS", PlainValue: "fixture-oauth-access"},
+		{ID: "oauth-access", Type: "OAUTH2", OAuthPrimary: true, Provider: "GITHUB", EnvVarName: "NATIVE_TEST_OAUTH_ACCESS", PlainValue: "fixture-oauth-access"},
 		{ID: "gitlab-token", Type: "CLI_TOKEN", EnvVarName: "GITLAB_TOKEN", PlainValue: "fixture-glab-token"},
 		{ID: "token", Type: "CLI_TOKEN", EnvVarName: "NATIVE_TEST_TOKEN", PlainValue: "fixture-token-value"},
 		{ID: "file", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_TEST_SECRET_FILE", PlainValue: generic},

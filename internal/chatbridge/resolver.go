@@ -212,11 +212,12 @@ type connectedAgentResponse struct {
 }
 
 type credentialResponse struct {
-	ID       string `json:"id"`
-	EnvVar   string `json:"env_var"`
-	Value    string `json:"value"`
-	Priority int    `json:"priority"`
-	Type     string `json:"type"`
+	ID           string `json:"id"`
+	EnvVar       string `json:"env_var"`
+	Value        string `json:"value"`
+	Priority     int    `json:"priority"`
+	Type         string `json:"type"`
+	OAuthPrimary bool   `json:"oauth_primary,omitempty"`
 	// Provider, BaseURL and Headers mirror api.mcpCredEntry's fields of the
 	// same JSON names — this struct decodes that payload. Dropping any of them
 	// here silently strips the provider identity between the API and the
@@ -664,6 +665,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			PlainValue:      c.Value,
 			Priority:        c.Priority,
 			Type:            c.Type,
+			OAuthPrimary:    c.OAuthPrimary,
 			Provider:        c.Provider,
 			BaseURL:         c.BaseURL,
 			Headers:         c.Headers,
