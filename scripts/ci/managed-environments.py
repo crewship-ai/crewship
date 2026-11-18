@@ -168,6 +168,8 @@ REQUIRED.update((PREFIX + 'internal/orchestrator', name + '/' + shell)
 REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeTmuxMissingSnapshotCannotSucceed/' + shell + '/' + mode + '/' + missing)
                 for shell in ('dash', 'busybox')
                 for mode in ('tmux', 'fallback') for missing in ('env', 'run.sh', 'early-exit'))
+REQUIRED.add((PREFIX + 'internal/orchestrator',
+              'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped/exact-session-targets'))
 HOST_UID = 65534
 
 
