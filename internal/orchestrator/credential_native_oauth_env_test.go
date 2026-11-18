@@ -90,13 +90,21 @@ func TestNativeOAuthExpiredSnapshotAndSecretPartExposure(t *testing.T) {
 				if len(exposures) != 0 {
 					t.Fatal("withheld OAuth snapshot was reported as delivered")
 				}
+				req.CrewMCPConfigJSON = `{"mcpServers":{"fixture":{"command":"fixture","env":{"token":"${NATIVE_OAUTH_ACCESS}"}}}}`
+				for _, path := range [][]string{BuildEnvVars(req, nil, true), injectMCPCredentialEnvVars(req, env, true, slog.Default())} {
+					for _, entry := range path {
+						if strings.Contains(entry, c.PlainValue) || strings.Contains(entry, c.Fields[0].Value) {
+							t.Fatal("expired OAuth snapshot returned through worker or explicit MCP delivery")
+						}
+					}
+				}
 			}
 		})
 	}
 }
 
 func TestNativeOAuthSlotCannotClaimRuntimeOrAnotherCredential(t *testing.T) {
-	for _, name := range []string{"PATH", "HOME", "BASH_ENV", "CREWSHIP_AGENT_TOKEN", "OPENCODE_CONFIG_CONTENT"} {
+	for _, name := range []string{"PATH", "HOME", "BASH_ENV", "CREWSHIP_AGENT_TOKEN", "OPENCODE_CONFIG_CONTENT", "OPENAI_API_KEY", "BAD-NAME"} {
 		t.Run(name, func(t *testing.T) {
 			cred := Credential{ID: "oauth", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: name, PlainValue: "synthetic-access"}
 			req := AgentRunRequest{AgentSlug: "fixture", RunID: "run", CLIAdapter: "CLAUDE_CODE", Credentials: []Credential{cred}}
@@ -113,6 +121,10 @@ func TestNativeOAuthSlotCannotClaimRuntimeOrAnotherCredential(t *testing.T) {
 				t.Fatal("ambiguous OAuth credential slot did not refuse delivery")
 			}
 		})
+	}
+	creds := []Credential{{ID: "first", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: "SAME_VALUE", PlainValue: "same"}, {ID: "second", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: "SAME_VALUE", PlainValue: "same"}}
+	if _, err := appendCredentialFileEnv(nil, creds, t.TempDir(), true); err == nil {
+		t.Fatal("equal values concealed distinct owners of an OAuth slot")
 	}
 }
 
