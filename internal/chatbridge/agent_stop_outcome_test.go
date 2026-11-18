@@ -21,7 +21,7 @@ type agentStopOutcomeContainer struct {
 }
 
 func (c *agentStopOutcomeContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM") {
+	if len(cfg.Env) == 0 && strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM") {
 		c.once.Do(func() { close(c.stopped) })
 		return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
 	}
