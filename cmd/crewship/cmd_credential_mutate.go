@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
@@ -545,7 +546,7 @@ var credCreateCmd = &cobra.Command{
 			// shape instead, and the first Codex run is the live test.
 			cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
 
-		case credType == "SECRET" || provider == "" || provider == "NONE":
+		case !credpolicy.TokenProbeAllowed(credType, provider) || provider == "" || provider == "NONE":
 			cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 		default:
 			valid, errMsg := testCredentialValue(client, provider, credType, value)
@@ -738,6 +739,17 @@ var credUpdateCmd = &cobra.Command{
 					var cred struct {
 						Type     string `json:"type" yaml:"type"`
 						Provider string `json:"provider" yaml:"provider"`
+						Login    *struct {
+							Mode string `json:"mode" yaml:"mode"`
+						} `json:"login" yaml:"login"`
+					}
+					// Only a persisted metered login may use the API-key probe.
+					// Missing mode must not turn a subscription artifact into a key.
+					probeType := func() string {
+						if cred.Type == "PROVIDER_LOGIN" && cred.Login != nil && cred.Login.Mode == providerlogin.ModeAPIKey {
+							return "API_KEY"
+						}
+						return cred.Type
 					}
 					if err := cli.ReadJSON(metaResp, &cred); err != nil {
 						cli.PrintWarning("Could not parse credential metadata, skipping validation: " + err.Error())
@@ -749,14 +761,14 @@ var credUpdateCmd = &cobra.Command{
 						cli.PrintWarning(fmt.Sprintf(
 							"%s is not validated on update — Crewship does not dial an operator-supplied endpoint.",
 							spec.ID))
-					} else if cred.Type == "SECRET" || cred.Provider == "" || cred.Provider == "NONE" {
-						cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 					} else if codexauth.IsLogin(cred.Type, cred.Provider) {
 						// Same as create: a ChatGPT login is not an API key and
 						// the probe would only report "Invalid API key" (#2428).
 						cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
+					} else if !credpolicy.TokenProbeAllowed(probeType(), cred.Provider) || cred.Provider == "" || cred.Provider == "NONE" {
+						cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 					} else {
-						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
+						valid, errMsg := testCredentialValue(client, cred.Provider, probeType(), valStr)
 						if valid {
 							cli.PrintSuccess("Key validated successfully")
 						} else {
