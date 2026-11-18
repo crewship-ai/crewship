@@ -59,12 +59,12 @@ func (s *ExecutionStore) start(ctx context.Context, runID, stepID, kind, agent, 
 	return context.WithValue(ctx, executionContextKey{}, executionContext{id: id, path: executionPath, runID: runID}), id, nil
 }
 func (s *ExecutionStore) finish(ctx context.Context, id, output string, runErr error) error {
-	return s.finishWithWait(ctx, id, output, runErr, nil)
+	return s.finishWithWait(ctx, id, output, runErr, nil, "")
 }
 
 // Only leaf agent attempts record waiting. Parent durations include their
 // children and must not claim the same wait as additional measured time.
-func (s *ExecutionStore) finishWithWait(ctx context.Context, id, output string, runErr error, waitMs *int64) error {
+func (s *ExecutionStore) finishWithWait(ctx context.Context, id, output string, runErr error, waitMs *int64, effectiveModel string) error {
 	status, reason := "completed", ""
 	if runErr != nil {
 		status, reason = "failed", runErr.Error()
@@ -87,7 +87,12 @@ func (s *ExecutionStore) finishWithWait(ctx context.Context, id, output string, 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	scrub := scrubber.New()
-	_, err := s.db.ExecContext(persistCtx, `UPDATE pipeline_step_executions SET status=?,ended_at=?,output=?,error=?,agent_wait_ms=? WHERE id=? AND status='running'`, status, tsformat.Format(time.Now()), scrub.Scrub(output), scrub.Scrub(reason), waitMs, id)
+	_, err := s.db.ExecContext(persistCtx, `UPDATE pipeline_step_executions SET status=?,ended_at=?,output=?,error=?,agent_wait_ms=?,
+ model=COALESCE(NULLIF(?,''),CASE WHEN kind='agent_run' THEN
+  (SELECT child.model FROM pipeline_step_executions child WHERE child.parent_execution_id=pipeline_step_executions.id
+   AND child.kind='agent_attempt' AND child.model IS NOT NULL AND child.model<>'' ORDER BY child.attempt DESC LIMIT 1)
+  END,model)
+ WHERE id=? AND status='running'`, status, tsformat.Format(time.Now()), scrub.Scrub(output), scrub.Scrub(reason), waitMs, effectiveModel, id)
 	return err
 }
 
@@ -142,7 +147,7 @@ func (e *Executor) runRecordedAgent(ctx context.Context, req AgentStepRequest) (
 			_ = e.executionStore.finish(ctx, id, res.Output, fmt.Errorf("agent panicked: %v", p))
 			panic(p)
 		}
-		err = errors.Join(err, e.executionStore.finishWithWait(ctx, id, res.Output, err, &res.AgentWaitMs))
+		err = errors.Join(err, e.executionStore.finishWithWait(ctx, id, res.Output, err, &res.AgentWaitMs, res.EffectiveModel))
 	}()
 	res, err = e.runner.RunStep(ctx, req)
 	if e.executionStore.publisher != nil && res.Output != "" {

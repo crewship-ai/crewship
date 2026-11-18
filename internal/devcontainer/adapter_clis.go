@@ -66,8 +66,16 @@ var adapterCLIs = []AdapterCLI{
 // handlers' validCLIAdapters.
 func AdapterCLIFor(adapter string) (AdapterCLI, bool) {
 	adapter = strings.ToUpper(strings.TrimSpace(adapter))
+	switch adapter {
+	case "CURSOR":
+		adapter = "CURSOR_CLI"
+	case "FACTORY", "FACTORY-DROID":
+		adapter = "FACTORY_DROID"
+	case "CODEX-CLI":
+		adapter = "CODEX_CLI"
+	}
 	for _, a := range adapterCLIs {
-		if a.Adapter == adapter {
+		if a.Adapter == adapter || strings.EqualFold(a.Binary, adapter) || (a.MiseTool != "" && strings.EqualFold(a.MiseTool, adapter)) {
 			return a, true
 		}
 	}

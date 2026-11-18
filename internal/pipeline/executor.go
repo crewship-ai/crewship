@@ -845,6 +845,14 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	in.pipeline = p
 	in.dsl = dsl
 
+	// A parked run keeps its existing execution recipe and skipped branches.
+	// Its remaining executed agent steps validate a pin before their hooks.
+	if in.Mode != ModeDryRun && !in.resume {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, p.AuthorCrewID, dsl.Steps); err != nil {
+			return nil, err
+		}
+	}
+
 	// Dispatch gates — same chokepoint, same reason as the status gate above.
 	//
 	// RunPreflight's own doc says the operation "had two doors and only one
@@ -1249,7 +1257,8 @@ type RunInput struct {
 	// ResumeInterruptedRuns — external callers cannot reach it, which
 	// keeps the resume semantics (skip restored steps, re-attach
 	// waitpoints, no fresh pipeline_runs insert) off the public API.
-	resume bool
+	resume        bool
+	legacyOutcome bool
 	// restoredOutputs is the step-outputs map recovered from the
 	// run's persisted pipeline_runs row. Steps present here are
 	// treated as already completed: their outputs feed template
@@ -1566,6 +1575,19 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		}()
 	}
 
+	// Loading retained provenance can observe a cancel immediately after resume
+	// admission. Keep it under the same terminal persistence and cancellation
+	// classification as every other body failure; never leave the run interrupted
+	// or dispatch another step when this read fails.
+	if in.resume && !in.legacyOutcome && e.runStore != nil {
+		var err error
+		result.outcomeEvidence, err = e.runStore.getOutcomeEvidence(ctx, runID)
+		if err != nil {
+			return e.failRun(ctx, in, emit, result, "",
+				fmt.Sprintf("restore outcome evidence: %v", err), false, startedAt), nil
+		}
+	}
+
 	// Governance airbag (runtime, #1417). Run() enforces the status gate
 	// for top-level dispatch, but nested call_pipeline invocations reach
 	// runDSL directly (runCallPipelineStep → runDSL), bypassing that check.
@@ -1842,7 +1864,8 @@ func (e *Executor) runLinearStep(
 			emit.emitStepSkipped(ctx, step, step.If)
 			e.recordSkippedExecution(ctx, in, runID, step)
 			result.StepOutputs[step.ID] = "<skipped>"
-			e.persistStepOutput(ctx, in, depth, runID, step.ID, result.StepOutputs[step.ID], result.CostUSD, startedAt)
+			evidence := result.recordOutcome(step, &outcomeCapture{evidence: &outcomeEvidence{Version: 1}})
+			e.persistStepOutput(ctx, in, depth, runID, step.ID, result.StepOutputs[step.ID], result.CostUSD, startedAt, evidence)
 			return nil
 		}
 	}
@@ -1915,7 +1938,8 @@ func (e *Executor) runLinearStep(
 
 		emit.emitStepStarted(ctx, step, stepIdx, tier)
 
-		output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
+		stepCtx, outcomeCapture := captureOutcome(ctx)
+		output, stepCost, stepDur, stepErr := e.runStepWithRetry(stepCtx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, result.CostUSD)
 		// Suspend: the wait step parked on an approval. NOT a failure —
 		// return WAITING promptly so the caller (and slot) is released.
 		// MarkWaiting + step-output persistence already happened in
@@ -1940,6 +1964,7 @@ func (e *Executor) runLinearStep(
 			return e.failRun(ctx, in, emit, result, step.ID, stepErr.Error(), true, startedAt)
 		}
 		result.StepOutputs[step.ID] = output
+		evidence := result.recordOutcome(step, outcomeCapture)
 		result.CostUSD += stepCost
 		// #1416 item 5: the journal/broadcast copy is scrubbed; the
 		// in-memory result.StepOutputs entry above stays raw for
@@ -1947,7 +1972,7 @@ func (e *Executor) runLinearStep(
 		emit.emitStepCompleted(ctx, step, scrubStepOutput(output), stepDur, stepCost)
 		// Flush the outputs map at the step boundary so a kill
 		// between steps loses at most the in-flight step.
-		e.persistStepOutput(ctx, in, depth, runID, step.ID, output, result.CostUSD, startedAt)
+		e.persistStepOutput(ctx, in, depth, runID, step.ID, output, result.CostUSD, startedAt, evidence)
 		// Persist this step's state_write bindings for the NEXT run (#1420).
 		// ctxRender.StepOutputs is result.StepOutputs (already carrying this
 		// step's output), so a value template can reference the step itself.
@@ -2043,6 +2068,12 @@ func (e *Executor) runStepBody(
 		span.End()
 	}()
 
+	if step.Type == StepAgentRun && step.ModelOverride != "" {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, in.AuthorCrewID, []Step{step}); err != nil {
+			return "", 0, 0, err
+		}
+	}
+
 	// Per-step before hook (Wave 4.1): runs ahead of the step; its
 	// failure fails the step (setup contract, like routine before_all).
 	if step.Hooks != nil && step.Hooks.Before != nil {
@@ -2052,6 +2083,9 @@ func (e *Executor) runStepBody(
 	}
 
 	out, cost, dur, err := e.dispatchStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth, priorCostUSD)
+	if err == nil && step.Type == StepAgentRun {
+		acceptedAgentOutcome(ctx, step, out, runID, pipelineID)
+	}
 
 	// Per-step after hook: best-effort once the step itself completes
 	// (logged, never overrides the step's outcome).
@@ -2251,6 +2285,7 @@ func (e *Executor) runAgentStep(
 			AgentSlug:        step.AgentSlug,
 			Adapter:          am.Adapter,
 			Model:            am.Model,
+			ModelOverride:    step.ModelOverride,
 			Prompt:           attemptPrompt,
 			TimeoutSec:       step.TimeoutSec,
 			PipelineID:       pipelineID,
@@ -2500,6 +2535,7 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		return "", nested.CostUSD, time.Since(stepStart).Milliseconds(),
 			fmt.Errorf("nested pipeline %q failed at step %q: %s", step.PipelineSlug, nested.FailedAtStep, nested.ErrorMessage)
 	}
+	recordOutcome(ctx, selectedOutcome(dsl, nested))
 	return nested.Output, nested.CostUSD, time.Since(stepStart).Milliseconds(), nil
 }
 
@@ -2676,14 +2712,14 @@ func (e *Executor) persistStepEntry(ctx context.Context, in RunInput, depth int,
 // the DAG scheduler can pass a mutex-guarded snapshot value without
 // holding the lock across a DB write. A single-row upsert (#1411 item 4)
 // replaced the old whole-map rewrite here.
-func (e *Executor) persistStepOutput(ctx context.Context, in RunInput, depth int, runID, stepID, output string, costUSD float64, startedAt time.Time) {
+func (e *Executor) persistStepOutput(ctx context.Context, in RunInput, depth int, runID, stepID, output string, costUSD float64, startedAt time.Time, evidence ...*outcomeEvidence) {
 	if !e.stepPersistEnabled(in, depth) {
 		return
 	}
 	// #1416 item 5: scrub before persist. The in-memory result.StepOutputs
 	// entry stays raw for template chaining; only the persisted projection
 	// copy is scrubbed so secrets never leak into the run row.
-	if err := e.runStore.UpsertStepOutput(ctx, runID, stepID, scrubStepOutput(output), costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+	if err := e.runStore.UpsertStepOutput(ctx, runID, stepID, scrubStepOutput(output), costUSD, time.Since(startedAt).Milliseconds(), evidence...); err != nil {
 		e.persistWarn("step output", runID, err)
 	}
 }
@@ -2693,7 +2729,7 @@ func (e *Executor) persistStepOutput(ctx context.Context, in RunInput, depth int
 // dag.go), so its resume granularity is per-wave: this upserts every
 // entry in the wave's outputs snapshot in one transaction instead of
 // rewriting the whole step_outputs_json blob (#1411 item 4).
-func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, costUSD float64, startedAt time.Time) {
+func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth int, runID string, stepOutputs map[string]string, evidence map[string]outcomeEvidence, costUSD float64, startedAt time.Time) {
 	if !e.stepPersistEnabled(in, depth) {
 		return
 	}
@@ -2704,7 +2740,7 @@ func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth in
 	for k, v := range stepOutputs {
 		scrubbed[k] = scrubStepOutput(v)
 	}
-	if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, costUSD, time.Since(startedAt).Milliseconds()); err != nil {
+	if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, costUSD, time.Since(startedAt).Milliseconds(), evidence); err != nil {
 		e.persistWarn("wave outputs", runID, err)
 	}
 }
@@ -2852,10 +2888,17 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		// MarkTerminalInput.HasOutcomeCapableStep.
 		HasOutcomeCapableStep: DSLHasOutcomeCapableStep(in.dsl),
 	}
+	var evidence outcomeEvidence
 	if result != nil {
-		// Judge by what executed: an agent step skipped by its `if:` could
-		// not have reported a hand-off.
-		terminal.HasOutcomeCapableStep = ExecutedOutcomeCapableStep(in.dsl, result.StepOutputs)
+		if in.legacyOutcome {
+			// Runs created before evidence was required settle using their
+			// original contract even when they park again after an upgrade.
+			terminal.HasOutcomeCapableStep = ExecutedOutcomeCapableStep(in.dsl, result.StepOutputs)
+		} else {
+			evidence = selectedOutcome(in.dsl, result)
+			terminal.HasOutcomeCapableStep = evidence.Executed
+			terminal.ReportedOutcome = &evidence.Outcome
+		}
 	}
 	if result == nil {
 		terminal.Status = RunStatusFailed
@@ -2906,10 +2949,13 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 			for k, v := range result.StepOutputs {
 				scrubbed[k] = scrubStepOutput(v)
 			}
-			if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, result.CostUSD, dur); err != nil {
+			if err := e.runStore.FlushStepOutputs(ctx, runID, scrubbed, result.CostUSD, dur, result.outcomeEvidence); err != nil {
 				e.persistWarn("step outputs flush", runID, err)
 			}
 		}
+	}
+	if terminal.Status == RunStatusCompleted && terminal.ErrorMessage == "" && evidence.Executed && evidence.SourceKind == "unproven" {
+		terminal.ErrorMessage = unprovenOutcomeReason
 	}
 	if err := e.runStore.MarkTerminal(ctx, terminal); err != nil {
 		e.persistWarn("run terminal", runID, err)

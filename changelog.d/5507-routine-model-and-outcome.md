@@ -1,0 +1,2 @@
+- **Routines could launch the wrong model or lose the agent outcome:** keep the agent's configured adapter, validate explicit model pins, and persist the accepted outcome across delivery steps and resume.
+- **Agent-authored schedules omitted input presets:** expose trigger.inputs in routine authoring separately from test-run sample inputs.

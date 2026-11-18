@@ -76,6 +76,8 @@ const (
 // in the DB until the run ends. step_outputs_json is opaque to the
 // store; callers marshal/unmarshal as needed (typically map[string]string).
 type RunRecord struct {
+	outcomeEvidenceRequired bool
+
 	ChatOriginID          string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	InvocationSourceRunID string `json:"-"` // Fresh verified invocation only; never inherited recipe authority.
 	ID                    string
@@ -336,8 +338,8 @@ INSERT INTO pipeline_runs (
     invoking_crew_id, invoking_agent_id, invoking_user_id, invocation_authority, chat_origin_id, invocation_source_run_id,
     triggered_via, triggered_by_id, idempotency_key,
     inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json,
-    chain_depth, chain_origin, created_at, updated_at, due_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    chain_depth, chain_origin, created_at, updated_at, due_at, outcome_evidence_required
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
@@ -345,7 +347,7 @@ INSERT INTO pipeline_runs (
 		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID), r.InvocationAuthority, nullableStr(r.ChatOriginID), nullableStr(r.InvocationSourceRunID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
 		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON,
-		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt), nullableTime(r.DueAt))
+		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt), nullableTime(r.DueAt), 1)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: insert: %w", err)
 	}
@@ -399,19 +401,28 @@ WHERE id = ? AND status IN ('queued','running','waiting')`, stepID, runID)
 // AppendStepOutput, which rewrote the entire step_outputs_json blob on
 // every step boundary — O(1) bytes written here per call vs. O(N) bytes
 // per call (O(N²) over a run) before. See #1411 item 4.
-func (s *RunStore) UpsertStepOutput(ctx context.Context, runID, stepID, output string, costUSD float64, durationMs int64) error {
+func (s *RunStore) UpsertStepOutput(ctx context.Context, runID, stepID, output string, costUSD float64, durationMs int64, evidence ...*outcomeEvidence) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("pipeline_run_step_outputs: begin: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
+	var normalized any
+	if len(evidence) > 0 && evidence[0] != nil {
+		b, err := json.Marshal(evidence[0])
+		if err != nil {
+			return err
+		}
+		normalized = string(b)
+	}
 	now := formatRFC3339(time.Now().UTC())
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at`,
-		runID, stepID, output, now); err != nil {
+INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at, outcome_evidence_json)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at,
+outcome_evidence_json=COALESCE(excluded.outcome_evidence_json,pipeline_run_step_outputs.outcome_evidence_json)`,
+		runID, stepID, output, now, normalized); err != nil {
 		return fmt.Errorf("pipeline_run_step_outputs: upsert: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -434,7 +445,7 @@ WHERE id = ?`, costUSD, durationMs, runID); err != nil {
 // re-affirming already-persisted steps (idempotent, harmless). Unlike the
 // old whole-blob rewrite this happens O(N) times ONCE per run, not on
 // every step boundary.
-func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64) error {
+func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutputs map[string]string, costUSD float64, durationMs int64, evidence ...map[string]outcomeEvidence) error {
 	if len(stepOutputs) == 0 {
 		return nil
 	}
@@ -445,9 +456,10 @@ func (s *RunStore) FlushStepOutputs(ctx context.Context, runID string, stepOutpu
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at`)
+INSERT INTO pipeline_run_step_outputs (run_id, step_id, output, updated_at, outcome_evidence_json)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at = excluded.updated_at,
+outcome_evidence_json=COALESCE(excluded.outcome_evidence_json,pipeline_run_step_outputs.outcome_evidence_json)`)
 	if err != nil {
 		return fmt.Errorf("pipeline_run_step_outputs: flush prepare: %w", err)
 	}
@@ -455,7 +467,17 @@ ON CONFLICT (run_id, step_id) DO UPDATE SET output = excluded.output, updated_at
 
 	now := formatRFC3339(time.Now().UTC())
 	for stepID, output := range stepOutputs {
-		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now); err != nil {
+		var normalized any
+		if len(evidence) > 0 {
+			if report, ok := evidence[0][stepID]; ok {
+				raw, err := json.Marshal(report)
+				if err != nil {
+					return err
+				}
+				normalized = string(raw)
+			}
+		}
+		if _, err := stmt.ExecContext(ctx, runID, stepID, output, now, normalized); err != nil {
 			return fmt.Errorf("pipeline_run_step_outputs: flush upsert step %s: %w", stepID, err)
 		}
 	}
@@ -504,6 +526,8 @@ func (s *RunStore) GetStepOutputs(ctx context.Context, runID string) (map[string
 // fully-formed record (no torn-state read where status=completed but
 // output is still empty from the previous step).
 type MarkTerminalInput struct {
+	ReportedOutcome *string // normalized server-owned outcome; nil preserves legacy direct store callers
+
 	RunID        string
 	Status       RunStatus // completed | failed | cancelled | interrupted
 	Output       string
@@ -612,7 +636,7 @@ func stepsHaveOutcomeCapableStep(steps []Step) bool {
 // outcome when the run held a step that could have reported one. An
 // agentless routine that ran clean settles SUCCEEDED with no reason —
 // see MarkTerminalInput.HasOutcomeCapableStep and DeriveOutcome.
-func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeCapableStep bool) (outcome, resolvedErrorMessage string) {
+func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeCapableStep bool, normalized ...*string) (outcome, resolvedErrorMessage string) {
 	if status == RunStatusDryRunOK {
 		// A dry run is, by definition, one that made no real change — the
 		// closest of the seven values to what actually happened, and
@@ -627,7 +651,11 @@ func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeC
 	case RunStatusCancelled:
 		technical = "cancelled"
 	}
-	outcome, reason := orchestrator.DeriveOutcome(technical, orchestrator.ReportedOutcome(output), hasOutcomeCapableStep)
+	reported := orchestrator.ReportedOutcome(output)
+	if len(normalized) > 0 && normalized[0] != nil {
+		reported = *normalized[0]
+	}
+	outcome, reason := orchestrator.DeriveOutcome(technical, reported, hasOutcomeCapableStep)
 	if reason != "" && errorMessage == "" {
 		errorMessage = reason
 	}
@@ -656,7 +684,7 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	// error_message the caller passed in) so the outcome landing here can
 	// never disagree with the row it lands on. May rewrite ErrorMessage —
 	// see deriveRunOutcome's doc comment for when and why.
-	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage, in.HasOutcomeCapableStep)
+	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage, in.HasOutcomeCapableStep, in.ReportedOutcome)
 	in.ErrorMessage = resolvedErrorMessage
 
 	var fp any
@@ -987,7 +1015,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
        COALESCE(warnings_json,'[]'),
        COALESCE(chain_depth,0), COALESCE(chain_origin,''),
-       created_at, updated_at, COALESCE(outcome,''), due_at
+       created_at, updated_at, COALESCE(outcome,''), due_at, outcome_evidence_required
 FROM pipeline_runs`
 
 // scanRunRow is the row-scanner contract — both sql.Row and sql.Rows
@@ -1018,7 +1046,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,
 		&r.WarningsJSON,
 		&r.ChainDepth, &r.ChainOrigin,
-		&createdAt, &updatedAt, &r.Outcome, &dueAt,
+		&createdAt, &updatedAt, &r.Outcome, &dueAt, &r.outcomeEvidenceRequired,
 	); err != nil {
 		return nil, err
 	}

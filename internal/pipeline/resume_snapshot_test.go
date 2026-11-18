@@ -149,3 +149,40 @@ func TestResumeCapturedRecipeDoesNotApplyNewOverrides(t *testing.T) {
 		t.Fatalf("calls=%+v", runner.calls)
 	}
 }
+
+func TestLegacyParkedRunResumesAcrossInactivePinnedBranch(t *testing.T) {
+	db := openResumeTestDB(t)
+	installExecutionSchema(t, db)
+	ctx := t.Context()
+	store, runs := NewStore(db), NewRunStore(db)
+	waits := NewSQLWaitpointStore(db)
+	t.Cleanup(waits.Close)
+	recipe := strings.Replace(asyncApprovalDAGDSL, `{"id": "final", "type": "transform", "needs": ["gate"]`, `
+		{"id":"inactive","type":"agent_run","needs":["gate"],"agent_slug":"worker","prompt":"unused","if":"false","model_override":"claude-sonnet-4-6"},
+		{"id": "final", "type": "transform", "needs": ["inactive"]`, 1)
+	p := saveResumePipeline(t, store, "legacy-inactive-pin", recipe)
+	executor := func(runner AgentRunner) *Executor {
+		return NewExecutor(store, NewResolver(db), runner, &captureEmitter{}).
+			WithRunStore(runs).WithExecutionStore(NewExecutionStore(db)).WithWaitpointStore(waits).WithRunRegistry(NewRunRegistry())
+	}
+	started, err := executor(newMockRunner()).Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil || started.Status != "WAITING" {
+		t.Fatalf("start: %+v %v", started, err)
+	}
+	// Match the state of the run and completed outputs after migrating an
+	// installation that parked the run before the evidence fields existed.
+	if _, err := db.ExecContext(ctx, "UPDATE pipeline_runs SET outcome_evidence_required=0 WHERE id=?", started.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE pipeline_run_step_outputs SET outcome_evidence_json=NULL WHERE run_id=?", started.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := waits.CompleteApproval(ctx, "ws_test", started.WaitpointToken, true, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	executor(&rejectingPinPrewarmer{}).ResumeAfterApproval(started.RunID, nil)
+	final := waitForRunStatus(t, runs, started.RunID, RunStatusCompleted, 5*time.Second)
+	if final.Output != "final-drafted" || final.outcomeEvidenceRequired {
+		t.Fatalf("legacy parked run did not use its old recipe: %+v", final)
+	}
+}

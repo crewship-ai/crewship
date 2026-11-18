@@ -67,6 +67,7 @@ chat_origin_id TEXT,
 // openScheduleTestDBWithRunStore below, #2283.
 const pipelineRunsTestSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+    outcome_evidence_required INTEGER NOT NULL DEFAULT 0,
  start_phase TEXT,
 invocation_source_run_id TEXT,
 chat_origin_id TEXT,
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
     step_id    TEXT NOT NULL,
     output     TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    outcome_evidence_json TEXT,
     PRIMARY KEY (run_id, step_id)
 );
 CREATE TABLE IF NOT EXISTS run_tags (

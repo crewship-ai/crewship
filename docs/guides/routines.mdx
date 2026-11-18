@@ -329,6 +329,22 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
 | `agentless` | boolean | Token-zero guarantee: the routine may only contain steps that can never invoke an LLM — `agent_run`, `call_pipeline` and `crewship` are rejected. See [Agentless routines](#agentless-routines). |
 
+### Agent models and workspace tiers
+
+An `agent_run` always keeps the selected agent's CLI adapter, credentials,
+persona and tool permissions. A workspace tier can change its model when the
+tier targets that same adapter. If an implicit tier targets another adapter
+(for example a default Claude tier for a Codex agent), execution retains the
+agent's configured model and records a warning. Configure a matching tier when
+its price or capability matters; an incompatible tier does not provide the
+intended cost reduction. Existing cost caps still apply.
+
+An explicit `model_override` can be a bare model for the configured adapter
+(`gpt-6.1-sol` for Codex), or a qualified pin such as `codex:gpt-6.1-sol`.
+A qualified pin for another adapter is refused before provisioning; it cannot
+silently switch the agent's provider. A static dry-run displays the requested
+tier and does not prove live adapter/model compatibility.
+
 ### InputSpec
 
 ```json
@@ -2403,6 +2419,10 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 
 A run resumes on the recipe it was executing, not on today's head. Every live run captures its executed definition (`executed_definition_json`) before dispatch, and resume re-enters that snapshot — so publishing an edit while a run is in flight, or rolling the routine back, does not interrupt it. Runs recorded before the snapshot existed fall back to the pinned version if the run had one, else to the current definition, and there the legacy drift gate still applies: a content-hash mismatch with what the run started on stamps the run `interrupted` (this catches in-place edits even when every step id survives, not just renamed/removed steps).
 
+Runs created before the outcome evidence upgrade keep the legacy outcome
+derivation when resumed. A new run records the accepted agent outcome at the
+step boundary, so a subsequent notification or transform cannot replace it.
+
 When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone, the executed recipe is unreadable or no longer parses, the legacy hash drift above, unreadable persisted inputs/outputs, or a non-resumable mode (only live `run` rows resume; a `dry_run` preview row from a previous lifetime is never re-run). The reason lands in the run's `error_message`.
 
 Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
@@ -2507,12 +2527,49 @@ agent. §9.6 also names an issue-comment lane for
 under [API reference → Issues → Outcome](/api-reference/issues#outcome) for exactly what
 is and isn't wired.
 
-The practical consequence for authors: every `agent_run` prompt should end by
-asking for the line — for example *"End your reply with exactly one line:
-`outcome: SUCCEEDED` if you did the work, `outcome: NO_CHANGE` if there was
-nothing to do, `outcome: NEEDS_HUMAN` if you are blocked."* A routine written
-before this rule will show `FAILED` on every run until its prompt says so; the
-first scheduled dogfood run on dev1 did exactly that.
+The public run output remains the last delivery step's output. Outcome routing
+uses separate, server-owned evidence from the last executed outcome-capable step
+in execution order (deterministic dependency waves for a DAG, with definition-order ties); a later notify, transform or code result
+cannot supply or replace an agent hand-off. An executed last agent with no valid
+report fails instead of falling back to an earlier success. Skipped agents do not
+count. A called routine propagates its actual accepted agent evidence, never a
+hand-off parsed from its public tool output. Foreach combines actual item reports
+conservatively: FAILED, NEEDS_HUMAN, missing, PARTIAL, WORK_CREATED, SUCCEEDED,
+then NO_CHANGE, in that priority; equal priorities use item order. Empty or wholly
+agentless iterations have no reporter. A self-reported CANCELLED is not trusted;
+technical cancellation or failure always takes precedence.
+
+Normalized source run, step path and outcome are stored atomically with completed
+step output and restored after a wait or process restart. Legacy resumed steps
+without this evidence fail closed with a request to inspect existing outputs before
+retrying, so completed effects are not repeated blindly. Arbitrary stored
+output or a replacement/sample HANDOFF is not proof of accepted agent execution.
+
+An `agent_run` prompt must request a structured CHECKPOINT or HANDOFF report;
+a bare `outcome:` line or an arbitrary JSON field is not that report. For example,
+a step that permits a text reply can ask:
+
+```text
+Perform the task and verify its actual deliverable. After the evidence, return:
+---HANDOFF---
+outcome: SUCCEEDED
+summary: <what you actually verified>
+confidence: <high, medium or low>
+artifacts: <actual deliverable paths, if any>
+---END HANDOFF---
+Use NO_CHANGE only if there was no work, NEEDS_HUMAN for a genuine blocker,
+and FAILED for an unsuccessful result. Never invent a successful outcome.
+```
+
+Keep the report compatible with the step's output validation. Appending this
+text to a JSON-only answer makes that answer invalid JSON and may also violate
+max-length or must-not-contain checks. Write structured data to a verified
+artifact/file or data store and return the permitted report separately, or
+explicitly design a separate agent reporting step and its validation. Do not
+have a notify, transform or script fabricate a HANDOFF for a missing agent
+report. Crewship does not silently rewrite authored prompts or relax validation
+to force a success. Automatic typed reporting for JSON-only tasks needs a
+separate supported contract; a missing report remains an actionable failure.
 
 ### The step's chat is a durable transcript
 

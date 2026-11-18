@@ -367,7 +367,7 @@ func (e *Executor) runDAG(
 		// kill mid-DAG loses at most the in-flight wave. DAG resume
 		// granularity is therefore per-wave, not per-step — the
 		// parallel scheduler has no single current_step_id to stamp.
-		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, costSnap, startedAt)
+		e.persistWaveOutputs(ctx, in, depth, runID, outputsSnap, result.outcomeEvidence, costSnap, startedAt)
 
 		// Suspend takes precedence over a failure: a wait step parked on an
 		// approval (MarkWaiting already stamped status=waiting + current_step
@@ -491,7 +491,12 @@ func (e *Executor) executeOneStep(
 			e.recordSkippedExecution(ctx, in, runID, *step)
 			resMu.Lock()
 			result.StepOutputs[step.ID] = "<skipped>"
+			evidence := result.recordOutcome(*step, &outcomeCapture{evidence: &outcomeEvidence{Version: 1}})
+			cost := result.CostUSD
 			resMu.Unlock()
+			if evidence != nil {
+				e.persistStepOutput(ctx, in, depth, runID, step.ID, "<skipped>", cost, startedAt, evidence)
+			}
 			return
 		}
 	}
@@ -512,7 +517,8 @@ func (e *Executor) executeOneStep(
 	resMu.Lock()
 	priorCost := result.CostUSD
 	resMu.Unlock()
-	output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, *step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, priorCost)
+	stepCtx, outcomeCapture := captureOutcome(ctx)
+	output, stepCost, stepDur, stepErr := e.runStepWithRetry(stepCtx, *step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth, priorCost)
 	if stepErr != nil {
 		// Suspend (wait-step park) is not a failure: record it separately and
 		// stop scheduling. The runDAG loop checks `suspended` before firstErr.
@@ -536,6 +542,7 @@ func (e *Executor) executeOneStep(
 	}
 	resMu.Lock()
 	result.StepOutputs[step.ID] = output
+	evidence := result.recordOutcome(*step, outcomeCapture)
 	result.CostUSD += stepCost
 	costNow := result.CostUSD
 	resMu.Unlock()
@@ -550,7 +557,7 @@ func (e *Executor) executeOneStep(
 	// without the O(N²) blob churn. The wave-boundary flush
 	// (persistWaveOutputs) still re-upserts the full set. persistStepOutput
 	// scrubs the persisted copy (#1416 item 5).
-	e.persistStepOutput(ctx, in, depth, runID, step.ID, output, costNow, startedAt)
+	e.persistStepOutput(ctx, in, depth, runID, step.ID, output, costNow, startedAt, evidence)
 	// State_write bindings persist for the NEXT run (#1420). Add this step's
 	// own output to the goroutine-local snapshot so a value template can
 	// reference it, then render+upsert off the shared lock.
