@@ -1026,6 +1026,13 @@ func WithRunID(ctx context.Context, runID string) context.Context {
 	return context.WithValue(ctx, runIDCtxKey{}, runID)
 }
 
+// WithoutRunID explicitly removes an inherited run attribution while keeping
+// cancellation, deadlines and other request context. WithRunID's empty-value
+// no-op contract remains unchanged.
+func WithoutRunID(ctx context.Context) context.Context {
+	return context.WithValue(ctx, runIDCtxKey{}, "")
+}
+
 // RunIDFromContext returns the runID stamped on ctx via WithRunID, or
 // "" if none was set.
 func RunIDFromContext(ctx context.Context) string {
