@@ -8,13 +8,19 @@ func directRunPIDFile(runID string) string { return "/tmp/crewship-direct-" + ru
 // its process group; argv and stdin are preserved, including large prompts.
 // The kernel start time protects against signalling a reused PID.
 func directRunCommand(runID string, argv []string) []string {
+	return directRunCommandWithPIDFile(directRunPIDFile(runID), argv)
+}
+
+// Internal callers may keep a distinct identity inside an already owned HOME.
+// The ordinary run entrypoint above retains its existing PID path and protocol.
+func directRunCommandWithPIDFile(pidFile string, argv []string) []string {
 	script := `umask 077; set -C
 stamp=$(awk '{print $22}' /proc/$$/stat) || exit 125
 [ -n "$stamp" ] || exit 125
 printf '%s %s\n' "$$" "$stamp" > "$1" || exit 125
 shift
 exec "$@"`
-	return append([]string{"stdbuf", "-oL", "setsid", "--wait", "sh", "-c", script, "crewship-direct", directRunPIDFile(runID)}, argv...)
+	return append([]string{"stdbuf", "-oL", "setsid", "--wait", "sh", "-c", script, "crewship-direct", pidFile}, argv...)
 }
 
 // Returns before the tmux probe when a direct-exec identity exists. Missing
@@ -25,6 +31,10 @@ func directRunProbe(runID string, stop bool) string {
 
 // Managed launches calibrate the image utility and fail closed on uncertain group evidence.
 func managedDirectRunProbe(runID string, stop bool) string {
+	return managedDirectRunProbeAt(directRunPIDFile(runID), stop)
+}
+
+func managedDirectRunProbeAt(pidFile string, stop bool) string {
 	signal := ""
 	if stop {
 		// Explicit signal avoids interpreting a negative PID as a signal option.
@@ -55,5 +65,5 @@ else
  case "$group_state" in ABSENT) echo ABSENT;; *) echo UNKNOWN;; esac
 fi
 exit
-fi; `, directRunPIDFile(runID), directRunPIDFile(runID), signal)
+fi; `, pidFile, pidFile, signal)
 }

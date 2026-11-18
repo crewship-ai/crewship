@@ -3,6 +3,7 @@
 package orchestrator
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -112,30 +114,301 @@ func nativeTmuxMissingClientEnv(t *testing.T, env []string, home string) []strin
 	return overrideEnv(overrideEnv(env, "PATH", bin), "LC_ALL", "C")
 }
 
-func TestNativeTmuxMissingSnapshotCannotSucceed(t *testing.T) {
-	for _, tc := range []struct{ mode, missing string }{{"tmux", "env"}, {"fallback", "env"}, {"fallback", "run.sh"}} {
-		t.Run(tc.mode+"/"+tc.missing, func(t *testing.T) {
+type nativeTmuxShell struct {
+	name string
+	argv []string
+}
+
+func nativeTmuxOuterShells(t *testing.T) []nativeTmuxShell {
+	t.Helper()
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Fatal("native tmux qualification requires BusyBox as well as Dash")
+	}
+	return []nativeTmuxShell{{"dash", []string{"/bin/dash"}}, {"busybox", []string{busybox, "ash"}}}
+}
+
+func nativeTmuxSelectShell(ctx context.Context, original *exec.Cmd, shell nativeTmuxShell) *exec.Cmd {
+	args := append(append([]string(nil), shell.argv[1:]...), original.Args[1:]...)
+	cmd := exec.CommandContext(ctx, shell.argv[0], args...)
+	cmd.Env, cmd.Dir = original.Env, original.Dir
+	return cmd
+}
+
+func TestNativeTmuxReaderKernelOwnership(t *testing.T) {
+	for _, shell := range nativeTmuxOuterShells(t) {
+		t.Run(shell.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			root := t.TempDir()
+			fifo, identity, ready := filepath.Join(root, "reader.fifo"), filepath.Join(root, "reader.pid"), filepath.Join(root, "reader.ready")
+			if err := exec.CommandContext(ctx, "mkfifo", fifo).Run(); err != nil {
+				t.Fatal(err)
+			}
+			reader := directRunCommandWithPIDFile(identity, []string{"/bin/sh", "-c", `exec 0< "$1"; : > "$2"; exec /bin/cat`, "fixture-reader", fifo, ready})
+			quoted := make([]string, len(reader))
+			for i, arg := range reader {
+				quoted[i] = "'" + shellEscape(arg) + "'"
+			}
+			program := fmt.Sprintf(`umask 077
+exec 3<> '%[1]s'
+stop_reader() { ( %[5]s ) 3>&-; }
+%[4]s 3>&- &
+reader=$!
+original=''
+trap 'exec 3>&-; if [ -n "$original" ]; then printf "%%s\n" "$original" > "%[2]s"; fi; stop_reader >/dev/null 2>&1; wait "$reader" 2>/dev/null || true' 0
+while [ ! -f '%[3]s' ]; do /bin/sleep 0.01 3>&-; done
+original=$(cat '%[2]s' 3>&-)
+read -r pid stamp < '%[2]s'
+printf '%%s 0\n' "$pid" > '%[2]s'
+state=$( ( %[5]s ) 3>&-)
+[ "$state" = UNKNOWN ] || exit 31
+printf '%%s\n' "$original" > '%[2]s'
+state=$( ( %[6]s ) 3>&-)
+[ "$state" = PRESENT ] || exit 32
+stop_reader >/dev/null 2>&1
+exec 3>&-
+if wait "$reader" 2>/dev/null; then exit 33; fi
+state=$( ( %[6]s ) 3>&-)
+[ "$state" = ABSENT ] || exit 34
+trap - 0
+printf OWNED_READER_OK
+`, fifo, identity, ready, strings.Join(quoted, " "), managedDirectRunProbeAt(identity, true), managedDirectRunProbeAt(identity, false))
+			args := append(append([]string(nil), shell.argv[1:]...), "-c", program)
+			cmd := exec.CommandContext(ctx, shell.argv[0], args...)
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+			out, err := cmd.CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "OWNED_READER_OK") {
+				t.Fatalf("native reader kernel identity failed: %v %s", err, out)
+			}
+		})
+	}
+}
+
+func TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 2\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "HOME=" + home}
+	c := &nativeTmuxHostFixture{baseEnv: env}
+	o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	location := RunLocation{ContainerID: "private-fixture", AgentSlug: "fixture", RunID: fmt.Sprintf("tmux-unknown-%d-%d", os.Getpid(), time.Now().UnixNano())}
+	if alive, err := o.RunIsAliveAt(ctx, location); err == nil || alive {
+		t.Fatal("client failure was treated as authoritative runtime presence/absence")
+	}
+	if stopped, _, err := o.legacyRunStoppedOnce(ctx, location, "terminal-observer"); err == nil || stopped {
+		t.Fatal("a terminal observer plus a broken tmux client authorized credential cleanup")
+	}
+}
+
+func TestNativeTmuxFreshServerRunSettles(t *testing.T) {
+	for _, shell := range nativeTmuxOuterShells(t) {
+		t.Run(shell.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			home := t.TempDir()
-			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
-			cmd := nativeTmuxCLICommand(t, ctx, []string{"sh", "-c", "printf UNEXPECTED_TOOL"}, env, home, tc.mode == "fallback")
-			privateDir := filepath.Join(home, ".crewship-tmux")
-			if err := os.Remove(filepath.Join(privateDir, tc.missing)); err != nil {
+			socketRoot := nativeTmuxSocketRoot(t)
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMUX_TMPDIR=" + socketRoot, "TMUX="}
+			if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("set -g exit-empty on\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			out, err := cmd.CombinedOutput()
-			if ctx.Err() != nil {
-				t.Fatal("bootstrap failure did not settle before timeout")
+			t.Cleanup(func() {
+				cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				cmd := exec.CommandContext(cleanup, "tmux", "kill-server")
+				cmd.Env = env
+				cmd.Run() // A successful fresh server normally already exited.
+			})
+			c := &nativeTmuxHostFixture{baseEnv: env}
+			o := New(c, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			runID := fmt.Sprintf("native-tmux-fresh-%d-%d", os.Getpid(), time.Now().UnixNano())
+			privateDir := filepath.Join(home, ".crewship-tmux")
+			wrapper, err := o.setupTmuxExecAt(ctx, "private-fixture", []string{"sh", "-c", "printf FRESH_SERVER_OK"}, "fixture", runID, env, privateDir)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if err == nil {
-				t.Fatal("tmux bootstrap reported success without starting the tool")
-			}
-			if strings.Contains(string(out), "UNEXPECTED_TOOL") {
-				t.Fatal("tool started despite a missing native snapshot/script")
+			cmd := exec.CommandContext(ctx, wrapper[0], wrapper[1:]...)
+			cmd.Env = env
+			cmd = nativeTmuxSelectShell(ctx, cmd, shell)
+			if out, err := cmd.CombinedOutput(); err != nil || ctx.Err() != nil || !strings.Contains(string(out), "FRESH_SERVER_OK") {
+				t.Fatal("fresh tmux server did not drain and settle its run")
 			}
 			if _, err := os.Stat(privateDir); !os.IsNotExist(err) {
-				t.Fatal("failed bootstrap retained its directory")
+				t.Fatal("fresh run retained bootstrap files")
+			}
+		})
+	}
+}
+
+func TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner(t *testing.T) {
+	for _, shell := range nativeTmuxOuterShells(t) {
+		t.Run(shell.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			home := t.TempDir()
+			path := os.Getenv("PATH")
+			env := []string{"PATH=" + path, "HOME=" + home}
+			cmd := nativeTmuxCLICommand(t, ctx, []string{"/bin/sleep", "60"}, env, home, false)
+			cmd = nativeTmuxSelectShell(ctx, cmd, shell)
+			realTmux, err := exec.LookPath("tmux")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(home, "control-failure")
+			if err := os.Mkdir(bin, 0700); err != nil {
+				t.Fatal(err)
+			}
+			// Fault injection affects only this observer's control queries.
+			// Initial session creation and the producer use the real client.
+			shim := "#!/bin/sh\ncase \"$1\" in has-session|list-sessions) exit 2;; esac\nexec '" + shellEscape(realTmux) + "' \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(shim), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd.Env = overrideEnv(cmd.Env, "PATH", bin+":"+path)
+			cmd.Stdout = io.Discard
+			cmd.WaitDelay = time.Second
+			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			unknown := make(chan struct{}, 1)
+			go func() {
+				scanner := bufio.NewScanner(stderr)
+				for scanner.Scan() {
+					if strings.Contains(scanner.Text(), "tmux state unknown; retaining runtime ownership") {
+						select {
+						case unknown <- struct{}{}:
+						default:
+						}
+					}
+				}
+			}()
+			readerIdentity := filepath.Join(home, ".crewship-tmux", "reader.pid")
+			t.Cleanup(func() {
+				cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				exec.CommandContext(cleanup, "/bin/sh", "-c", managedDirectRunProbeAt(readerIdentity, true)).Run()
+			})
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-unknown:
+			case <-ctx.Done():
+				t.Fatal("observer did not preserve an unknown control state")
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				if _, err := os.Stat(filepath.Join(home, ".crewship-tmux", "env")); os.IsNotExist(err) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("producer did not load its native snapshot")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+				t.Fatal(err)
+			}
+			failure, ok := cmd.Wait().(*exec.ExitError)
+			if !ok || failure.ExitCode() != 143 || ctx.Err() != nil {
+				t.Fatal("observer cancellation did not settle with its signal status")
+			}
+			probe := exec.CommandContext(ctx, "/bin/sh", "-c", managedDirectRunProbeAt(readerIdentity, false))
+			if out, err := probe.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "ABSENT" {
+				t.Fatal("cancelled observer left its reader process group alive or unknown")
+			}
+			if _, err := os.Stat(filepath.Join(home, ".crewship-tmux")); err != nil {
+				t.Fatal("observer cancellation removed the still-owned producer environment")
+			}
+			roster := exec.CommandContext(ctx, realTmux, "list-sessions", "-F", "#{session_name}")
+			roster.Env = cmd.Env
+			out, err := roster.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := ""
+			for _, session := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(session, TmuxSessionPrefix("fixture")) {
+					runID = strings.TrimPrefix(session, TmuxSessionPrefix("fixture"))
+				}
+			}
+			if !ValidRunID(runID) {
+				t.Fatal("producer did not remain alive after its observer ended")
+			}
+			location := RunLocation{ContainerID: "private-fixture", AgentSlug: "fixture", RunID: runID}
+			broken := &nativeTmuxHostFixture{baseEnv: cmd.Env}
+			broken.inspectResult.exitCode = 143
+			o := New(broken, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if stopped, _, err := o.legacyRunStoppedOnce(ctx, location, "terminated-observer"); err == nil || stopped {
+				t.Fatal("unknown producer state plus terminal observer authorized settlement")
+			}
+			good := &nativeTmuxHostFixture{baseEnv: overrideEnv(cmd.Env, "PATH", path)}
+			good.inspectResult.exitCode = 143
+			o = New(good, newMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if stopped, code, err := o.confirmLegacyRunStop(ctx, location, "terminated-observer"); err != nil || !stopped || code != 143 {
+				t.Fatal("native stop did not confirm both producer and observer identities")
+			}
+		})
+	}
+}
+
+func TestNativeTmuxMissingSnapshotCannotSucceed(t *testing.T) {
+	for _, shell := range nativeTmuxOuterShells(t) {
+		t.Run(shell.name, func(t *testing.T) {
+			for _, tc := range []struct{ mode, missing string }{{"tmux", "env"}, {"tmux", "run.sh"}, {"tmux", "early-exit"}, {"fallback", "env"}, {"fallback", "run.sh"}, {"fallback", "early-exit"}} {
+				t.Run(tc.mode+"/"+tc.missing, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+					defer cancel()
+					home := t.TempDir()
+					env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}
+					cmd := nativeTmuxCLICommand(t, ctx, []string{"sh", "-c", "printf UNEXPECTED_TOOL"}, env, home, tc.mode == "fallback")
+					cmd = nativeTmuxSelectShell(ctx, cmd, shell)
+					privateDir := filepath.Join(home, ".crewship-tmux")
+					if tc.missing == "early-exit" {
+						if err := os.WriteFile(filepath.Join(privateDir, "run.sh"), []byte("exit 23\n"), 0700); err != nil {
+							t.Fatal(err)
+						}
+					} else if err := os.Remove(filepath.Join(privateDir, tc.missing)); err != nil {
+						t.Fatal(err)
+					}
+					// A deliberately broken baseline can block cat while opening the
+					// FIFO. Rescue only this fixture's reader so RED leaves no orphan;
+					// any use of the rescue is itself an explicit test failure.
+					rescued := make(chan struct{})
+					timer := time.AfterFunc(5*time.Second, func() {
+						close(rescued)
+						if f, err := os.OpenFile(filepath.Join(privateDir, "output.fifo"), os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+							f.Close()
+						}
+					})
+					t.Cleanup(func() { timer.Stop() })
+					out, err := cmd.CombinedOutput()
+					select {
+					case <-rescued:
+						t.Fatal("bootstrap hung until its test-only FIFO rescue")
+					default:
+					}
+					if ctx.Err() != nil {
+						t.Fatal("bootstrap failure did not settle before timeout")
+					}
+					if err == nil {
+						t.Fatal("tmux bootstrap reported success without starting the tool")
+					}
+					if strings.Contains(string(out), "UNEXPECTED_TOOL") {
+						t.Fatal("tool started despite a missing native snapshot/script")
+					}
+					if _, err := os.Stat(privateDir); !os.IsNotExist(err) {
+						t.Fatal("failed bootstrap retained its directory")
+					}
+				})
 			}
 		})
 	}

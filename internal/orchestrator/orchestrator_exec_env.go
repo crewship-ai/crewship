@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -182,7 +183,7 @@ func (o *Orchestrator) setupTmuxExecAt(ctx context.Context, containerID string, 
 	} else {
 		checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
 			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1 && /usr/bin/env -i /bin/sh -c 'exit 0'"},
+			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1 && /usr/bin/env -i PATH=" + managedlaunch.SafePath + " /bin/sh -c 'command -v awk >/dev/null 2>&1 && stdbuf -oL setsid --wait /bin/true'"},
 			User:        "1001:1001",
 		})
 		if checkErr != nil {
@@ -260,7 +261,8 @@ func (o *Orchestrator) setupTmuxExecAt(ctx context.Context, containerID string, 
 	// failure and the exit-receipt trap. EOF therefore means the receipt has
 	// been written. Direct fallback streams to its caller without a FIFO.
 	scriptContent := fmt.Sprintf(`#!/bin/sh
-trap 'EC=$?; /bin/rm -f "%s" "%s"; printf "%%s\n" "$EC" > "%s"' 0
+umask 077
+trap 'EC=$?; /bin/rm -f "%s" "%s"; printf "%%s\n" "$EC" > "%s.tmp"; /bin/mv -f "%s.tmp" "%s"' 0
 trap 'exit 143' TERM
 trap 'exit 130' INT
 trap 'exit 129' HUP
@@ -271,7 +273,7 @@ EX=0
 xargs -0 stdbuf -oL < '%s' || EX=$?
 rm -f '%s'
 exit "$EX"
-`, envFile, argsFile, exitFile, fifo, envFile, envFile, argsFile, argsFile)
+`, envFile, argsFile, exitFile, exitFile, exitFile, fifo, envFile, envFile, argsFile, argsFile)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
 
 	// Refuse an existing directory instead of reusing a file or following a
@@ -305,24 +307,87 @@ exit "$EX"
 	// Multiargv tmux direct-exec avoids the server's inherited default-shell.
 	// Both launch paths start the target shell with a clean environment before
 	// loading the fresh snapshot. Only this run's session may be stopped.
-	wrapper := fmt.Sprintf(
-		"tmux kill-session -t '%s' 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
-			"if tmux new-session -d -s '%s' -x 200 -y 50 /usr/bin/env -i /bin/sh '%s'; then "+
-			"cat '%s' 2>/dev/null; "+
-			"else /usr/bin/env -i /bin/sh '%s' direct; fi; "+
-			"EC=1; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
-			"rm -rf -- '%s'; exit $EC",
-		session, fifo, exitFile, fifo,
-		session, scriptFile,
-		fifo,
-		scriptFile,
-		exitFile, exitFile, exitFile,
-		privateDir,
-	)
+	readerPIDFile := privateDir + "/reader.pid"
+	readerReady := privateDir + "/reader.ready"
+	readerCommand := append([]string{"/usr/bin/env", "-i", "PATH=" + managedlaunch.SafePath}, directRunCommandWithPIDFile(readerPIDFile, []string{"/bin/sh", "-c", `exec 0< "$1"; : > "$2"; exec /bin/cat`, "crewship-tmux-reader", fifo, readerReady})...)
+	quotedReader := make([]string, len(readerCommand))
+	for i, arg := range readerCommand {
+		quotedReader[i] = "'" + shellEscape(arg) + "'"
+	}
+	// The one reader uses Crewship's existing isolated-group/kernel-starttime
+	// protocol, with a distinct identity inside this run's HOME. $! is wait-only.
+	// Parent-owned Linux RDWR keeps the FIFO open until the reader has opened a
+	// read-only descriptor and the producer has ended. No child inherits fd3.
+	// An unavailable client (127) can fall back directly; an ambiguous client
+	// error must not start a duplicate producer. UNKNOWN keeps the wrapper live
+	// for the existing lifecycle stop/hold authority instead of cleaning HOME.
+	wrapper := fmt.Sprintf(`umask 077
+tmux kill-session -t '%[1]s' 2>/dev/null
+rm -f '%[4]s' '%[3]s'
+mkfifo '%[4]s' || exit 1
+exec 3<> '%[4]s'
+NEW_STATUS=0
+tmux new-session -d -s '%[1]s' -x 200 -y 50 /usr/bin/env -i /bin/sh '%[2]s' 3>&- || NEW_STATUS=$?
+READER_STATUS=0
+if [ "$NEW_STATUS" -eq 127 ]; then
+ exec 3>&-
+ /usr/bin/env -i /bin/sh '%[2]s' direct
+else
+ %[7]s 3>&- &
+ reader=$!
+ crewship_stop_reader() { ( %[8]s ) 3>&-; }
+ trap 'exec 3>&-; crewship_stop_reader >/dev/null 2>&1; wait "$reader" 2>/dev/null || true' 0
+ trap 'exit 143' TERM
+ trap 'exit 130' INT
+ trap 'exit 129' HUP
+ while [ ! -f '%[9]s' ]; do
+  reader_state=$( ( %[10]s ) 3>&-)
+  if [ "$reader_state" = ABSENT ]; then READER_STATUS=1; break; fi
+  /bin/sleep 0.05 3>&-
+ done
+ if [ "$READER_STATUS" -ne 0 ]; then exec 3>&-; fi
+ unknown=0
+ while [ ! -f '%[3]s' ]; do
+  state=$({ %[6]s; } 3>&-)
+  if [ -f '%[3]s' ] || [ "$state" = ABSENT ]; then break; fi
+  if [ "$state" != PRESENT ] && [ "$unknown" -eq 0 ]; then
+   printf 'tmux state unknown; retaining runtime ownership\n' >&2
+   unknown=1
+  fi
+  /bin/sleep 0.05 3>&-
+ done
+ # The atomic receipt and a closed parent fd release/drain the established
+ # reader even when the producer never executed its bootstrap script.
+ exec 3>&-
+ wait "$reader" 2>/dev/null || READER_STATUS=$?
+ trap - 0 TERM INT HUP
+fi
+EC=1
+if [ "$READER_STATUS" -eq 0 ] && [ -f '%[3]s' ]; then EC=$(cat '%[3]s'); fi
+case "$EC" in ''|*[!0-9]*) EC=1;; esac
+[ "$EC" -le 255 ] 2>/dev/null || EC=1
+rm -rf -- '%[5]s'
+exit "$EC"
+`, session, scriptFile, exitFile, fifo, privateDir, tmuxSessionProbe(session), strings.Join(quotedReader, " "), managedDirectRunProbeAt(readerPIDFile, true), readerReady, managedDirectRunProbeAt(readerPIDFile, false))
 	return []string{"sh", "-c", wrapper}, nil
 }
 
 // tmuxExecDir is inside one run's canonical HOME and shares its retained cleanup.
 func tmuxExecDir(agentSlug, runID string) string {
 	return agentHomeDir(agentSlug, runID) + "/.crewship-tmux"
+}
+
+// A failed client query is not evidence of absence. A live server's roster
+// must confirm that this exact session is missing; otherwise retain UNKNOWN.
+// Callers supply only names built from validated agent slugs and run IDs.
+func tmuxSessionProbe(session string) string {
+	return fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
+elif tmux has-session -t '%[1]s' 2>/dev/null; then echo PRESENT;
+elif crewship_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); then
+ case "
+$crewship_sessions
+" in *'
+%[1]s
+'*) echo PRESENT;; *) echo ABSENT;; esac
+else echo UNKNOWN; fi`, session)
 }

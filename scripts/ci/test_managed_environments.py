@@ -32,6 +32,15 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
             errors = managed.host_source_inventory_errors(root)
             self.assertTrue(any(name in error for error in errors))
 
+    def test_native_tmux_requires_shell_ownership_cancellation_and_bootstrap_receipts(self):
+        package = managed.PREFIX + 'internal/orchestrator'
+        for shell in ('dash', 'busybox'):
+            for name in ('TestNativeTmuxReaderKernelOwnership', 'TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner', 'TestNativeTmuxFreshServerRunSettles'):
+                self.assertIn((package, name + '/' + shell), managed.REQUIRED)
+            for mode in ('tmux', 'fallback'):
+                for missing in ('env', 'run.sh', 'early-exit'):
+                    self.assertIn((package, 'TestNativeTmuxMissingSnapshotCannotSucceed/' + shell + '/' + mode + '/' + missing), managed.REQUIRED)
+
     def passing(self):
         return [{'Package': package, 'Test': name, 'Action': action}
                 for package, name in managed.REQUIRED for action in ('run', 'pass')]
@@ -67,7 +76,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertEqual(launcher[-1], './internal/orchestrator')
         self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestCodexOuterActualNativeDocker|TestManagedLaunchRealDocker)$')
         self.assertNotIn('sudo', cli)
-        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory)$')
+        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy
