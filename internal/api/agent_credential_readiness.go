@@ -99,7 +99,8 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 		byID[d.ID] = d
 		c := orchestrator.Credential{
 			ID: d.ID, EnvVarName: d.EnvVar, Priority: d.Priority, Type: d.Type,
-			Provider: d.Provider, LeaseExpiresAt: d.LeaseExpiresAt, HandleOnly: d.HandleOnly,
+			OAuthPrimary: d.Type == CredTypeOAuth2,
+			Provider:     d.Provider, LeaseExpiresAt: d.LeaseExpiresAt, HandleOnly: d.HandleOnly,
 		}
 		// A provider login's mode part decides whether it is a seat or a
 		// metered key (credentialOAuthKind); the part is cleartext, so it

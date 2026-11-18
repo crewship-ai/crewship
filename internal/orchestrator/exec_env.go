@@ -69,6 +69,11 @@ func baseAgentEnv(req AgentRunRequest) []string {
 // historical call shape for existing integrations.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential, keeper ...bool) []string {
 	keeperEnabled := len(keeper) > 0 && keeper[0]
+	now := time.Now()
+	req = nativeOAuthEnvView(req, keeperEnabled, now)
+	if activeCred != nil && activeCred.Type == "OAUTH2" && !primaryOAuthMaterial(*activeCred, keeperEnabled, now) {
+		activeCred = nil
+	}
 	env := baseAgentEnv(req)
 	if bedrockRun(req) {
 		return env
@@ -371,6 +376,9 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 		if cred.EnvVarName == "" || cred.PlainValue == "" {
 			continue
 		}
+		if cred.Type == "OAUTH2" && (cred.HandleOnly || credentialLeaseLapsed(cred, time.Now())) {
+			continue
+		}
 		if _, needed := mcpEnvRefs[cred.EnvVarName]; !needed {
 			continue
 		}
@@ -561,6 +569,7 @@ func SidecarProxyEnv() []string {
 // When keeperEnabled is false, SECRET credentials are injected as env vars directly.
 // The agent gets dummy API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
+	req = nativeOAuthEnvView(req, keeperEnabled, time.Now())
 	if bedrockRun(req) {
 		filtered := make([]Credential, 0, len(req.Credentials))
 		for _, c := range req.Credentials {
@@ -775,6 +784,13 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	for _, cred := range req.Credentials {
 		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
 			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
+		}
+	}
+	// Primary OAuth access tokens use their explicit consumer slot. MCP
+	// companions are not primary and retain their separately requested channel.
+	for _, cred := range req.Credentials {
+		if name, ok := nativeOAuthSlot(cred, keeperEnabled, time.Now()); ok {
+			env = append(env, name+"="+cred.PlainValue)
 		}
 	}
 
@@ -1561,6 +1577,7 @@ type CredentialEnvExposure struct {
 // observable instead of silent. It performs no logging and allocates only when an
 // exposure actually exists.
 func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []CredentialEnvExposure {
+	req = nativeOAuthEnvView(req, keeperEnabled, time.Now())
 	var out []CredentialEnvExposure
 
 	// Credentials whose plaintext lands in the env. BuildEnvVarsSidecar
@@ -1660,6 +1677,15 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				EnvVarName: cred.EnvVarName,
 				Type:       "CLI_TOKEN",
 				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
+			})
+			markExposed(cred.ID)
+		}
+	}
+	for _, cred := range req.Credentials {
+		if name, ok := nativeOAuthSlot(cred, keeperEnabled, time.Now()); ok {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: name, Type: "OAUTH2",
+				Reason: "the resolved OAuth access token is delivered to a CLI consumer as process env; OAuth client and refresh companions use separate channels",
 			})
 			markExposed(cred.ID)
 		}
@@ -1903,6 +1929,9 @@ func fileOnlyCredential(cred Credential) bool {
 func appendCredentialFileEnv(env []string, creds []Credential, secretsDir string, keeperEnabled bool, mcpRefs ...map[string]bool) ([]string, error) {
 	_, aliases, _, err := buildCredFilePlan(creds, secretsDir, keeperEnabled)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateNativeOAuthSlots(env, creds, keeperEnabled, time.Now(), aliases...); err != nil {
 		return nil, err
 	}
 aliasesLoop:

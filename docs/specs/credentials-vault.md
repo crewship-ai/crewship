@@ -29,7 +29,7 @@ Adapter-specific login behavior is documented in `docs/guides/credentials.mdx`.
 | `USERPASS` | Two mode-0400 files; `<SLOT>_USERNAME` and `<SLOT>_PASSWORD` contain paths, not their values. |
 | `SSH_KEY` | Unencrypted PEM/OpenSSH private key in `D/ssh/<SLOT>` mode 0600; `<SLOT>_PATH` locates it. |
 | `CERTIFICATE` | X.509 PEM certificate chain in `D/certs/<SLOT>.pem` mode 0400; `<SLOT>_PATH` locates it. A private key is separate material. |
-| `OAUTH2` | Provider-aware access-token delivery and server-side refresh; the refresh token is not a generic shell token. |
+| `OAUTH2` | A granted primary access token is exported as the value of its explicit consumer slot. Specialized provider login delivery remains adapter-specific; refresh tokens and MCP client companions are separate channels. |
 | `ENDPOINT_URL` | Provider endpoint configuration, with separately encrypted optional authentication material. |
 
 File aliases are exported to the adapter process and inherited by tool/child
@@ -39,6 +39,14 @@ its file. Reserved names and collisions refuse delivery. The diagnostic `.env`
 map is not a shell setup step and must not be sourced: it would replace direct
 token values with paths. Env/file delivery is readable by the agent process;
 masking logs or UI does not make it inaccessible.
+
+The internal resolver marks a granted primary OAuth access token with
+`oauth_primary`. MCP client IDs, client secrets and synthetic access-token
+selectors do not receive this marker. An absent marker stays MCP-only; runtime
+delivery does not infer a token's role from its slot suffix. Expired or malformed
+cached grant leases and handle-only snapshots cannot enter native OAuth env
+delivery. Invalid names, reserved runtime names and conflicting slot owners
+refuse delivery.
 
 Adding a new type:
 

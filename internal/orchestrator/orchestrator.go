@@ -301,6 +301,10 @@ type Credential struct {
 	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.
 	Type string `json:"type,omitempty"`
+	// OAuthPrimary is set only by the trusted grant/binding resolver for the
+	// stored OAUTH2 access token. MCP client parts and synthetic token entries
+	// share the type but must not acquire generic process-env delivery.
+	OAuthPrimary bool `json:"oauth_primary,omitempty"`
 	// Provider is credentials.provider as delivered by the API tier: the
 	// service label, UPPERCASE, equal to llmroute.Spec.ID for a routable LLM
 	// provider and free-form ("GITHUB", "NONE", "") for everything else.

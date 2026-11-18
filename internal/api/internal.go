@@ -177,6 +177,10 @@ type mcpCredEntry struct {
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
 	Type     string `json:"type"`
+	// True only for the stored OAUTH2 access token resolved through a grant
+	// or binding. Explicit MCP references and synthetic companions leave it
+	// false, even when their type is also OAUTH2.
+	OAuthPrimary bool `json:"oauth_primary,omitempty"`
 	// Provider is credentials.provider, UPPERCASE, and equals llmroute.Spec.ID
 	// for a routable LLM provider. It is what lets the sidecar CredStore hold a
 	// credential whose env-var name names no provider — before it travelled,
