@@ -123,6 +123,17 @@ func (s *DeliveryStore) MarkFailed(ctx context.Context, id, errMsg string) error
 	return nil
 }
 
+// markSourceUnavailable permanently closes a retry whose recipient lost
+// access to the source. A concurrent successful delivery stays recorded.
+func (s *DeliveryStore) markSourceUnavailable(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE notification_deliveries SET status = 'dropped_pref',
+		    error = 'source no longer available',
+		    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE id = ? AND status IN ('pending','failed')`, id)
+	return err
+}
+
 // ListRecoverable returns outbox rows that are stuck and worth another
 // delivery attempt: still pending (the process died between InsertPending
 // and MarkSent/MarkFailed) or failed (a transient dispatch error), under
@@ -173,15 +184,15 @@ type ListFilter struct {
 
 // List returns a workspace's delivery-log rows, newest first — backs
 // GET /api/v1/notification-deliveries. Read-only, no secrets involved
-// (the log never stores a channel's URL/token, only ids).
+// Private work notices stay in the recipient's inbox and internal retry queue.
 func (s *DeliveryStore) List(ctx context.Context, workspaceID string, f ListFilter) ([]Delivery, error) {
 	q := `
 SELECT id, workspace_id, channel_id, COALESCE(user_id,''), category, dedup_key,
        COALESCE(source_kind,''), COALESCE(source_id,''), COALESCE(title,''),
        status, COALESCE(error,''), attempts, created_at, updated_at, COALESCE(sent_at,'')
 FROM notification_deliveries
-WHERE workspace_id = ?`
-	args := []any{workspaceID}
+WHERE workspace_id = ? AND COALESCE(source_kind,'') <> ?`
+	args := []any{workspaceID, privateWorkFailureSource}
 	if f.Status != "" {
 		q += ` AND status = ?`
 		args = append(args, f.Status)

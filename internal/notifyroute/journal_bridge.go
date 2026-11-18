@@ -198,6 +198,7 @@ func (r *Router) ObserveJournal(entries []journal.Entry) {
 		return
 	}
 	for i := range entries {
+		r.wakeRunFailureNotices(entries[i].Type)
 		category := CategoryForJournalEntry(entries[i])
 		if category == "" {
 			continue

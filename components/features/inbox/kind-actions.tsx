@@ -825,6 +825,14 @@ export function KindActions({
       )
     }
     case "failed_run":
+      if (item.payload?.subkind === "work_run_failure") {
+        return (
+          <Button size="sm" disabled={disabled || busy !== null}
+            onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}>
+            Dismiss
+          </Button>
+        )
+      }
       // Retry actually re-fires the routine: POST /pipelines/{slug}/run
       // with the same inputs that produced the failure (replayed from
       // the run's inputs_json so dynamic context is preserved). The

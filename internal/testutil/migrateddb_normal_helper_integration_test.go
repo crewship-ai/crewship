@@ -20,11 +20,13 @@ import (
 // defaults, not supplied auth/content values. v50 inserts the singleton
 // instance_config row with its datetime(now) installed_at default (and v144
 // explicitly preserves that write-only bookkeeping timestamp). Every other
-// column, including instance_config.hostname, is compared.
+// column is compared. The run-failure activation cutoff is also the real
+// migration clock and is not stable across fresh installs.
 var fixtureMigrationClockColumns = map[string]map[string]bool{
-	"_migrations":     {"applied_at": true},
-	"feature_flags":   {"created_at": true, "updated_at": true},
-	"instance_config": {"installed_at": true},
+	"_migrations":              {"applied_at": true},
+	"feature_flags":            {"created_at": true, "updated_at": true},
+	"instance_config":          {"installed_at": true},
+	"run_failure_notice_state": {"enabled_at": true},
 }
 
 func snapshotFixtureRows(t *testing.T, db *sql.DB) map[string][]string {

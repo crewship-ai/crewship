@@ -562,3 +562,13 @@ describe("backup incidents reach instance admins as message cards", () => {
     expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument()
   })
 })
+
+
+describe("work run failure notice", () => {
+  it("can be dismissed without offering to replay a routine", async () => {
+    mount(item({ kind: "failed_run", payload: { subkind: "work_run_failure" } }))
+    expect(screen.queryByRole("button", { name: /^retry$/i })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }))
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("dismissed"))
+  })
+})

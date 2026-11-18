@@ -26,8 +26,12 @@ const VisibleSQL = `EXISTS (
 	    SELECT 1 FROM live_access_grants g WHERE g.member_id = wm.id
 	      AND g.resource_kind = 'agent' AND g.agent_id = c.agent_id AND g.operation = 'chat'
 	  )))
-	  AND (` + PrivateArtifactContextSQL + `)
-	  AND (
+	  AND (` + visibleChatToMemberSQL + `)
+)`
+
+// Correlate a chat c with its authorized workspace membership wm. Callers
+// bind the same viewer identity for both personal and participant checks.
+const visibleChatToMemberSQL = `(` + PrivateArtifactContextSQL + `) AND (
 	    (c.created_by = ? AND c.visibility IN ('private','group'))
 	    OR (c.visibility = 'group' AND EXISTS (
 	      SELECT 1 FROM chat_participants p
@@ -37,7 +41,6 @@ const VisibleSQL = `EXISTS (
 	      AND c.visibility IN ('private','group'))
 	    OR (wm.access_mode = 'trusted' AND c.created_by IS NULL AND wm.role IN ('OWNER','ADMIN')
 	      AND (c.mode = 'MISSION' OR c.origin IN ('ROUTINE','CRON','WEBHOOK','AGENT')))
-	  )
 )`
 
 // Args supplies VisibleSQL's identity parameters in their fixed order.

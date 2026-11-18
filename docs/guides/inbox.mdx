@@ -15,6 +15,11 @@ It lives at `/inbox` in the running web UI and is the first item in the **Plan**
 
 The bell's panel filters by kind — **All (n)**, **Decisions**, **Input**, **Review**, **Repair**, each chip shown only when it has items. A plain routine approval can be decided in the row (**Approve** / **Deny**, MANAGER and up — the same call and the same "already decided elsewhere" handling as the page). Anything that needs more than a yes or no — a decision form, a destructive step, an autonomy gate or a hire — opens the item instead.
 
+Human-authorized agent chats and lead assignments can create a failure
+notice for their requester. Post-upgrade failure notices use the agent error
+external-notification preference. Delivery retries use the notification
+outbox, and rollout does not generate notices for earlier runs.
+
 ## What lands in the Inbox
 
 Items get written through to `inbox_items` the moment their source signal fires. `inbox.AllKinds` is the single source of truth for the set, and `TestInboxKindsMatchSchema` inserts one row per entry against the real migrated schema — a kind added there without a matching migration fails CI rather than failing silently at runtime, where the alert simply never arrives:

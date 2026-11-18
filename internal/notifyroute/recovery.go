@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/quiesce"
@@ -73,7 +74,12 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 	if derive, ok := sourceDeriverFor(d.SourceKind); ok {
 		return r.recoverDerived(ctx, d, derive)
 	}
-	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, d.SourceKind, d.SourceID)
+	workFailure := d.SourceKind == privateWorkFailureSource
+	inboxKind := d.SourceKind
+	if workFailure {
+		inboxKind = inbox.KindFailedRun
+	}
+	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, inboxKind, d.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Source inbox item is gone — nothing left to render. Bump the
@@ -92,28 +98,65 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		return false
 	}
 
+	if workFailure {
+		allowed, err := r.canDeliverRunFailure(ctx, d.WorkspaceID, d.SourceID, d.UserID)
+		if err != nil {
+			r.logger.Warn("notifyroute: recovery: verify run failure audience", "error", err, "delivery_id", d.ID)
+		}
+		if err != nil {
+			return false
+		}
+		if !allowed {
+			if err := r.deliveries.markSourceUnavailable(ctx, d.ID); err != nil {
+				r.logger.Warn("notifyroute: recovery: close inaccessible delivery", "error", err, "delivery_id", d.ID)
+			}
+			return false
+		}
+	}
+
 	ch, err := r.channels.GetForDispatch(ctx, d.WorkspaceID, d.ChannelID)
 	if err != nil {
 		_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: channel unavailable: "+err.Error())
 		return false
 	}
 
+	if workFailure {
+		cells, err := r.prefs.Get(ctx, d.WorkspaceID, d.UserID)
+		if err != nil {
+			r.logger.Warn("notifyroute: recovery: read current preferences", "error", err, "delivery_id", d.ID)
+			return false
+		}
+		prefs := indexCells(cells)
+		if !ch.Enabled || ch.Scope != notify.ScopeUser || ch.OwnerUserID != d.UserID ||
+			!ch.AllowsCategory(d.Category) || notify.PriorityRank(priority) < notify.PriorityRank(ch.MinPriority) ||
+			prefs.state(d.Category, ch.ID) != "immediate" || prefs.muted(ch.ID) {
+			if err := r.deliveries.markSourceUnavailable(ctx, d.ID); err != nil {
+				r.logger.Warn("notifyroute: recovery: close opted-out delivery", "error", err, "delivery_id", d.ID)
+			}
+			return false
+		}
+	}
+
 	// Same derivation as the live path, so a recovered delivery carries the
 	// same links and variables the original attempt would have.
-	links, vars := notificationFacts(d.SourceKind, payload)
+	links, vars := notificationFacts(inboxKind, payload)
 	msg := notify.CategoryMessage{
 		WorkspaceID: d.WorkspaceID,
 		Category:    d.Category,
 		Title:       d.Title,
 		Body:        body,
 		Priority:    priority,
-		SourceKind:  d.SourceKind,
+		SourceKind:  inboxKind,
 		SourceID:    d.SourceID,
 		Links:       links,
 		Vars:        vars,
 	}
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
-		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {
+		reason := err.Error()
+		if workFailure {
+			reason = "personal notification delivery failed"
+		}
+		if merr := r.deliveries.MarkFailed(ctx, d.ID, reason); merr != nil {
 			r.logger.Warn("notifyroute: recovery: mark failed", "error", merr, "delivery_id", d.ID)
 		}
 		return false

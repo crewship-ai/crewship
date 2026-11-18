@@ -68,7 +68,11 @@ func (h *ChainHandler) Get(w http.ResponseWriter, r *http.Request) {
 		// The inbox's own audience, per node (#2986, docs/specs/activity-links.md).
 		CanSeeInbox: inboxAudience(userID, RoleFromContext(r.Context())),
 		CanSeeInboxSource: func(ctx context.Context, id string) (bool, error) {
-			return chataudience.CanReadVerifiedEscalationInbox(ctx, h.db, workspaceID, id, userID)
+			var allowed bool
+			visibility, args := inboxVisibilityClause(userID, RoleFromContext(r.Context()))
+			err := h.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM inbox_items WHERE workspace_id=? AND id=?`+visibility+`)`,
+				append([]any{workspaceID, id}, args...)...).Scan(&allowed)
+			return allowed, err
 		},
 	}
 
