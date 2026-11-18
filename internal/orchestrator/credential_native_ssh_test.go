@@ -76,6 +76,10 @@ func TestNativeCredentialStandardSSH(t *testing.T) {
 }
 
 func startNativeSSHFixture(t *testing.T, signer ssh.Signer, authorized ...ssh.PublicKey) int {
+	return startNativeSSHFixtureObserved(t, signer, nil, authorized...)
+}
+
+func startNativeSSHFixtureObserved(t *testing.T, signer ssh.Signer, observed func(), authorized ...ssh.PublicKey) int {
 	t.Helper()
 	config := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, public ssh.PublicKey) (*ssh.Permissions, error) {
 		for _, key := range append([]ssh.PublicKey{signer.PublicKey()}, authorized...) {
@@ -120,6 +124,9 @@ func startNativeSSHFixture(t *testing.T, signer ssh.Signer, authorized ...ssh.Pu
 						if request.Type != "exec" || ssh.Unmarshal(request.Payload, &command) != nil || command.Command != "whoami" {
 							request.Reply(false, nil)
 							continue
+						}
+						if observed != nil {
+							observed()
 						}
 						request.Reply(true, nil)
 						fmt.Fprintln(channel, "fixture\\native-user")
