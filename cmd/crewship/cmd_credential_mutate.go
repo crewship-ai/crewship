@@ -524,8 +524,10 @@ var credCreateCmd = &cobra.Command{
 
 		case isProviderLogin:
 			// api_key mode is a metered key and probes exactly like API_KEY.
-			valid, errMsg := testCredentialValue(client, provider, "API_KEY", value)
-			if valid {
+			valid, supported, errMsg := testCredentialValue(client, provider, "API_KEY", value)
+			if valid && !supported {
+				cli.PrintWarning("No authentication test was performed; the server accepted the credential payload")
+			} else if valid {
 				cli.PrintSuccess("Key validated successfully")
 			} else {
 				msg := errMsg
@@ -549,8 +551,10 @@ var credCreateCmd = &cobra.Command{
 		case !credpolicy.TokenProbeAllowed(credType, provider) || provider == "" || provider == "NONE":
 			cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 		default:
-			valid, errMsg := testCredentialValue(client, provider, credType, value)
-			if valid {
+			valid, supported, errMsg := testCredentialValue(client, provider, credType, value)
+			if valid && !supported {
+				cli.PrintWarning("No authentication test was performed; the server accepted the credential payload")
+			} else if valid {
 				cli.PrintSuccess("Key validated successfully")
 			} else {
 				msg := errMsg
@@ -768,8 +772,10 @@ var credUpdateCmd = &cobra.Command{
 					} else if !credpolicy.TokenProbeAllowed(probeType(), cred.Provider) || cred.Provider == "" || cred.Provider == "NONE" {
 						cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 					} else {
-						valid, errMsg := testCredentialValue(client, cred.Provider, probeType(), valStr)
-						if valid {
+						valid, supported, errMsg := testCredentialValue(client, cred.Provider, probeType(), valStr)
+						if valid && !supported {
+							cli.PrintWarning("No authentication test was performed; the server accepted the credential payload")
+						} else if valid {
 							cli.PrintSuccess("Key validated successfully")
 						} else {
 							msg := errMsg

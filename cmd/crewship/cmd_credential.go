@@ -470,23 +470,12 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 	return "", cli.NotFoundf("credential %q not found", nameOrID)
 }
 
-// testCredentialValue validates a credential value against the provider API.
-// Returns (valid, errorMessage). Skips the test only where there is genuinely
-// nothing to ask: an opaque SECRET, or no provider to ask.
-//
-// It used to short-circuit sk-ant-oat tokens here too, on the claim that OAuth
-// tokens "cannot be validated via API". That claim was wrong on the server
-// (probeAnthropicCredential authenticates exactly this shape against
-// /v1/messages) and the server side has been fixed — but this branch made the
-// fix invisible from the CLI, which is where `crewship credential create`
-// reports to the operator. Creating a credential with a fabricated
-// sk-ant-oat value printed "Key validated successfully" having contacted
-// nothing.
-//
-// A check that cannot run must not report success. Here it can run, so it does.
-func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, string) {
+// testCredentialValue returns (valid, authenticationSupported, errorMessage).
+// Structural acceptance is distinct from a successful authentication probe.
+// Older responses without supported also cannot substantiate authentication.
+func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, bool, string) {
 	if credType == "SECRET" || provider == "" || provider == "NONE" {
-		return true, ""
+		return true, false, ""
 	}
 
 	body := map[string]interface{}{
@@ -496,21 +485,22 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 	}
 	resp, err := client.Post("/api/v1/credentials/test", body)
 	if err != nil {
-		return false, "test request failed: " + err.Error()
+		return false, false, "test request failed: " + err.Error()
 	}
 	defer resp.Body.Close()
 	if err := cli.CheckError(resp); err != nil {
-		return false, "test request failed: " + err.Error()
+		return false, false, "test request failed: " + err.Error()
 	}
 
 	var result struct {
-		Valid bool   `json:"valid" yaml:"valid"`
-		Error string `json:"error" yaml:"error"`
+		Valid     bool   `json:"valid" yaml:"valid"`
+		Supported bool   `json:"supported" yaml:"supported"`
+		Error     string `json:"error" yaml:"error"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
-		return false, "failed to read test result"
+		return false, false, "failed to read test result"
 	}
-	return result.Valid, result.Error
+	return result.Valid, result.Supported, result.Error
 }
 
 // confirmInvalidKey prompts the user to confirm saving an invalid credential.
