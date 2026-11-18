@@ -875,9 +875,9 @@ jobs:
       - name: Require detached launch dependency
         timeout-minutes: 3
         run: |
-          if ! command -v tmux >/dev/null 2>&1; then
+          if ! command -v tmux >/dev/null 2>&1 || ! command -v busybox >/dev/null 2>&1; then
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends tmux
+            sudo apt-get install -y --no-install-recommends tmux busybox
           fi
           tmux -V
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

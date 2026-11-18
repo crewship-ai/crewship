@@ -15,6 +15,8 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         package = managed.PREFIX + 'internal/orchestrator'
         for adapter in expected:
             self.assertIn((package, 'TestNativeCLIShellEnvironment/' + adapter), managed.REQUIRED)
+            for mode in ('direct', 'tmux', 'fallback'):
+                self.assertIn((package, 'TestNativeCLIShellEnvironment/' + adapter + '/' + mode), managed.REQUIRED)
         commands = managed.commands()
         command = next(c for c in commands if 'TestNativeCLIShellEnvironment' in c[c.index('-run') + 1])
         self.assertNotIn('sudo', command)
@@ -29,6 +31,15 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
                              {package: managed.HOST_TESTS[package] - {name}}):
             errors = managed.host_source_inventory_errors(root)
             self.assertTrue(any(name in error for error in errors))
+
+    def test_native_tmux_requires_shell_ownership_cancellation_and_bootstrap_receipts(self):
+        package = managed.PREFIX + 'internal/orchestrator'
+        for shell in ('dash', 'busybox'):
+            for name in ('TestNativeTmuxReaderKernelOwnership', 'TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner', 'TestNativeTmuxFreshServerRunSettles'):
+                self.assertIn((package, name + '/' + shell), managed.REQUIRED)
+            for mode in ('tmux', 'fallback'):
+                for missing in ('env', 'run.sh', 'early-exit'):
+                    self.assertIn((package, 'TestNativeTmuxMissingSnapshotCannotSucceed/' + shell + '/' + mode + '/' + missing), managed.REQUIRED)
 
     def passing(self):
         return [{'Package': package, 'Test': name, 'Action': action}
@@ -65,7 +76,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertEqual(launcher[-1], './internal/orchestrator')
         self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestCodexOuterActualNativeDocker|TestManagedLaunchRealDocker)$')
         self.assertNotIn('sudo', cli)
-        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment)$')
+        self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy

@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Credential tests cannot send file/login material to API-token probes (#5466).** Probe dispatch now checks the credential type, preserves metered provider-login and dedicated Claude OAuth checks, refuses unknown types, and reports unsupported checks without an authentication-success audit claim. Native CLI create/update apply the same policy.
+- **Tmux runs use their own native credential environment (#5467).** Existing server-only token/path variables are excluded from the target CLI, image PATH/mise settings are preserved, and setup payloads move from process arguments to stdin. Run-private files are created with restricted permissions and removed after the run settles.
 
 - **Multiline credential parts no longer stop at the first line (#5463).** `credential field set --value-stdin` preserves complete UTF-8 PEM/JSON and final line endings within 64 KiB, rejects unsupported binary input and refuses conflicting value flags. Native certificate `key_pem` onboarding can use stdin without exposing the key in arguments.
 

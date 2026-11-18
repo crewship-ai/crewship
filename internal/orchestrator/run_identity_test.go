@@ -191,6 +191,15 @@ type recordingExecContainer struct {
 func (r *recordingExecContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	r.mu.Lock()
 	r.cmds = append(r.cmds, strings.Join(cfg.Cmd, " "))
+	// Generated setup programs are intentionally delivered on stdin, not argv.
+	if cfg.Stdin != nil {
+		program, err := io.ReadAll(cfg.Stdin)
+		if err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
+		r.cmds = append(r.cmds, string(program))
+	}
 	r.mu.Unlock()
 	return &provider.ExecResult{ExecID: "exec-rec", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
@@ -212,20 +221,29 @@ func newTmuxExecOrchestrator() (*Orchestrator, *recordingExecContainer) {
 	return New(rc, newMemState(), slog.Default()), rc
 }
 
+func TestSetupTmuxExecRejectsFailedWriter(t *testing.T) {
+	o, rc := newTmuxExecOrchestrator()
+	o.tmuxCacheStore("c1", true)
+	rc.inspectResult.exitCode = 23
+	if wrapper, err := o.setupTmuxExec(t.Context(), "c1", []string{"true"}, "fixture", "failed-writer", nil); err == nil || len(wrapper) != 0 {
+		t.Fatal("a failed setup writer returned a runnable tmux wrapper")
+	}
+}
+
 // derivedPaths is what setupTmuxExec is contractually required to scope by
 // run. Held as a table so a seventh derived name added later without a
 // matching run scope shows up as a missing row here rather than as a silent
 // cross-run collision in production.
 func derivedPaths(slug, runID string) map[string]string {
 	session := TmuxSessionName(slug, runID)
+	directory := tmuxExecDir(slug, runID)
 	return map[string]string{
 		"tmux session": session,
-		"args file":    "/tmp/" + session + ".args",
-		"env file":     "/tmp/" + session + ".env",
-		"inner script": "/tmp/" + session + ".sh",
-		"FIFO":         "/tmp/" + session + ".fifo",
-		"exit file":    "/tmp/" + session + ".exit",
-		"wait-for":     session + "-done",
+		"args file":    directory + "/args",
+		"env file":     directory + "/env",
+		"inner script": directory + "/run.sh",
+		"FIFO":         directory + "/output.fifo",
+		"exit file":    directory + "/exit",
 	}
 }
 
@@ -319,7 +337,7 @@ func TestSetupTmuxExec_StartingBLeavesARunning(t *testing.T) {
 	}
 	// And A's own wrapper still reads A's argv and A's exit code.
 	joinedA := strings.Join(wrapperA, " ")
-	if !strings.Contains(joinedA, "/tmp/"+TmuxSessionName("eva", "run-a")+".exit") {
+	if !strings.Contains(joinedA, tmuxExecDir("eva", "run-a")+"/exit") {
 		t.Errorf("run A's wrapper lost its own exit file:\n%s", joinedA)
 	}
 }

@@ -49,7 +49,7 @@ func (c *blockingAgentContainer) kill() {
 }
 
 func (c *blockingAgentContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Env) > 0 {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil {
 		r, w := io.Pipe()
 		c.mu.Lock()
 		c.pipeW = w
@@ -189,7 +189,7 @@ type slowSuccessContainer struct {
 }
 
 func (c *slowSuccessContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Env) > 0 {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil {
 		r, w := io.Pipe()
 		go func() {
 			time.Sleep(c.delay)
@@ -342,7 +342,7 @@ type inspectGapContainer struct {
 }
 
 func (c *inspectGapContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Env) > 0 {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil {
 		out := `{"type":"system","subtype":"init","model":"claude-test"}` + "\n" +
 			`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial answer"}}}` + "\n"
 		return &provider.ExecResult{ExecID: "agent-exec", Reader: io.NopCloser(strings.NewReader(out))}, nil
