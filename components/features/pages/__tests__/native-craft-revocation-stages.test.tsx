@@ -218,6 +218,10 @@ describe('silent stream',()=>{
 describe('offline',()=>{
  it('does not finish offline setup while the final capture hash is held',async()=>{
   await opened()
+  // Isolate retirement from the independent short-lease watchdog: this
+  // fixture holds hashing through reauthorization, not through lease expiry.
+  server.push('lease',{...lease(),expires_at:new Date(Date.now()+120_000).toISOString()})
+  await advance(1)
   let release=()=>{},started=()=>{},waiting=()=>{}
   const held=new Promise<void>(resolve=>{release=resolve})
   const finalHash=new Promise<void>(resolve=>{started=resolve})
