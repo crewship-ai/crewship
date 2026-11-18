@@ -149,6 +149,15 @@ agent and run with authentication unknown. Audit failure prevents launch.
 This event does not change `USE` or `last_used_at`; existing sidecar fetch USE
 is crew-scoped and cannot prove which agent authenticated successfully.
 
+For agent proxy requests with an authenticated current run, `PROXY_ADMITTED`
+records the credential, agent, crew and active run after scope and budget
+admission. Its fixed metadata describes the proxy channel, admitted stage and
+unknown authentication. Audit persistence failure refuses admission. The event
+proves neither forwarding nor upstream authentication and does not update
+`USE` or `last_used_at`. Legacy requests without a run retain admission behavior
+without an invented run attribution; crew-only requests cannot claim a run or
+credential. A shared sidecar's boot run is never used as the current caller.
+
 The Docker crew container is the current filesystem trust boundary. Agents
 sharing UID 1001 can read each other's reachable delivered files. Separate
 crews are required for mutually untrusted agents; product grant checks alone

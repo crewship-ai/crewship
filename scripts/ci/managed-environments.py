@@ -32,6 +32,7 @@ CLI_TESTS = {'internal/orchestrator': {
     'TestNativeTmuxRefusesExistingSetupDirectory',
 }}
 CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
+PACKAGING_TESTS = {'internal/devcontainer': {'TestCodexNativePackaging'}}
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},
@@ -155,7 +156,7 @@ def host_source_inventory_errors(root='.'):
     return errors
 
 REQUIRED = {(PREFIX + package, name)
-            for suites in (TESTS, HOST_TESTS, CLI_TESTS)
+            for suites in (TESTS, HOST_TESTS, CLI_TESTS, PACKAGING_TESTS)
             for package, names in suites.items() for name in names}
 REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter)
                 for adapter in CLI_ADAPTERS)
@@ -173,6 +174,8 @@ REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeTmuxMissingSnapsho
                 for mode in ('tmux', 'fallback') for missing in ('env', 'run.sh', 'early-exit'))
 REQUIRED.add((PREFIX + 'internal/orchestrator',
               'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped/exact-session-targets'))
+REQUIRED.update((PREFIX + 'internal/devcontainer', 'TestCodexNativePackaging/' + mode)
+                for mode in ('clean', 'upgrade'))
 HOST_UID = 65534
 
 
@@ -224,11 +227,12 @@ def commands(go_binary='go'):
             (legacy, []),
             ({'internal/orchestrator': TESTS['internal/orchestrator']},
              ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local']),
-            (CLI_TESTS, [])):
+            (CLI_TESTS, []),
+            (PACKAGING_TESTS, [])):
         pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
                                  for name in sorted(names)) + ')$'
         command = prefix + [go_binary, 'test', '-tags', 'integration', '-p', '1', '-count=1',
-                            '-timeout=' + ('8m' if prefix else '3m'), '-json', '-run', pattern]
+                            '-timeout=' + ('10m' if packages is PACKAGING_TESTS else ('8m' if prefix else '3m')), '-json', '-run', pattern]
         command.extend('./' + package for package in packages)
         if prefix and native:
             command.extend(['-args', '-codex-outer-native-artifact=' + native])

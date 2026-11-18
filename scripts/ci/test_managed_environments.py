@@ -33,6 +33,14 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
             self.assertTrue(managed.failures(events, 0))
         command = next(c for c in managed.commands() if root in c[c.index('-run') + 1])
         self.assertNotIn('sudo', command)
+    def test_native_mise_packaging_requires_clean_and_upgrade_receipts(self):
+        package = managed.PREFIX + 'internal/devcontainer'
+        root = 'TestCodexNativePackaging'
+        for name in (root, root + '/clean', root + '/upgrade'):
+            key = (package, name)
+            self.assertIn(key, managed.REQUIRED)
+            events = [e for e in self.passing() if (e['Package'], e['Test']) != key]
+            self.assertTrue(managed.failures(events, 0))
 
     def test_all_guarded_host_fixture_sources_are_mandatory(self):
         root = Path(__file__).resolve().parents[2]
@@ -87,13 +95,19 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertTrue(managed.failures([e for e in self.passing() if e['Action'] == 'pass'], 0))
 
     def test_existing_commands_preserve_their_original_privilege_profiles(self):
-        legacy, launcher, cli = managed.commands()
+        legacy, launcher, cli, packaging = managed.commands()
         self.assertEqual(legacy[0], 'go')
         self.assertNotIn('sudo', legacy)
         self.assertNotIn('./internal/orchestrator', legacy)
         self.assertEqual(launcher[:2], ['sudo', 'env'])
         self.assertEqual(launcher[-1], './internal/orchestrator')
         self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestCodexOuterActualNativeDocker|TestManagedLaunchRealDocker)$')
+        self.assertNotIn('sudo', packaging)
+        self.assertIn('./internal/devcontainer', packaging)
+        self.assertIn('-timeout=10m', packaging)
+        self.assertIn('-timeout=3m', legacy)
+        self.assertIn('-timeout=3m', cli)
+        self.assertIn('-timeout=8m', launcher)
         self.assertNotIn('sudo', cli)
         self.assertEqual(cli[cli.index('-run') + 1], '^(TestNativeCLIShellEnvironment|TestNativeTmuxCurrentRunCannotInheritRevokedToken|TestNativeTmuxFallbackStreamsFailure|TestNativeTmuxFreshServerRunSettles|TestNativeTmuxMissingSnapshotCannotSucceed|TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner|TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped|TestNativeTmuxReaderKernelOwnership|TestNativeTmuxRefusalTeardownPreservesOutsideHome|TestNativeTmuxRefusesExistingSetupDirectory|TestNativeVaultCLITrioProtocols)$')
         for package, names in managed.TESTS.items():
@@ -130,7 +144,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
 
     def test_real_codex_artifact_is_explicit_across_sudo(self):
         with mock.patch.dict(os.environ, {'CREWSHIP_TEST_CODEX_NATIVE': '/fixture/native-codex'}):
-            legacy, elevated, cli = managed.commands()
+            legacy, elevated, cli, packaging = managed.commands()
         self.assertNotIn('-codex-outer-native-artifact=/fixture/native-codex', legacy)
         self.assertNotIn('-codex-outer-native-artifact=/fixture/native-codex', cli)
         self.assertIn('-codex-outer-native-artifact=/fixture/native-codex', elevated)
@@ -141,7 +155,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
 
     def test_selected_go_toolchain_survives_sudo_and_nested_fixture_builds(self):
         binary = '/trusted/toolchain/bin/go'
-        legacy, elevated, cli = managed.commands(binary)
+        legacy, elevated, cli, packaging = managed.commands(binary)
         self.assertEqual(legacy[0], binary)
         self.assertEqual(cli[0], binary)
         self.assertEqual(elevated[elevated.index('test') - 1], binary)
