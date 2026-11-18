@@ -104,6 +104,17 @@ func keeperApprovalID(header http.Header, bodyField string) string {
 	return strings.TrimSpace(bodyField)
 }
 
+// A shared sidecar's boot run is never the calling run. Legacy identities can
+// still identify an agent but deliberately leave the run unknown.
+func (s *Server) keeperCallingIdentity(r *http.Request) (agentID, runID string, ok bool) {
+	agentID, _, runID, present, matched := s.actingRunIdentity(r)
+	if present {
+		return agentID, runID, matched
+	}
+	agentID, ok = s.actingAgentID(r)
+	return agentID, "", ok
+}
+
 // handleKeeperRequest handles POST /keeper/request from agents (UID 1001).
 // It validates the request and forwards it to crewshipd via the IPC channel.
 // The response is a keeper decision (ALLOW/DENY/ESCALATE) — never a raw credential.
@@ -175,7 +186,7 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 	// refused. With no token we fall back to the boot AgentID. Credential
 	// access is attribution-critical, so this closes the sibling-impersonation
 	// hole for the vault too.
-	agentID, ok := s.actingAgentID(r)
+	agentID, requestingRunID, ok := s.keeperCallingIdentity(r)
 	if !ok {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
@@ -191,6 +202,9 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 		"requesting_crew_id":  s.ipc.CrewID,
 		"workspace_id":        s.ipc.WorkspaceID,
 		"intent":              req.Intent,
+	}
+	if requestingRunID != "" {
+		ipcPayload["requesting_run_id"] = requestingRunID
 	}
 	if approvalID := keeperApprovalID(r.Header, req.ApprovalRequestID); approvalID != "" {
 		// #2574: a retry presenting a human approval. Forwarded, never
@@ -333,7 +347,7 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 
 	// Identity is the ACTING agent derived from the per-agent bearer token
 	// (#812), never a caller-supplied slug. See handleKeeperRequest.
-	execAgentID, ok := s.actingAgentID(r)
+	execAgentID, requestingRunID, ok := s.keeperCallingIdentity(r)
 	if !ok {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
@@ -354,6 +368,9 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 		"intent":              req.Intent,
 		"command":             req.Command,
 		"container_id":        s.ipc.ContainerID,
+	}
+	if requestingRunID != "" {
+		ipcPayload["requesting_run_id"] = requestingRunID
 	}
 	if approvalID := keeperApprovalID(r.Header, req.ApprovalRequestID); approvalID != "" {
 		// #2574: a retry presenting a human approval. Forwarded, never

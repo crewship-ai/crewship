@@ -18,6 +18,7 @@ func NewKeeperLogHandler(db *sql.DB, logger *slog.Logger) *KeeperLogHandler {
 }
 
 type keeperLogEntry struct {
+	RunID             *string `json:"requesting_run_id,omitempty"`
 	ID                string  `json:"id"`
 	AgentID           string  `json:"agent_id"`
 	AgentName         string  `json:"agent_name"`
@@ -77,7 +78,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			kr.intent, kr.request_type, kr.command,
 			kr.decision, kr.reason, kr.risk_score, kr.exit_code,
 			kr.ollama_prompt, kr.ollama_raw_response,
-			kr.created_at, kr.decided_at, kr.judge_profile
+			kr.created_at, kr.decided_at, kr.judge_profile, kr.requesting_run_id
 		FROM keeper_requests kr
 		LEFT JOIN agents a ON a.id = kr.requesting_agent_id
 		LEFT JOIN credentials c ON c.id = kr.credential_id
@@ -100,7 +101,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			&e.Intent, &e.RequestType, &e.Command,
 			&e.Decision, &e.Reason, &e.RiskScore, &e.ExitCode,
 			&e.OllamaPrompt, &e.OllamaRawResponse,
-			&e.CreatedAt, &e.DecidedAt, &e.JudgeProfile,
+			&e.CreatedAt, &e.DecidedAt, &e.JudgeProfile, &e.RunID,
 		); err != nil {
 			h.logger.Error("keeper log: scan failed", "error", err)
 			continue
@@ -119,6 +120,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 // (#1369). Distinct from keeperLogEntry: that one is the CURRENT state of a
 // request, this is the history of how it got there.
 type keeperRequestEventEntry struct {
+	RunID        *string `json:"requesting_run_id,omitempty"`
 	Seq          int     `json:"seq"`
 	State        string  `json:"state"`
 	RequestType  *string `json:"request_type,omitempty"`
@@ -174,7 +176,7 @@ func (h *KeeperLogHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		SELECT e.seq, e.state, e.request_type, e.requesting_agent_id, COALESCE(a.name,''),
 		       e.requesting_crew_id, e.credential_id, COALESCE(c.name,''),
 		       e.intent, e.command, e.reason, e.risk_score, e.exit_code,
-		       e.actor_type, e.actor_id, e.recorded_at
+		       e.actor_type, e.actor_id, e.recorded_at, e.requesting_run_id
 		FROM keeper_request_events e
 		LEFT JOIN agents a ON a.id = e.requesting_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id
@@ -195,7 +197,7 @@ func (h *KeeperLogHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&e.Seq, &e.State, &e.RequestType, &e.AgentID, &e.AgentName,
 			&e.CrewID, &e.CredentialID, &e.CredName, &e.Intent, &e.Command,
 			&e.Reason, &e.RiskScore, &e.ExitCode, &e.ActorType, &e.ActorID,
-			&e.RecordedAt); err != nil {
+			&e.RecordedAt, &e.RunID); err != nil {
 			// Unlike List, do NOT swallow a scan error here: this endpoint's whole
 			// value is completeness, and quietly dropping a transition would make a
 			// gap look like it never happened.

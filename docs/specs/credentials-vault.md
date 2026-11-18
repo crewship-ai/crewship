@@ -262,3 +262,28 @@ Workspace backups retain erased tombstones and workspace-attributed history;
 legacy audit rows with NULL workspace attribution remain outside that scope. A replacement restore that would orphan
 those rows is refused and rolled back, rather than deleting history absent from
 the bundle. The separate active-secret export excludes tombstones.
+
+## Keeper run attribution
+
+The sidecar derives `requesting_run_id` from the verified current v2 calling-run
+identity, never from the request body or its boot IPC run. Legacy identities
+without a verified run leave attribution unknown and explicitly clear unrelated
+inherited Journal run context while preserving request cancellation. The host admits new requests
+against the durable journal start/terminal records for the same workspace, crew
+and agent. Approval consumption, run admission and the new pending request and
+ledger are committed in one transaction; failed admission or persistence rolls
+back the spend. Both paths recheck after judging and record an unavailable run
+as a system denial before optional lease issuance. Execute also rechecks run
+liveness before container execution. A run may still end
+concurrently with an already admitted container operation; this is not a claim
+of an atomic kernel-level cancellation boundary.
+
+Keeper requests have immutable nullable run attribution. Every ledger transition
+copies it, including a later human/reference decision after the run has ended.
+Admin `keeper requests` and `keeper history` JSON expose `requesting_run_id` when known.
+Credential-bound non-pending transitions also append `KEEPER_DECISION` to Vault
+Activity in the same transaction. Metadata contains only request/run identifiers,
+decision, request type and actor attribution; no credential value, command, intent
+or free-form reason. These events do not update `last_used_at` and do not prove
+that a standard tool authenticated. Historical rows are not backfilled with
+a guessed boot run.

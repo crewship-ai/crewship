@@ -500,6 +500,7 @@ var keeperSecondApproverDisableCmd = &cobra.Command{
 // (internal/api/keeper_log.go:keeperLogEntry) — the Keeper decision audit
 // log, previously API-only (issue #966 part 3).
 type keeperRequestEntry struct {
+	RunID        *string `json:"requesting_run_id,omitempty" yaml:"requesting_run_id,omitempty"`
 	ID           string  `json:"id" yaml:"id"`
 	AgentID      string  `json:"agent_id" yaml:"agent_id"`
 	AgentName    string  `json:"agent_name" yaml:"agent_name"`

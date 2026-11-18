@@ -93,11 +93,11 @@ type keeperTransition struct {
 const keeperEventInsertSQL = `
 	INSERT INTO keeper_request_events
 		(id, request_id, workspace_id, seq, state, request_type, requesting_agent_id,
-		 requesting_crew_id, credential_id, intent, command, reason, risk_score,
+		 requesting_run_id, requesting_crew_id, credential_id, intent, command, reason, risk_score,
 		 exit_code, actor_type, actor_id, recorded_at)
 	VALUES (?, ?, NULLIF(?,''),
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM keeper_request_events WHERE request_id = ?),
-		?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''),
+		?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''),
 		NULLIF(?,''), ?, ?, ?, NULLIF(?,''), ?)`
 
 // appendKeeperTransitionTx appends tr to the ledger inside the caller's
@@ -108,9 +108,16 @@ func appendKeeperTransitionTx(ctx context.Context, tx *sql.Tx, tr keeperTransiti
 	if tr.RequestID == "" {
 		return fmt.Errorf("keeper transition: request_id is required")
 	}
+	callingRun, storedType, err := keeperStoredRun(ctx, tx, tr.RequestID)
+	if err != nil {
+		return fmt.Errorf("keeper transition: read durable attribution: %w", err)
+	}
 	actorType := tr.ActorType
 	if actorType == "" {
 		actorType = keeperActorKeeper
+	}
+	if actorType == keeperActorUser || actorType == keeperActorReference {
+		tr.RequestType = storedType
 	}
 	// An empty State means the caller had no decision to record — keeper_requests
 	// stores that as a NULL decision, so the ledger records PENDING. Deliberately
@@ -129,9 +136,9 @@ func appendKeeperTransitionTx(ctx context.Context, tx *sql.Tx, tr keeperTransiti
 	if tr.ExitCode != nil {
 		exit = *tr.ExitCode
 	}
-	_, err := tx.ExecContext(ctx, keeperEventInsertSQL,
+	_, err = tx.ExecContext(ctx, keeperEventInsertSQL,
 		generateCUID(), tr.RequestID, tr.WorkspaceID, tr.RequestID,
-		state, tr.RequestType, tr.AgentID, tr.CrewID, tr.CredentialID,
+		state, tr.RequestType, tr.AgentID, callingRun, tr.CrewID, tr.CredentialID,
 		tr.Intent, tr.Command, tr.Reason, risk, exit, actorType, tr.ActorID,
 		// recorded_at is indexed (workspace_id, recorded_at DESC) and read as an
 		// ordering, so it goes through tsformat: a truncated fractional second is
@@ -139,6 +146,22 @@ func appendKeeperTransitionTx(ctx context.Context, tx *sql.Tx, tr keeperTransiti
 		tsformat.Format(time.Now()))
 	if err != nil {
 		return fmt.Errorf("keeper transition: append %s for %s: %w", state, tr.RequestID, err)
+	}
+	if tr.CredentialID != "" && state != keeperStatePending {
+		metadata := map[string]any{
+			"source": "keeper", "keeper_request_id": tr.RequestID,
+			"decision": state, "request_type": tr.RequestType,
+			"actor_type": actorType,
+		}
+		if callingRun != "" {
+			metadata["run_id"] = callingRun
+		}
+		if tr.ActorID != "" {
+			metadata["actor_id"] = tr.ActorID
+		}
+		if err := RecordCredentialEventTx(ctx, tx, tr.CredentialID, AuditEventKeeperDecision, tr.AgentID, "", metadata); err != nil {
+			return fmt.Errorf("keeper transition: credential audit: %w", err)
+		}
 	}
 	return nil
 }
@@ -157,8 +180,15 @@ func insertKeeperRequestWithTransition(
 	requestSQL string,
 	requestArgs []any,
 	tr keeperTransition,
+	providedTx ...*sql.Tx,
 ) error {
-	tx, err := db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	var err error
+	if len(providedTx) > 0 && providedTx[0] != nil {
+		tx = providedTx[0]
+	} else {
+		tx, err = db.BeginTx(ctx, nil)
+	}
 	if err != nil {
 		return fmt.Errorf("keeper audit: begin: %w", err)
 	}
@@ -166,6 +196,13 @@ func insertKeeperRequestWithTransition(
 
 	if _, err := tx.ExecContext(ctx, requestSQL, requestArgs...); err != nil {
 		return fmt.Errorf("keeper audit: insert request: %w", err)
+	}
+	callingRun, _, err := keeperStoredRun(ctx, tx, tr.RequestID)
+	if err != nil {
+		return fmt.Errorf("keeper audit: read run attribution: %w", err)
+	}
+	if err := validateKeeperRunTx(ctx, tx, tr.WorkspaceID, tr.AgentID, tr.CrewID, callingRun); err != nil {
+		return err
 	}
 	if err := appendKeeperTransitionTx(ctx, tx, tr); err != nil {
 		return err
