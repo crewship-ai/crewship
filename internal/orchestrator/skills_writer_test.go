@@ -26,10 +26,10 @@ func newFakeContainer() *fakeContainer {
 }
 
 func (f *fakeContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Cmd) < 3 {
+	if len(cfg.Cmd) < 3 && cfg.Stdin == nil {
 		return nil, errors.New("unexpected cmd")
 	}
-	script := cfg.Cmd[2]
+	script := covScript(cfg)
 	pathStart := strings.Index(script, "> ")
 	if pathStart < 0 {
 		return nil, errors.New("script missing redirect")

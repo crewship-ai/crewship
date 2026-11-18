@@ -155,7 +155,7 @@ func TestAgentEnvCredentialExposures_ReportsCodexLoginAsFile(t *testing.T) {
 func scriptsOf(c *countingContainer) []string {
 	var out []string
 	for _, e := range c.execs {
-		out = append(out, strings.Join(e.cfg.Cmd, " "))
+		out = append(out, strings.Join(e.cfg.Cmd, " ")+"\n"+e.stdin)
 	}
 	return out
 }

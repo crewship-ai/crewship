@@ -183,11 +183,17 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN} -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog=${CRAFT_COMPONENT_PINS} -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase=${CRAFT_COMPONENT_URL}" \
     -o /crewship ./cmd/crewship
+# Version-matched static Linux client, delivered read-only to crew runtimes.
+RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath -tags clionly \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /crewship-agent-cli ./cmd/crewship
 # The workbook test barrier exists only in binaries built with the
 # crewship_testbarrier tag. No image may carry it, whatever build args or
 # GOFLAGS were used; the same guard checks every release archive.
 COPY scripts/check-no-test-barrier.sh /usr/local/bin/check-no-test-barrier
-RUN sh /usr/local/bin/check-no-test-barrier /crewship /crewship-sidecar
+RUN sh /usr/local/bin/check-no-test-barrier /crewship /crewship-sidecar /crewship-agent-cli
 
 # -- Runner --
 # The docker CLI (page builds, devcontainer images) comes from Docker's static
@@ -232,6 +238,7 @@ RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
 COPY --from=dockercli /docker /usr/local/bin/docker
 COPY --from=backend /crewship /usr/local/bin/crewship
 COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar
+COPY --from=backend /crewship-agent-cli /usr/local/bin/crewship-agent-cli
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 # Distribution legal files, produced inside the frontend/backend stages
 # (self-contained: PR image builds and local docker builds need no host

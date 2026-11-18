@@ -50,8 +50,8 @@ func (c *captureContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*pr
 			Reader: io.NopCloser(strings.NewReader(`{"status":"ok","network_mode":"free"}`)),
 		}, nil
 	}
-	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
-		matches := scriptArgsRE.FindStringSubmatch(cfg.Cmd[2])
+	if cfg.Stdin != nil || (len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c") {
+		matches := scriptArgsRE.FindStringSubmatch(covScript(cfg))
 		if len(matches) == 3 {
 			b64 := strings.TrimSpace(matches[1])
 			body, err := base64.StdEncoding.DecodeString(b64)

@@ -149,6 +149,11 @@ type ContainerConfig struct {
 	// Empty = autodetect; see SidecarBinaryPath for the same semantics.
 	EntrypointPath string `yaml:"entrypoint_path"`
 
+	// AgentCLIBinaryPath selects the packaged, static Linux Crewship client for
+	// read-only delivery into agent containers. It is independent of the server
+	// executable: a macOS/Windows server cannot execute inside a Linux runtime.
+	AgentCLIBinaryPath string `yaml:"agent_cli_binary_path"`
+
 	// IdleRuntimeRetentionDays removes this installation's stopped runtime
 	// containers of live crews once they have been stopped this many days.
 	// Volumes and host data stay; the next start recreates the container.
@@ -767,6 +772,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_ENTRYPOINT_PATH"); v != "" {
 		cfg.Container.EntrypointPath = v
 	}
+	if v := os.Getenv("CREWSHIP_AGENT_CLI_PATH"); v != "" {
+		cfg.Container.AgentCLIBinaryPath = v
+	}
 	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
 		cfg.Auth.NextjsURL = v
 	}
@@ -928,6 +936,17 @@ func resolveSidecarPaths(cfg *Config, binDir, cwd string) error {
 		}
 	}
 
+	if cfg.Container.AgentCLIBinaryPath == "" {
+		for _, candidate := range agentCLIBinaryCandidates(binDir) {
+			candidate = filepath.Clean(candidate)
+			if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
+				cfg.Container.AgentCLIBinaryPath = candidate
+				slog.Debug("autodetected agent Crewship CLI", "path", candidate)
+				break
+			}
+		}
+	}
+
 	if os.Getenv("CREWSHIP_SKIP_SIDECAR") == "1" {
 		return nil
 	}
@@ -965,6 +984,18 @@ func sidecarBinaryCandidates(binDir string) []string {
 	}
 	c = append(c, "/usr/local/bin/crewship-sidecar")
 	return c
+}
+
+// agentCLIBinaryCandidates follows the same archive, Homebrew and FHS layouts
+// as the sidecar. The separately named companion is always built for Linux.
+func agentCLIBinaryCandidates(binDir string) []string {
+	var candidates []string
+	if binDir != "" {
+		for _, dir := range []string{binDir, filepath.Join(binDir, "..", "libexec"), filepath.Join(binDir, "..", "libexec", "crewship")} {
+			candidates = append(candidates, filepath.Join(dir, "crewship-agent-cli"))
+		}
+	}
+	return append(candidates, "/usr/local/bin/crewship-agent-cli")
 }
 
 // entrypointCandidates lists where entrypoint.sh may live, in priority order:
