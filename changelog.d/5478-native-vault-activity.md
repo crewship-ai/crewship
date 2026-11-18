@@ -1,0 +1,1 @@
+Vault Activity shows the run correlated with native file delivery and distinguishes delivery and sidecar fetches from verified remote authentication. Other audit metadata and credential values remain hidden.
