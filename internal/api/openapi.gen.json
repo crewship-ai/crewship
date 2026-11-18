@@ -61989,6 +61989,7 @@
                       "type": "integer"
                     },
                     "assignments_open": {
+                      "description": "Assignments routed to this agent in PENDING, QUEUED, or RUNNING state, regardless of case.",
                       "type": "integer"
                     },
                     "cost_usd_this_month": {
