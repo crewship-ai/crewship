@@ -256,3 +256,14 @@ reload requires both confirmed server text and a ready visible renderer. Receipt
 and native-text checks establish data evidence; screenshots are review artifacts
 and **are not automatic glyph or GPU paint verification**. Passing this harness
 does not qualify the wider command catalog or collaborative editing.
+
+`acceptance-trigger-detail-browser.mjs` is invoked by the Linux-only
+`TestTriggerDetailLoadErrorBrowser` fixture (`trigger_detail_browser` or
+compile-only `conformance`). After building the static export, run it with
+`CREWSHIP_TRIGGER_DETAIL_BROWSER=1` and the provisioned Chromium cache through
+`PLAYWRIGHT_BROWSERS_PATH`. It uses a migrated synthetic database, authenticated
+session and the real Router. Browser interception injects only HTTP/transport
+failures; Retry and successful not-found use real API reads. The same scenario
+runs in the PR Incoming webhook lifecycle. It creates no containers or execution
+runtime. `CREWSHIP_TRIGGER_DETAIL_OUTPUT` selects private reports/screenshots;
+fixture session proofs stay in a temporary mode-0600 file removed by the test.
