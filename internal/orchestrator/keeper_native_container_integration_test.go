@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // This observer delegates every command to the real container provider. It does
@@ -91,7 +92,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 			t.Fatal(err)
 		}
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	for i, run := range []string{"native-live", "native-peer", "native-ended"} {
 		id, state := agent, "running"
 		var terminal any
@@ -102,7 +103,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 			state, terminal = "succeeded", now
 		}
 		seed(`INSERT INTO work_items(id,workspace_id,source,source_ref,agent_id,crew_id,session_id,class,input_json,input_sha256,target_revision,state,generation,attempts,priority,eligible_at,created_at,updated_at,terminal_at) VALUES(?,?,'manual','',?,?,'','background','{}','sha','rev',?,1,0,0,?,?,?,?)`, "work-"+run, ws, id, crew, state, now, now, now, terminal)
-		seed(`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,runtime_phase,ended_at) VALUES(?,?,1,1,'fixture',?,?,?,'confirmed',?)`, run, "work-"+run, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), now, now, terminal)
+		seed(`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,runtime_phase,ended_at) VALUES(?,?,1,1,'fixture',?,?,?,'confirmed',?)`, run, "work-"+run, tsformat.Format(time.Now().Add(time.Hour)), now, now, terminal)
 		seed(`INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES(?,?,?,?,'run.started','orchestrator','fixture run','{}',?)`, "journal-"+run, ws, crew, id, run)
 		if terminal != nil {
 			seed(`INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES(?,?,?,?,'run.completed','orchestrator','fixture end','{}',?)`, "journal-end-"+run, ws, crew, id, run)
@@ -143,7 +144,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 		t.Fatal("native credential create returned no ID")
 	}
 	require("", "credential", "assign", created.ID, agent, "--env-var-name", "GITLAB_TOKEN", "--ttl", "30m")
-	resolved, err := chatbridge.NewIPCResolver(hostURL, master, logger).ResolveAgent(t.Context(), agent, ws)
+	resolved, err := chatbridge.NewIPCResolver(fmt.Sprintf("http://127.0.0.1:%d", hostPort), master, logger).ResolveAgent(t.Context(), agent, ws)
 	if err != nil {
 		t.Fatal(err)
 	}
