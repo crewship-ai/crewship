@@ -31,7 +31,10 @@ func (h *IssueHandler) loadIssueExecution(ctx context.Context, issue *issueRespo
 	// writes a mission around those — a restore, a mission_type flipped by an
 	// UPDATE — leaves a row this read must survive. Keep the issue readable using the default acceptance policy.
 	issue.ClientReviewRequired = true
-	if err := h.db.QueryRowContext(ctx, `SELECT brief_revision,client_review_required FROM issue_work WHERE mission_id=?`, issue.ID).Scan(&issue.BriefRevision, &issue.ClientReviewRequired); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := h.db.QueryRowContext(ctx, `SELECT COALESCE(w.brief_revision,
+		(SELECT x.brief_revision FROM issue_executions x WHERE x.mission_id=m.id ORDER BY x.created_at DESC,x.id DESC LIMIT 1),0),
+		COALESCE(w.client_review_required,1) FROM missions m LEFT JOIN issue_work w ON w.mission_id=m.id WHERE m.id=?`,
+		issue.ID).Scan(&issue.BriefRevision, &issue.ClientReviewRequired); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	execution := &issueExecutionResponse{Workers: []issueExecutionWorker{}}

@@ -206,17 +206,20 @@ func TestIssueDetail_SurvivesMissingWorkRow(t *testing.T) {
 	if _, err := h.db.Exec(`DELETE FROM issue_work WHERE mission_id=?`, id); err != nil {
 		t.Fatal(err)
 	}
+	execOrFatal(t, h.db, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+		VALUES('restored-exec',?,8,13,'accepted',?,'2026-09-08','2026-09-08')`, id, lead)
+	execOrFatal(t, h.db, `UPDATE missions SET status='REVIEW' WHERE id=?`, id)
 	rec := httptest.NewRecorder()
 	h.Get(rec, covIWReq(user, ws, "OWNER", "GET", "", crew, "ENG-82"))
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	var detail issueResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil || !detail.ClientReviewRequired {
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil || !detail.ClientReviewRequired || detail.BriefRevision != 13 {
 		t.Fatalf("expected default review policy in issue detail: %s (%v)", rec.Body.String(), err)
 	}
 	rec = httptest.NewRecorder()
-	h.Review(rec, covIWReq(user, ws, "OWNER", "POST", `{"action":"approve"}`, crew, "ENG-82"))
+	h.Review(rec, covIWReq(user, ws, "OWNER", "POST", `{"action":"approve","brief_revision":13,"revision":0}`, crew, "ENG-82"))
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}

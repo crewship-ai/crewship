@@ -389,18 +389,9 @@ func (e *MissionEngine) missionTick(ctx context.Context, ms *missionState) (stop
 		if !active {
 			return true
 		}
-		if _, err := e.checkIssueExecution(ctx, ms); err != nil {
-			e.logger.Error("issue execution tick", "mission_id", ms.ID, "error", err)
-			return false
-		}
-		if err := e.scheduleReadyTasks(ctx, ms, true); err != nil {
-			e.logger.Error("schedule issue execution under client review", "mission_id", ms.ID, "error", err)
-		}
-		return false
 	}
-
 	// Mission is no longer in progress -- stop orchestrating
-	if status != "IN_PROGRESS" {
+	if status != "IN_PROGRESS" && status != "REVIEW" {
 		e.logger.Info("mission no longer in progress", "mission_id", ms.ID, "status", status)
 		return true
 	}
@@ -413,9 +404,10 @@ func (e *MissionEngine) missionTick(ctx context.Context, ms *missionState) (stop
 	}
 	if executionHandled {
 		current, err := e.getMissionStatus(ctx, ms.ID)
-		if err != nil || current != "IN_PROGRESS" {
+		if err != nil || (current != "IN_PROGRESS" && current != "REVIEW") {
 			return false
 		}
+		status = current
 	}
 
 	// Lead planning phase: if mission has 0 tasks, dispatch to lead
@@ -463,8 +455,13 @@ func (e *MissionEngine) missionTick(ctx context.Context, ms *missionState) (stop
 		}
 	}
 
-	if err := e.scheduleReadyTasks(ctx, ms); err != nil {
+	if err := e.scheduleReadyTasks(ctx, ms, status == "REVIEW"); err != nil {
 		e.logger.Error("schedule ready tasks", "mission_id", ms.ID, "error", err)
+	}
+	if status == "REVIEW" {
+		// The issue execution settles review. General mission completion and
+		// deadlock detection must not overwrite its client review status.
+		return false
 	}
 
 	// Load the post-schedule task snapshot once and share it with
