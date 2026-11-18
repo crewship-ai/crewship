@@ -166,6 +166,9 @@ func (s *Store) sweepInboxEvidence(ctx context.Context, batch int, cutoff time.T
 		 ORDER BY source.created_at LIMIT ?)`,
 	} {
 		for {
+			if err := quiesce.Yield(ctx); err != nil {
+				return err
+			}
 			updated, err := s.db.ExecContext(ctx, q, stamp, stamp, batch)
 			if err != nil {
 				return fmt.Errorf("work: expire agent inbox evidence: %w", err)

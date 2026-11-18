@@ -30,7 +30,7 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 		`CREATE TABLE work_attempts(run_id TEXT PRIMARY KEY,work_id TEXT,generation INTEGER,ended_at TEXT)`,
 		`CREATE TABLE users(id TEXT PRIMARY KEY,full_name TEXT,avatar_url TEXT,suspended_at TEXT,authority_revision INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE workspaces(id TEXT PRIMARY KEY,deleted_at TEXT)`,
-		`CREATE TABLE workspace_members(id TEXT NOT NULL DEFAULT '',access_revision INTEGER NOT NULL DEFAULT 0,workspace_id TEXT,user_id TEXT,created_at TEXT DEFAULT '',PRIMARY KEY(workspace_id,user_id))`,
+		`CREATE TABLE workspace_members(id TEXT NOT NULL DEFAULT '',access_revision INTEGER NOT NULL DEFAULT 0,workspace_id TEXT,user_id TEXT,created_at TEXT DEFAULT '',access_mode TEXT NOT NULL DEFAULT 'trusted',PRIMARY KEY(workspace_id,user_id))`,
 		`CREATE TABLE crews(id TEXT PRIMARY KEY,workspace_id TEXT,deleted_at TEXT,avatar_style TEXT)`,
 		`INSERT INTO crews(id,workspace_id) VALUES('crew','w')`,
 		`CREATE TABLE agents(id TEXT PRIMARY KEY,workspace_id TEXT,crew_id TEXT DEFAULT 'crew',name TEXT,slug TEXT DEFAULT 'agent',deleted_at TEXT,avatar_seed TEXT,avatar_style TEXT,avatar_svg_hash TEXT)`,

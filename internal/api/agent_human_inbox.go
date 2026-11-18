@@ -82,7 +82,8 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
   ORDER BY receipt.read_at LIMIT 1)
  FROM missions m JOIN agents a ON a.id=m.delegate_agent_id AND a.workspace_id=m.workspace_id
  WHERE m.workspace_id=? AND m.delegate_agent_id=? AND m.created_by_user_id=? AND a.deleted_at IS NULL
- AND EXISTS(SELECT 1 FROM workspace_members viewer JOIN users usr ON usr.id=viewer.user_id AND usr.suspended_at IS NULL JOIN workspaces live ON live.id=viewer.workspace_id AND live.deleted_at IS NULL WHERE viewer.workspace_id=m.workspace_id AND viewer.user_id=?)
+ AND EXISTS(SELECT 1 FROM workspace_members viewer JOIN users usr ON usr.id=viewer.user_id AND usr.suspended_at IS NULL JOIN workspaces live ON live.id=viewer.workspace_id AND live.deleted_at IS NULL WHERE viewer.workspace_id=m.workspace_id AND viewer.user_id=?
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=viewer.user_id AND restricted.access_mode='restricted'))
  ORDER BY m.created_at DESC,m.id DESC LIMIT 50`, ws, agent, user.ID, user.ID)
 	if err != nil {
 		replyError(w, 503, "human inbox unavailable")
@@ -124,7 +125,8 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
  WHERE w.workspace_id=? AND w.agent_id=? AND w.source='chat' AND w.domain_kind='host_chat_turn' AND a.deleted_at IS NULL
  AND c.workspace_id=w.workspace_id AND (`+chataudience.VisibleSQL+`) AND (`+chataudience.NoPrivateArtifactContextSQL+`)
  AND EXISTS(SELECT 1 FROM workspaces live WHERE live.id=c.workspace_id AND live.deleted_at IS NULL)
- AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL)
+ AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=viewer.id AND restricted.access_mode='restricted'))
  ORDER BY w.created_at DESC,w.id DESC LIMIT 50`, args...)
 	if err != nil {
 		replyError(w, 503, "human inbox unavailable")
@@ -150,6 +152,23 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
 	rows.Close()
 	if err != nil {
 		replyError(w, 503, "human inbox unavailable")
+		return
+	}
+	// A grant can change while an HTTP request is reading the projections.
+	// Recheck before returning anything read by the earlier statements.
+	var canRead bool
+	if err := r.db.QueryRowContext(req.Context(), `SELECT EXISTS (
+		SELECT 1 FROM workspace_members member JOIN users viewer ON viewer.id=member.user_id
+		JOIN workspaces workspace ON workspace.id=member.workspace_id
+		WHERE member.workspace_id=? AND member.user_id=? AND viewer.suspended_at IS NULL
+		 AND workspace.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members restricted
+		  WHERE restricted.user_id=viewer.id AND restricted.access_mode='restricted'))`,
+		ws, user.ID).Scan(&canRead); err != nil {
+		replyInternalError(w, r.logger, "recheck human inbox viewer", err)
+		return
+	}
+	if !canRead {
+		replyError(w, http.StatusForbidden, "human inbox is unavailable in this session")
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")

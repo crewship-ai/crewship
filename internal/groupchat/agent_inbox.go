@@ -46,7 +46,7 @@ func (s *Store) AgentInbox(ctx context.Context, w, u, agent string) ([]AgentInbo
  FROM workspace_conversation_agent_jobs j INDEXED BY idx_agent_inbox_conversation_jobs CROSS JOIN workspace_conversations c ON c.id=j.conversation_id
  JOIN workspace_conversation_messages m ON m.id=j.message_id AND m.conversation_id=c.id
  JOIN agents a ON a.id=j.agent_id LEFT JOIN assignments execution ON execution.id=j.assignment_id AND execution.workspace_id=c.workspace_id AND execution.assigned_to_id=a.id LEFT JOIN agent_inbox_receipts receipt ON receipt.workspace_id=c.workspace_id AND receipt.agent_id=a.id AND receipt.source_kind='channel_message' AND receipt.source_id=j.id
- WHERE j.agent_id=? AND `+accessible+` AND `+liveInboxJob+` AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL) ORDER BY j.created_at DESC,j.id DESC LIMIT 50`, agent, w, u, u, u)
+ WHERE j.agent_id=? AND `+accessible+` AND `+liveInboxJob+` AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=viewer.id AND restricted.access_mode='restricted')) ORDER BY j.created_at DESC,j.id DESC LIMIT 50`, agent, w, u, u, u)
 	if err != nil {
 		return nil, err
 	}

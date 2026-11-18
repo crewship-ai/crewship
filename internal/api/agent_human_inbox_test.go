@@ -490,3 +490,36 @@ func TestAgentInboxReadLegacyChannelJobUsesCurrentAuthority(t *testing.T) {
 		t.Fatalf("revoked legacy source exposed: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAgentInboxUnavailableWorkspaceDatabaseReturnsServerError(t *testing.T) {
+	f := inboxChannelFixture(t)
+	m := NewAuthMiddleware(nil, nil, f.h.db, newTestLogger())
+	handler := m.RequireWorkspace(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("workspace authority failure reached the inbox handler")
+	}))
+	if err := f.h.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	url := "/api/v1/agents/" + f.agent + "/human-inbox?workspace_id=" + f.ws
+	req := withWorkspaceUser(httptest.NewRequest(http.MethodGet, url, nil), f.user, f.ws, "OWNER")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code < 500 {
+		t.Fatalf("unavailable membership database: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentInboxRechecksViewerAfterWorkspaceAdmission(t *testing.T) {
+	f := inboxChannelFixture(t)
+	req := withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/human-inbox", nil), f.user, f.ws, "OWNER")
+	req.SetPathValue("agentId", f.agent)
+	// The real request can already have passed the mode guard when a member
+	// becomes restricted. Database authority must govern the response.
+	execOrFatal(t, f.h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, f.ws, f.user)
+	execOrFatal(t, f.h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE workspace_id=? AND user_id=?`, f.ws, f.user)
+	rec := httptest.NewRecorder()
+	(&Router{db: f.h.db, logger: newTestLogger()}).agentHumanInbox(rec, req)
+	if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "Only the actual source body") {
+		t.Fatalf("revoked viewer got inbox response %d %s", rec.Code, rec.Body.String())
+	}
+}
