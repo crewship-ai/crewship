@@ -1049,6 +1049,25 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"drift", drift,
 					)
 				}
+				// An SDK file bind pins its generation inode. Reusing it after a
+				// server upgrade could advertise unavailable native commands. Unlike
+				// advisory sidecar refresh, SDK drift must wait on the existing fair
+				// runtime-use gate; it never stops active peers or admits the old client.
+				if artifact := p.cfg.agentCLIArtifact; artifact != nil {
+					have := ""
+					if inspect.Config != nil {
+						have = inspect.Config.Labels["crewship.agent-cli-sha256"]
+					}
+					if have != artifact.SHA256 {
+						if crewContainerHoldsNoProcesses(c.State) {
+							if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+								return "", false, err
+							}
+							break
+						}
+						return "", false, fmt.Errorf("native agent CLI upgrade is waiting for an idle crew runtime: %w", &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage})
+					}
+				}
 				// Outdated sidecar (#3964, sidecar_refresh.go). The sidecar is
 				// bind-mounted and the mount pins the binary the container was
 				// created with, so after an upgrade only a new container runs
@@ -1451,6 +1470,9 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	// The sidecar this container mounts, so a later reconcile can tell it was
 	// created before an upgrade replaced the binary (#3964). Same rule as the
 	// contract digest: no hash, no label.
+	if artifact := p.cfg.agentCLIArtifact; artifact != nil {
+		cfg.Labels["crewship.agent-cli-sha256"] = artifact.SHA256
+	}
 	if h := p.mountedSidecarHash(); h != "" {
 		cfg.Labels[crewSidecarHashLabel] = h
 	}

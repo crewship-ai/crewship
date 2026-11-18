@@ -1,10 +1,13 @@
 package docker
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func agentCLIProviderFixture(t *testing.T) Config {
@@ -94,5 +97,52 @@ func TestAgentCLIMountRejectsWritableStagingAliases(t *testing.T) {
 				t.Fatal("runtime exposed trusted SDK staging through a writable crew bind")
 			}
 		})
+	}
+}
+
+func TestAgentCLIUpgradeDefersWhileCrewRuntimeIsHeld(t *testing.T) {
+	p, daemon, sidecarHash := newSidecarRefreshFixture(t, "", "running")
+	// Keep the sidecar current so only the missing/stale SDK can request refresh.
+	daemon.containers[refreshOldID].labels[crewSidecarHashLabel] = sidecarHash
+	fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
+	p.cfg.AgentCLIBinaryPath = fixture.AgentCLIBinaryPath
+	p.cfg.agentCLIArtifact = fixture.agentCLIArtifact
+	p.cfg.RequireAgentCLI = true
+	p.SetRuntimeIdleVerifier(func(context.Context, string, string) error { return nil })
+	release, err := p.runtimeUseGate(refreshCrewID).Use(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	use, err := p.AcquireCrewRuntimeUse(ctx, refreshCrew())
+	if use != nil {
+		use.Release()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stale SDK must wait for existing crew use instead of admitting an old client: %v", err)
+	}
+	if daemon.count("stop ") != 0 || daemon.count("remove ") != 0 {
+		t.Fatal("SDK upgrade interrupted active crew work")
+	}
+	release()
+	released = true
+	upgraded, err := p.AcquireCrewRuntimeUse(t.Context(), refreshCrew())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Release()
+	if upgraded.ContainerID() == refreshOldID {
+		t.Fatal("SDK did not converge to a fresh runtime after the crew became idle")
+	}
+	current := daemon.crewContainer()
+	if current == nil || current.labels["crewship.agent-cli-sha256"] != p.cfg.agentCLIArtifact.SHA256 {
+		t.Fatal("replacement runtime lacks its complete SDK generation digest")
 	}
 }
