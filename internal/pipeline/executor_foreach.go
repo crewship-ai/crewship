@@ -51,6 +51,7 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 		return "", 0, 0, fmt.Errorf("foreach step %q: %w", step.ID, err)
 	}
 	if len(items) == 0 {
+		recordOutcome(ctx, outcomeEvidence{Version: 1})
 		// An empty array is a valid no-op: emit an empty result array.
 		return "[]", 0, time.Since(stepStart).Milliseconds(), nil
 	}
@@ -66,8 +67,9 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 	}
 
 	type itemResult struct {
-		out  string
-		cost float64
+		out      string
+		cost     float64
+		evidence outcomeEvidence
 	}
 	results := make([]itemResult, len(items))
 
@@ -89,8 +91,12 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 			if feCtx.Err() != nil {
 				return
 			}
-			out, cost, ierr := e.runForeachItem(foreachExecutionContext(feCtx, idx), step, item, in, parentRender, runID, pipelineID, emit, depth)
+			itemCtx, capture := captureOutcome(foreachExecutionContext(feCtx, idx))
+			out, cost, ierr := e.runForeachItem(itemCtx, step, item, in, parentRender, runID, pipelineID, emit, depth)
 			results[idx] = itemResult{out: out, cost: cost}
+			if capture.evidence != nil {
+				results[idx].evidence = *capture.evidence
+			}
 			if ierr != nil {
 				firstErr.CompareAndSwap(nil, &foreachItemErr{index: idx, err: ierr})
 				cancel() // fail-fast: stop scheduling further items
@@ -121,6 +127,11 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 		return "", total, time.Since(stepStart).Milliseconds(),
 			fmt.Errorf("foreach step %q: marshal results: %w", step.ID, mErr)
 	}
+	reports := make([]outcomeEvidence, len(results))
+	for i, r := range results {
+		reports[i] = r.evidence
+	}
+	recordOutcome(ctx, aggregateOutcomes(reports))
 	return string(arr), total, time.Since(stepStart).Milliseconds(), nil
 }
 
@@ -207,6 +218,7 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 			}
 		}
 	}
+	recordOutcome(ctx, selectedOutcome(subDSL, subResult))
 	return subResult.StepOutputs[lastID], subResult.CostUSD, nil
 }
 
