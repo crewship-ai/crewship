@@ -68,6 +68,23 @@ func TestNativeTokenProbesKeepSupportedScalarTypes(t *testing.T) {
 	}
 }
 
+func TestNativeProbeMetadataRespectsExplicitTypesAndLegacyDefault(t *testing.T) {
+	h := NewCredentialHandler(nil, newTestLogger())
+	for _, typ := range []string{"", "API_KEY", "CLI_TOKEN", "SECRET", "SSH_KEY", "CERTIFICATE", "USERPASS", "OAUTH2", "UNKNOWN"} {
+		rr := httptest.NewRecorder()
+		h.DefaultEnvVar(rr, httptest.NewRequest("GET", "/api/v1/credentials/default-env-var?provider=GITLAB&type="+typ, nil))
+		var got struct {
+			Testable bool `json:"testable"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if want := typ == "" || typ == "API_KEY" || typ == "CLI_TOKEN"; got.Testable != want {
+			t.Errorf("metadata type %q: testable=%t want%t", typ, got.Testable, want)
+		}
+	}
+}
+
 func TestNativeEndpointProbeCannotBecomeVendorAuthentication(t *testing.T) {
 	transport := countNativeProbeCalls(t)
 	got := probeProvider(t.Context(), "GITLAB", "ENDPOINT_URL", "https://fixture.example/v1", false)
