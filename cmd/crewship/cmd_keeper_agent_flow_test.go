@@ -33,6 +33,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 	"github.com/crewship-ai/crewship/internal/testutil"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Exercise the production Gatekeeper prompt/response parser with deterministic
@@ -140,7 +141,7 @@ func TestKeeperAgentCLIVaultSidecarStandardTool(t *testing.T) {
 	for _, id := range []string{agent, peer} {
 		seed(`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,status,cli_adapter,llm_provider,llm_model,tool_profile,timeout_seconds,memory_enabled,created_at) VALUES(?,?,?,?,?,'AGENT','IDLE','CLAUDE_CODE','ANTHROPIC','fixture','CODING',60,0,datetime('now'))`, id, ws, crew, id, id)
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	for i, run := range []string{"native-live", "native-peer", "native-ended"} {
 		id, state := agent, "running"
 		var terminal any
@@ -151,7 +152,11 @@ func TestKeeperAgentCLIVaultSidecarStandardTool(t *testing.T) {
 			state, terminal = "succeeded", now
 		}
 		seed(`INSERT INTO work_items(id,workspace_id,source,source_ref,agent_id,crew_id,session_id,class,input_json,input_sha256,target_revision,state,generation,attempts,priority,eligible_at,created_at,updated_at,terminal_at) VALUES(?,?,'manual','',?,?,'','background','{}','sha','rev',?,1,0,0,?,?,?,?)`, "work-"+run, ws, id, crew, state, now, now, now, terminal)
-		seed(`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,runtime_phase,ended_at) VALUES(?,?,1,1,'fixture',?,?,?,'confirmed',?)`, run, "work-"+run, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), now, now, terminal)
+		seed(`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,runtime_phase,ended_at) VALUES(?,?,1,1,'fixture',?,?,?,'confirmed',?)`, run, "work-"+run, tsformat.Format(time.Now().Add(time.Hour)), now, now, terminal)
+		seed(`INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES(?,?,?,?,'run.started','orchestrator','fixture run','{}',?)`, "journal-"+run, ws, crew, id, run)
+		if terminal != nil {
+			seed(`INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES(?,?,?,?,'run.completed','orchestrator','fixture end','{}',?)`, "journal-end-"+run, ws, crew, id, run)
+		}
 	}
 	var authenticated atomic.Int32
 	var acceptedToken atomic.Value
