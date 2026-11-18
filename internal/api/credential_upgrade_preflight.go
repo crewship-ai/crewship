@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -126,12 +125,10 @@ func InspectCredentialUpgrade(ctx context.Context, db *sql.DB, workspace string,
 			}
 			mrows.Close()
 		}
-		for _, config := range configs {
-			if strings.TrimSpace(config) != "" && !json.Valid([]byte(config)) {
-				a.Warnings = append(a.Warnings, "malformed MCP metadata; reference coverage unknown")
-			}
+		refs, refsErr := orchestrator.CredentialUpgradeMCPReferences(configs...)
+		if refsErr != nil {
+			a.Warnings = append(a.Warnings, "malformed typed MCP metadata; reference coverage unknown")
 		}
-		refs := orchestrator.CredentialUpgradeMCPReferences(configs...)
 		covered := map[string]bool{}
 		creds := []orchestrator.Credential{}
 		for _, d := range delivered {

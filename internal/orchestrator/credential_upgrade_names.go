@@ -1,9 +1,13 @@
 package orchestrator
 
 import (
+	"encoding/json"
+	"errors"
+	"sort"
+	"strings"
+
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
-	"sort"
 )
 
 // CredentialNameProblem contains metadata, never material or payload errors.
@@ -14,28 +18,36 @@ type CredentialNameProblem struct {
 }
 
 // CredentialUpgradeMCPReferences shares the runtime's reference extraction.
-func CredentialUpgradeMCPReferences(configs ...string) map[string]bool {
-	return collectMCPEnvRefs(configs...)
+func CredentialUpgradeMCPReferences(configs ...string) (map[string]bool, error) {
+	for _, config := range configs {
+		if strings.TrimSpace(config) == "" {
+			continue
+		}
+		var parsed credentialMCPReferenceConfig
+		if json.Unmarshal([]byte(config), &parsed) != nil {
+			return collectMCPEnvRefs(configs...), errors.New("malformed typed MCP reference metadata")
+		}
+	}
+	return collectMCPEnvRefs(configs...), nil
 }
 
 // InspectCredentialUpgradeNames checks potential native file-name conflicts.
 // Inputs are the resolver's complete metadata snapshot, not the deduplicated
 // public resolve view. It does not establish payload validity or authentication.
 func InspectCredentialUpgradeNames(creds []Credential, keeper bool, mcpRefs map[string]bool) []CredentialNameProblem {
-	claims := map[string]map[string]string{}
+	claims := map[string][]string{}
 	problems := []CredentialNameProblem{}
 	claim := func(name string, c Credential, file bool) {
 		if !credname.Valid(name) {
 			problems = append(problems, CredentialNameProblem{name, []string{c.ID}, "invalid_name"})
 			return
 		}
-		if file && nativeAliasReserved(name) && !(c.Type == "CLI_TOKEN" && providerAuthSlot(name)) {
+		if (file || c.Type == "OAUTH2") && nativeAliasReserved(name) && !(c.Type == "CLI_TOKEN" && c.EnvVarName == name && providerAuthSlot(name)) {
 			problems = append(problems, CredentialNameProblem{name, []string{c.ID}, "reserved_runtime_name"})
 		}
-		if claims[name] == nil {
-			claims[name] = map[string]string{}
-		}
-		claims[name][c.ID+"@"+c.EnvVarName] = c.ID
+		// Preserve each occurrence: a primary alias can collide with a part
+		// of the very same credential, which the runtime also rejects.
+		claims[name] = append(claims[name], c.ID)
 	}
 	for _, c := range creds {
 		if !credpolicy.Known(c.Type) {
@@ -84,8 +96,12 @@ func InspectCredentialUpgradeNames(creds []Credential, keeper bool, mcpRefs map[
 			continue
 		}
 		ids := []string{}
+		seen := map[string]bool{}
 		for _, id := range owners {
-			ids = append(ids, id)
+			if !seen[id] {
+				ids = append(ids, id)
+				seen[id] = true
+			}
 		}
 		sort.Strings(ids)
 		problems = append(problems, CredentialNameProblem{name, ids, "potential_collision"})
