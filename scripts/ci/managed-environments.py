@@ -18,6 +18,8 @@ import tempfile
 from contextlib import contextmanager
 
 PREFIX = 'github.com/crewship-ai/crewship/'
+CLI_TESTS = {'internal/orchestrator': {'TestNativeCLIShellEnvironment'}}
+CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},
@@ -141,8 +143,10 @@ def host_source_inventory_errors(root='.'):
     return errors
 
 REQUIRED = {(PREFIX + package, name)
-            for suites in (TESTS, HOST_TESTS)
+            for suites in (TESTS, HOST_TESTS, CLI_TESTS)
             for package, names in suites.items() for name in names}
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter)
+                for adapter in CLI_ADAPTERS)
 HOST_UID = 65534
 
 
@@ -193,7 +197,8 @@ def commands(go_binary='go'):
     for packages, prefix in (
             (legacy, []),
             ({'internal/orchestrator': TESTS['internal/orchestrator']},
-             ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local'])):
+             ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local']),
+            (CLI_TESTS, [])):
         pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
                                  for name in sorted(names)) + ')$'
         command = prefix + [go_binary, 'test', '-tags', 'integration', '-p', '1', '-count=1',

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Multiline credential parts no longer stop at the first line (#5463).** `credential field set --value-stdin` preserves complete UTF-8 PEM/JSON and final line endings within 64 KiB, rejects unsupported binary input and refuses conflicting value flags. Native certificate `key_pem` onboarding can use stdin without exposing the key in arguments.
+
 - **Codex can opt into qualified outer-container isolation per crew (#5460).** OWNER/ADMIN consent, immutable exact-build authority, actual runtime attestation and durable run audit are required. The static launcher enforces effective UID, no-new-privileges, seccomp and zero capabilities before Codex executes. MINIMAL remains read-only and other adapters retain their provider.
 - ⚠️ **Behaviour change:** the legacy global Codex `danger-full-access` override no longer authorizes execution without the crew opt-in and qualified runtime. New runtimes stage immutable launcher generations when supported; running ordinary crews are not stopped for a path-only change. Mutable or missing launcher evidence refuses outer mode with a recreation requirement.
 

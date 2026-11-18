@@ -131,6 +131,16 @@ func TestNativeVaultCLIToStandardSSH(t *testing.T) {
 	if encrypted == original || strings.Contains(encrypted, "PRIVATE KEY") {
 		t.Fatal("Vault did not encrypt private key")
 	}
+	// The same safe CLI field path used by certificate key_pem must preserve
+	// a whole key, not just the first scanner line, through encrypted storage.
+	cli(canonical, "credential", "field", "set", created.ID, "key_pem", "--value-stdin")
+	var fieldPlain, fieldEncrypted string
+	if err := db.QueryRow(`SELECT COALESCE(value,''),encrypted_value FROM credential_fields WHERE credential_id=? AND key='key_pem'`, created.ID).Scan(&fieldPlain, &fieldEncrypted); err != nil {
+		t.Fatal(err)
+	}
+	if fieldPlain != "" || fieldEncrypted == "" || fieldEncrypted == canonical {
+		t.Fatal("secret field was not encrypted at rest")
+	}
 	resolver := chatbridge.NewIPCResolver(server.URL, master, logger)
 	resolve := func(id string) []orchestrator.Credential {
 		t.Helper()
@@ -147,6 +157,9 @@ func TestNativeVaultCLIToStandardSSH(t *testing.T) {
 	creds := resolve(agent)
 	if len(creds) != 1 || creds[0].ID != created.ID || creds[0].EnvVarName != "NATIVE_SSH" || creds[0].PlainValue != original {
 		t.Fatal("CLI/Vault/resolver changed bytes or slot")
+	}
+	if len(creds[0].Fields) != 1 || creds[0].Fields[0].Value != canonical || creds[0].Fields[0].EnvVar != "NATIVE_SSH_KEY_PEM" || !creds[0].Fields[0].IsSecret {
+		t.Fatal("CLI/Vault/resolver changed the secret field bytes or slot")
 	}
 	if len(resolve(peer)) != 0 {
 		t.Fatal("ungranted peer received credential through resolver")
@@ -180,6 +193,18 @@ func TestNativeVaultCLIToStandardSSH(t *testing.T) {
 		output, err := command.CombinedOutput()
 		if err != nil || strings.TrimSpace(string(output)) != "fixture\\native-user" {
 			t.Fatalf("native SSH failed after Vault resolution: %v %s", err, output)
+		}
+		fieldFile := filepath.Join(files, "NATIVE_SSH_KEY_PEM")
+		fieldBytes, err := os.ReadFile(fieldFile)
+		fieldInfo, statErr := os.Stat(fieldFile)
+		if err != nil || statErr != nil || fieldInfo.Mode().Perm() != 0400 || string(fieldBytes) != canonical {
+			t.Fatal("native secret field bytes or permissions changed")
+		}
+		fieldCommand := exec.CommandContext(ctx, "sh", "-c", `test -f "$NATIVE_SSH_KEY_PEM" && exec ssh -F /dev/null -i "$NATIVE_SSH_KEY_PEM" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o PasswordAuthentication=no -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o ClearAllForwardings=yes -o ConnectTimeout=3 -o UserKnownHostsFile="$1" -p "$2" fixture@127.0.0.1 whoami`, "fixture", known, fmt.Sprint(port))
+		fieldCommand.Env = command.Env
+		fieldOutput, err := fieldCommand.CombinedOutput()
+		if err != nil || strings.TrimSpace(string(fieldOutput)) != "fixture\\native-user" {
+			t.Fatalf("native secret-field SSH authentication failed: %v %s", err, fieldOutput)
 		}
 		return filepath.Join(files, "ssh/NATIVE_SSH")
 	}
