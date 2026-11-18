@@ -1,0 +1,1 @@
+- **Stopping a protected run during a container runtime outage now reports `runtime_unavailable` instead of `stop_not_confirmed`.** The host-run stop path discarded the container inspection error when its output probe also failed, losing the runtime classification. It now preserves both errors, matching the other stop paths.

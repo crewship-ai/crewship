@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test"
+import { triggerDetailLoadErrorFlow } from "./trigger-detail-load-error"
 
-/** Real HTTP setup and lifecycle; no route mocks or provider execution required. */
+/** Real HTTP lifecycle; only recovery checks inject failures. No provider execution. */
 export async function incomingWebhookFlow(page: Page) {
   const slug = `e2e-incoming-${Date.now().toString(36)}`
   const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
@@ -147,6 +148,7 @@ export async function incomingWebhookFlow(page: Page) {
     await expect(
       page.getByRole("row", { name: `Open ${slug} refreshed`, exact: true }),
     ).toHaveCount(0)
+    await triggerDetailLoadErrorFlow(page, hook.id, `${slug} GitHub`)
   } finally {
     for (const id of hooks) {
       const deleted = await page.request.delete(

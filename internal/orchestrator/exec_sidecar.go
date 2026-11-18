@@ -822,6 +822,10 @@ func writeCredentialFiles(
 		return nil
 	}
 
+	// The non-batched path must keep credential material off argv too.
+	// This also covers providers decorated by routine and worker callers.
+	cfg.Cmd = []string{"sh"}
+	cfg.Stdin = strings.NewReader(script)
 	result, err := ctr.Exec(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("write credential files: %w", err)

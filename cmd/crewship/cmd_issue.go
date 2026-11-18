@@ -36,6 +36,7 @@ type issueItem struct {
 	WorkNote             string         `json:"work_note" yaml:"work_note"`
 	WorkStopping         bool           `json:"work_stopping" yaml:"work_stopping"`
 	ID                   string         `json:"id" yaml:"id"`
+	WorkspaceID          string         `json:"workspace_id" yaml:"workspace_id"`
 	CrewID               string         `json:"crew_id" yaml:"crew_id"`
 	CrewName             string         `json:"crew_name" yaml:"crew_name"`
 	CrewSlug             string         `json:"crew_slug" yaml:"crew_slug"`

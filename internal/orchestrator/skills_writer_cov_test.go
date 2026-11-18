@@ -66,8 +66,8 @@ func covListedRoots(script string) []string {
 func covRMCommands(c *covContainer) []string {
 	var out []string
 	for _, call := range c.snapshotCalls() {
-		if len(call.Cmd) == 3 && call.Cmd[0] == "sh" && strings.HasPrefix(call.Cmd[2], "rm ") {
-			out = append(out, call.Cmd[2])
+		if script := covScript(call); strings.HasPrefix(script, "rm ") {
+			out = append(out, script)
 		}
 	}
 	return out

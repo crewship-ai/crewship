@@ -178,6 +178,18 @@ func (s *Store) FinishHostChat(ctx context.Context, runID string, r HostChatResu
 	}
 	// A separately supplied display exit can never overrule observed process proof.
 	r.Result.ExitCode = r.ObservedExit
+	if r.Status == "TIMEOUT" {
+		metadata := make(map[string]any, len(r.Result.Metadata)+1)
+		for key, value := range r.Result.Metadata {
+			metadata[key] = value
+		}
+		metadata["runtime_status"] = "TIMEOUT"
+		r.Result.Metadata = metadata
+		if r.Result.ErrorMessage == nil || *r.Result.ErrorMessage == "" {
+			message := "agent execution timed out"
+			r.Result.ErrorMessage = &message
+		}
+	}
 	encoded, err := json.Marshal(r.Result)
 	if err != nil || len(encoded) > 512*1024 {
 		return ErrRunResultUnstored
@@ -230,6 +242,12 @@ func (s *Store) FinishHostChat(ctx context.Context, runID string, r HostChatResu
 		reason = "host turn returned before agent execution was requested"
 	}
 	status := r.Status
+	if known && status == "TIMEOUT" {
+		// The work ledger's terminal vocabulary is COMPLETED/FAILED/CANCELLED.
+		// Keep the timeout diagnosis in the result and journal projection.
+		status = "FAILED"
+		reason = "host chat execution timed out"
+	}
 	if !known {
 		reason = "protected host capture awaiting retained result"
 		evidence = "execution_outcome_unknown"
