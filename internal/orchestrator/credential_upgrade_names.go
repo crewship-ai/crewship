@@ -12,9 +12,9 @@ import (
 
 // CredentialNameProblem contains metadata, never material or payload errors.
 type CredentialNameProblem struct {
-	Alias         string   `json:"alias"`
-	CredentialIDs []string `json:"credential_ids"`
-	Reason        string   `json:"reason"`
+	Alias         string   `json:"alias" yaml:"alias"`
+	CredentialIDs []string `json:"credential_ids" yaml:"credential_ids"`
+	Reason        string   `json:"reason" yaml:"reason"`
 }
 
 // CredentialUpgradeMCPReferences shares the runtime's reference extraction.

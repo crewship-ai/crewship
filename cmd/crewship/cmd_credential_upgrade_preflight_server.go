@@ -50,11 +50,11 @@ func init() {
 			}
 		}
 		return struct {
-			*api.CredentialUpgradeReport
-			SourceBuild        string `json:"source_build"`
-			TargetBuild        string `json:"target_build"`
-			ConfigurationKnown bool   `json:"configuration_known"`
-			TargetBuildKnown   bool   `json:"target_build_known"`
+			*api.CredentialUpgradeReport `json:",inline" yaml:",inline"`
+			SourceBuild                  string `json:"source_build" yaml:"source_build"`
+			TargetBuild                  string `json:"target_build" yaml:"target_build"`
+			ConfigurationKnown           bool   `json:"configuration_known" yaml:"configuration_known"`
+			TargetBuildKnown             bool   `json:"target_build_known" yaml:"target_build_known"`
 		}{report, in.SourceBuild, target, in.ConfigurationKnown, targetKnown}, nil
 	}
 }

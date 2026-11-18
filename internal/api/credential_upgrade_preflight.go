@@ -12,22 +12,22 @@ import (
 )
 
 type CredentialUpgradeAgent struct {
-	ID                               string                               `json:"agent_id"`
-	Slug                             string                               `json:"agent_slug"`
-	Problems                         []orchestrator.CredentialNameProblem `json:"problems"`
-	Warnings                         []string                             `json:"warnings"`
-	LegacySandboxBlocked             bool                                 `json:"legacy_sandbox_blocked"`
+	ID                               string                               `json:"agent_id" yaml:"agent_id"`
+	Slug                             string                               `json:"agent_slug" yaml:"agent_slug"`
+	Problems                         []orchestrator.CredentialNameProblem `json:"problems" yaml:"problems"`
+	Warnings                         []string                             `json:"warnings" yaml:"warnings"`
+	LegacySandboxBlocked             bool                                 `json:"legacy_sandbox_blocked" yaml:"legacy_sandbox_blocked"`
 	crew, adapter, agentMCP, crewMCP string
 }
 
 type CredentialUpgradeReport struct {
-	Ready               bool                     `json:"ready"`
-	State               string                   `json:"state"`
-	WorkspaceID         string                   `json:"workspace_id"`
-	Scope               string                   `json:"scope"`
-	Agents              []CredentialUpgradeAgent `json:"agents"`
-	CodexSandboxMode    string                   `json:"codex_sandbox_mode"`
-	ConfigurationSource string                   `json:"configuration_source"`
+	Ready               bool                     `json:"ready" yaml:"ready"`
+	State               string                   `json:"state" yaml:"state"`
+	WorkspaceID         string                   `json:"workspace_id" yaml:"workspace_id"`
+	Scope               string                   `json:"scope" yaml:"scope"`
+	Agents              []CredentialUpgradeAgent `json:"agents" yaml:"agents"`
+	CodexSandboxMode    string                   `json:"codex_sandbox_mode" yaml:"codex_sandbox_mode"`
+	ConfigurationSource string                   `json:"configuration_source" yaml:"configuration_source"`
 }
 
 // InspectCredentialUpgrade is an offline, metadata-only consumer of the exact
