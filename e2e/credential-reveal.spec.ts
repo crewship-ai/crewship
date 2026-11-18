@@ -79,7 +79,7 @@ test("Native delivery Activity shows its run without claiming authentication", a
     else if (path === "/api/v1/workspaces") body = [{ id: "ws", name: "Fixture", slug: "fixture", currentUserRole: "OWNER", currentUserCapabilities: [] }]
     else if (path === "/api/v1/credentials") body = [credential]
     else if (path === "/api/v1/credentials/native-delivery") body = credential
-    else if (path === "/api/v1/credentials/native-delivery/access/me") body = { actions: { read: { state: "allowed" } } }
+    else if (path === "/api/v1/credentials/native-delivery/access/me") body = { actions: { read: { state: "allowed" }, edit: { state: "allowed" } } }
     else if (path === "/api/v1/credentials/native-delivery/audit") body = [
       { ...common, id: "delivered", event_type: "DELIVERED", metadata: { channel: "file", run_id: "msg_123_fixture", authentication: "unknown", value: "never-render-synthetic-secret" } },
       { ...common, id: "fetch", event_type: "USE", metadata: { source: "sidecar_fetch" } },
