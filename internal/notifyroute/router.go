@@ -217,6 +217,9 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 	var routeErr error
 
 	for _, ch := range channels {
+		if item.Payload["subkind"] == "work_run_failure" && (ch.Scope != notify.ScopeUser || ch.OwnerUserID != uid) {
+			continue
+		}
 		if idx.state(category, ch.ID) != "immediate" {
 			// off (the default) — the user never opted this cell in. Not
 			// logged: with N channels x 9 categories this is overwhelmingly

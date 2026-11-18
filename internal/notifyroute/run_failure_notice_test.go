@@ -12,6 +12,13 @@ import (
 )
 
 func TestRunFailureNoticeOutboxSurvivesExternalFailure(t *testing.T) {
+	for _, change := range []string{"retry", "revoked"} {
+		t.Run(change, func(t *testing.T) { checkRunFailureNoticeRetry(t, change == "revoked") })
+	}
+}
+
+func checkRunFailureNoticeRetry(t *testing.T, revoke bool) {
+	t.Helper()
 	db := newRouteTestDB(t)
 	r := newTestRouter(db, nil, nil)
 	var sends atomic.Int32
@@ -23,7 +30,12 @@ func TestRunFailureNoticeOutboxSurvivesExternalFailure(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer target.Close()
-	ch := seedWebhookChannel(t, db, target.URL)
+	ch, err := r.channels.Create(t.Context(), notify.ChannelInput{
+		WorkspaceID: "ws1", Type: notify.ChannelWebhook, URL: target.URL, Scope: notify.ScopeUser, OwnerUserID: "u_member",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := r.prefs.Set(t.Context(), "ws1", "u_member", []PrefCell{
 		{Category: notify.CategoryAgentsError, ChannelID: ch.ID, State: "immediate"},
 	}); err != nil {
@@ -71,6 +83,18 @@ func TestRunFailureNoticeOutboxSurvivesExternalFailure(t *testing.T) {
 	restarted := newTestRouter(db, nil, nil)
 	if err := restarted.drainRunFailureNotices(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if revoke {
+		if _, err := db.Exec(`UPDATE workspace_members SET access_mode='restricted' WHERE user_id='u_member'`); err != nil {
+			t.Fatal(err)
+		}
+		if attempted, sent := restarted.RecoverStuckDeliveries(t.Context()); attempted != 1 || sent != 0 || sends.Load() != 1 {
+			t.Fatalf("revoked delivery attempted=%d sent=%d total sends=%d", attempted, sent, sends.Load())
+		}
+		if status, _ := deliveryStatus(t, restarted, deliveryID); status != StatusDroppedPref {
+			t.Fatalf("revoked delivery remains eligible: %q", status)
+		}
+		return
 	}
 	if attempted, sent := restarted.RecoverStuckDeliveries(t.Context()); attempted != 1 || sent != 1 || sends.Load() != 2 {
 		t.Fatalf("recovery attempted=%d sent=%d total sends=%d", attempted, sent, sends.Load())

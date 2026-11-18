@@ -123,6 +123,17 @@ func (s *DeliveryStore) MarkFailed(ctx context.Context, id, errMsg string) error
 	return nil
 }
 
+// markSourceUnavailable permanently closes a retry whose recipient lost
+// access to the source. A concurrent successful delivery stays recorded.
+func (s *DeliveryStore) markSourceUnavailable(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE notification_deliveries SET status = 'dropped_pref',
+		    error = 'source no longer available',
+		    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE id = ? AND status IN ('pending','failed')`, id)
+	return err
+}
+
 // ListRecoverable returns outbox rows that are stuck and worth another
 // delivery attempt: still pending (the process died between InsertPending
 // and MarkSent/MarkFailed) or failed (a transient dispatch error), under

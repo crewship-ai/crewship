@@ -11,7 +11,7 @@ import (
 
 const runFailureNoticeBatch = 100
 
-const pendingRunFailureNotices = `SELECT id,run_id FROM run_failure_notice_outbox
+const pendingRunFailureNotices = `SELECT id,run_id,projected FROM run_failure_notice_outbox
 WHERE id>(SELECT watermark FROM run_failure_notice_state WHERE id=1)
 ORDER BY id LIMIT ?`
 
@@ -47,23 +47,19 @@ func (r *Router) wakeRunFailureNotices(kind journal.EntryType) {
 }
 
 func (r *Router) drainRunFailureNotices(ctx context.Context) error {
-	write, ok := quiesce.Enter(ctx)
-	if !ok {
-		return ctx.Err()
-	}
-	defer write.Leave()
 	rows, err := r.db.QueryContext(ctx, pendingRunFailureNotices, runFailureNoticeBatch)
 	if err != nil {
 		return err
 	}
 	type event struct {
-		id  int64
-		run string
+		id        int64
+		run       string
+		projected bool
 	}
 	var pending []event
 	for rows.Next() {
 		var e event
-		if err = rows.Scan(&e.id, &e.run); err != nil {
+		if err = rows.Scan(&e.id, &e.run, &e.projected); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -75,17 +71,27 @@ func (r *Router) drainRunFailureNotices(ctx context.Context) error {
 		return err
 	}
 	for _, e := range pending {
-		if err := r.projectRunFailureNotice(ctx, e.run); err != nil {
-			return err
+		write, ok := quiesce.Enter(ctx)
+		if !ok {
+			return ctx.Err()
 		}
-		if _, err := r.db.ExecContext(ctx, `UPDATE run_failure_notice_state SET watermark=max(watermark,?) WHERE id=1`, e.id); err != nil {
+		err := func() error {
+			defer write.Leave()
+			writeCtx := write.Context()
+			if err := r.projectRunFailureNotice(writeCtx, e.id, e.run, e.projected); err != nil {
+				return err
+			}
+			_, err := r.db.ExecContext(writeCtx, `UPDATE run_failure_notice_state SET watermark=max(watermark,?) WHERE id=1`, e.id)
+			return err
+		}()
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Router) projectRunFailureNotice(ctx context.Context, run string) error {
+func (r *Router) projectRunFailureNotice(ctx context.Context, outboxID int64, run string, projected bool) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -99,20 +105,34 @@ func (r *Router) projectRunFailureNotice(ctx context.Context, run string) error 
 		WorkspaceID: source.WorkspaceID, Kind: inbox.KindFailedRun, SourceID: run,
 		TargetUserID: source.UserID, Title: "Agent run failed", SenderType: "system",
 		SenderName: "Runs", Priority: "high",
-		BodyMD: "The agent run ended unsuccessfully. Open run history to see the failure before retrying.",
-		Payload: map[string]any{"subkind": "work_run_failure", "run_id": run,
-			"agent_id": source.AgentID, "crew_id": source.CrewID},
+		BodyMD:  "The agent run ended unsuccessfully. Open run history to see the failure before retrying.",
+		Payload: map[string]any{"subkind": "work_run_failure"},
 	}
-	if err := inbox.InsertTx(ctx, tx, r.logger, item); err != nil {
-		return err
+	if projected {
+		var visible bool
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_items
+			WHERE workspace_id=? AND kind=? AND source_id=? AND target_user_id=?)`,
+			source.WorkspaceID, item.Kind, run, source.UserID).Scan(&visible)
+		if err != nil || !visible {
+			return err
+		}
+	} else {
+		if err := inbox.InsertTx(ctx, tx, r.logger, item); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE run_failure_notice_outbox SET projected=1 WHERE id=?`, outboxID); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if hub, ok := r.presence.(interface {
-		BroadcastChannel(prefix, id, eventType string, payload any)
-	}); ok {
-		hub.BroadcastChannel("user", source.UserID, "inbox.updated", map[string]string{"source": "run_failure"})
+	if !projected {
+		if hub, ok := r.presence.(interface {
+			BroadcastChannel(prefix, id, eventType string, payload any)
+		}); ok {
+			hub.BroadcastChannel("user", source.UserID, "inbox.updated", map[string]string{"source": "run_failure"})
+		}
 	}
 	// An error before a delivery row exists keeps the event behind the
 	// watermark. Once enqueued, external failures retry in the delivery outbox.

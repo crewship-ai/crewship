@@ -92,12 +92,19 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		return false
 	}
 
-	if payload["subkind"] == "work_run_failure" {
+	workFailure := payload["subkind"] == "work_run_failure"
+	if workFailure {
 		allowed, err := r.canDeliverRunFailure(ctx, d.WorkspaceID, d.SourceID, d.UserID)
 		if err != nil {
 			r.logger.Warn("notifyroute: recovery: verify run failure audience", "error", err, "delivery_id", d.ID)
 		}
-		if err != nil || !allowed {
+		if err != nil {
+			return false
+		}
+		if !allowed {
+			if err := r.deliveries.markSourceUnavailable(ctx, d.ID); err != nil {
+				r.logger.Warn("notifyroute: recovery: close inaccessible delivery", "error", err, "delivery_id", d.ID)
+			}
 			return false
 		}
 	}
@@ -106,6 +113,23 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 	if err != nil {
 		_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: channel unavailable: "+err.Error())
 		return false
+	}
+
+	if workFailure {
+		cells, err := r.prefs.Get(ctx, d.WorkspaceID, d.UserID)
+		if err != nil {
+			r.logger.Warn("notifyroute: recovery: read current preferences", "error", err, "delivery_id", d.ID)
+			return false
+		}
+		prefs := indexCells(cells)
+		if !ch.Enabled || ch.Scope != notify.ScopeUser || ch.OwnerUserID != d.UserID ||
+			!ch.AllowsCategory(d.Category) || notify.PriorityRank(priority) < notify.PriorityRank(ch.MinPriority) ||
+			prefs.state(d.Category, ch.ID) != "immediate" || prefs.muted(ch.ID) {
+			if err := r.deliveries.markSourceUnavailable(ctx, d.ID); err != nil {
+				r.logger.Warn("notifyroute: recovery: close opted-out delivery", "error", err, "delivery_id", d.ID)
+			}
+			return false
+		}
 	}
 
 	// Same derivation as the live path, so a recovered delivery carries the
@@ -121,6 +145,9 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		SourceID:    d.SourceID,
 		Links:       links,
 		Vars:        vars,
+	}
+	if workFailure {
+		msg = r.applyTemplate(ctx, msg, ch.ID)
 	}
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
 		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {
