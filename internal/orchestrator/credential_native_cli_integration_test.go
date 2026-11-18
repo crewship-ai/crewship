@@ -182,7 +182,7 @@ test "$(curl --silent --show-error --fail --noproxy '*' --connect-timeout 3 --ma
 # neither the password nor its expansion is passed as a process argument.
 test "$(printf 'user = "%%s:%%s"\n' "$(cat "$NATIVE_TEST_BASIC_LOGIN_USERNAME")" "$(cat "$NATIVE_TEST_BASIC_LOGIN_PASSWORD")" | curl --config - --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_BASIC_URL")" = fixture-basic-authenticated
 test "$(printf 'Authorization: Bearer %%s\n' "$NATIVE_TEST_TOKEN" | curl --header @- --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_TOKEN_URL")" = fixture-token-authenticated
-test "$("$NATIVE_TEST_GLAB_BINARY" api --hostname "$NATIVE_TEST_GITLAB_HOST" user)" = '{"id":1,"username":"fixture-glab-user"}'
+test "$("$NATIVE_TEST_GLAB_BINARY" api user)" = '{"id":1,"username":"fixture-glab-user"}'
 printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)), port)
 	var passed atomic.Bool
 	var calls atomic.Int32
