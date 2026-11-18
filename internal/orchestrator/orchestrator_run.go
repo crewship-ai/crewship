@@ -1340,11 +1340,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// the command exited non-zero — the default warn+ filter surfaces
 	// failures without consumers having to parse payload.
 	endSeverity := "info"
-	if exitCode != 0 || inBand.seen {
+	if exitCode != 0 || inBand.failed() {
 		endSeverity = "warn"
 	}
 	endPayload := map[string]any{"exit_code": exitCode, "running": running}
-	if inBand.seen {
+	if inBand.failed() {
 		// An exit-0 run the agent itself called failed must not read as a clean
 		// exec in Crow's Nest just because the process was polite about it.
 		endPayload["in_band_error"] = true

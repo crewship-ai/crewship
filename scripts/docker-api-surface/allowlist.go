@@ -94,12 +94,12 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerCreate", HTTP: "POST /containers/create", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "creates every agent, sidecar and provisioning container",
 	},
 	{
 		Method: "ContainerInspect", HTTP: "GET /containers/{id}/json", ProxyVars: []string{"CONTAINERS"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "state, mounts and network reads for running crews; effective configuration audit for disposable lock builders",
 	},
 	{
@@ -114,12 +114,12 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerRemove", HTTP: "DELETE /containers/{id}", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "tears down crews, temp provisioning containers and stranded runtime",
 	},
 	{
 		Method: "ContainerStart", HTTP: "POST /containers/{id}/start", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "starts agent, sidecar and provisioning containers",
 	},
 	{
@@ -144,7 +144,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerWait", HTTP: "POST /containers/{id}/wait", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "blocks on one-shot helper containers (secrets sweep, image cache warm)",
 	},
 	{
@@ -323,6 +323,10 @@ var declaredPackages = []string{
 	"internal/backup",
 	"internal/devcontainer",
 	"internal/provider/docker",
+	// Standalone release acceptance executable, never imported by the server or
+	// shipped in runtime archives. Uses only the five existing container APIs
+	// to install into one owned disposable CI container; no new proxy permission.
+	"scripts/ci/installer-qualification",
 	// The gate itself: imports the SDK only to read *client.Client's method set
 	// by reflection. It issues no requests.
 	"scripts/docker-api-surface",

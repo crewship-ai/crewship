@@ -57,7 +57,9 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		// brief_revision / client_review_required ride every issue row
 		// (no omitempty on issueResponse since #2448); the schema has to
 		// admit them or every response violates the contract (#2623).
-		"brief_revision": integer(), "client_review_required": boolean(),
+		"brief_revision": integer(), "client_review_required": map[string]any{
+			"type": "boolean", "description": "Requires human acceptance. Automated completion moves the issue to REVIEW while this policy applies.",
+		},
 		"id": str(), "workspace_id": str(), "crew_id": str(),
 		"crew_name": str(), "crew_slug": str(), "number": nullable("integer"),
 		"identifier": nullable("string"), "title": str(), "description": nullable("string"),

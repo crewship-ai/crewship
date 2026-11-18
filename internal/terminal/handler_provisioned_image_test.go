@@ -11,6 +11,7 @@ package terminal
 import (
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func (m *imgContainer) ContainerStats(context.Context, string) (*provider.Contai
 	return nil, nil
 }
 func (m *imgContainer) Exec(context.Context, provider.ExecConfig) (*provider.ExecResult, error) {
-	return &provider.ExecResult{ExecID: "e", Reader: io.NopCloser(nil)}, nil
+	return &provider.ExecResult{ExecID: "e", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *imgContainer) ExecInspect(context.Context, string) (bool, int, error) { return false, 0, nil }
 func (m *imgContainer) CrewContainerName(_ string, slug string) string {

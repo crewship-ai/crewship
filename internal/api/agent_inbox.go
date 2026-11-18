@@ -92,9 +92,9 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		resp.Unavailable = append(resp.Unavailable, "approvals")
 	}
 
-	// Assignments open (this agent is the recipient, still running or queued)
+	// Writers use PENDING/RUNNING; retain legacy lowercase queued rows too.
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM assignments WHERE workspace_id = ? AND assigned_to_id = ? AND status IN ('queued', 'running')`,
+		`SELECT COUNT(*) FROM assignments WHERE workspace_id = ? AND assigned_to_id = ? AND UPPER(status) IN ('PENDING', 'QUEUED', 'RUNNING')`,
 		workspaceID, agentID).Scan(&resp.AssignmentsOpen); err != nil {
 		h.logger.Warn("inbox: assignments count", "err", err, "agent_id", agentID)
 		resp.Unavailable = append(resp.Unavailable, "assignments")

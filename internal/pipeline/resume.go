@@ -373,6 +373,7 @@ func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan,
 			// compares the stamped hash against the pinned definition.
 			PinnedVersion:   rec.PipelineVersion,
 			resume:          true,
+			legacyOutcome:   !rec.outcomeEvidenceRequired,
 			resumeAdmitted:  onAdmitted,
 			resumeReason:    plan.reason,
 			restoredOutputs: plan.restored,

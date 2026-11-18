@@ -20,7 +20,7 @@ import (
 // command combines both layers and is the mutation surface for governance.
 var keeperCmd = &cobra.Command{
 	Use:   "keeper",
-	Short: "Keeper watchdog status and governance settings",
+	Short: "Keeper agent access, watchdog status and governance settings",
 	Long: `Inspect and configure the Keeper security watchdog for the current
 workspace.
 
@@ -500,6 +500,7 @@ var keeperSecondApproverDisableCmd = &cobra.Command{
 // (internal/api/keeper_log.go:keeperLogEntry) — the Keeper decision audit
 // log, previously API-only (issue #966 part 3).
 type keeperRequestEntry struct {
+	RunID        *string `json:"requesting_run_id,omitempty" yaml:"requesting_run_id,omitempty"`
 	ID           string  `json:"id" yaml:"id"`
 	AgentID      string  `json:"agent_id" yaml:"agent_id"`
 	AgentName    string  `json:"agent_name" yaml:"agent_name"`
@@ -596,6 +597,9 @@ func init() {
 	keeperCmd.AddCommand(keeperRequestsCmd)
 	keeperCmd.AddCommand(keeperWatchCmd)
 	keeperCmd.AddCommand(keeperSecondApproverCmd)
+	for _, operation := range []string{"request", "execute", "request-status"} {
+		keeperCmd.AddCommand(newKeeperAgentCommand(operation))
+	}
 
 	rootCmd.AddCommand(keeperCmd)
 }

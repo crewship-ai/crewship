@@ -105,7 +105,8 @@ func inboxVisibilityClause(userID, role string) (string, []interface{}) {
     )`
 	clause += ` AND (` + chataudience.VerifiedTextInboxReadSQL + `)`
 	args = append(args, chataudience.VerifiedTextReadArgs(userID)...)
-	return clause, args
+	clause += ` AND (` + chataudience.RunFailureInboxReadSQL + `)`
+	return clause, append(args, userID)
 }
 
 // inboxEffectiveStateExpr computes the `state` the API returns to ONE

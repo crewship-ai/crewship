@@ -27,7 +27,10 @@ import (
 // returned count honest.
 func (e *MissionEngine) ReattachInProgressMissions(ctx context.Context) int {
 	rows, err := e.db.QueryContext(ctx,
-		`SELECT id FROM missions WHERE status = 'IN_PROGRESS' ORDER BY created_at ASC`)
+		`SELECT id FROM missions m WHERE status='IN_PROGRESS' OR
+		 (status='REVIEW' AND EXISTS(SELECT 1 FROM issue_executions x
+		  WHERE x.mission_id=m.id AND x.stage IN ('working','reviewing')))
+		 ORDER BY created_at ASC`)
 	if err != nil {
 		e.logger.Error("mission re-attach: scan IN_PROGRESS missions", "error", err)
 		return 0

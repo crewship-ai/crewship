@@ -1108,7 +1108,7 @@ required path parameter and workspace context scopes the lookup.
 | Field | Type | Description |
 |-------|------|-------------|
 | `approvals_pending` | `int` | Inbox waitpoint items awaiting this agent's decision. |
-| `assignments_open` | `int` | Tasks routed to this agent that have not reached a terminal state. |
+| `assignments_open` | `int` | Assignments routed to this agent in PENDING, QUEUED, or RUNNING state. Legacy casing is accepted. |
 | `escalations_open` | `int` | Peer conversations escalated up the lead chain that still target this agent. |
 | `unavailable` | `string[]`, optional | Component reads that failed (`approvals`, `assignments`, `escalations`, `peers`, `cost`). Do not present their default values as measured zero. |
 | `peer_messages` | `array` | Last N peer messages (both directions). `direction` is `"incoming"` or `"outgoing"`; `response` and `duration_ms` are populated only for resolved exchanges. |

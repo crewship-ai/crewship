@@ -37,7 +37,7 @@ var routineMCPSaveSchema = json.RawMessage(`{
 		},
 		"definition": {
 			"type": "object",
-			"description": "The routine DSL definition (steps, inputs, schedules, etc.). Validated by an inline test_run before the routine is persisted."
+			"description": "The routine DSL definition (steps, inputs, schedules, etc.). Validated by an inline test_run before the routine is persisted. Agent-run prompts must request a structured CHECKPOINT or HANDOFF outcome grounded in actual work. Keep that report compatible with output validation: appending text to a JSON-only response breaks JSON; a bare outcome line or arbitrary JSON field is not a HANDOFF. Do not fabricate outcomes in notify/transform steps."
 		},
 		"sample_inputs": {
 			"type": "object",
@@ -64,6 +64,11 @@ var routineMCPSaveSchema = json.RawMessage(`{
 				"timezone": {
 					"type": "string",
 					"description": "IANA timezone the cron expression is evaluated in, e.g. \"Europe/Prague\". Defaults to UTC."
+				},
+				"inputs": {
+					"type": "object",
+					"description": "Preset routine input values supplied to each scheduled run. These are distinct from sample_inputs, which are used only by the mandatory test_run. Validated against the saved routine's declared inputs.",
+					"additionalProperties": true
 				},
 				"catchup_policy": {
 					"type": "string",

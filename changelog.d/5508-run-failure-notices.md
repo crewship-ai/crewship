@@ -1,0 +1,1 @@
+- **A failed agent run could leave the requester without a notice:** queue failures when new human-authorized agent work settles, and retry opted-in channel delivery from the durable outbox.

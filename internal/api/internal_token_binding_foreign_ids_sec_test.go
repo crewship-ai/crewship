@@ -149,7 +149,7 @@ func TestSecBinding_SameWorkspaceBodyIDsOK(t *testing.T) {
 			name: "assignment create own crew+chat",
 			body: func(ids scopeIDs) map[string]any {
 				return map[string]any{
-					"target_slug": "aagent", "task": "legit work",
+					"target_slug": "a-peer", "task": "legit work",
 					"crew_id": ids.crewA, "workspace_id": ids.wsA, "chat_id": ids.chatA,
 				}
 			},
@@ -165,7 +165,7 @@ func TestSecBinding_SameWorkspaceBodyIDsOK(t *testing.T) {
 			name: "peer query create own crew+chat",
 			body: func(ids scopeIDs) map[string]any {
 				return map[string]any{
-					"target_slug": "aagent", "question": "status?",
+					"target_slug": "a-peer", "question": "status?",
 					"from_slug": "aagent", "crew_id": ids.crewA,
 					"workspace_id": ids.wsA, "chat_id": ids.chatA,
 				}
@@ -222,6 +222,8 @@ func TestSecBinding_SameWorkspaceBodyIDsOK(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h, ids, ah, qh, ph := foreignIDsHandlers(t)
+			// Positive scope cases must exercise delegation to another agent.
+			seedAgentRow(t, h.db, "scope-positive-peer", ids.wsA, ids.crewA, "Peer", "a-peer", "AGENT")
 			body, _ := json.Marshal(tc.body(ids))
 			rr := httptest.NewRecorder()
 			req := boundReq(http.MethodPost, "/x", body, scopeMaster, ids.wsA)

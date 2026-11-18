@@ -476,20 +476,22 @@ func collectRequestMCPEnvRefs(req AgentRunRequest) map[string]bool {
 	return refs
 }
 
+type credentialMCPReferenceConfig struct {
+	MCPServers map[string]struct {
+		Env     map[string]string `json:"env"`
+		Headers map[string]string `json:"headers"`
+		URL     string            `json:"url"`
+		HTTPURL string            `json:"httpUrl"`
+	} `json:"mcpServers"`
+}
+
 func collectMCPEnvRefs(configs ...string) map[string]bool {
 	refs := make(map[string]bool)
 	for _, cfg := range configs {
 		if cfg == "" {
 			continue
 		}
-		var wrapper struct {
-			MCPServers map[string]struct {
-				Env     map[string]string `json:"env"`
-				Headers map[string]string `json:"headers"`
-				URL     string            `json:"url"`
-				HTTPURL string            `json:"httpUrl"`
-			} `json:"mcpServers"`
-		}
+		var wrapper credentialMCPReferenceConfig
 		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
 			continue
 		}

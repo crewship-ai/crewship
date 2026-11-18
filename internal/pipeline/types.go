@@ -1132,14 +1132,15 @@ type AgentRunner interface {
 // row in the author crew (this is where author-crew-context
 // execution actually takes effect).
 type AgentStepRequest struct {
-	ChatOriginID string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
-	WorkspaceID  string
-	AuthorCrewID string
-	AgentSlug    string
-	Adapter      string
-	Model        string
-	Prompt       string
-	TimeoutSec   int
+	ChatOriginID  string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
+	WorkspaceID   string
+	AuthorCrewID  string
+	AgentSlug     string
+	Adapter       string
+	Model         string
+	ModelOverride string `json:"-"` // Authored pin, retaining bare versus adapter:model intent.
+	Prompt        string
+	TimeoutSec    int
 	// Provenance for the orchestrator's own journal/audit:
 	PipelineID   string
 	PipelineSlug string
@@ -1189,12 +1190,14 @@ type AgentStepRequest struct {
 // orchestrator collects token counts + cost via its existing
 // paymaster middleware; the pipeline package does not double-count.
 type AgentStepResult struct {
-	AgentWaitMs int64  // time waiting for the shared agent lock, including aborted waits
-	Output      string // final assistant message text
-	DurationMs  int64
-	CostUSD     float64
-	TokensIn    int
-	TokensOut   int
+	EffectiveModel   string `json:"effective_model,omitempty"` // Native init model, falling back to the actual adapter request.
+	EffectiveAdapter string `json:"effective_adapter,omitempty"`
+	AgentWaitMs      int64  // time waiting for the shared agent lock, including aborted waits
+	Output           string // final assistant message text
+	DurationMs       int64
+	CostUSD          float64
+	TokensIn         int
+	TokensOut        int
 }
 
 // PipelineResolver is how the executor looks up a pipeline by slug
@@ -1210,6 +1213,8 @@ type PipelineResolver interface {
 // output by ID for richer caller logic. WouldExecute is populated
 // only when Mode == ModeDryRun.
 type RunResult struct {
+	outcomeEvidence map[string]outcomeEvidence // server-only accepted provenance, never authored/output text
+
 	RunID        string `json:"run_id"`
 	PipelineID   string `json:"pipeline_id"`
 	PipelineSlug string `json:"pipeline_slug"`

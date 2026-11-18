@@ -1,0 +1,2 @@
+{"type":"error","message":"Reconnecting... 2/5 (stream disconnected before completion: Connection refused (os error 111))"}
+{"type":"turn.completed","usage":{"input_tokens":143246,"cached_input_tokens":124928,"cache_write_input_tokens":0,"output_tokens":1464,"reasoning_output_tokens":0}}

@@ -1,0 +1,2 @@
+- **Agent inbox showed zero open assignments while agents were working:** count pending, queued and running assignments, including legacy lowercase states.
+- **Timed-out host chats could remain unsettled:** record a failed attempt in the work ledger and retain the timeout diagnosis.

@@ -3,6 +3,8 @@ package docker
 import (
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // TestApplyAgentLoginPath_UsesCapturedPath: when a login PATH was captured at
@@ -18,7 +20,7 @@ func TestApplyAgentLoginPath_UsesCapturedPath(t *testing.T) {
 	// dirs it lacks (npm-global, mise shims) are put in front, the ones it
 	// already has (~/.local/bin, py-utils) are not duplicated.
 	// Every captured dir is present, each dir exactly once, the well-known
-	// dirs first.
+	// missing dirs first, retaining existing precedence.
 	v := envValue(got, "PATH")
 	for _, d := range strings.Split(login, ":") {
 		if !strings.Contains(":"+v+":", ":"+d+":") {
@@ -32,7 +34,7 @@ func TestApplyAgentLoginPath_UsesCapturedPath(t *testing.T) {
 			t.Errorf("PATH = %q repeats %q", v, d)
 		}
 	}
-	if !strings.HasPrefix(v, "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:") {
+	if !strings.HasPrefix(v, "/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/usr/local/py-utils/bin:") {
 		t.Errorf("PATH = %q: well-known dirs must lead", v)
 	}
 	if !strings.Contains(envValue(got, "PATH"), "/usr/local/py-utils/bin") {
@@ -50,7 +52,7 @@ func TestApplyAgentLoginPath_FallbackPrependsWellKnownDirs(t *testing.T) {
 	got := applyAgentLoginPath(env, "", imageEnv)
 	path := envValue(got, "PATH")
 
-	for _, dir := range wellKnownDevcontainerBinDirs {
+	for _, dir := range devcontainer.AgentToolPathDirs {
 		if !strings.Contains(path, dir) {
 			t.Errorf("fallback PATH %q missing well-known dir %q", path, dir)
 		}
@@ -59,7 +61,7 @@ func TestApplyAgentLoginPath_FallbackPrependsWellKnownDirs(t *testing.T) {
 	if !strings.HasSuffix(path, "/usr/local/bin:/usr/bin:/bin") {
 		t.Errorf("fallback PATH must preserve image PATH tail, got %q", path)
 	}
-	if !strings.HasPrefix(path, "/usr/local/py-utils/bin:") {
+	if !strings.HasPrefix(path, "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:") {
 		t.Errorf("well-known dirs must be prepended, got %q", path)
 	}
 }
@@ -95,7 +97,7 @@ func TestApplyAgentLoginPath_MergesExistingPath(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly one PATH entry, got %d: %v", n, got)
 	}
-	want := "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/feature/bin:/usr/bin:/bin"
+	want := "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/share/npm-global/bin:/opt/feature/bin:/usr/bin:/usr/local/py-utils/bin:/bin"
 	if v := envValue(got, "PATH"); v != want {
 		t.Errorf("PATH = %q\n   want %q", v, want)
 	}

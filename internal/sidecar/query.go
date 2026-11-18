@@ -9,6 +9,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -47,11 +48,9 @@ type escalateRequest struct {
 	EvidencePack string `json:"evidence_pack"`
 }
 
-// isCrewMember reports whether slug names an agent in this crew. It is the
-// membership check both peer-query and escalation use to validate a
-// caller-supplied `from`/target slug (mirrors memory_mcp.go's CRE-137 check) —
-// the shared per-crew sidecar can't cryptographically bind identity, so it at
-// least refuses attribution to a slug outside the crew.
+// isCrewMember checks a legacy caller-supplied `from` against the boot
+// snapshot. Modern callers use token-derived identity, and delegation target
+// membership is always resolved at the host against current crew state.
 func (s *Server) isCrewMember(slug string) bool {
 	for _, m := range s.crewMembers {
 		if m.Slug == slug {
@@ -96,18 +95,15 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate that the target is a known crew member slug
-	if !s.isCrewMember(req.Target) {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("target %q not found in crew", req.Target),
-		})
-		return
-	}
+	// Resolve target membership at the host on every request, just as /assign
+	// does. The sidecar's boot peer snapshot excludes self and grows stale;
+	// using it here rejects the boot agent and newly added peers, while a
+	// removed peer must instead be refused by the host's current DB lookup.
 
 	// #812: attribute the query to the ACTING agent derived from its per-agent
 	// bearer token. A valid token overrides any `from` in the body (closing
-	// intra-crew impersonation); a token matching no member is refused. With no
-	// token we fall back to the #796 membership-validated `from`.
+	// intra-crew impersonation); a token matching no member is refused. With no token on a
+	// legacy sidecar, the host checks the supplied `from` against live membership.
 	actorAgentID := ""
 	tokenAuthed := false
 	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
@@ -134,10 +130,8 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if !s.isCrewMember(req.From) {
-			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("from %q is not a member of this crew", req.From),
-			})
+		if strings.TrimSpace(req.From) == "" {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "from is required for legacy peer queries"})
 			return
 		}
 	}

@@ -324,7 +324,9 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // AreCrewsConnected checks if two crews have an active connection.
-func AreCrewsConnected(ctx context.Context, db *sql.DB, crewA, crewB string) (bool, error) {
+func AreCrewsConnected(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, crewA, crewB string) (bool, error) {
 	var exists bool
 	err := db.QueryRowContext(ctx, `
 		SELECT 1 FROM crew_connections

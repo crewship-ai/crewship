@@ -348,7 +348,7 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 
 // scheduleReadyTasks finds PENDING tasks with completed dependencies and creates assignments.
 
-func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState) error {
+func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState, review ...bool) error {
 	// Single snapshot shared between ready-resolution and the mission-brief
 	// context below — resolveReadyFromTasks self-heals/auto-assigns in place
 	// on this slice, so allTasks already reflects those mutations without a
@@ -363,7 +363,7 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 	}
 
 	for _, task := range ready {
-		err := e.scheduleTask(ctx, ms, task, allTasks)
+		err := e.scheduleTask(ctx, ms, task, allTasks, review...)
 		if err == nil {
 			continue
 		}
@@ -433,7 +433,7 @@ func (e *MissionEngine) ensureMissionChat(ctx context.Context, ms *missionState)
 // crew for cross-crew tasks) and dispatches the work via the TaskDispatcher.
 // allTasks is used to build the mission brief context for the agent.
 
-func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo) error {
+func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo, review ...bool) error {
 	// Circuit breaker: skip agent if it has failed too many times consecutively
 	if task.AssignedAgentID != nil {
 		e.cbMu.Lock()
@@ -544,7 +544,12 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		// Take the task and current mission authority under the same write
 		// lock as acceptance. Stop/handoff either runs first and prevents this
 		// claim, or runs after commit and cancels its persisted work owner.
-		res, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET status='IN_PROGRESS',started_at=?,updated_at=? WHERE id=? AND mission_id=? AND status='PENDING' AND COALESCE(assignment_id,'')='' AND assigned_agent_id=? AND EXISTS(SELECT 1 FROM missions m WHERE m.id=mission_tasks.mission_id AND m.workspace_id=? AND m.status='IN_PROGRESS')`, now, now, task.ID, ms.ID, *task.AssignedAgentID, ms.WorkspaceID)
+		missionStatus := "m.status='IN_PROGRESS'"
+		if len(review) > 0 && review[0] {
+			missionStatus = `m.status='REVIEW' AND EXISTS(SELECT 1 FROM issue_executions x
+				WHERE x.id=mission_tasks.issue_execution_id AND x.mission_id=m.id AND x.stage IN ('working','reviewing'))`
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET status='IN_PROGRESS',started_at=?,updated_at=? WHERE id=? AND mission_id=? AND status='PENDING' AND COALESCE(assignment_id,'')='' AND assigned_agent_id=? AND EXISTS(SELECT 1 FROM missions m WHERE m.id=mission_tasks.mission_id AND m.workspace_id=? AND `+missionStatus+`)`, now, now, task.ID, ms.ID, *task.AssignedAgentID, ms.WorkspaceID)
 		if err != nil {
 			return fmt.Errorf("claim mission task: %w", err)
 		}

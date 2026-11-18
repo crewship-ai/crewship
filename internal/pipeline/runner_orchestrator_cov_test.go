@@ -67,9 +67,11 @@ func (m *orchCovState) Close() error { return nil }
 // orchCovContainer fakes the container provider: every setup exec is a
 // no-op; the tmux-wrapped agent exec streams the canned agent output.
 type orchCovContainer struct {
-	ensureErr   error
-	agentStream string
-	execScripts []string
+	// Opt in when a test exercises an adapter with fail-closed file login.
+	preflightSucceeds bool
+	ensureErr         error
+	agentStream       string
+	execScripts       []string
 	// inspectExit is the exit code ExecInspect reports for the agent exec.
 	// Zero (the default) is a clean exit; non-zero drives RunAgent to
 	// return a post-stream error while the streamed usage is already
@@ -101,6 +103,9 @@ func (m *orchCovContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*pr
 	m.execScripts = append(m.execScripts, joined)
 	if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-cov-agent") {
 		return &provider.ExecResult{ExecID: "exec-agent", Reader: io.NopCloser(strings.NewReader(m.agentStream))}, nil
+	}
+	if m.preflightSucceeds && strings.Contains(joined, "crewship-preflight-done") {
+		return &provider.ExecResult{ExecID: "preflight", Reader: io.NopCloser(strings.NewReader("crewship-preflight-done\n"))}, nil
 	}
 	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }

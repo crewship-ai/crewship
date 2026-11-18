@@ -40,6 +40,15 @@ map is not a shell setup step and must not be sourced: it would replace direct
 token values with paths. Env/file delivery is readable by the agent process;
 masking logs or UI does not make it inaccessible.
 
+Before activating an upgrade, the candidate full-server CLI supports offline
+`credential upgrade-preflight --database ...`. It opens retained SQLite data
+read-only, reuses the complete resolver snapshot and the runtime file-alias
+naming contract, and never decrypts values or applies migrations. Its report
+covers potential metadata conflicts and operator-declared legacy Codex sandbox
+configuration; incomplete metadata/configuration yields `UNKNOWN`, not runtime
+readiness. See `docs/cli/credential.mdx` for the explicit configuration flags,
+the machine-readable gate and the limits of MCP inspection.
+
 The internal resolver marks a granted primary OAuth access token with
 `oauth_primary`. MCP client IDs, client secrets and synthetic access-token
 selectors do not receive this marker. An absent marker stays MCP-only; runtime
@@ -253,3 +262,28 @@ Workspace backups retain erased tombstones and workspace-attributed history;
 legacy audit rows with NULL workspace attribution remain outside that scope. A replacement restore that would orphan
 those rows is refused and rolled back, rather than deleting history absent from
 the bundle. The separate active-secret export excludes tombstones.
+
+## Keeper run attribution
+
+The sidecar derives `requesting_run_id` from the verified current v2 calling-run
+identity, never from the request body or its boot IPC run. Legacy identities
+without a verified run leave attribution unknown and explicitly clear unrelated
+inherited Journal run context while preserving request cancellation. The host admits new requests
+against the durable journal start/terminal records for the same workspace, crew
+and agent. Approval consumption, run admission and the new pending request and
+ledger are committed in one transaction; failed admission or persistence rolls
+back the spend. Both paths recheck after judging and record an unavailable run
+as a system denial before optional lease issuance. Execute also rechecks run
+liveness before container execution. A run may still end
+concurrently with an already admitted container operation; this is not a claim
+of an atomic kernel-level cancellation boundary.
+
+Keeper requests have immutable nullable run attribution. Every ledger transition
+copies it, including a later human/reference decision after the run has ended.
+Admin `keeper requests` and `keeper history` JSON expose `requesting_run_id` when known.
+Credential-bound non-pending transitions also append `KEEPER_DECISION` to Vault
+Activity in the same transaction. Metadata contains only request/run identifiers,
+decision, request type and actor attribution; no credential value, command, intent
+or free-form reason. These events do not update `last_used_at` and do not prove
+that a standard tool authenticated. Historical rows are not backfilled with
+a guessed boot run.

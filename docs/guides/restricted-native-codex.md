@@ -50,6 +50,14 @@ paid provider calls. Run the explicit tagged native live canary with
 
 ## Independent release candidates
 
+The version pin belongs to the restricted worker's release and qualification
+contract. The original runner pairs this version with bubblewrap 0.8 for its
+private-PID proc fallback. The release producer verifies the exact upstream archive and binary
+hashes, builds the restricted image and records its provenance. Native acceptance
+verifies those exact CLI bytes and the immutable image before exercising the
+sandbox. An upgrade needs a new verified candidate and a fresh native
+acceptance receipt. The ordinary Codex adapter can run a different version.
+
 `Native Worker Release` is a separate, main-only manual producer. Dispatch with
 `publish=false` to prepare an artifact containing the exact runner, authenticated
 upstream Codex binary, existing pinned runtime Dockerfile, and distributed legal

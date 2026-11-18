@@ -395,10 +395,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// and the external effects it is about to repeat already happened once.
 	// A restore should come up with an empty queue and let real deliveries fill
 	// it, which is what "regenerates naturally" means for this table.
-	"work_items":          IntentExcludeRuntime,
-	"work_attempts":       IntentExcludeRuntime,
-	"work_events":         IntentExcludeRuntime,
-	"external_operations": IntentExcludeRuntime,
+	"work_items":                IntentExcludeRuntime,
+	"work_attempts":             IntentExcludeRuntime,
+	"run_failure_notice_outbox": IntentExcludeRuntime,
+	"run_failure_notice_state":  IntentExcludeRuntime,
+	"work_events":               IntentExcludeRuntime,
+	"external_operations":       IntentExcludeRuntime,
 	// The delivery ledger is an operational record of what this instance
 	// received, including raw request bodies. Carrying it into a fork would
 	// duplicate another instance's inbound history under a new workspace, and

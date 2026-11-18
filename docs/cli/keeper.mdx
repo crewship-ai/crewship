@@ -21,11 +21,54 @@ crewship commands --format json | jq '.commands[] | select(.path == "keeper")'
 
 ## Authentication and scope
 
-Except for `keeper eval`, every command below calls the server in the current
+Except for `keeper eval` and the agent commands below, commands call the server in the current
 authenticated workspace and requires an OWNER or ADMIN workspace role. The
 server remains the authority for authorization; a CLI-side permission hint does
 not grant access. `keeper status` includes both instance server status and the
 workspace governance overlay.
+
+### Agent run commands
+
+These commands use the original `CREWSHIP_AGENT_TOKEN` and the local sidecar,
+without a saved human profile. The default origin is `http://127.0.0.1:9119`;
+`CREWSHIP_SIDECAR_URL` can select another HTTP `127.0.0.1` origin. HTTP proxies,
+redirects and human config/server/profile/workspace overrides are refused.
+The sidecar and host decide the acting agent and access policy.
+
+#### `keeper request <credential-name>`
+
+Ask Keeper for authorization. `--intent` is required (maximum 4096 bytes).
+Use `--id` to interpret the argument as a credential ID. Optional
+`--approval-request-id` presents a previously approved escalation and `--task-id`
+associates the request with a task. An ALLOW response contains a decision and
+request ID, never the credential value; it does not prove authentication.
+
+#### `keeper execute <credential-name>`
+
+Run one command through Keeper's existing credential injection path. The same
+`--intent`, `--id`, `--approval-request-id` and `--task-id` options apply.
+`--command-stdin` is required and reads at most 4096 bytes of UTF-8 text. The
+command uses the credential's assigned slot; do not put credential values in
+the command. Shell restrictions, approval binding, grant expiry, output
+redaction and container selection remain enforced by the server.
+
+```bash
+printf '%s\n' 'glab api user' | crewship keeper execute gitlab-secret \
+  --intent 'Verify the assigned fixture account' --command-stdin
+```
+
+#### `keeper request-status <request-id>`
+
+Read an existing request's decision through the acting agent's sidecar scope.
+An approval must be presented with `--approval-request-id` on the corresponding
+request/execute command; polling does not execute it.
+
+All three agent commands emit JSON. DENY exits 4; ESCALATE or PENDING exits 5.
+An allowed execution propagates its command exit code (zero is omitted by the
+existing server API and normalized to `exit_code: 0` by the CLI). A lost or
+cancelled response has an unknown outcome: inspect before retrying. The CLI
+does not automatically repeat an execution. Requests are bounded to five
+minutes; the server's command timeout still applies.
 
 `keeper eval` is different: it opens the Crewship SQLite database **file on
 this host** read-only, dials models from the machine running the CLI, and does
@@ -440,12 +483,15 @@ keeper
 ├── disable
 ├── enable
 ├── eval [--candidate --endpoint --explain --incumbent --limit --passes --tolerance]
+├── execute <credential-name> [--id --intent --command-stdin --approval-request-id --task-id]
 ├── findings: test
 ├── health
 ├── history <request-id>
 ├── judge: models [--endpoint] | test [--credential --endpoint --model --provider]
 ├── model: clear | get | set [--credential --model --provider]
 ├── profile: get | reset | set [--consistency-samples --escalate-from --evidence --evidence-facts --hard-gate --precedent --precedent-n --prompt-budget]
+├── request <credential-name> [--id --intent --approval-request-id --task-id]
+├── request-status <request-id>
 ├── requests [--limit --offset]
 ├── resolve <request-id> [--adjudicator --decision --reason]
 ├── review: run <slot> [--agent --crew --failure --skill --tool --tool-args --trigger]

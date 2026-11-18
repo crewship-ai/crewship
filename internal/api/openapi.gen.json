@@ -14334,6 +14334,7 @@
             "type": "integer"
           },
           "client_review_required": {
+            "description": "Requires human acceptance. Automated completion moves the issue to REVIEW while this policy applies.",
             "type": "boolean"
           },
           "code_links": {
@@ -62147,6 +62148,7 @@
                       "type": "integer"
                     },
                     "assignments_open": {
+                      "description": "Assignments routed to this agent in PENDING, QUEUED, or RUNNING state, regardless of case.",
                       "type": "integer"
                     },
                     "cost_usd_this_month": {

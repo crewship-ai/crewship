@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -130,5 +132,36 @@ func TestExecutor_PrewarmForRun_UnknownPipelineNoop(t *testing.T) {
 
 	if got := runner.warmed(); len(got) != 0 {
 		t.Errorf("unknown pipeline must not prewarm, got %v", got)
+	}
+}
+
+type rejectingPinPrewarmer struct {
+	prewarmRunner
+}
+
+func (r *rejectingPinPrewarmer) validateModelPin(context.Context, string, string, Step) error {
+	return errors.New("incompatible explicit model pin")
+}
+
+func TestPrewarmAndRoutineHooksWaitForValidModelPin(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := &rejectingPinPrewarmer{}
+	e := NewExecutor(store, resolver, runner, nil)
+	input := validSaveInput("invalid-pinned-model")
+	input.DefinitionJSON = `{"name":"invalid-pinned-model","steps":[
+		{"id":"agent","type":"agent_run","agent_slug":"worker","prompt":"hi","model_override":"claude-sonnet-4-6"}
+	]}`
+	p, err := store.Save(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.PrewarmForRun(t.Context(), p.ID, "ws_test")
+	if got := runner.warmed(); len(got) != 0 {
+		t.Fatalf("invalid pin caused runtime warmup: %v", got)
+	}
+	result, err := e.Run(t.Context(), RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err == nil || !strings.Contains(err.Error(), "incompatible explicit model pin") || result != nil {
+		t.Fatalf("invalid pin was admitted: result=%+v err=%v", result, err)
 	}
 }

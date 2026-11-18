@@ -1,0 +1,1 @@
+- **Codex runs could show a failure after a successful reconnect:** settle retry progress with the next successful turn completion while retaining real run failures.

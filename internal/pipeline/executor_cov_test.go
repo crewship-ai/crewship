@@ -729,6 +729,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 // with a RunStore in these tests (FK-free variant of the v83 schema).
 const runsProjectionDDL = `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+    outcome_evidence_required INTEGER NOT NULL DEFAULT 0,
  start_phase TEXT,
 invocation_source_run_id TEXT,
 chat_origin_id TEXT,
@@ -775,6 +776,7 @@ CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
     step_id    TEXT NOT NULL,
     output     TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    outcome_evidence_json TEXT,
     PRIMARY KEY (run_id, step_id)
 );`
 
