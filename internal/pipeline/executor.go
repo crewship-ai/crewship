@@ -845,8 +845,10 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	in.pipeline = p
 	in.dsl = dsl
 
-	if in.Mode != ModeDryRun {
-		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, p.AuthorCrewID, dsl.Steps, in.restoredOutputs); err != nil {
+	// A parked run keeps its existing execution recipe and skipped branches.
+	// Its remaining executed agent steps validate a pin before their hooks.
+	if in.Mode != ModeDryRun && !in.resume {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, p.AuthorCrewID, dsl.Steps); err != nil {
 			return nil, err
 		}
 	}
@@ -2067,7 +2069,7 @@ func (e *Executor) runStepBody(
 	}()
 
 	if step.Type == StepAgentRun && step.ModelOverride != "" {
-		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, in.AuthorCrewID, []Step{step}, nil); err != nil {
+		if err := e.validateRoutineModelPins(ctx, in.WorkspaceID, in.AuthorCrewID, []Step{step}); err != nil {
 			return "", 0, 0, err
 		}
 	}

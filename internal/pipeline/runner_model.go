@@ -79,7 +79,7 @@ func (r *OrchestratorRunner) validateModelPin(ctx context.Context, workspaceID, 
 	return nil
 }
 
-func (e *Executor) validateRoutineModelPins(ctx context.Context, workspaceID, crewID string, steps []Step, restored map[string]string) error {
+func (e *Executor) validateRoutineModelPins(ctx context.Context, workspaceID, crewID string, steps []Step) error {
 	validator, ok := e.runner.(interface {
 		validateModelPin(context.Context, string, string, Step) error
 	})
@@ -87,16 +87,13 @@ func (e *Executor) validateRoutineModelPins(ctx context.Context, workspaceID, cr
 		return nil
 	}
 	for _, step := range steps {
-		if _, done := restored[step.ID]; done {
-			continue
-		}
 		if step.Type == StepAgentRun && step.ModelOverride != "" {
 			if err := validator.validateModelPin(ctx, workspaceID, crewID, step); err != nil {
 				return err
 			}
 		}
 		if step.Foreach != nil {
-			if err := e.validateRoutineModelPins(ctx, workspaceID, crewID, step.Foreach.Steps, nil); err != nil {
+			if err := e.validateRoutineModelPins(ctx, workspaceID, crewID, step.Foreach.Steps); err != nil {
 				return err
 			}
 		}

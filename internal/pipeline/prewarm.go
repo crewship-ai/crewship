@@ -59,7 +59,7 @@ func (e *Executor) PrewarmForRun(ctx context.Context, pipelineID, workspaceID st
 		}
 		applyStepOverrides(dsl.Steps, overrides)
 	}
-	if err := e.validateRoutineModelPins(ctx, workspaceID, p.AuthorCrewID, dsl.Steps, nil); err != nil {
+	if err := e.validateRoutineModelPins(ctx, workspaceID, p.AuthorCrewID, dsl.Steps); err != nil {
 		prewarmDebug("validate model pins", pipelineID, err)
 		return
 	}
