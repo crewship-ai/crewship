@@ -330,11 +330,70 @@ func TestKeeperAgentCLIVaultSidecarStandardTool(t *testing.T) {
 	}
 	require("", "keeper", "resolve", approval, "--decision", "allow", "--reason", "Approve the isolated fixture operation")
 	approvedArgs := []string{"keeper", "execute", created.ID, "--id", "--intent", intent + " fixture-escalate", "--command-stdin", "--approval-request-id", approval}
-	if _, code := call(capability, "glab api user --header X-Native-Scenario:escalate", approvedArgs...); code != 0 {
-		t.Fatal("native approved execution failed")
+	approvedOut, code := call(capability, "glab api user --header X-Native-Scenario:escalate", approvedArgs...)
+	var approved keeperAgentReply
+	if code != 0 || json.Unmarshal(approvedOut, &approved) != nil || approved.RequestID == "" || approved.RequestID == approval {
+		t.Fatal("native approved execution lacks its own successful request receipt")
+	}
+	var projection, pendingEvent, allowedEvent, leaked int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM keeper_requests WHERE id=? AND requesting_agent_id=? AND credential_id=? AND request_type='execute' AND decision='ALLOW' AND exit_code=0 AND approval_consumed_at IS NOT NULL`, approved.RequestID, agent, created.ID).Scan(&projection); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"PENDING", "ALLOW"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM keeper_request_events WHERE request_id=? AND workspace_id=? AND requesting_agent_id=? AND requesting_crew_id=? AND credential_id=? AND request_type='execute' AND state=? AND (state='PENDING' OR exit_code=0)`, approved.RequestID, ws, agent, crew, created.ID, state).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if state == "PENDING" {
+			pendingEvent = count
+		} else {
+			allowedEvent = count
+		}
+	}
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM keeper_request_events WHERE instr(COALESCE(intent,'')||COALESCE(command,'')||COALESCE(reason,''),?)>0 OR instr(COALESCE(intent,'')||COALESCE(command,'')||COALESCE(reason,''),?)>0`, secret, replacement).Scan(&leaked); err != nil {
+		t.Fatal(err)
+	}
+	if projection != 1 || pendingEvent != 1 || allowedEvent != 1 || leaked != 0 {
+		t.Fatal("native approved execution lacks correlated, value-free projection/transition audit")
 	}
 	approvedCalls := executor.calls.Load()
-	_, _ = call(capability, "glab api user --header X-Native-Scenario:escalate", approvedArgs...)
+	// An immediate replay exercises the five-second execute debounce only.
+	if _, code := call(capability, "glab api user --header X-Native-Scenario:escalate", approvedArgs...); code != 5 {
+		t.Fatal("immediate approval replay was not rejected")
+	}
+	status, code := call(capability, "", "keeper", "request-status", approval)
+	var spent keeperAgentReply
+	if code != 0 || json.Unmarshal(status, &spent) != nil || spent.ApprovalConsumedAt == nil || *spent.ApprovalConsumedAt == "" {
+		t.Fatal("native approval status lacks its consumption receipt")
+	}
+	duplicateCount := func() int {
+		t.Helper()
+		var count int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM keeper_requests WHERE requesting_agent_id=? AND decision='DUPLICATE_SUPPRESSED'`, agent).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	duplicates := duplicateCount()
+	if duplicates == 0 {
+		t.Fatal("immediate replay did not exercise the debounce control")
+	}
+	// Pass the production debounce without modifying its clock or policy. A
+	// post-window denial, with no new duplicate-suppressed row, exercises the
+	// approval's durable single-use guard rather than in-memory deduplication.
+	timer := time.NewTimer(5100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		t.Fatal("fixture canceled before post-debounce approval replay")
+	}
+	if _, code := call(capability, "glab api user --header X-Native-Scenario:escalate", approvedArgs...); code != 5 {
+		t.Fatal("already-consumed approval was not rejected after execute debounce")
+	}
+	if duplicateCount() != duplicates {
+		t.Fatal("post-window replay was still suppressed by debounce; single-use guard was not exercised")
+	}
 	if executor.calls.Load() != approvedCalls || authenticated.Load() != 2 {
 		t.Fatal("approval replay executed the standard tool twice")
 	}
