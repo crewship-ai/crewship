@@ -174,7 +174,7 @@ func runSelfUpdate(ctx context.Context, checkOnly bool) error {
 		out, verr := exec.CommandContext(sanityCtx, exePath, "version").CombinedOutput()
 		sanityCancel()
 		if verr != nil {
-			restoreErr := update.RestoreBackups(result.Replaced)
+			restoreErr := update.RestoreInstallerUpdate(result)
 			if restoreErr != nil {
 				return fmt.Errorf(
 					"updated binary failed its version sanity check: %w\n%s\n"+

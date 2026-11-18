@@ -30,6 +30,7 @@ type covContainer struct {
 	ensureErr      error
 	ensureCalls    int
 	execErr        error
+	nativePath     string
 	execCalls      []provider.ExecConfig
 	inspectRunning bool
 	inspectExit    int
@@ -67,6 +68,11 @@ func (m *covContainer) ContainerStatus(_ context.Context, id string) (*provider.
 }
 func (m *covContainer) ContainerStats(context.Context, string) (*provider.ContainerMetrics, error) {
 	return nil, nil
+}
+func (m *covContainer) ContainerPath(context.Context, string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.nativePath, m.inspectErr
 }
 func (m *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	m.mu.Lock()
@@ -217,7 +223,7 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	db := seedTerminalDB(t)
 
 	serverSide, testSide := net.Pipe()
-	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
+	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}, nativePath: "/opt/mise/data/shims:/opt/legacy-feature/bin:/usr/bin:/bin"}, conn: serverSide}
 	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
@@ -240,8 +246,16 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	if cfg.WorkingDir != "/crew/shared" {
 		t.Errorf("WorkingDir = %q, want /crew/shared", cfg.WorkingDir)
 	}
-	if len(cfg.Cmd) != 2 || cfg.Cmd[0] != "/bin/bash" || cfg.Cmd[1] != "--login" {
-		t.Errorf("Cmd = %v, want [/bin/bash --login]", cfg.Cmd)
+	if len(cfg.Cmd) != 2 || cfg.Cmd[0] != "/bin/bash" || cfg.Cmd[1] != "-i" {
+		t.Errorf("Cmd = %v, want [/bin/bash -i]", cfg.Cmd)
+	}
+	// Only metadata plus the shared native PATH are supplied. Other env must
+	// remain inherited from the container, never copied from an agent run.
+	if len(cfg.Env) != 3 || cfg.Env[0] != "TERM=xterm-256color" || cfg.Env[1] != "HOME=/home/agent" || !strings.Contains(cfg.Env[2], "/opt/crew-tools/bin") || !strings.Contains(cfg.Env[2], "/opt/mise/data/shims") {
+		t.Errorf("terminal must inherit native runtime environment, got %v", cfg.Env)
+	}
+	if !strings.Contains(cfg.Env[2], "/opt/legacy-feature/bin") {
+		t.Fatalf("native fallback lost the existing image/feature PATH: %v", cfg.Env)
 	}
 	if cfg.Rows != 24 || cfg.Cols != 80 {
 		t.Errorf("default size = %dx%d, want 24x80", cfg.Rows, cfg.Cols)
@@ -322,7 +336,9 @@ func TestServeHTTP_AgentShellCreatesHomeDir(t *testing.T) {
 	if cfg.Rows != 30 || cfg.Cols != 100 {
 		t.Errorf("size = %dx%d, want 30x100 (client values must pass through)", cfg.Rows, cfg.Cols)
 	}
-	mkdir := im.lastExecCmd()
+	im.covContainer.mu.Lock()
+	mkdir := im.execCalls[0].Cmd
+	im.covContainer.mu.Unlock()
 	if len(mkdir) != 3 || mkdir[0] != "mkdir" || mkdir[1] != "-p" || mkdir[2] != "/crew/agents/agent-1" {
 		t.Errorf("mkdir exec = %v, want [mkdir -p /crew/agents/agent-1]", mkdir)
 	}
@@ -707,4 +723,33 @@ func TestServeHTTP_SlugSpoofRejected(t *testing.T) {
 
 	conn.Close()
 	<-done
+}
+
+func TestServeHTTP_PathInspectFailureStillOpensTerminal(t *testing.T) {
+	v := newTestValidator(t)
+	db := seedTerminalDB(t)
+	serverSide, testSide := net.Pipe()
+	defer testSide.Close()
+	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}, inspectErr: errors.New("runtime overloaded")}, conn: serverSide}
+	h := New(im, v, db, silentLogger(), nil)
+	conn, done := dialTerminalDone(t, h)
+	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	go func() {
+		testSide.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		_, _ = testSide.Write([]byte("fallback shell ready"))
+	}()
+	if got := readBinaryFrame(t, conn); string(got) != "fallback shell ready" {
+		t.Fatalf("fallback did not open: %q", got)
+	}
+	cfg := im.config()
+	if cfg == nil || strings.Join(cfg.Env, "|") != "TERM=xterm-256color|HOME=/home/agent" {
+		t.Fatalf("inspect failure must inherit PATH, passing TERM/HOME only: %+v", cfg)
+	}
+	conn.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal failed to close")
+	}
 }

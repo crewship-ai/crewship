@@ -23,6 +23,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
@@ -54,6 +55,16 @@ type Config struct {
 	// container's Entrypoint is forced to that path so custom base images
 	// (debian, ubuntu, etc.) use our init script instead of /bin/sh.
 	EntrypointPath string
+
+	// AgentCLIBinaryPath is the static Linux client installed with the server.
+	// RequireAgentCLI is enabled by the product entrypoint; zero-value embedded
+	// providers that never advertise SDK commands retain their existing contract.
+	AgentCLIBinaryPath       string
+	ExpectedAgentCLICommit   string
+	RequiredAgentCLICommands []string
+	RequireAgentCLI          bool
+	agentCLIArtifact         *runtimestage.AgentCLIArtifact
+	agentCLIError            error
 
 	// Admission holds a container start until the host can afford it (#1668).
 	// nil disables admission control entirely, which is the pre-#1668
@@ -1627,6 +1638,15 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 	if p.cfg.EntrypointPath == "" {
 		return nil, fmt.Errorf("docker provider: EntrypointPath is required (run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH)")
 	}
+	if p.cfg.agentCLIError != nil {
+		return nil, fmt.Errorf("docker provider: native agent CLI staging failed: %w", p.cfg.agentCLIError)
+	}
+	if p.cfg.RequireAgentCLI && p.cfg.AgentCLIBinaryPath == "" {
+		return nil, errors.New("docker provider: packaged crewship-agent-cli is required; reinstall the complete Crewship distribution or build make build:agent-cli")
+	}
+	if p.cfg.AgentCLIBinaryPath != "" && (p.cfg.agentCLIArtifact == nil || p.cfg.agentCLIArtifact.Path != p.cfg.AgentCLIBinaryPath) {
+		return nil, errors.New("docker provider: agent CLI must use a qualified immutable runtime generation")
+	}
 	if err := verifySidecarIsLinuxELF(p.cfg.SidecarBinaryPath); err != nil {
 		return nil, err
 	}
@@ -1655,6 +1675,12 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 			ReadOnly: true,
 		},
 	)
+	if p.cfg.agentCLIArtifact != nil {
+		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: p.cfg.agentCLIArtifact.Path, Target: "/usr/local/bin/crewship", ReadOnly: true})
+	}
+	if err := p.validateAgentCLIBindSources(mounts); err != nil {
+		return nil, err
+	}
 	return mounts, nil
 }
 
@@ -2099,6 +2125,18 @@ func (p *Provider) ContainerIP(ctx context.Context, containerID, network string)
 		return "", fmt.Errorf("container %s not attached to network %q", containerID, network)
 	}
 	return net.IPAddress.String(), nil
+}
+
+// ContainerPath returns only PATH from immutable container configuration.
+func (p *Provider) ContainerPath(ctx context.Context, id string) (string, error) {
+	inspected, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", fmt.Errorf("inspect container PATH: %w", err)
+	}
+	if inspected.Container.Config == nil {
+		return "", fmt.Errorf("inspect container PATH: missing config")
+	}
+	return envValue(inspected.Container.Config.Env, "PATH"), nil
 }
 
 // ContainerUser returns the container's configured run-as user — the

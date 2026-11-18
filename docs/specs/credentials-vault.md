@@ -40,6 +40,15 @@ map is not a shell setup step and must not be sourced: it would replace direct
 token values with paths. Env/file delivery is readable by the agent process;
 masking logs or UI does not make it inaccessible.
 
+Before activating an upgrade, the candidate full-server CLI supports offline
+`credential upgrade-preflight --database ...`. It opens retained SQLite data
+read-only, reuses the complete resolver snapshot and the runtime file-alias
+naming contract, and never decrypts values or applies migrations. Its report
+covers potential metadata conflicts and operator-declared legacy Codex sandbox
+configuration; incomplete metadata/configuration yields `UNKNOWN`, not runtime
+readiness. See `docs/cli/credential.mdx` for the explicit configuration flags,
+the machine-readable gate and the limits of MCP inspection.
+
 The internal resolver marks a granted primary OAuth access token with
 `oauth_primary`. MCP client IDs, client secrets and synthetic access-token
 selectors do not receive this marker. An absent marker stays MCP-only; runtime

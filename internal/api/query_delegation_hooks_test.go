@@ -316,3 +316,50 @@ func TestQueryCreate_PrePeerConversationJoinedErrorReportsTheDispatchFailure(t *
 		t.Errorf("body = %s — reported as a policy refusal while a hook never ran", w.Body.String())
 	}
 }
+
+func TestQueryCreateRechecksAdmissionAfterPreHook(t *testing.T) {
+	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
+	for _, tc := range []struct{ name, change, agent string }{
+		{"sender removed", "UPDATE agents SET deleted_at=datetime('now') WHERE id=?", "from1"},
+		{"target removed", "UPDATE agents SET deleted_at=datetime('now') WHERE id=?", "to1"},
+		{"target held", "UPDATE agents SET status='PENDING_REVIEW' WHERE id=?", "to1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ws, body := newPeerQueryRig(t)
+			hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if _, err := h.db.Exec(tc.change, tc.agent); err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.Write([]byte(`{"ok":true}`))
+			}))
+			defer hook.Close()
+			if _, err := hooks.Register(t.Context(), h.db, hooks.Hook{
+				WorkspaceID: ws, Event: hooks.EventPrePeerConversation, HandlerKind: hooks.HandlerKindHTTP,
+				HandlerConfig: map[string]any{"url": hook.URL}, Blocking: true, Enabled: true,
+			}, false); err != nil {
+				t.Fatal(err)
+			}
+			rec := httptest.NewRecorder()
+			h.Create(rec, httptest.NewRequest(http.MethodPost, "/api/v1/internal/queries", body))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("changed admission: %d %s", rec.Code, rec.Body.String())
+			}
+			var n int
+			if err := h.db.QueryRow("SELECT COUNT(*) FROM peer_conversations").Scan(&n); err != nil || n != 0 {
+				t.Fatalf("peer conversations=%d err=%v", n, err)
+			}
+		})
+	}
+}
+
+func TestQueryCreateRefusesStagedAgent(t *testing.T) {
+	h, _, body := newPeerQueryRig(t)
+	execOrFatal(t, h.db, `UPDATE agents SET status='PENDING_REVIEW' WHERE id='to1'`)
+	rec := httptest.NewRecorder()
+	h.Create(rec, httptest.NewRequest(http.MethodPost, "/internal/queries", body))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("staged target: %d %s", rec.Code, rec.Body.String())
+	}
+}

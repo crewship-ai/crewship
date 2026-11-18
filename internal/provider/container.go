@@ -552,6 +552,12 @@ type CrewRuntimePruner interface {
 	PruneCrewRuntimes(ctx context.Context, crews []CrewRef) (removed []string, err error)
 }
 
+// ContainerPathProvider exposes only the configured PATH through read-only
+// runtime inspection, without executing a process or returning other env.
+type ContainerPathProvider interface {
+	ContainerPath(ctx context.Context, containerID string) (string, error)
+}
+
 // InteractiveExecConfig configures an interactive (TTY) exec session.
 type InteractiveExecConfig struct {
 	ContainerID string

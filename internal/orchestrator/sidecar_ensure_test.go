@@ -307,7 +307,9 @@ func TestEnsureCrewSidecar_ConcurrentCallersStartOne(t *testing.T) {
 	started := 0
 	c := &covContainer{}
 	c.route = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
-		if strings.Contains(covScript(cfg), "127.0.0.1:9119/health") {
+		// Match the standalone health probe, not the launch script's own
+		// readiness loop, which also contains this URL on stdin.
+		if strings.Contains(strings.Join(cfg.Cmd, " "), "127.0.0.1:9119/health") {
 			mu.Lock()
 			body := ""
 			if started > 0 {

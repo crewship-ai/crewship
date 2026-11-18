@@ -84,9 +84,9 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Which crew is the target in? Unnamed — or named as our own — means the
-	// local roster, which the sidecar can and must check itself: it holds the
-	// member list, and a typo should fail here rather than after a round trip.
+	// Unnamed and explicitly local crews use the bound crew ID. The host
+	// validates current actor and target membership; a boot-time sidecar roster
+	// cannot authorize revoked members or reject agents hired after startup.
 	targetCrewID := s.ipc.CrewID
 	if req.Crew != "" {
 		resolved, err := s.resolveCrewIDBySlug(r.Context(), req.Crew)
@@ -103,24 +103,11 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		targetCrewID = resolved
 	}
 
-	// Membership is only ours to judge for our own crew. For another crew the
-	// roster lives elsewhere, so crewshipd resolves the agent — and refuses
-	// the whole dispatch unless the two crews are linked.
-	if targetCrewID == s.ipc.CrewID {
-		found := false
-		for _, m := range s.crewMembers {
-			if m.Slug == req.Target {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("target %q not found in crew", req.Target),
-			})
-			return
-		}
-	}
+	// The host resolves the target against CURRENT crew membership and checks
+	// crew links there. The boot roster is a peer/legacy-identity snapshot:
+	// it excludes the boot agent and cannot know about later hires, moves or
+	// deletions. Never use it as delegation authority. Actor/run identity and
+	// the bound workspace/crew are still forwarded for host-side validation.
 
 	body := map[string]string{
 		"target_slug":  req.Target,

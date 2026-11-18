@@ -1,0 +1,3 @@
+{"type":"error","message":"Reconnecting... 2/5 (workspace routing discovery timed out)"}
+{"type":"error","message":"Reconnecting... 3/5 (workspace routing discovery failed)"}
+{"type":"turn.completed","usage":{"input_tokens":173438,"cached_input_tokens":148352,"cache_write_input_tokens":0,"output_tokens":447,"reasoning_output_tokens":0}}

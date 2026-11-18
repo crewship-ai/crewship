@@ -118,20 +118,14 @@ func TestQueryCreateCov_ContainerError500(t *testing.T) {
 	}
 }
 
-func TestQueryCreateCov_UnknownFromSlugStillWorks(t *testing.T) {
-	// from_slug that resolves to no agent: fromAgentID stays empty but the
-	// query still proceeds to the orchestrator gate.
+func TestQueryCreateCov_UnknownFromSlugIsRefused(t *testing.T) {
 	h, wsID, crewID, _, _, chatID := covQryRig(t)
 	rr := covQryPost(t, h, `{"target_slug":"qry2-to","from_slug":"nobody","question":"q","crew_id":"`+crewID+`","workspace_id":"`+wsID+`","chat_id":"`+chatID+`"}`)
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
-	var from string
-	if err := h.db.QueryRow(
-		`SELECT COALESCE(from_agent_id,'') FROM peer_conversations WHERE chat_id = ?`, chatID).Scan(&from); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if from != "" {
-		t.Errorf("from_agent_id = %q, want empty", from)
+	var count int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM peer_conversations WHERE chat_id = ?`, chatID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("unexpected peer conversations = %d, err=%v", count, err)
 	}
 }
