@@ -21,9 +21,9 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Explicit upstream packaging qualification, separate from the offline CI
-// fixtures. Requires an owned local image with mise; only public downloads and
-// --version are used, without provider credentials or model requests.
+// Required native packaging qualification from a pinned, owned mise image.
+// Real CLI lock resolution/application, clean install and upgrade use only
+// public tool downloads and --version, without credentials or model requests.
 func TestCodexNativePackaging(t *testing.T) {
 	image := os.Getenv("CREWSHIP_CODEX_QUALIFICATION_IMAGE")
 	if image == "" {
