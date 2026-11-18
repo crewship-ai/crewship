@@ -74,6 +74,7 @@ func (j nativeCrewKeeperJudge) Stream(ctx context.Context, req llm.Request, _ fu
 type nativeCrewKeeperReply struct {
 	RequestID          string  `json:"request_id"`
 	Decision           string  `json:"decision"`
+	ExitCode           *int    `json:"exit_code,omitempty"`
 	Reason             string  `json:"reason"`
 	Output             string  `json:"output"`
 	ApprovalConsumedAt *string `json:"approval_consumed_at"`
@@ -118,7 +119,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 	call := func(capability, input string, args ...string) ([]byte, int) {
 		t.Helper()
 		// Canonical read-only provisioned SDK, local real crew sidecar, UID1001.
-		cfg := provider.ExecConfig{ContainerID: containerID, User: "1001:1001", Cmd: append([]string{"/usr/local/bin/crewship"}, args...), WorkingDir: "/home/agent", Stdin: strings.NewReader(input), Env: []string{"CREWSHIP_AGENT_TOKEN=" + capability, "CREWSHIP_SIDECAR_URL=http://127.0.0.1:9119", "NO_COLOR=1"}}
+		cfg := provider.ExecConfig{ContainerID: containerID, User: "1001:1001", Cmd: append(append([]string{"/usr/local/bin/crewship"}, args...), "-f", "json"), WorkingDir: "/home/agent", Stdin: strings.NewReader(input), Env: []string{"CREWSHIP_AGENT_TOKEN=" + capability, "CREWSHIP_SIDECAR_URL=http://127.0.0.1:9119", "NO_COLOR=1"}}
 		result, err := ctr.Exec(ctx, cfg)
 		if err != nil {
 			t.Fatal("native crew Keeper SDK did not start", err)
@@ -157,14 +158,14 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 	intent := "Authenticate to the isolated native Keeper GitLab fixture to verify the assigned synthetic account for this regression test, with no production target or data."
 	request, code := call(capability, "", "keeper", "request", created.ID, "--id", "--intent", intent)
 	var decision nativeCrewKeeperReply
-	if code != 0 || json.Unmarshal(request, &decision) != nil || decision.Decision != "ALLOW" || decision.RequestID == "" {
+	if code != 0 || decodeNativeKeeperCrewReply(request, code, &decision) != nil || decision.Decision != "ALLOW" || decision.RequestID == "" {
 		t.Fatalf("native request was not allowed: exit=%d", code)
 	}
 	peerCap := internaltoken.DeriveAgentRunToken(runKey, ws, peer, "native-peer")
 	require("", "credential", "assign", created.ID, peer, "--env-var-name", "GITLAB_TOKEN", "--ttl", "30m")
 	peerRequest, peerCode := call(peerCap, "", "keeper", "request", created.ID, "--id", "--intent", intent)
 	var peerDecision nativeCrewKeeperReply
-	if peerCode != 0 || json.Unmarshal(peerRequest, &peerDecision) != nil || peerDecision.RequestID == "" || peerDecision.Decision != "ALLOW" {
+	if peerCode != 0 || decodeNativeKeeperCrewReply(peerRequest, peerCode, &peerDecision) != nil || peerDecision.RequestID == "" || peerDecision.Decision != "ALLOW" {
 		t.Fatal("positive peer capability/assignment control failed")
 	}
 	if _, code := call(peerCap, "", "keeper", "request-status", peerDecision.RequestID); code != 0 {
@@ -183,7 +184,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 		if command == "false" {
 			want = 1
 		}
-		if code != want || json.Unmarshal(out, &decision) != nil || decision.Decision != "ALLOW" {
+		if code != want || decodeNativeKeeperCrewReply(out, code, &decision) != nil || decision.Decision != "ALLOW" || decision.ExitCode == nil || *decision.ExitCode != want {
 			t.Fatalf("native %s result incorrect: exit=%d", command, code)
 		}
 		if command == "printenv GITLAB_TOKEN" && !strings.Contains(decision.Output, "REDACTED") {
@@ -201,7 +202,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 		out, code := call(capability, command, "keeper", "execute", created.ID, "--id", "--intent", intent+suffix, "--command-stdin")
 		want := []string{"DENY", "ESCALATE"}[i]
 		decision = nativeCrewKeeperReply{}
-		decodeErr := json.Unmarshal(out, &decision)
+		decodeErr := decodeNativeKeeperCrewReply(out, code, &decision)
 		if code != []int{4, 5}[i] || decodeErr != nil || decision.Decision != want {
 			t.Fatalf("expected Keeper %s decision and matching CLI exit, got exit=%d decision=%s reason=%s decode=%v", want, code, decision.Decision, decision.Reason, decodeErr)
 		}
@@ -214,7 +215,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 	approvedArgs := []string{"keeper", "execute", created.ID, "--id", "--intent", intent + " fixture-escalate", "--command-stdin", "--approval-request-id", approval}
 	approvedOut, code := call(capability, "/opt/crew-tools/fixture-glab api user --header X-Native-Scenario:escalate", approvedArgs...)
 	var approved nativeCrewKeeperReply
-	if code != 0 || json.Unmarshal(approvedOut, &approved) != nil || approved.RequestID == "" || approved.RequestID == approval {
+	if code != 0 || decodeNativeKeeperCrewReply(approvedOut, code, &approved) != nil || approved.RequestID == "" || approved.RequestID == approval {
 		t.Fatal("native approved execution lacks its own successful request receipt")
 	}
 	var projection, pendingEvent, allowedEvent, leaked int
@@ -258,7 +259,7 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 	}
 	status, code := call(capability, "", "keeper", "request-status", approval)
 	var spent nativeCrewKeeperReply
-	if code != 0 || json.Unmarshal(status, &spent) != nil || spent.ApprovalConsumedAt == nil || *spent.ApprovalConsumedAt == "" {
+	if code != 0 || decodeNativeKeeperCrewReply(status, code, &spent) != nil || spent.ApprovalConsumedAt == nil || *spent.ApprovalConsumedAt == "" {
 		t.Fatal("native approval status lacks its consumption receipt")
 	}
 	duplicateCount := func() int {

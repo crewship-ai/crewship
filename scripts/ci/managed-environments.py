@@ -36,7 +36,7 @@ CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 PACKAGING_TESTS = {'internal/devcontainer': {'TestCodexNativePackaging'}}
 SDK_TESTS = {
     'internal/provider/docker': {'TestAgentCLIRealDockerCleanAndRetainedUpgrade'},
-    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab', 'TestNativeKeeperRealCrewContainer', 'TestNativeContainerOutputCancellationAndOverflow', 'TestNativeCredentialFixtureUsesProductionBatchStdin'},
+    'internal/orchestrator': {'TestNativeVaultRealCrewContainerGlab', 'TestNativeKeeperRealCrewContainer', 'TestNativeKeeperCrewReplyMergedStreams', 'TestNativeKeeperCrewReplyRejectsAmbiguousStreams', 'TestNativeContainerOutputCancellationAndOverflow', 'TestNativeCredentialFixtureUsesProductionBatchStdin'},
 }
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
