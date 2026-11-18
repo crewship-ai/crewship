@@ -25,7 +25,7 @@ func (c *agentStopOutcomeContainer) Exec(ctx context.Context, cfg provider.ExecC
 		c.once.Do(func() { close(c.stopped) })
 		return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
 	}
-	if len(cfg.Env) > 0 {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil {
 		r, w := io.Pipe()
 		go func() {
 			<-c.stopped

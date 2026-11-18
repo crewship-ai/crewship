@@ -159,10 +159,10 @@ func (s *scriptedContainer) ContainerStatus(context.Context, string) (*provider.
 	return &provider.ContainerStatus{ID: "container-abcdef123456", State: "running"}, nil
 }
 func (s *scriptedContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	// The agent CLI exec is the only Exec call that carries Env (RunAgent
-	// always appends CREWSHIP_SECRETS_DIR / CREWSHIP_OUTPUT_DIR). All setup
-	// calls (mkdir, manifest, tmux probe, config writes) pass no Env.
-	if len(cfg.Env) > 0 {
+	// Both the tmux snapshot writer and CLI carry the fresh run Env.
+	// The writer supplies its bootstrap on stdin; only the subsequent CLI
+	// invocation represents the agent process whose lifecycle we simulate.
+	if len(cfg.Env) > 0 && cfg.Stdin == nil {
 		if s.agentExecErr != nil {
 			return nil, s.agentExecErr
 		}

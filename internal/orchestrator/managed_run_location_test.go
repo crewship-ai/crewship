@@ -81,7 +81,8 @@ func TestManagedDetachedHomeWrappersRetainAdmission(t *testing.T) {
 					t.Fatalf("missing durable identity: %v %v", stopped, err)
 				}
 			} else {
-				if alive || aliveErr != nil || !stopped || stopErr != nil {
+				// Both tmux queries fail: absence is unproven even for a legacy run.
+				if alive || stopped || aliveErr == nil || stopErr == nil || !strings.Contains(aliveErr.Error(), "UNKNOWN") || !strings.Contains(stopErr.Error(), "UNKNOWN") {
 					t.Fatalf("legacy HOME probe: alive=%v/%v stopped=%v/%v", alive, aliveErr, stopped, stopErr)
 				}
 				if state.reads != 2 || container.inspections != 0 {

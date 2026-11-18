@@ -194,7 +194,7 @@ type unconfirmedReplyContainer struct {
 }
 
 func (c *unconfirmedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	if len(cfg.Env) > 0 && c.cancel != nil {
+	if len(cfg.Env) > 0 && cfg.Stdin == nil && c.cancel != nil {
 		c.cancel()
 	}
 	return c.scriptedContainer.Exec(ctx, cfg)
