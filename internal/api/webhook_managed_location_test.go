@@ -142,7 +142,8 @@ func TestWebhookScheduledManagedLocationSurvivesReturn(t *testing.T) {
 						t.Fatalf("missing managed PID: alive=%v/%v stopped=%v/%v", alive, aliveErr, stopped, stopErr)
 					}
 				} else {
-					if alive || aliveErr != nil || !stopped || stopErr != nil {
+					// A failed tmux client cannot prove absence for legacy runs either.
+					if alive || stopped || aliveErr == nil || stopErr == nil || !strings.Contains(aliveErr.Error(), "UNKNOWN") || !strings.Contains(stopErr.Error(), "UNKNOWN") {
 						t.Fatalf("legacy: alive=%v/%v stopped=%v/%v", alive, aliveErr, stopped, stopErr)
 					}
 					if state.reads != 2 {
