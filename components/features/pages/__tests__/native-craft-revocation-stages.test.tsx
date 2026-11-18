@@ -23,7 +23,8 @@ vi.mock('../native-craft-version-history',()=>({NativeCraftVersionHistory:()=>nu
 vi.mock('../workbook-editor-host',()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
 
 const holder={actor_id:'user:human',display_name:'Pavel',kind:'human'}
-const lease=()=>({can_edit:true,holder,mine:true,generation:'7',can_write:true,acquired_at:new Date().toISOString(),expires_at:new Date(Date.now()+15_000).toISOString(),handoff_requested_by:[]})
+let leaseDurationMs=15_000
+const lease=()=>({can_edit:true,holder,mine:true,generation:'7',can_write:true,acquired_at:new Date().toISOString(),expires_at:new Date(Date.now()+leaseDurationMs).toISOString(),handoff_requested_by:[]})
 const bundle='b'.repeat(64)
 const bytes=btoa('{"body":[]}')
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status})
@@ -104,14 +105,15 @@ async function editWhileOffline(beforeRetirementWait?:()=>void){
  act(()=>options.at(-1)!.onChanged('typed','doc'))
  await advance(3_000)
  server.dropStream()
- // Let the normal reauthorization detect the disconnected browser, then
- // establish the captured-copy state before T0. persist precedes hashing;
+ // Establish the captured-copy state before T0. persist precedes hashing;
  // only this public post-retirement state confirms capture has finished.
- await advance(NATIVE_REAUTHORIZE_INTERVAL_MS)
+ // Stop fake time once the host withdraws the editor, so a deliberately
+ // held real hash cannot also trip an unrelated capture deadline.
+ for(let elapsed=0;elapsed<NATIVE_REAUTHORIZE_INTERVAL_MS&&contentVisible();elapsed+=250)await advance(250)
  beforeRetirementWait?.()
  const captured=()=>screen.getByRole('status').textContent?.includes('Editor disconnected · the captured local copy is kept')===true
  await settle(captured)
- expect(captured()).toBe(true)
+ expect(captured(),`offline setup did not finish retirement: ${screen.getByRole('status').textContent}`).toBe(true)
 }
 async function advance(ms:number){let left=ms;while(left>0){const step=Math.min(250,left);await act(async()=>{await vi.advanceTimersByTimeAsync(step)});left-=step}}
 // Hashing runs on real crypto threads, so waiting for it takes real time too.
@@ -135,6 +137,7 @@ async function justConfirmed(){
  server.calls.length=0
 }
 beforeEach(()=>{
+ leaseDurationMs=15_000
  vi.useFakeTimers({shouldAdvanceTime:false})
  vi.stubGlobal('crypto',webcrypto)
  server=scriptedServer();options=[]
@@ -217,11 +220,10 @@ describe('silent stream',()=>{
 })
 describe('offline',()=>{
  it('does not finish offline setup while the final capture hash is held',async()=>{
-  await opened()
   // Isolate retirement from the independent short-lease watchdog: this
   // fixture holds hashing through reauthorization, not through lease expiry.
-  server.push('lease',{...lease(),expires_at:new Date(Date.now()+120_000).toISOString()})
-  await advance(1)
+  leaseDurationMs=120_000
+  await opened()
   let release=()=>{},started=()=>{},waiting=()=>{}
   const held=new Promise<void>(resolve=>{release=resolve})
   const finalHash=new Promise<void>(resolve=>{started=resolve})
