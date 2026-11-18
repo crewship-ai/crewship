@@ -307,7 +307,7 @@ func TestGate_DeadlineRaceReturnsActualDecision(t *testing.T) {
 		BEFORE UPDATE OF status ON approvals_queue
 		WHEN OLD.status = 'pending' AND NEW.status = 'timeout'
 		BEGIN
-			UPDATE approvals_queue SET status = 'approved', decided_by = 'alice', comment = 'late'
+			UPDATE approvals_queue SET status = 'approved', decided_by = 'alice', decision_comment = 'late'
 			WHERE id = OLD.id;
 			SELECT RAISE(IGNORE);
 		END;`); err != nil {
@@ -327,6 +327,9 @@ func TestGate_DeadlineRaceReturnsActualDecision(t *testing.T) {
 	}
 	if !dec.Approved || dec.TimedOut {
 		t.Fatalf("expected the real approval, not a timeout: %+v", dec)
+	}
+	if dec.Comment != "late" {
+		t.Errorf("decision comment = %q, want late", dec.Comment)
 	}
 	if rec.hasType(journal.EntryApprovalTimeout) {
 		t.Error("approved request emitted a false timeout")
