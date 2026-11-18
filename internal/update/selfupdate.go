@@ -581,14 +581,6 @@ type payloadTarget struct {
 	create bool // destination was absent during prepare; publish without replacement
 }
 
-func pathsOf(ts []payloadTarget) []string {
-	out := make([]string, len(ts))
-	for i, t := range ts {
-		out[i] = t.path
-	}
-	return out
-}
-
 // RestoreBackup swaps the "<path>.bak" backup back over path — the rollback
 // primitive for a single file.
 func RestoreBackup(path string) error {
