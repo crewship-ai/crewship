@@ -59,10 +59,12 @@ type Config struct {
 	// AgentCLIBinaryPath is the static Linux client installed with the server.
 	// RequireAgentCLI is enabled by the product entrypoint; zero-value embedded
 	// providers that never advertise SDK commands retain their existing contract.
-	AgentCLIBinaryPath string
-	RequireAgentCLI    bool
-	agentCLIArtifact   *runtimestage.AgentCLIArtifact
-	agentCLIError      error
+	AgentCLIBinaryPath       string
+	ExpectedAgentCLICommit   string
+	RequiredAgentCLICommands []string
+	RequireAgentCLI          bool
+	agentCLIArtifact         *runtimestage.AgentCLIArtifact
+	agentCLIError            error
 
 	// Admission holds a container start until the host can afford it (#1668).
 	// nil disables admission control entirely, which is the pre-#1668

@@ -532,6 +532,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				p.stopUnfenced(ctx, team, cid, err)
 				return "", err
 			}
+			if err := p.qualifyAgentCLI(ctx, cid); err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
 			emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "warm cache hit"})
 			return cid, nil
 		}
@@ -756,6 +760,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	p.setWarm(team.ID, resp.ID, runtimeImage)
 	p.reportSidecarRecreate(ctx, team.ID, resp.ID)
+	if err := p.qualifyAgentCLI(ctx, resp.ID); err != nil {
+		p.evictWarm(team.ID)
+		return "", err
+	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 	return resp.ID, nil
 }
@@ -1111,6 +1119,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					if !sidecarOutdated {
 						p.setWarm(team.ID, c.ID, warmImage)
 					}
+					if err := p.qualifyAgentCLI(ctx, c.ID); err != nil {
+						p.evictWarm(team.ID)
+						return "", false, err
+					}
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
 				}
@@ -1181,6 +1193,10 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				// ephemeral hooks that re-run on each restart, add a
 				// per-feature opt-in flag rather than flipping this default.
 				p.setWarm(team.ID, c.ID, warmImage)
+				if err := p.qualifyAgentCLI(ctx, c.ID); err != nil {
+					p.evictWarm(team.ID)
+					return "", false, err
+				}
 				emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "restarted stopped container", Tag: reusedImage})
 				return c.ID, true, nil
 			}

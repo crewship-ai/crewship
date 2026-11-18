@@ -155,3 +155,44 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 	}
 	return &AgentCLIArtifact{Path: filepath.Join(canonical, name), SHA256: parsed.SHA256, Arch: arch}, nil
 }
+
+// VerifyAgentCLIArtifact revalidates an existing generation without copying or
+// republishing it. Runtime admission calls this after proving the tree is not
+// exposed through writable crew mounts.
+func VerifyAgentCLIArtifact(artifact *AgentCLIArtifact) error {
+	denied := errors.New("native agent CLI generation is no longer trusted")
+	if artifact == nil || len(artifact.SHA256) != 64 || filepath.Base(artifact.Path) != "crewship-agent-cli-"+artifact.SHA256 {
+		return denied
+	}
+	parent := filepath.Dir(artifact.Path)
+	for current := parent; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil || !safeAgentCLIDirectory(info) {
+			return denied
+		}
+		if current == parent && info.Mode().Perm() != 0700 {
+			return denied
+		}
+		if current == filepath.Dir(current) {
+			break
+		}
+	}
+	info, err := os.Lstat(artifact.Path)
+	if err != nil || !safeAgentCLIFile(info, true) {
+		return denied
+	}
+	file, err := os.OpenFile(artifact.Path, os.O_RDONLY|agentCLINoFollowFlag(), 0)
+	if err != nil {
+		return denied
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) || !safeAgentCLIFile(opened, true) {
+		return denied
+	}
+	actual, err := managedlaunch.CaptureFile("/usr/local/bin/crewship", file)
+	if err != nil || actual.SHA256 != artifact.SHA256 {
+		return denied
+	}
+	return nil
+}

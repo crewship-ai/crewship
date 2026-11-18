@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,6 +20,10 @@ var agentRuntimeProbeCmd = &cobra.Command{
 	Args:              cobra.NoArgs,
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		// Bound this metadata-only child even if its controller disappears. It
+		// has no credential input and never kills another process or the crew.
+		deadline := time.AfterFunc(15*time.Second, func() { os.Exit(124) })
+		defer deadline.Stop()
 		probe, err := buildinfo.ProbeAgentRuntime(version, commit, date, agentSDKCommandPaths(rootCmd))
 		if err != nil {
 			return err

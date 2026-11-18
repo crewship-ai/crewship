@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/buildinfo"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"os"
 	"path/filepath"
@@ -111,6 +112,9 @@ func TestAgentCLIUpgradeDefersWhileCrewRuntimeIsHeld(t *testing.T) {
 	p.cfg.AgentCLIBinaryPath = fixture.AgentCLIBinaryPath
 	p.cfg.agentCLIArtifact = fixture.agentCLIArtifact
 	p.cfg.RequireAgentCLI = true
+	p.cfg.ExpectedAgentCLICommit = strings.Repeat("b", 40)
+	p.cfg.RequiredAgentCLICommands = []string{"commands", "version"}
+	daemon.sdk = &agentSDKFake{t: t, artifact: p.cfg.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit}
 	p.SetRuntimeIdleVerifier(func(context.Context, string, string) error { return nil })
 	release, err := p.runtimeUseGate(refreshCrewID).Use(t.Context())
 	if err != nil {
@@ -189,5 +193,46 @@ func TestAgentCLIProbeRejectsStaleOrIncompleteClient(t *testing.T) {
 	}
 	if err := validateAgentCLIProbe(valid, artifact, commit, []string{"keeper execute"}); err == nil {
 		t.Fatal("backend advertised native Keeper on a client without that command")
+	}
+}
+
+func TestAgentCLIRequiredMissingClientCannotReuseLiveRuntime(t *testing.T) {
+	p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
+	daemon.containers[refreshOldID].labels[crewSidecarHashLabel] = hash
+	p.cfg.RequireAgentCLI = true
+	if _, err := p.EnsureCrewRuntime(t.Context(), refreshCrew()); err == nil {
+		t.Fatal("existing runtime was advertised ready without its required native CLI")
+	}
+	if daemon.count("stop ") != 0 || daemon.count("remove ") != 0 {
+		t.Fatal("missing installation artifact interrupted a live crew")
+	}
+}
+
+func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
+	for _, fault := range []string{"privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
+		t.Run(fault, func(t *testing.T) {
+			p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
+			fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
+			p.cfg.AgentCLIBinaryPath = fixture.AgentCLIBinaryPath
+			p.cfg.agentCLIArtifact = fixture.agentCLIArtifact
+			p.cfg.RequireAgentCLI = true
+			p.cfg.ExpectedAgentCLICommit = strings.Repeat("b", 40)
+			p.cfg.RequiredAgentCLICommands = []string{"commands", "version"}
+			daemon.containers[refreshOldID].labels[crewSidecarHashLabel] = hash
+			daemon.containers[refreshOldID].labels["crewship.agent-cli-sha256"] = fixture.agentCLIArtifact.SHA256
+			daemon.sdk = &agentSDKFake{t: t, artifact: fixture.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, fault: fault}
+			if fault == "stale-probe-commit" {
+				daemon.sdk.commit = strings.Repeat("c", 40)
+			}
+			team := refreshCrew()
+			ready := false
+			team.ProvisionSink = func(event devcontainer.ProvisionEvent) { ready = ready || event.Step == devcontainer.ProvStepReady }
+			if _, err := p.EnsureCrewRuntime(t.Context(), team); err == nil {
+				t.Fatal("runtime preflight admitted an unsafe or stale SDK response")
+			}
+			if ready {
+				t.Fatal("failed SDK preflight was advertised as a ready runtime")
+			}
+		})
 	}
 }
