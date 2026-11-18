@@ -1,10 +1,15 @@
 package orchestrator
 
 import (
-	"os"
+	"embed"
 	"strings"
 	"testing"
 )
+
+// The protected conformance lane runs a precompiled binary outside this package.
+//
+//go:embed testdata/codex-reconnect/*.jsonl
+var codexReconnectFixtures embed.FS
 
 func TestRunAgent_CodexRecoversFromCapturedReconnect(t *testing.T) {
 	for _, fixture := range []string{
@@ -13,7 +18,7 @@ func TestRunAgent_CodexRecoversFromCapturedReconnect(t *testing.T) {
 		"0.169.0-websocket-recovered.jsonl",
 	} {
 		t.Run(fixture, func(t *testing.T) {
-			stream, err := os.ReadFile("testdata/codex-reconnect/" + fixture)
+			stream, err := codexReconnectFixtures.ReadFile("testdata/codex-reconnect/" + fixture)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -26,7 +31,7 @@ func TestRunAgent_CodexRecoversFromCapturedReconnect(t *testing.T) {
 }
 
 func TestRunAgent_CodexReconnectDoesNotClearFailures(t *testing.T) {
-	data, err := os.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
+	data, err := codexReconnectFixtures.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}

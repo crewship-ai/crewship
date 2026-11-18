@@ -214,7 +214,7 @@ func requireProtectedHostTestUID(t *testing.T) {
 }
 
 func TestRetainedAnalysisCodexCapturedReconnect(t *testing.T) {
-	data, err := os.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
+	data, err := codexReconnectFixtures.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
