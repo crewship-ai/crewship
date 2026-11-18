@@ -184,6 +184,18 @@ func (h *CredentialHandler) AssignBedrock(w http.ResponseWriter, r *http.Request
 			if (existing != "" && (!inherited.Valid || modelOverridden)) || explicitLegacy {
 				continue
 			}
+			// Same eligibility as the crew triggers: only agents on Bedrock or
+			// with no provider (on a runner Bedrock can drive, without a
+			// model of another provider) take the crew default.
+			var provider, adapter, model string
+			if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(llm_provider,''),cli_adapter,COALESCE(llm_model,'') FROM agents WHERE id=? AND workspace_id=?`, agent, ws).Scan(&provider, &adapter, &model); err != nil {
+				replyError(w, 500, "Could not inspect agent provider")
+				return
+			}
+			eligible := provider == bedrock.Provider || (provider == "" && (adapter == "CLAUDE_CODE" || adapter == "OPENCODE") && (model == "" || strings.HasPrefix(model, bedrock.NativeProvider+"/")))
+			if !eligible {
+				continue
+			}
 		}
 		if existing != "" && existing != id {
 			replyError(w, 409, "Agent already has a Bedrock account; remove its existing assignment before changing payer")

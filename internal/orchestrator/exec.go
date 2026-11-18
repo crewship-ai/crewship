@@ -56,7 +56,7 @@ FILESYSTEM (paths are per-RUN; prefer the environment variables over literal pat
 - Working dir = this run's own directory under /output/{your-slug}/ — visible in Files panel.
   Files you create here are attributed to this run.
 - Shared crew space = /crew/shared/ — all crew members can read/write
-- Secrets = $CREWSHIP_SECRETS_DIR (under /secrets/{your-slug}/) — read-only credential
+- Secrets = $CREWSHIP_SECRETS_DIR (under /secrets/{your-slug}/) — run-scoped credential
   files, one per credential, named by env var
 - Scratch = /workspace/ — temporary, not persistent
 Do NOT attempt to write outside these directories -- the filesystem is read-only elsewhere.
@@ -79,8 +79,9 @@ AUTH
 - Unauthenticated GETs (/results, /standup, /connections, /mission/<id>) need none of this.
 
 CREDENTIALS:
-- Credentials granted to you appear as READ-ONLY files in $CREWSHIP_SECRETS_DIR (e.g., $CREWSHIP_SECRETS_DIR/GH_TOKEN)
-- The .env file at $CREWSHIP_SECRETS_DIR/.env maps env var names to file paths
+- Credentials granted to you appear as per-run files in $CREWSHIP_SECRETS_DIR (e.g., $CREWSHIP_SECRETS_DIR/GH_TOKEN)
+- Credential file paths are already exported in your process environment. SSH keys and certificates use <SLOT>_PATH; USERPASS uses <SLOT>_USERNAME and <SLOT>_PASSWORD pointing to files.
+- Do not source $CREWSHIP_SECRETS_DIR/.env: it is a diagnostic map and would replace direct CLI tokens with file paths.
 - API keys for LLM providers are injected automatically via the sidecar proxy
 - A credential you WERE granted but which is NOT in /secrets (your $CREWSHIP_SECRETS_DIR) is being withheld
   by the Keeper — Crewship's security gatekeeper. It is not missing and not a mistake: for a

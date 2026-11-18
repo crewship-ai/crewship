@@ -112,26 +112,6 @@
     "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
   },
   {
-    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.args|1",
-    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
-  },
-  {
-    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.env|1",
-    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
-  },
-  {
-    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.exit|1",
-    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
-  },
-  {
-    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.fifo|1",
-    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
-  },
-  {
-    "key": "internal/orchestrator/orchestrator_exec_env.go|*Orchestrator.setupTmuxExec|literal|/tmp/%s.sh|1",
-    "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
-  },
-  {
     "key": "internal/pipeline/runner_script.go|*OrchestratorRunner.RunScript|literal|/tmp/crewship-script-|1",
     "reason": "Existing path literal; verify host default or container-only usage before migrating or removing."
   },

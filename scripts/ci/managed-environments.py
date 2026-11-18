@@ -5,7 +5,7 @@ Run from the repository root with Go, tmux, Docker and local alpine:3. Creates o
 unique disposable test resources and cleans them up. No provider credentials,
 paid requests, production mounts, registry resolution or global prune. The
 activation fixture mounts only its temporary directories and test executable. CI prepares
-its pinned Alpine fixture separately; run this script as non-root with sudo
+its pinned Alpine fixture and explicit real Codex artifact separately; run this script as non-root with sudo
 available for the managed launcher fixture and isolated UID65534 qualification; local use never pulls or retags images.
 """
 import json
@@ -18,10 +18,24 @@ import tempfile
 from contextlib import contextmanager
 
 PREFIX = 'github.com/crewship-ai/crewship/'
+CLI_TESTS = {'internal/orchestrator': {
+    'TestNativeCLIShellEnvironment',
+    'TestNativeVaultCLITrioProtocols',
+    'TestNativeTmuxCurrentRunCannotInheritRevokedToken',
+    'TestNativeTmuxFallbackStreamsFailure',
+    'TestNativeTmuxFreshServerRunSettles',
+    'TestNativeTmuxMissingSnapshotCannotSucceed',
+    'TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner',
+    'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped',
+    'TestNativeTmuxReaderKernelOwnership',
+    'TestNativeTmuxRefusalTeardownPreservesOutsideHome',
+    'TestNativeTmuxRefusesExistingSetupDirectory',
+}}
+CLI_ADAPTERS = ('CLAUDE_CODE', 'CODEX_CLI', 'OPENCODE')
 TESTS = {
     'cmd/crewship-sidecar': {'TestDetachedLaunchSurvivesReaderAndRejectsDuplicate'},
     'internal/managedlaunch': {'TestNativeLauncherConformanceRealDocker'},
-    'internal/orchestrator': {'TestManagedLaunchRealDocker'},
+    'internal/orchestrator': {'TestManagedLaunchRealDocker', 'TestCodexOuterActualNativeDocker'},
     'internal/provider/docker': {
         'TestSandboxRuntimeRealDocker',
         'TestSandboxDisablesImageHealthcheckRealDocker',
@@ -141,8 +155,24 @@ def host_source_inventory_errors(root='.'):
     return errors
 
 REQUIRED = {(PREFIX + package, name)
-            for suites in (TESTS, HOST_TESTS)
+            for suites in (TESTS, HOST_TESTS, CLI_TESTS)
             for package, names in suites.items() for name in names}
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter)
+                for adapter in CLI_ADAPTERS)
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeCLIShellEnvironment/' + adapter + '/' + mode)
+                for adapter in CLI_ADAPTERS for mode in ('direct', 'tmux', 'fallback'))
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeVaultCLITrioProtocols/' + adapter)
+                for adapter in CLI_ADAPTERS)
+REQUIRED.update((PREFIX + 'internal/orchestrator', name + '/' + shell)
+                for name in ('TestNativeTmuxReaderKernelOwnership',
+                             'TestNativeTmuxObserverCancellationReapsReaderAndRetainsOwner',
+                             'TestNativeTmuxFreshServerRunSettles')
+                for shell in ('dash', 'busybox'))
+REQUIRED.update((PREFIX + 'internal/orchestrator', 'TestNativeTmuxMissingSnapshotCannotSucceed/' + shell + '/' + mode + '/' + missing)
+                for shell in ('dash', 'busybox')
+                for mode in ('tmux', 'fallback') for missing in ('env', 'run.sh', 'early-exit'))
+REQUIRED.add((PREFIX + 'internal/orchestrator',
+              'TestNativeTmuxProbeDoesNotTurnClientFailureIntoStopped/exact-session-targets'))
 HOST_UID = 65534
 
 
@@ -184,18 +214,24 @@ def commands(go_binary='go'):
     legacy = {package: names for package, names in TESTS.items()
               if package != 'internal/orchestrator'}
     result = []
+    native = os.environ.get('CREWSHIP_TEST_CODEX_NATIVE', '')
+    if native and not os.path.isabs(native):
+        raise ValueError('real native Codex fixture requires an absolute artifact path')
     privileged_path = os.environ['PATH']
     if os.path.isabs(go_binary):
         privileged_path = os.path.dirname(go_binary) + os.pathsep + privileged_path
     for packages, prefix in (
             (legacy, []),
             ({'internal/orchestrator': TESTS['internal/orchestrator']},
-             ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local'])):
+             ['sudo', 'env', 'PATH=' + privileged_path, 'GOTOOLCHAIN=local']),
+            (CLI_TESTS, [])):
         pattern = '^(' + '|'.join(re.escape(name) for names in packages.values()
                                  for name in sorted(names)) + ')$'
         command = prefix + [go_binary, 'test', '-tags', 'integration', '-p', '1', '-count=1',
-                            '-timeout=3m', '-json', '-run', pattern]
+                            '-timeout=' + ('8m' if prefix else '3m'), '-json', '-run', pattern]
         command.extend('./' + package for package in packages)
+        if prefix and native:
+            command.extend(['-args', '-codex-outer-native-artifact=' + native])
         result.append(command)
     return result
 

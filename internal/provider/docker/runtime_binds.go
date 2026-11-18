@@ -73,7 +73,9 @@ func stageRuntimeArtifacts(cfg Config, logger *slog.Logger) Config {
 	sidecarSource := cfg.SidecarBinaryPath
 	cfg.SidecarBinaryPath, cfg.EntrypointPath = runtimestage.Artifacts(
 		cfg.OutputBasePath, cfg.SidecarBinaryPath, cfg.EntrypointPath, logger)
-	if strings.TrimSpace(os.Getenv("CREWSHIP_MANAGED_LAUNCH_CREWS")) != "" {
+	// Stage an immutable launcher for new runtimes even when no crew has opted
+	// in yet. This grants no sandbox authority and changes no adapter selection.
+	{
 		if immutable, err := stageManagedLauncher(sidecarSource, cfg.OutputBasePath); err == nil {
 			cfg.SidecarBinaryPath = immutable
 		} else {
