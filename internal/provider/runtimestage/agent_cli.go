@@ -38,7 +38,7 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 	}
 	defer f.Close()
 	opened, err := f.Stat()
-	if err != nil || !os.SameFile(original, opened) || !safeAgentCLIFile(opened, false) || opened.Size() <= 0 || opened.Size() > managedlaunch.MaxArtifactBytes {
+	if err != nil || !os.SameFile(original, opened) || !safeAgentCLIHandle(f, opened, false) || opened.Size() <= 0 || opened.Size() > managedlaunch.MaxArtifactBytes {
 		return nil, denied
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, managedlaunch.MaxArtifactBytes+1))
@@ -72,7 +72,7 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 	}
 	for parent := canonical; ; parent = filepath.Dir(parent) {
 		info, err := os.Lstat(parent)
-		if err != nil || !safeAgentCLIDirectory(info) {
+		if err != nil || !safeAgentCLIDirectoryAt(parent, info, false) {
 			return nil, fmt.Errorf("%w: unsafe parent %s", denied, parent)
 		}
 		if parent == filepath.Dir(parent) {
@@ -88,7 +88,7 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 		return nil, err
 	}
 	parent, err := root.Lstat(DirName)
-	if err != nil || !safeAgentCLIDirectory(parent) || parent.Mode()&os.ModeSymlink != 0 {
+	if err != nil || !safeAgentCLIDirectoryAt(filepath.Join(canonical, DirName), parent, false) || parent.Mode()&os.ModeSymlink != 0 {
 		return nil, denied
 	}
 	private := filepath.Join(DirName, "agent-cli")
@@ -96,7 +96,7 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 		return nil, err
 	}
 	info, err := root.Lstat(private)
-	if err != nil || !safeAgentCLIDirectory(info) || info.Mode().Perm() != 0700 {
+	if err != nil || !safeAgentCLIDirectoryAt(filepath.Join(canonical, private), info, true) {
 		return nil, denied
 	}
 	name := filepath.Join(private, "crewship-agent-cli-"+parsed.SHA256)
@@ -145,7 +145,7 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 	}
 	defer verify.Close()
 	actual, err := verify.Stat()
-	if err != nil || !os.SameFile(existing, actual) || !safeAgentCLIFile(actual, true) || actual.Size() != int64(len(raw)) {
+	if err != nil || !os.SameFile(existing, actual) || !safeAgentCLIHandle(verify, actual, true) || actual.Size() != int64(len(raw)) {
 		return nil, denied
 	}
 	digest := sha256.New()
@@ -167,10 +167,7 @@ func VerifyAgentCLIArtifact(artifact *AgentCLIArtifact) error {
 	parent := filepath.Dir(artifact.Path)
 	for current := parent; ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
-		if err != nil || !safeAgentCLIDirectory(info) {
-			return denied
-		}
-		if current == parent && info.Mode().Perm() != 0700 {
+		if err != nil || !safeAgentCLIDirectoryAt(current, info, current == parent) {
 			return denied
 		}
 		if current == filepath.Dir(current) {
@@ -187,7 +184,7 @@ func VerifyAgentCLIArtifact(artifact *AgentCLIArtifact) error {
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) || !safeAgentCLIFile(opened, true) {
+	if err != nil || !os.SameFile(info, opened) || !safeAgentCLIHandle(file, opened, true) {
 		return denied
 	}
 	actual, err := managedlaunch.CaptureFile("/usr/local/bin/crewship", file)

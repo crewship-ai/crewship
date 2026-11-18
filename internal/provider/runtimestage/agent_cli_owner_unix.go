@@ -42,3 +42,10 @@ func safeAgentCLIDirectory(info os.FileInfo) bool {
 	return (info.Mode().Perm()&0002 == 0 || info.Mode()&os.ModeSticky != 0) &&
 		(info.Mode().Perm()&0020 == 0 || st.Gid == 0 || st.Gid == uint32(os.Getegid()))
 }
+
+func safeAgentCLIHandle(_ *os.File, info os.FileInfo, immutable bool) bool {
+	return safeAgentCLIFile(info, immutable)
+}
+func safeAgentCLIDirectoryAt(_ string, info os.FileInfo, private bool) bool {
+	return safeAgentCLIDirectory(info) && (!private || info.Mode().Perm() == 0700)
+}
