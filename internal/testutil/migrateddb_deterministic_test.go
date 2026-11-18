@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil/migratedtemplate"
@@ -21,12 +22,22 @@ func TestFreshMigrationChainIsDeterministic(t *testing.T) {
 	var snapshots []map[string][]string
 	for _, name := range []string{"first.db", "second.db"} {
 		path := filepath.Join(t.TempDir(), name)
+		started := time.Now().Add(-time.Second)
 		if err := migratedtemplate.Build(t.Context(), path); err != nil {
 			t.Fatal(err)
 		}
 		db, err := database.Open("file:" + path)
 		if err != nil {
 			t.Fatal(err)
+		}
+		var activation string
+		err = db.QueryRowContext(t.Context(), `SELECT enabled_at FROM run_failure_notice_state WHERE id=1`).Scan(&activation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at, parseErr := time.Parse(time.RFC3339Nano, activation)
+		if parseErr != nil || at.Before(started) || at.After(time.Now()) {
+			t.Fatalf("run-failure activation was outside the migration window: %q (%v)", activation, parseErr)
 		}
 		snapshots = append(snapshots, snapshotFixtureRows(t, db.DB))
 		_ = db.Close()
