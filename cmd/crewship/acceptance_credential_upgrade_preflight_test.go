@@ -79,6 +79,16 @@ func TestAcceptance_CredentialUpgradePreflightRetainedData(t *testing.T) {
 	if unknown := run("--source-build", ""); unknown["ready"] != false || unknown["state"] != "UNKNOWN" {
 		t.Fatalf("unverified running configuration passed: %v", unknown)
 	}
+	seed(`UPDATE crews SET mcp_config_json='{"mcpServers":{"fixture":{"env":{"bad":1,"key":"${NATIVE_OTHER_FILE}"}}}}' WHERE id='up-crew'`)
+	if malformed := run(); malformed["ready"] != false || malformed["state"] != "UNKNOWN" {
+		t.Fatalf("malformed typed MCP configuration passed: %v", malformed)
+	}
+	seed(`UPDATE crews SET mcp_config_json=NULL WHERE id='up-crew'`)
+	seed(`INSERT INTO agent_mcp_bindings(id,agent_id,mcp_server_id,mcp_server_scope,credential_id,env_var_name) VALUES('up-mcp-binding','up-agent','up-server','workspace','up-ssh','MCP_AUTH')`)
+	if binding := run(); binding["ready"] != false || binding["state"] != "UNKNOWN" {
+		t.Fatalf("additional MCP credential binding passed without coverage: %v", binding)
+	}
+	seed(`DELETE FROM agent_mcp_bindings WHERE id='up-mcp-binding'`)
 	// Public resolve hides duplicate exact slots; the retained snapshot must not.
 	seed(`UPDATE credentials SET type='GENERIC_SECRET' WHERE id='up-ssh'`)
 	seed(`UPDATE agent_credentials SET env_var_name='NATIVE_KEY' WHERE credential_id='up-file'`)
@@ -88,5 +98,35 @@ func TestAcceptance_CredentialUpgradePreflightRetainedData(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE encrypted_value='not-a-decryptable-fixture-value'`).Scan(&count); err != nil || count != 2 {
 		t.Fatal("preflight changed stored credentials", err)
+	}
+}
+
+func TestAcceptance_CredentialUpgradePreflightUnknownChecker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "retained.db")
+	db := testutil.MigratedDBAt(t, path).DB
+	if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('unknown-ws','Unknown checker','unknown-checker')`); err != nil {
+		t.Fatal(err)
+	}
+	// An unstamped candidate must not produce a PASS that cannot identify
+	// the implementation used to inspect the retained database.
+	binary := filepath.Join(t.TempDir(), "crewship-unstamped")
+	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build unstamped checker: %v: %s", err, out)
+	}
+	cmd := exec.CommandContext(t.Context(), binary, "credential", "upgrade-preflight", "--database", path, "--workspace", "unknown-ws", "--source-build", "4592d612bcaacd9a0e5dde963dddd6319cb324d5", "--keeper-enabled=false", "--codex-sandbox-mode", "", "-f", "json")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect with unstamped checker: %v: %s", err, out)
+	}
+	var report struct {
+		Ready bool   `json:"ready"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("invalid report: %v: %s", err, out)
+	}
+	if report.Ready || report.State != "UNKNOWN" {
+		t.Fatalf("unstamped checker reported readiness: %s", out)
 	}
 }

@@ -17,6 +17,10 @@ func TestCredentialUpgradeNamesMetadataOnly(t *testing.T) {
 		refs   map[string]bool
 		want   string
 	}{
+		{"same-credential-alias-part", []Credential{{ID: "one", Type: "SSH_KEY", EnvVarName: "KEY", Fields: []CredentialField{{EnvVar: "KEY_PATH"}}}}, true, nil, "potential_collision"},
+		{"reserved-oauth", []Credential{{ID: "one", Type: "OAUTH2", EnvVarName: "PATH"}}, true, nil, "reserved_runtime_name"},
+		{"reserved-oauth-part", []Credential{{ID: "one", Type: "OAUTH2", EnvVarName: "ACCESS", Fields: []CredentialField{{EnvVar: "LD_AUDIT"}}}}, true, nil, "reserved_runtime_name"},
+		{"reserved-cli-token-part", []Credential{{ID: "one", Type: "CLI_TOKEN", EnvVarName: "OPENAI", Fields: []CredentialField{{EnvVar: "OPENAI_API_KEY"}}}}, true, nil, "reserved_runtime_name"},
 		{"duplicate-slots", []Credential{{ID: "one", Type: "GENERIC_SECRET", EnvVarName: "SLOT"}, {ID: "two", Type: "GENERIC_SECRET", EnvVarName: "SLOT"}}, true, nil, "potential_collision"},
 		{"userpass", []Credential{{ID: "one", Type: "USERPASS", EnvVarName: "LOGIN"}, {ID: "two", Type: "GENERIC_SECRET", EnvVarName: "LOGIN_PASSWORD"}}, true, nil, "potential_collision"},
 		{"reserved", []Credential{{ID: "one", Type: "GENERIC_SECRET", EnvVarName: "PATH"}}, true, nil, "reserved_runtime_name"},
