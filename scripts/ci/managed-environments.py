@@ -86,6 +86,7 @@ HOST_TESTS = {
         'TestHostStopReceiptSettlesProviderStoppedForcedEnds',
         'TestRetainedAcknowledgementRefusesActiveOwnerAndForeignRoot',
         'TestRetainedAcknowledgementRespectsAuthoritativeNonSuccess',
+        'TestRetainedAnalysisCodexCapturedReconnect',
         'TestRetainedAnalysisIgnoresStderrAndRequiresStructuredTerminal',
         'TestRetainedAnalysisUsesSemanticFailureInsteadOfZeroExit',
         'TestRetainedAuthoritativeStatusMirrorsOverLocalTerminalObservation',
