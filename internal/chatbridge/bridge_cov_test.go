@@ -134,7 +134,7 @@ func (c *capResolver) RecordCost(ctx context.Context, usage RunCostUsage) error 
 // ---------- scripted container provider ----------
 
 // scriptedContainer drives the full HandleChatMessage flow. Setup execs get
-// empty no-op readers; the agent CLI exec (the only one carrying Env) gets
+// empty no-op readers; the agent CLI exec (non-stdin invocations in these fixtures) gets
 // agentOutput (claude stream-json) or agentExecErr. exitCode feeds
 // ExecInspect for BOTH the tmux probe and the final agent exec, so exitCode=0
 // means "tmux available + agent exited 0".
