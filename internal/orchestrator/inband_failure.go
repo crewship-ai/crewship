@@ -63,6 +63,9 @@ func NewInBandFailureError(msg string) error { return &inBandError{msg: msg} }
 // failed and then got fixed, a 404 from a fetch: the agent sees the failure and
 // works around it. Failing the run on those would redden nearly every real run.
 //
+// Codex retry-progress system events are the narrow exception: they remain
+// pending until that turn completes, and fail at EOF if completion never arrives.
+//
 // Sticky, not last-one-wins: once a CLI has reported a failed turn we do not
 // let a later successful envelope erase it. Adapters emit several result
 // envelopes per run (Droid emits both `completion` and `result`; OpenCode emits
@@ -70,10 +73,13 @@ func NewInBandFailureError(msg string) error { return &inBandError{msg: msg} }
 // ordering is not guaranteed across versions, so last-one-wins would silently
 // drop real failures — the exact class of bug this type exists to close.
 type inBandFailure struct {
-	seen    bool
-	subtype string
-	message string
-	turns   int
+	// Only Codex retry-progress envelopes are provisional. A missing terminal
+	// completion still fails; an actual fatal error remains independently sticky.
+	pendingReconnect string
+	seen             bool
+	subtype          string
+	message          string
+	turns            int
 	// reason/status come from Claude Code's terminal_reason + api_error_status.
 	// They exist because subtype is not always a cause: a hard auth failure
 	// arrives as subtype "success" with is_error true, and labelling that run
@@ -96,12 +102,19 @@ const maxTurnsSubtype = "error_max_turns"
 // tool-level failures are ignored.
 func (f *inBandFailure) observe(e AgentEvent) {
 	switch e.Type {
+	case "system":
+		if meta, ok := e.Metadata.(map[string]interface{}); ok && meta["subtype"] == codexReconnectSubtype {
+			f.pendingReconnect = e.Content
+		}
 	case "result":
 		meta, _ := e.Metadata.(map[string]interface{})
 		if meta == nil {
 			return
 		}
 		if isErr, _ := meta["is_error"].(bool); !isErr {
+			if meta["subtype"] == "turn.completed" {
+				f.pendingReconnect = ""
+			}
 			return
 		}
 		subtype, _ := meta["subtype"].(string)
@@ -121,6 +134,10 @@ func (f *inBandFailure) observe(e AgentEvent) {
 	case "error":
 		f.record("", e.Content, 0, "", 0)
 	}
+}
+
+func (f *inBandFailure) failed() bool {
+	return f.seen || f.pendingReconnect != ""
 }
 
 // metaInt reads an integer out of event metadata, tolerating both the in-process
@@ -193,6 +210,13 @@ const inBandDetailCap = 300
 // is what downstream classifiers must key off.
 func (f *inBandFailure) Err() error {
 	if !f.seen {
+		if f.pendingReconnect != "" {
+			detail := f.pendingReconnect
+			if len(detail) > inBandDetailCap {
+				detail = detail[:inBandDetailCap] + "…"
+			}
+			return NewInBandFailureError("Codex reconnect did not reach turn.completed: " + detail)
+		}
 		return nil
 	}
 	// Turn cap: name the limit and the two ways out. Deliberately does NOT

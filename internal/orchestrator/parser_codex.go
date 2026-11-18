@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -168,9 +170,18 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 		handleCodexItem(msg.Type, msg.Item, handler)
 
 	case "error":
+		detail := codexErrorMessage(msg)
+		if len(msg.Error) == 0 && isCodexReconnectProgress(msg.Message) {
+			// Codex exec emits retry progress as an error with a message and
+			// no retry code. A failed turn has its own structured event. Keep
+			// progress visible and require a later turn.completed.
+			handler(AgentEvent{Type: "system", Content: detail,
+				Metadata: map[string]interface{}{"subtype": codexReconnectSubtype}, Timestamp: time.Now()})
+			return
+		}
 		handler(AgentEvent{
 			Type:      "error",
-			Content:   codexErrorMessage(msg),
+			Content:   detail,
 			Timestamp: time.Now(),
 		})
 
@@ -179,6 +190,23 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 		// in the journal even before we parse them.
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 	}
+}
+
+const codexReconnectSubtype = "codex_reconnecting"
+
+var codexReconnectPattern = regexp.MustCompile(`^Reconnecting(?:\.\.\.|…)[[:space:]]+([1-9][0-9]*)/([1-9][0-9]*)(?:[[:space:]]+\(.+\))?$`)
+
+func isCodexReconnectProgress(message string) bool {
+	parts := codexReconnectPattern.FindStringSubmatch(strings.TrimSpace(message))
+	if parts == nil {
+		return false
+	}
+	attempt, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	limit, err := strconv.Atoi(parts[2])
+	return err == nil && attempt <= limit
 }
 
 func codexErrorMessage(msg codexEnvelope) string {
