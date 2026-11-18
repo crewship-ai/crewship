@@ -1,0 +1,1 @@
+- **Credential upgrade checks no longer abort on MCP servers without environment overrides (#5522).** Retained workspace and crew servers with a null environment now produce the metadata report normally. Malformed non-null configuration still reports unknown readiness; inspection does not decrypt or change credentials.
