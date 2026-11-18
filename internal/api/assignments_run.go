@@ -323,8 +323,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
-		WHERE a.slug = ? AND a.crew_id = ? AND a.deleted_at IS NULL
-	`, body.TargetSlug, body.CrewID).Scan(
+		WHERE a.slug = ? AND a.crew_id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
+	`, body.TargetSlug, body.CrewID, body.WorkspaceID).Scan(
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
 		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
@@ -336,6 +336,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "lookup target agent", err)
+		return
+	}
+
+	if assignedByID == target.ID {
+		replyError(w, http.StatusBadRequest, "cannot assign work to yourself")
 		return
 	}
 

@@ -156,16 +156,25 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var fromAgentID string
 	if body.ActorAgentID != "" {
 		err := h.db.QueryRowContext(r.Context(), `SELECT id,slug FROM agents WHERE id=? AND crew_id=? AND workspace_id=? AND deleted_at IS NULL`, body.ActorAgentID, body.CrewID, body.WorkspaceID).Scan(&fromAgentID, &body.FromSlug)
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		if err != nil {
+			replyInternalError(w, h.logger, "lookup authenticated query actor", err)
 			return
 		}
 	} else if body.FromSlug != "" {
 		err := h.db.QueryRowContext(r.Context(), `
-			SELECT id FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
-		`, body.FromSlug, body.CrewID).Scan(&fromAgentID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			h.logger.Error("lookup from agent", "error", err)
+			SELECT id FROM agents WHERE slug = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL
+		`, body.FromSlug, body.CrewID, body.WorkspaceID).Scan(&fromAgentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusForbidden, "query sender is not a current crew member")
+			return
+		}
+		if err != nil {
+			replyInternalError(w, h.logger, "lookup legacy query actor", err)
+			return
 		}
 	}
 
@@ -176,8 +185,8 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
-		WHERE a.slug = ? AND a.crew_id = ? AND a.deleted_at IS NULL
-	`, body.TargetSlug, body.CrewID).Scan(
+		WHERE a.slug = ? AND a.crew_id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
+	`, body.TargetSlug, body.CrewID, body.WorkspaceID).Scan(
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
 		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
@@ -188,6 +197,11 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "lookup target agent", err)
+		return
+	}
+
+	if fromAgentID == target.ID {
+		replyError(w, http.StatusBadRequest, "cannot query yourself")
 		return
 	}
 
