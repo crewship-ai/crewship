@@ -23,7 +23,8 @@ vi.mock('../native-craft-version-history',()=>({NativeCraftVersionHistory:()=>nu
 vi.mock('../workbook-editor-host',()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
 
 const holder={actor_id:'user:human',display_name:'Pavel',kind:'human'}
-const lease=()=>({can_edit:true,holder,mine:true,generation:'7',can_write:true,acquired_at:new Date().toISOString(),expires_at:new Date(Date.now()+15_000).toISOString(),handoff_requested_by:[]})
+let leaseDurationMs=15_000
+const lease=()=>({can_edit:true,holder,mine:true,generation:'7',can_write:true,acquired_at:new Date().toISOString(),expires_at:new Date(Date.now()+leaseDurationMs).toISOString(),handoff_requested_by:[]})
 const bundle='b'.repeat(64)
 const bytes=btoa('{"body":[]}')
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status})
@@ -99,11 +100,20 @@ const frame=()=>document.querySelector('iframe') as HTMLIFrameElement|null
 const contentVisible=()=>{const f=frame();return Boolean(f&&f.style.visibility!=='hidden'&&f.style.opacity!=='0')}
 const offered=()=>screen.queryAllByRole('button',{name:'Keep a copy'}).length>0
 /** An unconfirmed edit is captured locally while the network is already gone. */
-async function editWhileOffline(){
+async function editWhileOffline(beforeRetirementWait?:()=>void){
  server.reachable=false
  act(()=>options.at(-1)!.onChanged('typed','doc'))
  await advance(3_000)
  server.dropStream()
+ // Establish the captured-copy state before T0. persist precedes hashing;
+ // only this public post-retirement state confirms capture has finished.
+ // Stop fake time once the host withdraws the editor, so a deliberately
+ // held real hash cannot also trip an unrelated capture deadline.
+ for(let elapsed=0;elapsed<NATIVE_REAUTHORIZE_INTERVAL_MS&&contentVisible();elapsed+=250)await advance(250)
+ beforeRetirementWait?.()
+ const captured=()=>screen.getByRole('status').textContent?.includes('Editor disconnected · the captured local copy is kept')===true
+ await settle(captured)
+ expect(captured(),`offline setup did not finish retirement: ${screen.getByRole('status').textContent}`).toBe(true)
 }
 async function advance(ms:number){let left=ms;while(left>0){const step=Math.min(250,left);await act(async()=>{await vi.advanceTimersByTimeAsync(step)});left-=step}}
 // Hashing runs on real crypto threads, so waiting for it takes real time too.
@@ -127,6 +137,7 @@ async function justConfirmed(){
  server.calls.length=0
 }
 beforeEach(()=>{
+ leaseDurationMs=15_000
  vi.useFakeTimers({shouldAdvanceTime:false})
  vi.stubGlobal('crypto',webcrypto)
  server=scriptedServer();options=[]
@@ -208,6 +219,39 @@ describe('silent stream',()=>{
  })
 })
 describe('offline',()=>{
+ it('does not finish offline setup while the final capture hash is held',async()=>{
+  // Isolate retirement from the independent short-lease watchdog: this
+  // fixture holds hashing through reauthorization, not through lease expiry.
+  leaseDurationMs=120_000
+  await opened()
+  let release=()=>{},started=()=>{},waiting=()=>{}
+  const held=new Promise<void>(resolve=>{release=resolve})
+  const finalHash=new Promise<void>(resolve=>{started=resolve})
+  const retirementWait=new Promise<void>(resolve=>{waiting=resolve})
+  const digest=crypto.subtle.digest.bind(crypto.subtle)
+  const hashing=vi.spyOn(crypto.subtle,'digest').mockImplementation(async(...args)=>{
+   if(journal.persist.mock.calls.at(-1)?.[1]===true){started();await held}
+   return digest(...args)
+  })
+  let finished=false
+  const setup=editWhileOffline(waiting).then(()=>{finished=true})
+  try{
+   // No real-time delay races the fixture: the held hash or an incorrectly
+   // early helper return decides which stage we reached.
+   await Promise.race([Promise.all([finalHash,retirementWait]),setup.then(()=>{throw Error('offline setup returned before final capture hashing and retirement wait')})])
+   // Keep hashing held until the fake-time advance has finished. A helper
+   // missing its public retirement barrier must now settle and be detected.
+   await Promise.resolve();await Promise.resolve()
+   expect(finished).toBe(false)
+   expect(screen.getByRole('status')).not.toHaveTextContent('Editor disconnected · the captured local copy is kept')
+   release()
+   await setup
+   expect(screen.getByRole('status')).toHaveTextContent('Editor disconnected · the captured local copy is kept')
+  }finally{
+   release();hashing.mockRestore()
+   await Promise.allSettled([setup])
+  }
+ })
  it('cannot learn revocation: keeps the draft unread and unoffered, and on reconnect reads nothing before verified admission',async()=>{
   await opened()
   await editWhileOffline()
@@ -333,7 +377,7 @@ describe('a draft kept after write loss',()=>{
  it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
   await opened()
   // The capture hashes with real crypto, which fake time does not move on a busy host.
-  const settled=async(final:boolean)=>{for(let i=0;i<200&&journal.persist.mock.calls.at(-1)?.[1]!==final;i++){await advance(50)}}
+  const settled=async(final:boolean)=>{await settle(()=>journal.persist.mock.calls.at(-1)?.[1]===final)}
   act(()=>options.at(-1)!.onChanged('typed','doc'))
   await settled(false)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(false)

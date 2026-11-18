@@ -65,8 +65,9 @@ type AgentRunRequest struct {
 	// returns even when a detached process still needs the container.
 	RuntimeUse *provider.RuntimeUse
 	// Set by RunAgent from provider inspection, never a caller's desired image.
-	runtimeImageID string
-	managedLaunch  *managedlaunch.Descriptor
+	runtimeImageID    string
+	managedLaunch     *managedlaunch.Descriptor
+	codexOuterSandbox bool
 	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
 	// agent's exec is created, and nothing external happens between its
 	// answer and the creation. It is the authoritative "a process is about
@@ -300,6 +301,10 @@ type Credential struct {
 	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.
 	Type string `json:"type,omitempty"`
+	// OAuthPrimary is set only by the trusted grant/binding resolver for the
+	// stored OAUTH2 access token. MCP client parts and synthetic token entries
+	// share the type but must not acquire generic process-env delivery.
+	OAuthPrimary bool `json:"oauth_primary,omitempty"`
 	// Provider is credentials.provider as delivered by the API tier: the
 	// service label, UPPERCASE, equal to llmroute.Spec.ID for a routable LLM
 	// provider and free-form ("GITHUB", "NONE", "") for everything else.
@@ -559,6 +564,7 @@ type Orchestrator struct {
 	hostOutputCapacityRuns   int
 	managedLaunchCrews       map[string]bool
 	managedLaunchResolver    ManagedLaunchResolver
+	codexSandboxPolicy       CodexSandboxPolicyResolver
 	runRecoveryMu            sync.Mutex // serializes recovered publication with local admission
 	agentRuns                sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader          func(context.Context, string, string) (string, error)

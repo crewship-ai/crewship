@@ -628,6 +628,13 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *CredentialHandler) DefaultEnvVar(w http.ResponseWriter, r *http.Request) {
 	prov := r.URL.Query().Get("provider")
+	ctype := r.URL.Query().Get("type")
+	if ctype == "" {
+		// Historical provider-only metadata requests describe a scalar API key,
+		// like the legacy body shape of the Test endpoint. Explicit types still
+		// use the fail-closed type policy.
+		ctype = string(CredTypeAPIKey)
+	}
 	// #1083: the provider→env-var map is single-sourced in internal/credprovider
 	// so this handler and the CLI's --provider help can't drift.
 	envVar := credprovider.DefaultEnvVar(prov)
@@ -636,7 +643,7 @@ func (h *CredentialHandler) DefaultEnvVar(w http.ResponseWriter, r *http.Request
 	// probed. See probeSupportedProviders for why that second opinion was a bug.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"env_var":  envVar,
-		"testable": probeSupported(prov, r.URL.Query().Get("type")),
+		"testable": probeSupported(prov, ctype),
 	})
 }
 

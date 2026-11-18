@@ -217,6 +217,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := credentialValueShapeError(credType, valueToStore); msg != "" {
+		replyError(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	newEncrypted, ok := encryptOrError(w, h.logger, "encrypt rotated value", valueToStore)
 	if !ok {
 		return

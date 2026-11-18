@@ -127,7 +127,14 @@ func TestStageRuntimeArtifactsRestagesAChangedArtifact(t *testing.T) {
 	if err := os.WriteFile(src, []byte{0x7f, 'E', 'L', 'F', 1}, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dataDir := t.TempDir()
+	// macOS TempDir starts below the /var -> /private/var symlink.
+	// Immutable staging deliberately refuses symlinked ancestors; exercise its
+	// positive path with a canonical directory, as the managed staging fixture
+	// does, without relaxing production host trust checks.
+	dataDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	first := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
 
 	// A new deploy: different bytes, different length, newer mtime.
@@ -136,8 +143,18 @@ func TestStageRuntimeArtifactsRestagesAChangedArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
-	if second.SidecarBinaryPath != first.SidecarBinaryPath {
-		t.Fatalf("staged path moved between boots: %q then %q", first.SidecarBinaryPath, second.SidecarBinaryPath)
+	// Ordinary staging retains the fixed-path fallback on unsupported host
+	// identities/filesystems; only qualified immutable staging creates generations.
+	if managedLauncherServerUIDError(os.Geteuid()) == nil {
+		if second.SidecarBinaryPath == first.SidecarBinaryPath {
+			t.Fatal("changed bytes reused an immutable launcher generation")
+		}
+		original, err := os.ReadFile(first.SidecarBinaryPath)
+		if err != nil || string(original) != string([]byte{0x7f, 'E', 'L', 'F', 1}) {
+			t.Fatal("existing runtime's old launcher generation changed")
+		}
+	} else if second.SidecarBinaryPath != first.SidecarBinaryPath {
+		t.Fatal("unsupported host changed legacy fallback staging")
 	}
 	got, err := os.ReadFile(second.SidecarBinaryPath)
 	if err != nil {

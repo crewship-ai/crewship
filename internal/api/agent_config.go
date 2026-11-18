@@ -875,6 +875,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			EnvVar:         d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			OAuthPrimary:   d.Type == CredTypeOAuth2,
 			Provider:       d.Provider,
 			Username:       d.Username,
 			LeaseExpiresAt: d.LeaseExpiresAt,
@@ -1019,7 +1020,7 @@ func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, agentID stri
 		// Check if access token is already in creds
 		hasAccessToken := false
 		for _, c := range creds {
-			if c.ID == credID && !strings.HasSuffix(c.EnvVar, "_CLIENT_ID") && !strings.HasSuffix(c.EnvVar, "_CLIENT_SECRET") {
+			if c.ID == credID && (c.OAuthPrimary || (!strings.HasSuffix(c.EnvVar, "_CLIENT_ID") && !strings.HasSuffix(c.EnvVar, "_CLIENT_SECRET"))) {
 				hasAccessToken = true
 				break
 			}

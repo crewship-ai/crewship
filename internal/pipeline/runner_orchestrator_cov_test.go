@@ -90,6 +90,14 @@ func (m *orchCovContainer) ContainerStatus(_ context.Context, _ string) (*provid
 }
 func (m *orchCovContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	joined := strings.Join(cfg.Cmd, " ")
+	// Native setup carries the argument payload on stdin, not process argv.
+	if cfg.Stdin != nil {
+		raw, err := io.ReadAll(cfg.Stdin)
+		if err != nil {
+			return nil, err
+		}
+		joined += "\n" + string(raw)
+	}
 	m.execScripts = append(m.execScripts, joined)
 	if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-cov-agent") {
 		return &provider.ExecResult{ExecID: "exec-agent", Reader: io.NopCloser(strings.NewReader(m.agentStream))}, nil

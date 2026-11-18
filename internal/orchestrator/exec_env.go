@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
@@ -63,22 +64,22 @@ func baseAgentEnv(req AgentRunRequest) []string {
 // Delivery: DeliveryNone) is withheld here too — otherwise the same
 // credential in the same Keeper state would be withheld from a parent agent's
 // sidecar-built env and delivered anyway to a sub-agent taking this path.
-// This function has never taken a keeperEnabled parameter and that is
-// unchanged: DeliveryNone means no channel in EITHER Keeper state, so the
-// credpolicy gate alone is sufficient here without threading Keeper state
-// through. Extending this path to also honour KeeperGated for classified
-// types (SECRET) is a separate, larger behaviour change — this path has
-// historically delivered SECRET plaintext directly regardless of Keeper, and
-// that is out of scope for the #2092 fix, which is specifically about the
-// unclassified-type fail-safe promise, not about widening Keeper enforcement
-// to a path that never had it.
-func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
+// Production callers pass the current Keeper state explicitly, including
+// SkipSidecar worker runs. The optional argument preserves the helper's
+// historical call shape for existing integrations.
+func BuildEnvVars(req AgentRunRequest, activeCred *Credential, keeper ...bool) []string {
+	keeperEnabled := len(keeper) > 0 && keeper[0]
+	now := time.Now()
+	req = nativeOAuthEnvView(req, keeperEnabled, now)
+	if activeCred != nil && activeCred.Type == "OAUTH2" && !primaryOAuthMaterial(*activeCred, keeperEnabled, now) {
+		activeCred = nil
+	}
 	env := baseAgentEnv(req)
 	if bedrockRun(req) {
 		return env
 	}
 
-	if activeCred != nil && providerlogin.Canonical(activeCred.Provider) != bedrock.Provider {
+	if activeCred != nil && !(keeperEnabled && credpolicy.IsKeeperGated(activeCred.Type)) && !fileOnlyCredential(*activeCred) && providerlogin.Canonical(activeCred.Provider) != bedrock.Provider {
 		// #2092/#2246: a further review found this selector still unguarded
 		// — the non-sidecar path never consulted credpolicy at
 		// all, so an unclassified credential (fallback Delivery: DeliveryNone)
@@ -86,12 +87,8 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		// BuildEnvVarsSidecar now withholds it. A worker sub-agent dispatched
 		// with SkipSidecar=true takes exactly this path, so the same
 		// credential in the same Keeper state was withheld from the parent
-		// agent and delivered to its sub-agent. Gating on credEnvDeliverable
-		// alone (not keeperEnabled) matches what DeliveryNone means: no
-		// channel at all, in either Keeper state — this function has never
-		// taken a keeperEnabled parameter and pre-existing SECRET/Keeper
-		// behaviour on this path is unchanged; only the unclassified-type gap
-		// is closed here.
+		// agent and delivered to its sub-agent. Unknown-type classification and
+		// the Keeper check above are independent, required gates.
 		if credentialOAuthKind(*activeCred).fileDelivered() {
 			// #2428: a Codex or Gemini login is a file, never an env var —
 			// see auth_delivery.go. Writing the JSON blob into the env would
@@ -108,6 +105,13 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	}
 
 	for _, cred := range req.Credentials {
+		if keeperEnabled && credpolicy.IsKeeperGated(cred.Type) {
+			continue
+		}
+		if fileOnlyCredential(cred) {
+			env = appendCredentialFields(env, cred, false)
+			continue
+		}
 		if activeCred != nil && cred.ID == activeCred.ID {
 			continue
 		}
@@ -291,6 +295,9 @@ func (k oauthKind) fileDelivered() bool {
 // resolveEnvVar names the variable for a credential whose value may be
 // withheld, so an empty PlainValue is the caller's question, not this one's.
 func credentialOAuthKind(cred Credential) oauthKind {
+	if fileOnlyCredential(cred) {
+		return oauthNone
+	}
 	// A PROVIDER_LOGIN (PRD provider-logins §10.2) says which it is in its
 	// own parts: mode api_key is a metered key and takes the API_KEY paths
 	// below (CredStore, routed provider block); mode subscription is the
@@ -344,18 +351,7 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 	// headers. Substring match on regex so "Bearer ${LINEAR_TOKEN}" gets
 	// picked up — the pre-fix prefix-suffix check missed every header in
 	// every adapter, causing all HTTP MCP servers to 401 in production.
-	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
-
-	// Also collect from table-based MCPServers (after JSON blob migration).
-	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
-	// $VAR, not just whole-string ${VAR} as before.
-	for _, srv := range req.MCPServers {
-		for _, v := range srv.Env {
-			for _, name := range extractEnvRefs(v) {
-				mcpEnvRefs[name] = true
-			}
-		}
-	}
+	mcpEnvRefs := collectRequestMCPEnvRefs(req)
 
 	if len(mcpEnvRefs) == 0 {
 		return env
@@ -378,6 +374,9 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 			continue
 		}
 		if cred.EnvVarName == "" || cred.PlainValue == "" {
+			continue
+		}
+		if cred.Type == "OAUTH2" && (cred.HandleOnly || credentialLeaseLapsed(cred, time.Now())) {
 			continue
 		}
 		if _, needed := mcpEnvRefs[cred.EnvVarName]; !needed {
@@ -458,6 +457,25 @@ func extractEnvRefs(s string) []string {
 // was silently missed and the bearer token never got injected, so all HTTP
 // MCP servers hit upstream with literal "${LINEAR_TOKEN}" as the credential.
 // Production-blocking gap; this rewrite closes it.
+// collectRequestMCPEnvRefs is shared by explicit value injection and native
+// alias preparation, including workers and migrated table-based MCP bindings.
+func collectRequestMCPEnvRefs(req AgentRunRequest) map[string]bool {
+	refs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+
+	// Also collect from table-based MCPServers (after JSON blob migration).
+	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
+	// $VAR, not just whole-string ${VAR} as before.
+	for _, srv := range req.MCPServers {
+		for _, v := range srv.Env {
+			for _, name := range extractEnvRefs(v) {
+				refs[name] = true
+			}
+		}
+	}
+
+	return refs
+}
+
 func collectMCPEnvRefs(configs ...string) map[string]bool {
 	refs := make(map[string]bool)
 	for _, cfg := range configs {
@@ -551,6 +569,7 @@ func SidecarProxyEnv() []string {
 // When keeperEnabled is false, SECRET credentials are injected as env vars directly.
 // The agent gets dummy API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
+	req = nativeOAuthEnvView(req, keeperEnabled, time.Now())
 	if bedrockRun(req) {
 		filtered := make([]Credential, 0, len(req.Credentials))
 		for _, c := range req.Credentials {
@@ -571,6 +590,9 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	var oauthToken string
 	var oauthCred Credential
 	for _, cred := range req.Credentials {
+		if keeperEnabled && credpolicy.IsKeeperGated(cred.Type) {
+			continue
+		}
 		// #2428: only a Claude Code login belongs in CLAUDE_CODE_OAUTH_TOKEN.
 		// An OpenAI (ChatGPT) login is the same AI_CLI_TOKEN type and takes
 		// the file path below (syncCodexAuthFile); before this check it was
@@ -719,6 +741,9 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	if len(allowed) > 0 {
 		routed, isRouted := resolveRoutedProvider(req, true)
 		for _, cred := range req.Credentials {
+			if fileOnlyCredential(cred) || (keeperEnabled && credpolicy.IsKeeperGated(cred.Type)) {
+				continue
+			}
 			if cred.PlainValue == "" {
 				continue
 			}
@@ -758,7 +783,14 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// The sidecar proxy cannot inject credentials into HTTPS CONNECT tunnels.
 	for _, cred := range req.Credentials {
 		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
-			env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
+		}
+	}
+	// Primary OAuth access tokens use their explicit consumer slot. MCP
+	// companions are not primary and retain their separately requested channel.
+	for _, cred := range req.Credentials {
+		if name, ok := nativeOAuthSlot(cred, keeperEnabled, time.Now()); ok {
+			env = append(env, name+"="+cred.PlainValue)
 		}
 	}
 
@@ -1545,6 +1577,7 @@ type CredentialEnvExposure struct {
 // observable instead of silent. It performs no logging and allocates only when an
 // exposure actually exists.
 func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []CredentialEnvExposure {
+	req = nativeOAuthEnvView(req, keeperEnabled, time.Now())
 	var out []CredentialEnvExposure
 
 	// Credentials whose plaintext lands in the env. BuildEnvVarsSidecar
@@ -1644,6 +1677,15 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				EnvVarName: cred.EnvVarName,
 				Type:       "CLI_TOKEN",
 				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
+			})
+			markExposed(cred.ID)
+		}
+	}
+	for _, cred := range req.Credentials {
+		if name, ok := nativeOAuthSlot(cred, keeperEnabled, time.Now()); ok {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: name, Type: "OAUTH2",
+				Reason: "the resolved OAuth access token is delivered to a CLI consumer as process env; OAuth client and refresh companions use separate channels",
 			})
 			markExposed(cred.ID)
 		}
@@ -1871,4 +1913,109 @@ func DefaultEnvVarForProvider(provider string) string {
 
 func bedrockRun(req AgentRunRequest) bool {
 	return providerlogin.Canonical(req.LLMProvider) == bedrock.Provider || strings.HasPrefix(req.LLMModel, bedrock.NativeProvider+"/")
+}
+
+// File-only credentials expose paths, never their values, to process env.
+func fileOnlyCredential(cred Credential) bool {
+	switch cred.Type {
+	case "SSH_KEY", "CERTIFICATE", "GENERIC_SECRET", "USERPASS":
+		return true
+	}
+	return false
+}
+
+// appendCredentialFileEnv shares the writer's plan instead of sourcing .env.
+// Existing direct token/identifier assignments keep their native semantics.
+func appendCredentialFileEnv(env []string, creds []Credential, secretsDir string, keeperEnabled bool, mcpRefs ...map[string]bool) ([]string, error) {
+	_, aliases, _, err := buildCredFilePlan(creds, secretsDir, keeperEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateNativeOAuthSlots(env, creds, keeperEnabled, time.Now(), aliases...); err != nil {
+		return nil, err
+	}
+aliasesLoop:
+	for _, alias := range aliases {
+		name, _, _ := strings.Cut(alias, "=")
+		// Provider auth slots are deliberately direct for CLI_TOKEN; a
+		// generated dummy is not a conflicting credential or a file alias.
+		if providerAuthSlot(name) {
+			for _, cred := range creds {
+				if cred.Type == "CLI_TOKEN" && cred.EnvVarName == name && envHasAssignment(env, name, cred.PlainValue) {
+					continue aliasesLoop
+				}
+			}
+		}
+		if nativeAliasReserved(name) {
+			return nil, fmt.Errorf("credential delivery uses reserved runtime name: %s", name)
+		}
+
+		assignments := 0
+		for _, entry := range env {
+			if strings.HasPrefix(entry, name+"=") {
+				assignments++
+			}
+		}
+		if assignments > 1 {
+			return nil, fmt.Errorf("credential delivery name collision: %s", name)
+		}
+		if envHasName(env, name) && len(mcpRefs) > 0 && mcpRefs[0][name] {
+			for _, c := range creds {
+				if c.Type != "GENERIC_SECRET" || c.EnvVarName != name || !envHasAssignment(env, name, c.PlainValue) {
+					continue
+				}
+				pathAlias := name + "_PATH"
+				if nativeAliasReserved(pathAlias) || envHasName(env, pathAlias) {
+					return nil, fmt.Errorf("credential delivery name collision: %s", pathAlias)
+				}
+				for _, planned := range aliases {
+					plannedName, _, _ := strings.Cut(planned, "=")
+					if plannedName == pathAlias {
+						return nil, fmt.Errorf("credential delivery name collision: %s", pathAlias)
+					}
+				}
+				_, path, _ := strings.Cut(alias, "=")
+				env = append(env, pathAlias+"="+path)
+				continue aliasesLoop
+			}
+		}
+		if envHasName(env, name) {
+			direct := false
+			for _, c := range creds {
+				if (c.Type == "CLI_TOKEN" || c.Type == "SECRET") && name == c.EnvVarName && envHasAssignment(env, name, c.PlainValue) {
+					direct = true
+				}
+				for _, f := range c.Fields {
+					if name == f.EnvVar && envHasAssignment(env, name, f.Value) {
+						direct = true
+					}
+				}
+			}
+			if !direct {
+				return nil, fmt.Errorf("credential delivery name collision: %s", name)
+			}
+			continue
+		}
+		env = append(env, alias)
+	}
+	return env, nil
+}
+
+func nativeAliasReserved(name string) bool {
+	if strings.HasPrefix(name, "CREWSHIP_") || strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "DYLD_") {
+		return true
+	}
+	switch name {
+	case "HOME", "PATH", "SHELL", "IFS", "ENV", "BASH_ENV", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY", "CODEX_HOME", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "OPENCODE_CONFIG_CONTENT", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GOOGLE_GEMINI_BASE_URL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY":
+		return true
+	}
+	return false
+}
+
+func providerAuthSlot(name string) bool {
+	switch name {
+	case "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN":
+		return true
+	}
+	return false
 }

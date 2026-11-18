@@ -24,9 +24,10 @@ for this pilot; recreating crew runtimes cannot correct that host UID collision.
 Before selecting a crew, use the existing CLI environment flow:
 
 1. Set an exact Codex pin in `crew config <crew> --mise <file>` and resolve/apply its
-   native lock with `crew lock-resolve <file>` / `crew lock-apply <file> <resolution>`.
+   native lock with `crew provision lock-resolve <file>` /
+   `crew provision lock-apply <file> <resolution>`.
 2. Build the environment with `crew start` or `crew provision` and inspect its
-   immutable build revision with `crew revisions <crew>`.
+   immutable build revision with `crew provision revisions <crew>`.
 3. The executable must reside at a canonical image path below `/opt` or `/usr`,
    owned by root or UID 1001, executable, and not writable by group/others. The
    read-only root and mount checks prevent UID 1001 from replacing image files. Sealing a shim
@@ -114,7 +115,7 @@ Existing host-admitted HOME, proxy and credential values remain;
 moving credentials outside agents belongs to the later gateway work.
 
 `agent_runs` state and `exec.command` payloads contain `managed_launch` admission
-evidence. `version` is read from a single canonical native mise v3 locked entry and
+evidence. `version` is read from a single canonical native mise v3/v4 locked entry and
 must match the exact configured pin
 and build revision; session self-reported versions remain separate observations.
 This evidence describes admitted artifacts, not successful authentication or a
@@ -139,11 +140,28 @@ A missing selector fails this explicit gate and supplies no packaging qualificat
 go test -tags=integration ./internal/devcontainer -run '^TestCodexNativePackaging$' -count=1 -timeout 10m
 ```
 
-This gate resolves the public Codex 0.160.0 native lock, installs with
+This required Linux-amd64 gate uses native Crewship CLI `crew provision
+lock-resolve` and `lock-apply` to resolve Codex 0.169.0. It covers a clean
+installation and an upgrade from an actually installed 0.160.0, preserving the
+previous lock binding. It installs with
 `--locked --force`, records the native mise path and inspects the committed
 image without starting it for inspection. A separate read-only, network-disabled
 runtime executes the actual native binary through the static launcher with
-`--version`. It makes no authentication or model requests.
+`--version`. It makes no authentication or model requests. CI prepares the
+builder using the SHA-256-pinned mise 2026.11.9 musl artifact and immutable
+Bookworm glibc base (the supported product runtime family). Packaging gets a
+separate non-root ten-minute command; existing
+fixture privilege profiles and timeouts stay unchanged. Missing/skipped clean
+or upgrade execution fails the required lane.
+
+The `native-mise-cli-<run>-<attempt>` artifact contains public tool selectors,
+resolution, applied lock and a component receipt for each successful scenario.
+Export happens only after owned Docker resources are removed. It identifies the
+actual tested checkout, native CLI digest, builder/runtime image IDs, lock and
+observed artifact; authentication is explicitly `not_tested`. These are proposed
+build inputs and packaging observations, not authority to activate a crew or
+proof of a full product installation or successful Codex shell/authentication.
+
 
 Legacy inventory path/version observations remain PATH-first and keep their
 existing publication-gate meaning. Managed evidence separately resolves the

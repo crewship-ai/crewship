@@ -1,0 +1,1 @@
+- **Stopping an absent run could stop a longer-named tmux neighbor (#5471).** Runtime liveness, startup cleanup and stop now use exact tmux session targets, so prefix matching cannot select another run. Unreachable tmux servers still retain an unknown outcome until authoritative settlement.

@@ -7,37 +7,58 @@ or files at session start. The positioning is HashiCorp Vault OSS's
 injection use case — *not* a general-purpose password manager. There is
 no browser autofill, no sharing UI, no native client.
 
-This doc covers the type system, storage shape, and mount behaviour as
-of PR `feat/credentials-vault-types` (DB migration v93). Update it when
-the type enum changes, when the mount path conventions change, or when
-the encryption-at-rest path moves.
+This contract covers current type policy and native file delivery. The policy
+source is `internal/credpolicy/credpolicy.go`; an unknown type is withheld.
+Keeper is an access policy, not another credential type. Only `SECRET` is gated
+by the current table; changing type to avoid a required gate is not onboarding.
+Adapter-specific login behavior is documented in `docs/guides/credentials.mdx`.
 
 ## Supported credential types
 
-| Type             | Storage shape                                       | Mount target                                  | Why                                                                                |
-|------------------|-----------------------------------------------------|-----------------------------------------------|------------------------------------------------------------------------------------|
-| `API_KEY`        | `encrypted_value` only                              | sidecar reverse-proxy injects Authorization header | Anthropic / OpenAI API calls — secret never reaches the agent process              |
-| `AI_CLI_TOKEN`   | `encrypted_value`                                   | sidecar proxy (same as API_KEY)               | Claude Code / Codex / Gemini CLI tokens with `sk-ant-oat-` style prefix             |
-| `CLI_TOKEN`      | `encrypted_value`                                   | file at `/secrets/<agent>/<envvar>` mode 0400 | git PATs etc. — written to disk because the CLI tool reads it from env var path     |
-| `SECRET`         | same as CLI_TOKEN                                   | same as CLI_TOKEN                             | legacy opaque secret type                                                          |
-| `OAUTH2`         | `encrypted_value` (access token) + OAuth client cols | sidecar proxy + tokens.json                   | Linear, Google etc. — OAuth refresh flow lives in `internal/llmproxy/monitor.go`    |
-| `USERPASS`       | cleartext `username` + `encrypted_value` (password) | 2 files `<envvar>_USERNAME` + `<envvar>_PASSWORD` mode 0400 | Gmail email+password, DB login — matches Bitwarden's `login.username` shape         |
-| `SSH_KEY`        | `encrypted_value` = PEM body                        | `/secrets/<agent>/ssh/<envvar>` mode **0600** | OpenSSH refuses world-readable keys; 0600 mirrors `ssh-keygen` defaults             |
-| `CERTIFICATE`    | `encrypted_value` = PEM body                        | `/secrets/<agent>/certs/<envvar>.pem` mode 0400 | mTLS clients, signing certs                                                        |
-| `GENERIC_SECRET` | `encrypted_value` (opaque)                          | file like CLI_TOKEN                           | webhook secrets, signing keys, custom tokens — no shape validation                  |
+`D` below is the per-run `$CREWSHIP_SECRETS_DIR`, currently
+`/secrets/<agent-slug>/<run-id>`. A slot is the resolver's delivered name.
+
+| Type | Delivery |
+| --- | --- |
+| `API_KEY` | Sidecar provider injection where the adapter has a routable endpoint; supported direct fallbacks expose an env value. |
+| `AI_CLI_TOKEN` | Adapter-specific subscription derivative: token env or rendered login file; not generally secretless proxy delivery. |
+| `PROVIDER_LOGIN` | Adapter-specific derivative of a subscription or metered login; stored refresh-token parts remain server-side. |
+| `CLI_TOKEN` | `D/<SLOT>` mode 0400 **and the direct token value in `<SLOT>`** for standard CLI token conventions. |
+| `SECRET` | `D/<SLOT>` mode 0400, path in `<SLOT>`; withheld when Keeper is enabled. |
+| `GENERIC_SECRET` | `D/<SLOT>` mode 0400, path in `<SLOT>`; not Keeper-gated by current policy. |
+| `USERPASS` | Two mode-0400 files; `<SLOT>_USERNAME` and `<SLOT>_PASSWORD` contain paths, not their values. |
+| `SSH_KEY` | Unencrypted PEM/OpenSSH private key in `D/ssh/<SLOT>` mode 0600; `<SLOT>_PATH` locates it. |
+| `CERTIFICATE` | X.509 PEM certificate chain in `D/certs/<SLOT>.pem` mode 0400; `<SLOT>_PATH` locates it. A private key is separate material. |
+| `OAUTH2` | A granted primary access token is exported as the value of its explicit consumer slot. Specialized provider login delivery remains adapter-specific; refresh tokens and MCP client companions are separate channels. |
+| `ENDPOINT_URL` | Provider endpoint configuration, with separately encrypted optional authentication material. |
+
+File aliases are exported to the adapter process and inherited by tool/child
+processes. Explicit MCP plaintext env references remain a separate, policy-gated
+channel; a generic file slot explicitly consumed by MCP uses `<SLOT>_PATH` for
+its file. Reserved names and collisions refuse delivery. The diagnostic `.env`
+map is not a shell setup step and must not be sourced: it would replace direct
+token values with paths. Env/file delivery is readable by the agent process;
+masking logs or UI does not make it inaccessible.
+
+The internal resolver marks a granted primary OAuth access token with
+`oauth_primary`. MCP client IDs, client secrets and synthetic access-token
+selectors do not receive this marker. An absent marker stays MCP-only; runtime
+delivery does not infer a token's role from its slot suffix. Expired or malformed
+cached grant leases and handle-only snapshots cannot enter native OAuth env
+delivery. Invalid names, reserved runtime names and conflicting slot owners
+refuse delivery.
 
 Adding a new type:
 
 1. Add the constant to `internal/api/credentials_types.go` and the case
    in `validateCredentialPayload`.
-2. Add the mount branch to `buildCredFileScript` in
-   `internal/orchestrator/exec_sidecar.go` (or document why the type is
-   sidecar-proxy-only).
+2. Add an explicit row to `internal/credpolicy/credpolicy.go` and extend
+   the corresponding delivery plan/selectors; an unclassified type stays withheld.
 3. Extend the type handling in
    `components/features/credentials/credential-form.tsx`.
 4. Update the table above.
 
-## Schema (DB migration v93)
+## Historical vault-type schema (DB migration v94)
 
 ```sql
 ALTER TABLE credentials
@@ -110,27 +131,63 @@ The existing `env_var_name` column is reinterpreted per `mount_type`:
 
 ## Mount-time behaviour
 
-`writeCredentialFiles` runs inside the agent container as root (UID 0),
-delegating the script construction to the pure `buildCredFileScript`
-function (test-covered in `exec_sidecar_credfiles_test.go`). For each
-credential it:
+`writeCredentialFiles` executes as agent UID/GID 1001, not root. The pure
+`buildCredFilePlan` supplies both file writes and process path aliases. The
+writer creates private directories, unlinks existing file entries, writes a
+base64 round-trip, sets mode 0600 for SSH and 0400 for other files, and writes
+a mode-0400 diagnostic `.env` map. Ownership follows its UID; no chown capability
+is required. This does not isolate another process with that same UID.
 
-1. `mkdir -p` the `ssh/` and `certs/` subdirectories at mode **0700**
-   *before* any file write, so an unprivileged process can't race in
-   and create the dir with a wider mode.
-2. Writes each credential file via `echo '<base64>' | base64 -d > path`
-   — base64 round-trip prevents shell interpretation of secret bytes
-   (newlines in PEMs, quotes in passwords).
-3. `chown 1001:1001` each file to the agent UID.
-4. `chmod` to the type-specific mode (see table above).
-5. Writes `/secrets/<agent>/.env` mapping each env var name to its file
-   path — **the raw value never goes into an env var**, so nothing
-   sensitive lands in `/proc/<pid>/environ`.
-6. `chown 1001:1001 /secrets/<agent>` (non-recursive) so the intended
-   agent can access its secret directory. Ownership and mode bits do not
-   isolate processes that share UID 1001 and can reach the same directory;
-   that boundary must come from the runtime's filesystem/mount isolation.
-   API authorization tests alone do not verify that runtime boundary.
+Only SSH/certificate text receives CRLF-to-LF conversion and a missing final LF
+at delivery, including legacy stored values. The stored value is unchanged;
+opaque values and named fields remain byte-identical. Imports validate actual
+SSH/X.509 parsing and reject unsupported binary/NUL/non-UTF-8 input. Certificate
+primary values contain a certificate chain, not a private-key bundle.
+
+After verified native file preflight, `DELIVERED` records the credential,
+agent and run with authentication unknown. Audit failure prevents launch.
+This event does not change `USE` or `last_used_at`; existing sidecar fetch USE
+is crew-scoped and cannot prove which agent authenticated successfully.
+
+For agent proxy requests with an authenticated current run, `PROXY_ADMITTED`
+records the credential, agent, crew and active run after scope and budget
+admission. Its fixed metadata describes the proxy channel, admitted stage and
+unknown authentication. Audit persistence failure refuses admission. The event
+proves neither forwarding nor upstream authentication and does not update
+`USE` or `last_used_at`. Legacy requests without a run retain admission behavior
+without an invented run attribution; crew-only requests cannot claim a run or
+credential. A shared sidecar's boot run is never used as the current caller.
+
+The Docker crew container is the current filesystem trust boundary. Agents
+sharing UID 1001 can read each other's reachable delivered files. Separate
+crews are required for mutually untrusted agents; product grant checks alone
+are not same-UID isolation.
+
+## Native CLI regression evidence
+
+`TestNativeCLIShellEnvironment` drives actual Claude Code, Codex and OpenCode
+shell tools with fresh homes and isolated local providers. Every adapter must
+verify raw token delivery, exact opaque file/password bytes, native path aliases,
+child-shell inheritance, standard pinned-host OpenSSH authentication, mTLS with
+standard `curl`, and a synthetic USERPASS HTTP basic login through curl's stdin
+configuration. A CLI token authenticates through curl's stdin header input.
+The mTLS private key is the certificate's secret `key_pem` field;
+the certificate primary is a valid X.509 chain. No password is passed to curl
+as a process argument. The basic-login fixture uses a deliberately simple
+synthetic value, not a general curl-configuration serializer.
+The CI runner requires each adapter subtest to start and pass; a parent package
+success, missing CLI, skipped subtest or final model response cannot satisfy it.
+The CLI trio runs without root; the separate qualified Codex Docker fixture
+retains its stricter runtime/artifact/kernel-control checks. No paid model or
+production credential is used. These checks do not qualify every protocol,
+tmux/routine lifecycle, Gemini runtime or a production Windows login.
+
+`TestNativeVaultCLIToStandardSSH` separately follows the built Crewship CLI
+through the actual API, encrypted SQLite Vault, grant, native IPC resolver,
+writer and standard SSH authentication. It also imports a multiline secret
+field through native CLI stdin, checks encryption/exact bytes/0400 mode and
+authenticates with that field's native file alias. This closes the first-line
+scanner truncation path without adding an onboarding API workaround.
 
 ## What this is NOT
 
@@ -145,13 +202,13 @@ credential it:
 
 ## Related code
 
-- DB migration: `internal/database/migrate_consts_v93_credential_vault_types.go`
+- DB migration: `internal/database/migrate_consts_v94_credential_vault_types.go`
 - Type enum + validator: `internal/api/credentials_types.go`
 - API write paths: `internal/api/credentials_mutate.go`
 - Internal resolve endpoint: `internal/api/agent_config.go` (`resolveAgentCredentials`)
 - IPC bridge: `internal/chatbridge/resolver.go` (`credentialResponse`)
 - Container mount: `internal/orchestrator/exec_sidecar.go` (`buildCredFileScript`)
-- Tests: `*_test.go` next to each file above + `internal/database/migrate_v93_credential_vault_types_test.go`
+- Tests: `*_test.go` next to each file above + `internal/database/migrate_v94_credential_vault_types_test.go`
 
 The frontend wizard + list/detail update for the four new types is
 tracked separately (follow-up PR after `feat/credentials-vault-types`).

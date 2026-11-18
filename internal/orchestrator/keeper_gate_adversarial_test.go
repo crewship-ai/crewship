@@ -89,11 +89,8 @@ func TestBuildCredFileScript_KeeperMatrix_AllTypes(t *testing.T) {
 	}
 }
 
-// TestBuildCredFileScript_DuplicateSecretEnvVars checks that duplicate SECRET
-// env-var names don't sneak one copy past the gate. Under Keeper ON both are
-// withheld (empty script); under Keeper OFF both are written (the writer does
-// not dedupe — the last rm-then-write wins on disk, but the plaintext of both
-// still lands, which is the pre-existing legacy behaviour we must not change).
+// Duplicate aliases are rejected before any material is written. Keeper still
+// withholds both credentials when enabled.
 func TestBuildCredFileScript_DuplicateSecretEnvVars(t *testing.T) {
 	t.Parallel()
 	creds := []Credential{
@@ -109,16 +106,11 @@ func TestBuildCredFileScript_DuplicateSecretEnvVars(t *testing.T) {
 		t.Errorf("keeper ON: duplicate SECRETs must both be withheld; count=%d script=%q", onCount, onScript)
 	}
 
-	offScript, offCount, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
-	if err != nil {
-		t.Fatalf("keeper off: %v", err)
+	_, _, _, err = buildCredFileScript(creds, "/secrets/agent-a", false)
+	if err == nil || !strings.Contains(err.Error(), "collision") {
+		t.Fatalf("duplicate delivery names must fail closed: %v", err)
 	}
-	if offCount != 2 {
-		t.Errorf("keeper OFF: both duplicate SECRETs written (legacy), want count 2, got %d", offCount)
-	}
-	if !strings.Contains(offScript, "/secrets/agent-a/DUP") {
-		t.Errorf("keeper OFF: DUP path must appear; script:\n%s", offScript)
-	}
+
 }
 
 // TestBuildCredFileScript_EmptySecretBothKeeperStates confirms the empty-input

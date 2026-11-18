@@ -26,6 +26,7 @@ type Artifact struct {
 }
 
 type Descriptor struct {
+	OuterSandbox bool `json:"outer_sandbox,omitempty"`
 	Artifact
 	ImageID    string   `json:"image_id"`
 	RevisionID string   `json:"revision_id"`
@@ -51,7 +52,7 @@ func ImagePath(p string) bool {
 }
 
 func (d Descriptor) Validate() error {
-	if (d.RunID != "" && !ValidRunID(d.RunID)) || !ImagePath(d.Path) || !digestPattern.MatchString(d.SHA256) || d.Format != "static_elf" ||
+	if (d.OuterSandbox && d.Binary != "codex") || (d.RunID != "" && !ValidRunID(d.RunID)) || !ImagePath(d.Path) || !digestPattern.MatchString(d.SHA256) || d.Format != "static_elf" ||
 		!strings.HasPrefix(d.ImageID, "sha256:") || !digestPattern.MatchString(strings.TrimPrefix(d.ImageID, "sha256:")) ||
 		!digestPattern.MatchString(d.LockSHA256) || d.RevisionID == "" || len(d.RevisionID) > 128 ||
 		(d.Binary != "claude" && d.Binary != "codex") || !versionPattern.MatchString(d.Version) {

@@ -22,7 +22,7 @@ func TestReadValueStdin_KeepsEveryLine(t *testing.T) {
 		_ = w.Close()
 	}()
 
-	got, err := readValueStdin()
+	got, err := readValueStdin("API_KEY")
 	if err != nil {
 		t.Fatalf("readValueStdin: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestReadValueStdin_Boundary(t *testing.T) {
 			orig := os.Stdin
 			os.Stdin = f
 			defer func() { os.Stdin = orig }()
-			value, err := readValueStdin()
+			value, err := readValueStdin("API_KEY")
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error=%v wantError=%v", err, tc.wantError)
 			}

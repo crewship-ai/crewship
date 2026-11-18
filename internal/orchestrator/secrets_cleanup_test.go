@@ -367,8 +367,10 @@ func TestRunAgent_SecretsRetainBeforeWriteThenCleanup(t *testing.T) {
 	mc := &mockContainer{
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			joined := strings.Join(cfg.Cmd, " ")
+			stdin := covStdin(cfg)
 			switch {
-			case strings.Contains(joined, "base64 -d"):
+			// The merged preflight writes credential material over stdin.
+			case strings.Contains(stdin, preflightStepMarker+preflightStepCredentials):
 				mu.Lock()
 				holdAtWrite = o.secretsHoldCount("c1", "test-agent", "run-a")
 				mu.Unlock()

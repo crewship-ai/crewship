@@ -66,12 +66,17 @@ const (
 type CredentialAuditEvent string
 
 const (
-	AuditEventUse      CredentialAuditEvent = "USE"
-	AuditEventRotate   CredentialAuditEvent = "ROTATE"
-	AuditEventTest     CredentialAuditEvent = "TEST"
-	AuditEventRevoke   CredentialAuditEvent = "REVOKE"
-	AuditEventDetected CredentialAuditEvent = "DETECTED"
-	AuditEventCreated  CredentialAuditEvent = "CREATED"
+	AuditEventUse CredentialAuditEvent = "USE"
+	// File delivery is not proof of a successful authentication.
+	AuditEventDelivered CredentialAuditEvent = "DELIVERED"
+	// Proxy admission is an allowed attempt, not a forwarded request or
+	// successful upstream authentication. It never updates last_used_at.
+	AuditEventProxyAdmitted CredentialAuditEvent = "PROXY_ADMITTED"
+	AuditEventRotate        CredentialAuditEvent = "ROTATE"
+	AuditEventTest          CredentialAuditEvent = "TEST"
+	AuditEventRevoke        CredentialAuditEvent = "REVOKE"
+	AuditEventDetected      CredentialAuditEvent = "DETECTED"
+	AuditEventCreated       CredentialAuditEvent = "CREATED"
 	// Approval lifecycle for agent-proposed credentials (v119): an agent
 	// proposes a credential (CREATED, status PENDING_APPROVAL) and a human
 	// then APPROVED it (→ ACTIVE) or REJECTED it (→ soft-deleted).
@@ -123,17 +128,19 @@ const (
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
-	AuditEventUse:      {},
-	AuditEventRotate:   {},
-	AuditEventTest:     {},
-	AuditEventRevoke:   {},
-	AuditEventDetected: {},
-	AuditEventCreated:  {},
-	AuditEventApproved: {},
-	AuditEventRejected: {},
-	AuditEventLeased:   {},
-	AuditEventReveal:   {},
-	AuditEventRefresh:  {},
+	AuditEventUse:           {},
+	AuditEventDelivered:     {},
+	AuditEventProxyAdmitted: {},
+	AuditEventRotate:        {},
+	AuditEventTest:          {},
+	AuditEventRevoke:        {},
+	AuditEventDetected:      {},
+	AuditEventCreated:       {},
+	AuditEventApproved:      {},
+	AuditEventRejected:      {},
+	AuditEventLeased:        {},
+	AuditEventReveal:        {},
+	AuditEventRefresh:       {},
 
 	AuditEventReattributed: {},
 	AuditEventMoved:        {},

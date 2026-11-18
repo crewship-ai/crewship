@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -125,6 +126,57 @@ func TestCredFieldSet_DefaultsToSecret(t *testing.T) {
 	}
 	if secret, ok := body["is_secret"].(bool); !ok || !secret {
 		t.Errorf("POST body is_secret = %v, want true — an unflagged field must be encrypted", body["is_secret"])
+	}
+}
+
+func TestCredFieldSet_StdinPreservesMultilineBytes(t *testing.T) {
+	for _, value := range []string{"-----BEGIN PRIVATE KEY-----\r\nsynthetic\r\n-----END PRIVATE KEY-----\r\n", "opaque-$HOME\n\n", strings.Repeat("x", 64*1024)} {
+		t.Run(fmt.Sprint(len(value)), func(t *testing.T) {
+			stub := covStub(t)
+			stubFieldCredential(stub)
+			stub.OnPost("/api/v1/credentials/"+credFieldCredID+"/fields", clitest.JSONResponse(201, map[string]any{"key": "key_pem", "is_secret": true}))
+			withStdin(t, value, func() {
+				out, err := runCredField(t, credFieldSetCmd, []string{credFieldCredID, "key_pem"}, map[string]string{"value-stdin": "true"})
+				if err != nil {
+					t.Fatalf("field stdin rejected: %v", err)
+				}
+				if strings.Contains(out, value) {
+					t.Fatal("secret field printed")
+				}
+			})
+			calls := stub.Calls()
+			var body struct {
+				Value string `json:"value"`
+			}
+			if err := json.Unmarshal(calls[len(calls)-1].Body, &body); err != nil || body.Value != value {
+				t.Fatal("field stdin bytes were changed or truncated")
+			}
+		})
+	}
+}
+
+func TestCredFieldSet_StdinRejectsInvalidAndAmbiguousInput(t *testing.T) {
+	for name, value := range map[string]string{"oversized": strings.Repeat("x", 64*1024+1), "invalid_utf8": "synthetic\xff", "nul": "synthetic\x00value", "conflicting_flags": "synthetic"} {
+		t.Run(name, func(t *testing.T) {
+			stub := covStub(t)
+			flags := map[string]string{"value-stdin": "true"}
+			if name == "conflicting_flags" {
+				flags["value"] = "other"
+			}
+			withStdin(t, value, func() {
+				_, err := runCredField(t, credFieldSetCmd, []string{credFieldCredID, "key_pem"}, flags)
+				if err == nil {
+					t.Fatal("invalid field input accepted")
+				}
+				want := map[string]string{"oversized": "too long", "invalid_utf8": "non-UTF-8", "nul": "NUL", "conflicting_flags": "mutually exclusive"}[name]
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("expected actionable %s error, got %v", name, err)
+				}
+			})
+			if len(stub.Calls()) != 0 {
+				t.Fatal("invalid input reached the server")
+			}
+		})
 	}
 }
 

@@ -980,6 +980,7 @@ export function CredentialDetailSheet({
             <li key={e.id} className="flex flex-wrap items-center gap-2 rounded-md px-1.5 py-1.5 text-label hover:bg-muted/60">
               <AuditActor event={e} crewsById={crewsById} />
               <Badge variant="outline" className="px-1.5 font-mono text-micro">{e.event_type}</Badge>
+              <AuditDeliveryContext event={e} />
               {e.ip_address && <span className="font-mono text-micro text-muted-foreground-soft">{e.ip_address}</span>}
               <span className="ml-auto text-micro text-muted-foreground-soft">{formatRelativeTime(e.occurred_at)}</span>
             </li>
@@ -1216,6 +1217,22 @@ async function loadAssignments(
  * unattributed row says "system" instead of leaving a gap, so "nobody signed
  * this" and "we forgot to render it" cannot be confused.
  */
+/** Show only known delivery context, never arbitrary audit metadata or values. */
+function AuditDeliveryContext({ event }: { event: AuditEvent }) {
+  if (event.event_type === "USE" && event.metadata?.source === "sidecar_fetch") {
+    return <span className="text-micro text-muted-foreground">Sidecar fetch · Authentication unverified</span>
+  }
+  if (event.event_type !== "DELIVERED") return null
+  const run = event.metadata?.run_id
+  const runId = typeof run === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(run) ? run : null
+  return (
+    <span className="flex min-w-0 flex-wrap gap-x-2 text-micro text-muted-foreground">
+      <span>{event.metadata?.channel === "file" ? "File delivered" : "Delivery recorded"} · Authentication unverified</span>
+      {runId && <span className="break-all font-mono">Run {runId}</span>}
+    </span>
+  )
+}
+
 function AuditActor({
   event,
   crewsById,
