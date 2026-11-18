@@ -21,6 +21,7 @@ import (
 
 type keeperRequestBody struct {
 	RequestingAgentID string `json:"requesting_agent_id"`
+	RequestingRunID   string `json:"requesting_run_id,omitempty"`
 	RequestingCrewID  string `json:"requesting_crew_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	CredentialID      string `json:"credential_id"`
@@ -89,6 +90,17 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.RequestingCrewID) {
+		return
+	}
+
+	// Admit the calling run before consuming a one-use approval or claiming a
+	// dedup key. The audit transaction rechecks before persisting a request.
+	if err := validateKeeperRunTx(r.Context(), h.db, body.WorkspaceID, body.RequestingAgentID, body.RequestingCrewID, body.RequestingRunID); err != nil {
+		if errors.Is(err, errKeeperRunScope) {
+			replyError(w, http.StatusForbidden, "keeper calling run unavailable")
+		} else {
+			replyInternalError(w, h.logger, "keeper run admission", err)
+		}
 		return
 	}
 
@@ -216,9 +228,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	insertSQL := `
-		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
-		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`
-	insertArgs := []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_run_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
+		VALUES (?, ?, NULLIF(?,''), ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`
+	insertArgs := []any{reqID, body.RequestingAgentID, body.RequestingRunID, body.RequestingCrewID, body.CredentialID,
 		body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)}
 	if approvedVia != nil {
 		// Born CONSUMED: this row will carry decision ALLOW, and without the
@@ -229,9 +241,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// markers must agree that this row is not spendable (#2574).
 		nowUTC := time.Now().UTC().Format(time.RFC3339)
 		insertSQL = `
-		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at, approval_consumed_at)
-		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?, ?)`
-		insertArgs = []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_run_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at, approval_consumed_at)
+		VALUES (?, ?, NULLIF(?,''), ?, ?, NULLIF(?,?), ?, 'PENDING', ?, ?)`
+		insertArgs = []any{reqID, body.RequestingAgentID, body.RequestingRunID, body.RequestingCrewID, body.CredentialID,
 			body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339), nowUTC}
 	}
 
@@ -260,9 +272,17 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			ActorType:    keeperActorAgent,
 			ActorID:      body.RequestingAgentID,
 		}); err != nil {
+		if errors.Is(err, errKeeperRunScope) {
+			replyError(w, http.StatusForbidden, "run scope unavailable")
+			return
+		}
 		h.logger.Error("keeper: insert PENDING request failed; refusing to decide without an audit row", "error", err)
 		replyError(w, http.StatusInternalServerError, "audit persistence failed")
 		return
+	}
+
+	if body.RequestingRunID != "" {
+		r = r.WithContext(journal.WithRunID(r.Context(), body.RequestingRunID))
 	}
 
 	// Emit keeper.request to the journal so a credential access ask

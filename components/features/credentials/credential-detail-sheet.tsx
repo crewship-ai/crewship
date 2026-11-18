@@ -1222,12 +1222,12 @@ function AuditDeliveryContext({ event }: { event: AuditEvent }) {
   if (event.event_type === "USE" && event.metadata?.source === "sidecar_fetch") {
     return <span className="text-micro text-muted-foreground">Sidecar fetch · Authentication unverified</span>
   }
-  if (event.event_type !== "DELIVERED") return null
+  if (event.event_type !== "DELIVERED" && event.event_type !== "KEEPER_DECISION") return null
   const run = event.metadata?.run_id
   const runId = typeof run === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(run) ? run : null
   return (
     <span className="flex min-w-0 flex-wrap gap-x-2 text-micro text-muted-foreground">
-      <span>{event.metadata?.channel === "file" ? "File delivered" : "Delivery recorded"} · Authentication unverified</span>
+      <span>{event.event_type === "KEEPER_DECISION" ? (["ALLOW", "DENY", "ESCALATE"].includes(String(event.metadata?.decision)) ? `Keeper ${event.metadata?.decision}` : "Keeper decision recorded") : event.metadata?.channel === "file" ? "File delivered" : "Delivery recorded"} · Authentication unverified</span>
       {runId && <span className="break-all font-mono">Run {runId}</span>}
     </span>
   )

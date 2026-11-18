@@ -66,7 +66,9 @@ const (
 type CredentialAuditEvent string
 
 const (
-	AuditEventUse CredentialAuditEvent = "USE"
+	// Keeper policy decision, never proof of authentication or USE.
+	AuditEventKeeperDecision CredentialAuditEvent = "KEEPER_DECISION"
+	AuditEventUse            CredentialAuditEvent = "USE"
 	// File delivery is not proof of a successful authentication.
 	AuditEventDelivered CredentialAuditEvent = "DELIVERED"
 	// Proxy admission is an allowed attempt, not a forwarded request or
@@ -128,19 +130,20 @@ const (
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
-	AuditEventUse:           {},
-	AuditEventDelivered:     {},
-	AuditEventProxyAdmitted: {},
-	AuditEventRotate:        {},
-	AuditEventTest:          {},
-	AuditEventRevoke:        {},
-	AuditEventDetected:      {},
-	AuditEventCreated:       {},
-	AuditEventApproved:      {},
-	AuditEventRejected:      {},
-	AuditEventLeased:        {},
-	AuditEventReveal:        {},
-	AuditEventRefresh:       {},
+	AuditEventKeeperDecision: {},
+	AuditEventUse:            {},
+	AuditEventDelivered:      {},
+	AuditEventProxyAdmitted:  {},
+	AuditEventRotate:         {},
+	AuditEventTest:           {},
+	AuditEventRevoke:         {},
+	AuditEventDetected:       {},
+	AuditEventCreated:        {},
+	AuditEventApproved:       {},
+	AuditEventRejected:       {},
+	AuditEventLeased:         {},
+	AuditEventReveal:         {},
+	AuditEventRefresh:        {},
 
 	AuditEventReattributed: {},
 	AuditEventMoved:        {},

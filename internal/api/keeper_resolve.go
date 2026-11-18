@@ -308,13 +308,23 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	callingRun, requestType, err := keeperStoredRun(r.Context(), tx, reqID)
+	if err != nil {
+		replyInternalError(w, h.logger, "keeper resolve: read original attribution", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: commit", err)
 		return
 	}
-	_, _ = h.journal.Emit(r.Context(), journal.Entry{
+	_, _ = h.journal.Emit(journal.WithRunID(r.Context(), callingRun), journal.Entry{
 		WorkspaceID: wsID,
 		CrewID:      crewID,
+		AgentID:     agentID,
+		TraceID:     callingRun,
+		Payload:     map[string]any{"decision": decision, "request_type": requestType},
+		Refs:        map[string]any{"keeper_request_id": reqID, "credential_id": credentialID},
 		Type:        journal.EntryKeeperDecision,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorUser,

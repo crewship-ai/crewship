@@ -1383,6 +1383,15 @@ describe("native delivery evidence", () => {
       }] : [],
     }))
   }
+  it.each(["ALLOW", "DENY", "ESCALATE"])("shows Keeper %s as authorization, with run context and no raw metadata", async (decision) => {
+    audit("KEEPER_DECISION", { run_id: "msg_keeper_fixture", decision, value: "never-render-synthetic-secret", reason: "raw-private-metadata" })
+    renderSheet()
+    const row = (await screen.findByText("KEEPER_DECISION")).closest("li")!
+    expect(within(row).getByText("Run msg_keeper_fixture")).toBeInTheDocument()
+    expect(within(row).getByText(`Keeper ${decision} · Authentication unverified`)).toBeInTheDocument()
+    expect(screen.queryByText("never-render-synthetic-secret")).not.toBeInTheDocument()
+    expect(screen.queryByText("raw-private-metadata")).not.toBeInTheDocument()
+  })
   it("shows a delivered file's run and leaves authentication unverified", async () => {
     audit("DELIVERED", { run_id: "msg_123_fixture", channel: "file", authentication: "unknown", value: "never-render-synthetic-secret" })
     renderSheet()
