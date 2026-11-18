@@ -182,14 +182,14 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var target targetAgentInfo
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
-		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug, COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
 		WHERE a.slug = ? AND a.crew_id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
 	`, body.TargetSlug, body.CrewID, body.WorkspaceID).Scan(
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
-		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug, &target.Status,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -202,6 +202,11 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if fromAgentID == target.ID {
 		replyError(w, http.StatusBadRequest, "cannot query yourself")
+		return
+	}
+
+	if err := refuseHeldAgent(target.Slug, target.Status); err != nil {
+		replyError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -263,6 +268,11 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	// A blocking pre-hook can run while the crew roster changes. Admission
+	// must recheck the exact resolved IDs in the transaction that writes.
+	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, fromAgentID, body.CrewID, target.ID, body.CrewID) {
+		return
+	}
 	originID := runauthority.OriginIDFromContext(r.Context())
 	if body.SourceRunID != "" {
 		chat, err := delegationExecutionChat(r.Context(), tx, body.SourceRunID, fromAgentID, body.WorkspaceID)

@@ -429,6 +429,20 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if !assertLiveDelegationMembers(w, r, tx, h.logger, body.WorkspaceID, assignedByID, assignerCrewID, target.ID, body.CrewID) {
+		return
+	}
+	if assignerCrewID != body.CrewID {
+		connected, err := AreCrewsConnected(r.Context(), tx, assignerCrewID, body.CrewID)
+		if err != nil {
+			replyInternalError(w, h.logger, "recheck assignment crew connection", err)
+			return
+		}
+		if !connected {
+			replyError(w, http.StatusForbidden, "crews are no longer connected")
+			return
+		}
+	}
 	originID := runauthority.OriginIDFromContext(r.Context())
 	if body.SourceRunID != "" {
 		chat, err := delegationExecutionChat(r.Context(), tx, body.SourceRunID, assignedByID, body.WorkspaceID)
