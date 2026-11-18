@@ -1,0 +1,1 @@
+- **Native credential setup keeps secret material out of process arguments even when batching is unavailable (#5494).** File credentials and adapter authentication files now use stdin in fallback execution as well as merged setup. Ambiguous shell requests with an existing stdin stream are rejected before execution.
