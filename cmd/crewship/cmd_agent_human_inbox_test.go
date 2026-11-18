@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 )
 
 func TestAgentHumanInboxCLISendUsesCanonicalJoinedTargetAndWorkspace(t *testing.T) {
@@ -34,6 +35,9 @@ func TestAgentHumanInboxCLISendUsesCanonicalJoinedTargetAndWorkspace(t *testing.
 	if !ok || len(mentions) != 1 || mentions[0] != covAgentIDCli3 || body["client_id"] != "send-once" || body["content"] != "A real human message" {
 		t.Fatalf("wrong canonical send=%+v", body)
 	}
+	if calls[0].Headers.Get(featureflags.AgentInboxRequestHeader) != "1" {
+		t.Fatal("canonical send lost explicit inbox gating")
+	}
 	if !strings.Contains(calls[0].Query, "workspace_id="+covWSCli3) {
 		t.Fatalf("workspace not explicit: %s", calls[0].Query)
 	}
@@ -58,6 +62,9 @@ func TestAgentHumanInboxCLITaskKeepsIssueCreationAndStartGates(t *testing.T) {
 	starts := stub.CallsFor("POST", "/api/v1/crews/"+crew+"/issues/ENG-7/start")
 	if len(creates) != 1 || len(starts) != 1 {
 		t.Fatalf("create/start counts=%d/%d", len(creates), len(starts))
+	}
+	if creates[0].Headers.Get(featureflags.AgentInboxRequestHeader) != "1" || starts[0].Headers.Get(featureflags.AgentInboxRequestHeader) != "1" {
+		t.Fatal("explicit inbox create or start lost gating")
 	}
 	if creates[0].Headers.Get("Idempotency-Key") != "task-once" || starts[0].Headers.Get("Idempotency-Key") != "task-once:start" {
 		t.Fatal("canonical retry identity lost")

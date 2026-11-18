@@ -4,7 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
+
+func (s *Server) humanInboxDiscovered(r *http.Request) bool {
+	if s.ipc == nil || s.ipc.AgentRunKey == "" {
+		return false
+	}
+	token := bearerToken(r)
+	ws, _, run, ok := internaltoken.ValidateAgentRunToken(s.ipc.AgentRunKey, token)
+	if !ok || ws != s.ipc.WorkspaceID {
+		return false
+	}
+	st, known := s.runs.lookup(run)
+	return known && st.HumanInboxGranted && st.EndedAt.IsZero() && s.runs.current(r.Context(), run)
+}
+
+func (s *Server) handleInboxGrant(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil || !internaltoken.ValidateAgentInboxGrant(s.ipc.AgentRunKey, bearerToken(r), r.Header.Get(internaltoken.AgentInboxGrantHeader)) {
+		writeRunEndError(w, http.StatusForbidden, "a host inbox grant is required")
+		return
+	}
+	_, _, run, present, ok := s.actingRunIdentity(r)
+	if !present || !ok || run == "" || !s.runs.grantHumanInbox(run) {
+		writeRunEndError(w, http.StatusForbidden, "grant requires a live agent run")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
 func (s *Server) readHumanInbox(r *http.Request) (int, []byte) {
 	if s.ipc == nil {

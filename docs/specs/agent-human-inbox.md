@@ -7,9 +7,10 @@ additive authorized read, not another dispatch queue.
 
 The existing agent detail response returns `human_inbox_enabled: true` only
 when enabled. The overview does not mount the card or fetch its projection
-otherwise. Workspace flag changes refresh the in-memory admission state,
-loaded at server startup. The sidecar advertises inbox read on runs launched
-with the feature enabled. Explicit source reads still verify the live database
+otherwise. Flag writes and live logical database restores refresh the in-memory
+admission state loaded at startup. The sidecar advertises the tool only to a
+live run launched with the feature enabled. Its signed run grant works with a
+shared sidecar already handling other runs. Explicit source reads still verify the live database
 flag and source authority. Previously bound channel jobs retain their original
 authority fence through completion, including after disabling the feature.
 
@@ -28,7 +29,9 @@ joining an agent is a separate authorized operation. The task composer and CLI
 `agent inbox task` create and start a canonical issue. Existing approval,
 delegate, project and start gates remain effective. Public starts capture a
 host-issued `web_issue` execution origin, even without a private chat.
-Creation uses an atomic idempotency receipt. The start request also carries a
+Explicit composer writes carry `X-Crewship-Human-Inbox: 1` and are rejected
+while the workspace flag is off. Ordinary writes preserve their existing behavior.
+An enabled inbox create uses an atomic idempotency receipt. The start request also carries a
 stable key, but the canonical start endpoint does not provide operation replay.
 After a lost response or a start 400, wrappers may read back that same issue
 through its authorized GET. A matching delegate with an already-running or

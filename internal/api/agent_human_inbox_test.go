@@ -261,6 +261,10 @@ func TestAgentInboxReadPrivateChatDoesNotCrossSource(t *testing.T) {
 	if rr := a.call(t, a.proof(), nil); rr.Code < 400 {
 		t.Fatalf("revoked requester source read=%d %s", rr.Code, rr.Body.String())
 	}
+	execOrFatal(t, h.db, `UPDATE chats SET private_artifact_author_user_id=? WHERE id=?`, other, b.chat)
+	if rr := b.call(t, b.proof(), nil); rr.Code != http.StatusNotFound || strings.Contains(rr.Body.String(), "PRIVATE MESSAGE B") {
+		t.Fatalf("sealed source left its original chat surface: %d %s", rr.Code, rr.Body.String())
+	}
 }
 
 func TestAgentHumanInboxProjectionDoesNotAcknowledge(t *testing.T) {

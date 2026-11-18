@@ -77,7 +77,7 @@ function HumanInbox({ workspaceId, agentId, agentSlug, crewId, user }: { workspa
     if (!text.trim() || busy || (mode === "message" && !room) || (mode === "task" && (!crewId || !title.trim()))) return
     const abort = new AbortController(); request.current = abort; setBusy(true); setError(null); setNotice(null)
     const post = async (path: string, body: unknown) => {
-      const res = await apiFetch(`${path}?${qs}`, { method: "POST", signal: abort.signal, headers: { "Content-Type": "application/json", "Idempotency-Key": clientId.current + (path.endsWith("/start") ? ":start" : "") }, body: JSON.stringify(body) })
+      const res = await apiFetch(`${path}?${qs}`, { method: "POST", signal: abort.signal, headers: { "Content-Type": "application/json", "X-Crewship-Human-Inbox": "1", "Idempotency-Key": clientId.current + (path.endsWith("/start") ? ":start" : "") }, body: JSON.stringify(body) })
       const data = await res.json().catch(() => ({})); if (!res.ok) throw Object.assign(new Error(data.error || "The request could not be sent"), { status: res.status }); return data
     }
     try {

@@ -7,6 +7,10 @@ import (
 	"sync/atomic"
 )
 
+// AgentInboxRequestHeader distinguishes an explicit inbox write from a
+// canonical conversation or issue write using the same public endpoint.
+const AgentInboxRequestHeader = "X-Crewship-Human-Inbox"
+
 // AgentInboxState keeps the optional inbox admission path out of ordinary
 // workspace queries. The router loads it at startup and refreshes it after
 // supported flag mutations. Source reads still check the database in their

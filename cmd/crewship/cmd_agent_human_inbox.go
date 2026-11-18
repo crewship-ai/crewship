@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +48,7 @@ func newAgentInboxSendCmd() *cobra.Command {
 		if room == "" || strings.TrimSpace(text) == "" || key == "" {
 			return fmt.Errorf("--conversation, --message and --client-id are required")
 		}
-		return chatRoomRequest(http.MethodPost, chatRoomPath(room)+"/messages", map[string]any{"content": text, "client_id": key, "mentioned_agent_ids": []string{id}})
+		return chatRoomRequestWithClient(c.WithHeader(featureflags.AgentInboxRequestHeader, "1"), http.MethodPost, chatRoomPath(room)+"/messages", map[string]any{"content": text, "client_id": key, "mentioned_agent_ids": []string{id}})
 	}
 	return cmd
 }
@@ -78,6 +79,7 @@ func newAgentInboxTaskCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		c = c.WithHeader(featureflags.AgentInboxRequestHeader, "1")
 		// The ordinary public issue routes retain admission, plan, review and human
 		// acceptance gates. This wrapper never inserts a task/run or marks DONE.
 		resp, err := c.WithHeader("Idempotency-Key", key).Post("/api/v1/crews/"+url.PathEscape(crew)+"/issues", map[string]any{"title": title, "description": text, "delegate_agent_id": agent})

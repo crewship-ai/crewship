@@ -6,15 +6,19 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/featureflags"
 )
 
 func TestHumanInboxTaskCreateRetryIsOneCanonicalIssue(t *testing.T) {
 	h, user, ws, crew, _, worker := newTestIssueHandler(t)
-	h.agentInboxEnabled = func(w string) bool { return w == ws }
+	enabled := true
+	h.agentInboxEnabled = func(w string) bool { return enabled && w == ws }
 	call := func(title string) *httptest.ResponseRecorder {
 		req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/crews/"+crew+"/issues", bytes.NewBufferString(`{"title":"`+title+`","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
 		req.Header.Set("Idempotency-Key", "human-inbox-create-once")
+		req.Header.Set(featureflags.AgentInboxRequestHeader, "1")
 		rr := httptest.NewRecorder()
 		h.Create(rr, req)
 		return rr
@@ -23,6 +27,11 @@ func TestHumanInboxTaskCreateRetryIsOneCanonicalIssue(t *testing.T) {
 	if a.Code != 201 {
 		t.Fatalf("first=%d %s", a.Code, a.Body.String())
 	}
+	enabled = false
+	if rr := call("One task"); rr.Code != http.StatusNotFound {
+		t.Fatalf("disabled retry=%d %s", rr.Code, rr.Body.String())
+	}
+	enabled = true
 	b := call("One task")
 	if b.Code != 201 || a.Body.String() != b.Body.String() || b.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("retry=%d %s; first=%s", b.Code, b.Body.String(), a.Body.String())
@@ -39,6 +48,7 @@ func TestHumanInboxTaskCreateRetryIsOneCanonicalIssue(t *testing.T) {
 	req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/issues", bytes.NewBufferString(`{"title":"One task","delegate_agent_id":"`+worker+`"}`)), user, ws, "VIEWER")
 	req.SetPathValue("crewId", crew)
 	req.Header.Set("Idempotency-Key", "human-inbox-create-once")
+	req.Header.Set(featureflags.AgentInboxRequestHeader, "1")
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
 	if rr.Code != 403 {
@@ -53,6 +63,7 @@ func TestHumanInboxTaskCreateReceiptRollsBackWithMutation(t *testing.T) {
 		req := withWorkspaceUser(httptest.NewRequest("POST", "/issues", bytes.NewBufferString(`{"title":"Atomic task","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
 		req.Header.Set("Idempotency-Key", "atomic-create")
+		req.Header.Set(featureflags.AgentInboxRequestHeader, "1")
 		rr := httptest.NewRecorder()
 		h.Create(rr, req)
 		return rr
@@ -80,6 +91,7 @@ func TestHumanInboxTaskCreateConcurrentRetryAndLiveRevocation(t *testing.T) {
 		req := withWorkspaceUser(httptest.NewRequest("POST", "/issues", bytes.NewBufferString(`{"title":"Concurrent task","delegate_agent_id":"`+worker+`"}`)), user, ws, "OWNER")
 		req.SetPathValue("crewId", crew)
 		req.Header.Set("Idempotency-Key", "concurrent-create")
+		req.Header.Set(featureflags.AgentInboxRequestHeader, "1")
 		rr := httptest.NewRecorder()
 		h.Create(rr, req)
 		return rr
@@ -114,8 +126,9 @@ func TestHumanInboxTaskCreateConcurrentRetryAndLiveRevocation(t *testing.T) {
 	}
 }
 
-func TestHumanInboxDisabledIssueCreateUsesLegacyBehavior(t *testing.T) {
+func TestHumanInboxUnmarkedIssueCreateUsesLegacyBehavior(t *testing.T) {
 	h, user, workspace, crew, _, worker := newTestIssueHandler(t)
+	h.agentInboxEnabled = func(string) bool { return true }
 	for range 2 {
 		req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/issues", bytes.NewBufferString(`{"title":"Ordinary task","delegate_agent_id":"`+worker+`"}`)), user, workspace, "OWNER")
 		req.SetPathValue("crewId", crew)
@@ -129,5 +142,25 @@ func TestHumanInboxDisabledIssueCreateUsesLegacyBehavior(t *testing.T) {
 	var issues, operations int
 	if err := h.db.QueryRow("SELECT (SELECT count(*) FROM missions),(SELECT count(*) FROM agent_operations)").Scan(&issues, &operations); err != nil || issues != 2 || operations != 0 {
 		t.Fatalf("ordinary issues=%d inbox operation receipts=%d: %v", issues, operations, err)
+	}
+}
+
+func TestHumanInboxDisabledRejectsMarkedStartAndChannelWithoutMutation(t *testing.T) {
+	h, user, workspace, crew, _, _ := newTestIssueHandler(t)
+	start := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/issues/start", nil), user, workspace, "OWNER")
+	start.SetPathValue("crewId", crew)
+	start.SetPathValue("identifier", "UNUSED")
+	start.Header.Set(featureflags.AgentInboxRequestHeader, "1")
+	response := httptest.NewRecorder()
+	h.Start(response, start)
+	if response.Code != http.StatusNotFound || !bytes.Contains(response.Body.Bytes(), []byte("human inbox is disabled")) {
+		t.Fatalf("disabled explicit start was not fenced: %d %s", response.Code, response.Body.String())
+	}
+	send := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/conversations/messages", nil), user, workspace, "OWNER")
+	send.Header.Set(featureflags.AgentInboxRequestHeader, "1")
+	response = httptest.NewRecorder()
+	(&WorkspaceConversationsHandler{}).Send(response, send)
+	if response.Code != http.StatusNotFound || !bytes.Contains(response.Body.Bytes(), []byte("human inbox is disabled")) {
+		t.Fatalf("disabled explicit send was not fenced: %d %s", response.Code, response.Body.String())
 	}
 }

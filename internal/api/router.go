@@ -919,9 +919,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
-	if err := r.agentInboxFlags.Refresh(context.Background(), db); err != nil && logger != nil {
-		logger.Warn("load agent inbox flag", "error", err)
-	}
+	r.refreshAgentInboxFlags(context.Background())
 	if r.orch != nil {
 		r.orch.SetAgentInboxEnabled(r.agentInboxFlags.Enabled)
 	}
@@ -1325,4 +1323,10 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 
 	// Static files / other paths — no rate limiting
 	r.mux.ServeHTTP(w, req)
+}
+
+func (r *Router) refreshAgentInboxFlags(ctx context.Context) {
+	if err := r.agentInboxFlags.Refresh(ctx, r.db); err != nil && r.logger != nil {
+		r.logger.Warn("refresh agent inbox flag", "error", err)
+	}
 }

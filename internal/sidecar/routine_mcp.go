@@ -339,7 +339,7 @@ func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 	case "initialize":
 		s.respondRoutinesMCPInitialize(w, req)
 	case "tools/list":
-		s.respondRoutinesMCPToolsList(w, req)
+		s.respondRoutinesMCPToolsList(w, r, req)
 	case "tools/call":
 		s.respondRoutinesMCPToolsCall(w, r, req)
 	case "notifications/initialized", "notifications/cancelled":
@@ -378,9 +378,9 @@ func (s *Server) respondRoutinesMCPInitialize(w http.ResponseWriter, req memoryM
 
 var agentInboxMCPTool = memoryMCPToolDescriptor{Name: "inbox_read", Description: "Where the workspace has enabled agent human inbox, read and acknowledge the human message or assigned task that started your current run. The host derives the source from this run. Takes no arguments. The workspace setting or a run without a human inbox source can make this tool unavailable.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
 
-func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, req memoryMCPRequest) {
+func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, r *http.Request, req memoryMCPRequest) {
 	tools := routineMCPTools
-	if s.ipc != nil && s.ipc.AgentInboxEnabled {
+	if s.humanInboxDiscovered(r) {
 		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), agentInboxMCPTool)
 	}
 	if s.ipc != nil && s.ipc.GridCraftEnabled {
@@ -487,7 +487,7 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		}
 		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID, s.liveRunToken(r))
 	case "inbox_read":
-		if s.ipc == nil || !s.ipc.AgentInboxEnabled {
+		if !s.humanInboxDiscovered(r) {
 			status, bodyBytes = 404, mustJSON(map[string]string{"error": "unknown tool"})
 			break
 		}

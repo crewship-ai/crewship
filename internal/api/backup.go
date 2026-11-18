@@ -75,8 +75,9 @@ type BackupHandler struct {
 	// the same root AttachmentHandler writes to. Create collects the blobs
 	// the dump's attachments rows reference; Restore writes them back.
 	// Empty collects/lands none, and the manifest / report say so.
-	attachmentRoot   string
-	serviceSnapshots backup.ServiceSnapshotRuntime
+	attachmentRoot        string
+	serviceSnapshots      backup.ServiceSnapshotRuntime
+	notifyDatabaseRestore func(context.Context)
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -509,6 +510,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		DryRun:                    req.DryRun,
 		FilesOnly:                 req.FilesOnly,
 		ResumeWorkspaceID:         workspaceID,
+		OnDatabaseCommit:          h.notifyDatabaseRestore,
 		Actor:                     backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:                 ops,
 		ContainerFor:              h.resolveCrewContainerName(),

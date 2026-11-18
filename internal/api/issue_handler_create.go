@@ -34,6 +34,11 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	inboxWrite := r.Header.Get(featureflags.AgentInboxRequestHeader) == "1"
+	if inboxWrite && !requireHumanInboxWrite(w, wsID, h.agentInboxEnabled) {
+		return
+	}
+
 	var req struct {
 		Title       string  `json:"title"`
 		Description *string `json:"description"`
@@ -314,7 +319,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var op *chatentities.Operation
-	if h.agentInboxEnabled != nil && h.agentInboxEnabled(wsID) {
+	if inboxWrite {
 		var handled bool
 		op, handled = h.beginHumanIssueCreate(w, r, tx, crewID, req)
 		if handled {

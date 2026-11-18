@@ -87,6 +87,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.
 	wch := NewWorkspaceConversationsHandler(groupchat.New(r.db).WithInboxEnabled(r.agentInboxFlags.Enabled), r.logger)
+	wch.agentInboxEnabled = r.agentInboxFlags.Enabled
 	wch.hub = r.hub
 	// openapi: query offset:integer limit:integer
 	r.mux.Handle("GET /api/v1/conversations", authed(wsCtx(http.HandlerFunc(wch.List))))

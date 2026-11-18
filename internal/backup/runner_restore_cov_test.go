@@ -19,6 +19,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 )
 
 // writeRawBundle assembles a bundle whose payload is the given tar.zst
@@ -248,6 +249,10 @@ func TestRestoreBackup_NoOpThenReplace(t *testing.T) {
 	ctx := context.Background()
 	source := openMigratedDBCov(t)
 	wsID, _ := seedCovWorkspace(t, source, "noopreplace")
+	if _, err := source.ExecContext(ctx, `INSERT INTO feature_flag_overrides (id,flag_id,workspace_id,enabled)
+		SELECT 'test-inbox-override',id,?,1 FROM feature_flags WHERE key=?`, wsID, featureflags.AgentHumanInbox); err != nil {
+		t.Fatal(err)
+	}
 	res, err := CreateBackup(ctx, source, CreateOptions{
 		Scope: ScopeWorkspace, WorkspaceID: wsID,
 		OutputDir: t.TempDir(),
@@ -259,14 +264,31 @@ func TestRestoreBackup_NoOpThenReplace(t *testing.T) {
 	}
 
 	target := openMigratedDBCov(t)
+	var flags featureflags.AgentInboxState
+	refreshes := 0
+	observe := func(ctx context.Context) {
+		t.Helper()
+		refreshes++
+		if err := flags.Refresh(ctx, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := RestoreBackup(ctx, target, RestoreOptions{
+		Path: res.Path, Actor: covAdminActor(), DryRun: true, OnDatabaseCommit: observe,
+	}); err != nil || refreshes != 0 {
+		t.Fatalf("dry run refreshes=%d, err=%v", refreshes, err)
+	}
 	logLines := []string{}
 	logger := func(s string) { logLines = append(logLines, s) }
 
 	first, err := RestoreBackup(ctx, target, RestoreOptions{
-		Path: res.Path, Actor: covAdminActor(), Logger: logger,
+		Path: res.Path, Actor: covAdminActor(), Logger: logger, OnDatabaseCommit: observe,
 	})
 	if err != nil {
 		t.Fatalf("first restore: %v", err)
+	}
+	if refreshes != 1 || !flags.Enabled(wsID) {
+		t.Fatalf("restored override not visible at commit: refreshes=%d, enabled=%v", refreshes, flags.Enabled(wsID))
 	}
 	if first.RowsInserted <= 0 || first.RestoredWs != "cov-noopreplace" {
 		t.Fatalf("first = %+v", first)
@@ -288,10 +310,13 @@ func TestRestoreBackup_NoOpThenReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	third, err := RestoreBackup(ctx, target, RestoreOptions{
-		Path: res.Path, Actor: covAdminActor(), Replace: true, Logger: logger,
+		Path: res.Path, Actor: covAdminActor(), Replace: true, Logger: logger, OnDatabaseCommit: observe,
 	})
 	if err != nil {
 		t.Fatalf("replace restore: %v", err)
+	}
+	if refreshes != 2 || !flags.Enabled(wsID) {
+		t.Fatalf("replaced override not visible at commit: refreshes=%d, enabled=%v", refreshes, flags.Enabled(wsID))
 	}
 	if third.RowsInserted <= 0 {
 		t.Fatalf("replace must re-insert rows: %+v", third)

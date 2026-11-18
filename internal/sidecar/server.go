@@ -40,8 +40,7 @@ type MemoryConfig struct {
 // ContainerID is the Docker container where this agent is running; forwarded to
 // crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
-	AgentInboxEnabled bool `json:"agent_inbox_enabled,omitempty"`
-	GridCraftEnabled  bool `json:"gridcraft_enabled,omitempty"`
+	GridCraftEnabled bool `json:"gridcraft_enabled,omitempty"`
 	// CrewOnly exposes only read-only fleet telemetry to agent-less scripts.
 	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`
@@ -430,6 +429,10 @@ func NewServer(cfg ServerConfig) *Server {
 		})
 	}
 
+	if cfg.IPC != nil && cfg.IPC.AgentRunKey != "" {
+		s.runs.ensureDurable(cfg.IPC, cfg.Logger)
+	}
+
 	// #1385: fingerprint the crew-bound IPC token so /health can advertise
 	// which master minted it. Empty when no IPC token is configured (crew-less
 	// or standalone sidecar), which the server reads as "nothing to compare".
@@ -628,6 +631,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// to the very test that exists to stop routes going unclassified.
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/end":
 				s.handleRunEnd(w, r)
+			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/inbox-grant":
+				s.handleInboxGrant(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/artifact-capability":
 				s.handleRunArtifactCapability(w, r)
 				return

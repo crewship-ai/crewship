@@ -120,12 +120,13 @@ type runRegistry struct {
 // replaces the boot-frozen s.ipc.ChatID on every route that stamps a chat onto
 // an escalation, a peer query or an issue.
 type runState struct {
-	AgentID   string
-	AgentSlug string
-	ChatID    string
-	MissionID string
-	StartedAt time.Time
-	EndedAt   time.Time // zero while live
+	AgentID           string
+	AgentSlug         string
+	ChatID            string
+	MissionID         string
+	HumanInboxGranted bool
+	StartedAt         time.Time
+	EndedAt           time.Time // zero while live
 }
 
 func newRunRegistry() *runRegistry {
@@ -144,9 +145,12 @@ func (r *runRegistry) start(runID string, st runState) {
 		return
 	}
 	r.mu.Lock()
-	if existing, ok := r.runs[runID]; ok && !existing.EndedAt.IsZero() {
-		r.mu.Unlock()
-		return
+	if existing, ok := r.runs[runID]; ok {
+		if !existing.EndedAt.IsZero() {
+			r.mu.Unlock()
+			return
+		}
+		st.HumanInboxGranted = existing.HumanInboxGranted
 	}
 	st.StartedAt = r.now()
 	r.runs[runID] = &st
@@ -154,7 +158,27 @@ func (r *runRegistry) start(runID string, st runState) {
 	r.mu.Unlock()
 
 	j.append(runRecord{Op: runRecordStart, RunID: runID, AgentID: st.AgentID,
-		AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, At: st.StartedAt})
+		AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, HumanInboxGranted: st.HumanInboxGranted, At: st.StartedAt})
+}
+
+func (r *runRegistry) grantHumanInbox(runID string) bool {
+	r.mu.Lock()
+	st, ok := r.runs[runID]
+	if !ok || !st.EndedAt.IsZero() {
+		r.mu.Unlock()
+		return false
+	}
+	if st.HumanInboxGranted {
+		r.mu.Unlock()
+		return true
+	}
+	st.HumanInboxGranted = true
+	j, snapshot := r.journal, *st
+	r.mu.Unlock()
+	j.append(runRecord{Op: runRecordStart, RunID: runID, AgentID: snapshot.AgentID,
+		AgentSlug: snapshot.AgentSlug, ChatID: snapshot.ChatID, MissionID: snapshot.MissionID,
+		HumanInboxGranted: true, At: snapshot.StartedAt})
+	return true
 }
 
 // end marks a run finished. Recorded even for a run this sidecar never saw
@@ -403,13 +427,14 @@ const (
 // runRecord is one line of the journal. JSON lines, because a torn final line
 // from a killed process must be skippable without losing everything before it.
 type runRecord struct {
-	Op        runRecordOp `json:"op"`
-	RunID     string      `json:"run"`
-	AgentID   string      `json:"agent,omitempty"`
-	AgentSlug string      `json:"slug,omitempty"`
-	ChatID    string      `json:"chat,omitempty"`
-	MissionID string      `json:"mission,omitempty"`
-	At        time.Time   `json:"at"`
+	Op                runRecordOp `json:"op"`
+	RunID             string      `json:"run"`
+	AgentID           string      `json:"agent,omitempty"`
+	AgentSlug         string      `json:"slug,omitempty"`
+	ChatID            string      `json:"chat,omitempty"`
+	MissionID         string      `json:"mission,omitempty"`
+	HumanInboxGranted bool        `json:"human_inbox_granted,omitempty"`
+	At                time.Time   `json:"at"`
 }
 
 // runJournal is the append-only file behind the registry. A nil *runJournal is
@@ -464,11 +489,9 @@ func safeStateName(s string) string {
 // ensureDurable attaches the journal and the authority, replaying the journal
 // before the registry answers its first admission question.
 //
-// Called from both identityForRunToken and llmRouteIdentity, the callers of
-// current(), rather than from NewServer, so replay precedes any decision this
-// registry makes for a run token, which is the ordering the requirement
-// ("restore the registry and its revocations before serving") actually asks
-// for. Once per process.
+// NewServer restores the registry before tool discovery. Both identity
+// paths also call this so embedded servers cannot admit a token before
+// replay. The journal is initialized once per process.
 func (r *runRegistry) ensureDurable(ipc *IPCConfig, logger *slog.Logger) {
 	r.initOnce.Do(func() {
 		r.mu.Lock()
@@ -524,6 +547,7 @@ func (r *runRegistry) replay(j *runJournal) {
 			}
 			r.runs[rec.RunID] = st
 		}
+		st.HumanInboxGranted = st.HumanInboxGranted || rec.HumanInboxGranted
 		if rec.Op == runRecordEnd && st.EndedAt.IsZero() {
 			st.EndedAt = rec.At
 			if st.EndedAt.IsZero() {
@@ -547,7 +571,7 @@ func (r *runRegistry) replay(j *runJournal) {
 			continue
 		}
 		backfill = append(backfill, runRecord{Op: runRecordStart, RunID: id, AgentID: st.AgentID,
-			AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, At: st.StartedAt})
+			AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, HumanInboxGranted: st.HumanInboxGranted, At: st.StartedAt})
 	}
 	r.journal = j
 	r.mu.Unlock()
@@ -681,7 +705,7 @@ func (r *runRegistry) compact() {
 	snapshot := make([]runRecord, 0, len(r.runs)*2)
 	for id, st := range r.runs {
 		snapshot = append(snapshot, runRecord{Op: runRecordStart, RunID: id, AgentID: st.AgentID,
-			AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, At: st.StartedAt})
+			AgentSlug: st.AgentSlug, ChatID: st.ChatID, MissionID: st.MissionID, HumanInboxGranted: st.HumanInboxGranted, At: st.StartedAt})
 		if !st.EndedAt.IsZero() {
 			snapshot = append(snapshot, runRecord{Op: runRecordEnd, RunID: id, At: st.EndedAt})
 		}

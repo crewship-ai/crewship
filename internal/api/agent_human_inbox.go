@@ -19,6 +19,14 @@ import (
 
 var errHumanInboxDisabled = errors.New("human inbox is disabled")
 
+func requireHumanInboxWrite(w http.ResponseWriter, workspace string, enabled func(string) bool) bool {
+	if enabled != nil && enabled(workspace) {
+		return true
+	}
+	replyError(w, http.StatusNotFound, errHumanInboxDisabled.Error())
+	return false
+}
+
 type humanInboxEntry struct {
 	ID        string  `json:"id"`
 	Kind      string  `json:"kind"`
@@ -307,7 +315,7 @@ func (h *InternalHandler) AgentInboxRead(w http.ResponseWriter, r *http.Request)
 				return groupchat.ErrForbidden
 			}
 			var content string
-			err = q.QueryRowContext(r.Context(), `SELECT message.content FROM conversation_messages message JOIN work_items source_work ON source_work.source='chat' AND source_work.domain_kind='host_chat_turn' AND source_work.source_ref=message.id AND source_work.session_id=message.session_id AND source_work.agent_id=message.agent_id JOIN work_attempts source_attempt ON source_attempt.work_id=source_work.id AND source_attempt.generation=source_work.generation AND source_attempt.run_id=? AND source_attempt.ended_at IS NULL WHERE message.id=? AND message.session_id=? AND message.agent_id=? AND message.role='user'`, body.RunID, a.TriggerMessageID, a.ChatID, body.AgentID).Scan(&content)
+			err = q.QueryRowContext(r.Context(), `SELECT message.content FROM conversation_messages message JOIN chats c ON c.id=message.session_id JOIN work_items source_work ON source_work.source='chat' AND source_work.domain_kind='host_chat_turn' AND source_work.source_ref=message.id AND source_work.session_id=message.session_id AND source_work.agent_id=message.agent_id JOIN work_attempts source_attempt ON source_attempt.work_id=source_work.id AND source_attempt.generation=source_work.generation AND source_attempt.run_id=? AND source_attempt.ended_at IS NULL WHERE message.id=? AND message.session_id=? AND message.agent_id=? AND message.role='user' AND (`+chataudience.NoPrivateArtifactContextSQL+`)`, body.RunID, a.TriggerMessageID, a.ChatID, body.AgentID).Scan(&content)
 			if err != nil {
 				return err
 			}

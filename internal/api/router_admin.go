@@ -473,6 +473,7 @@ func (r *Router) registerAdminRoutes() {
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
 	backupH.mooringHTTPEnabled = r.mooringHTTPConfig.Enabled
+	backupH.notifyDatabaseRestore = r.refreshAgentInboxFlags
 	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {
 		backupH.serviceSnapshots = transport
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -37,9 +38,10 @@ type workspaceConversationAgentJobsResponse struct {
 // WorkspaceConversationsHandler exposes agent-independent human conversations.
 // Every store operation rechecks workspace membership and conversation access.
 type WorkspaceConversationsHandler struct {
-	store  *groupchat.Store
-	logger *slog.Logger
-	hub    *ws.Hub
+	store             *groupchat.Store
+	logger            *slog.Logger
+	hub               *ws.Hub
+	agentInboxEnabled func(string) bool
 }
 
 func NewWorkspaceConversationsHandler(store *groupchat.Store, logger *slog.Logger) *WorkspaceConversationsHandler {
@@ -203,6 +205,9 @@ func (h *WorkspaceConversationsHandler) Messages(w http.ResponseWriter, r *http.
 func (h *WorkspaceConversationsHandler) Send(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := h.identity(w, r)
 	if !ok {
+		return
+	}
+	if r.Header.Get(featureflags.AgentInboxRequestHeader) == "1" && !requireHumanInboxWrite(w, ws, h.agentInboxEnabled) {
 		return
 	}
 	var in groupchat.SendInput

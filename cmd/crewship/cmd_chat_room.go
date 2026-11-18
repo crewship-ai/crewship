@@ -209,6 +209,10 @@ func chatRoomRequest(method, path string, input any) error {
 	if err != nil {
 		return err
 	}
+	return chatRoomRequestWithClient(client, method, path, input)
+}
+
+func chatRoomRequestWithClient(client *cli.Client, method, path string, input any) error {
 	response, err := client.Do(method, path, input)
 	if err != nil {
 		return err

@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // What "Keeper off" means for credentials, pinned where it is decided.
@@ -47,5 +49,32 @@ func TestKeeperOff_DeliversSecretsAtBoot(t *testing.T) {
 	if written == 0 {
 		t.Error("nothing delivered with Keeper OFF — either the gate inverted or " +
 			"the admin screen's warning is now wrong")
+	}
+}
+
+func TestAgentInboxPreflightGrantPreservesCanonicalRunBearer(t *testing.T) {
+	const master = "inbox-fixture-master"
+	req := AgentRunRequest{WorkspaceID: "workspace", CrewID: "crew", AgentID: "agent", RunID: "run"}
+	key := internaltoken.DeriveAgentRunKey(master, req.WorkspaceID, req.CrewID)
+	proof := internaltoken.DeriveAgentRunToken(key, req.WorkspaceID, req.AgentID, req.RunID)
+	env := []string{"CREWSHIP_AGENT_TOKEN=" + proof}
+	o := &Orchestrator{ipcToken: master}
+	if script := o.sidecarInboxGrantScript(req, env); script != "" {
+		t.Fatal("a disabled workspace ran an inbox registration")
+	}
+	o.SetAgentInboxEnabled(func(w string) bool { return w == req.WorkspaceID })
+	script := o.sidecarInboxGrantScript(req, env)
+	grant := internaltoken.DeriveAgentInboxGrant(key, proof)
+	command, _, _ := strings.Cut(script, "\n")
+	if !strings.Contains(script, "Authorization: Bearer "+proof) ||
+		!strings.Contains(script, internaltoken.AgentInboxGrantHeader+": "+grant) ||
+		strings.Contains(command, proof) || strings.Contains(command, grant) ||
+		agentRunTokenFromEnv(env) != proof {
+		t.Fatal("registration changed the canonical bearer or exposed a proof in argv")
+	}
+	other := req
+	other.RunID = "another-run"
+	if script := o.sidecarInboxGrantScript(other, env); script != "" {
+		t.Fatal("registration accepted another run's proof")
 	}
 }
