@@ -19,3 +19,15 @@ func TestKeeperBlockTeachesNativeCLIWithoutAuthAssembly(t *testing.T) {
 		}
 	}
 }
+
+// Agent-owned tool directories precede /usr/local/bin in some retained homes.
+// A prompt must select the read-only runtime SDK rather than a stale PATH entry.
+func TestKeeperBlockUsesCanonicalRuntimeSDK(t *testing.T) {
+	h := &InternalHandler{}
+	block := h.buildKeeperBlock("fixture", []mcpCredEntry{{ID: "fixture", EnvVar: "GITLAB_TOKEN", Type: "SECRET"}})
+	for _, command := range []string{"request CREDENTIAL_ID", "execute CREDENTIAL_ID", "request-status REQUEST_ID"} {
+		if !strings.Contains(block, "/usr/local/bin/crewship keeper "+command) {
+			t.Errorf("Keeper recipe can select an agent-owned PATH binary: %s", command)
+		}
+	}
+}
