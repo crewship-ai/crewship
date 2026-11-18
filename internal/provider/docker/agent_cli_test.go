@@ -209,7 +209,7 @@ func TestAgentCLIRequiredMissingClientCannotReuseLiveRuntime(t *testing.T) {
 }
 
 func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
-	for _, fault := range []string{"privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
+	for _, fault := range []string{"privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "writable-sdk-alias", "writable-sdk-volume-alias", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
 		t.Run(fault, func(t *testing.T) {
 			p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
 			fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())

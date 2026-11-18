@@ -50,6 +50,9 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 			return false
 		}
 		mounts := []map[string]any{{"Type": "bind", "Source": s.artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": s.fault == "writable-sdk"}}
+		if s.fault == "writable-sdk-alias" {
+			mounts = append(mounts, map[string]any{"Type": "bind", "Source": s.artifact.Path, "Destination": "/tmp/writable-sdk", "RW": true})
+		}
 		for _, target := range []string{"/workspace", "/output", "/crew", "/home/agent", "/opt/crew-tools"} {
 			name := "fixture-sdk-" + strings.ReplaceAll(target, "/", "-")
 			mounts = append(mounts, map[string]any{"Type": "volume", "Name": name, "Source": "/var/lib/docker/volumes/" + name + "/_data", "Destination": target, "RW": true})
@@ -75,6 +78,9 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		volume := map[string]any{"Name": name, "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/" + name + "/_data"}
 		if s.fault == "writable-staging-volume" {
 			volume["Options"] = map[string]string{"type": "none", "o": "bind", "device": filepath.Dir(s.artifact.Path)}
+		}
+		if s.fault == "writable-sdk-volume-alias" {
+			volume["Options"] = map[string]string{"type": "none", "o": "bind", "device": s.artifact.Path}
 		}
 		reply(volume)
 		return true

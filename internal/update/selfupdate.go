@@ -286,11 +286,12 @@ var companions = []string{"crewship-sidecar", "entrypoint.sh", "crewship-agent-c
 
 // SelfUpdateResult reports what an installer-channel update did.
 type SelfUpdateResult struct {
-	FromVersion string
-	ToVersion   string
-	Replaced    []string // paths swapped (the binary + any companions)
-	Created     []string // newly introduced companions; rollback restores their absence
-	BackupPath  string   // the "<binary>.bak" kept for rollback
+	FromVersion     string
+	ToVersion       string
+	Replaced        []string               // paths swapped (the binary + any companions)
+	Created         []string               // newly introduced companions; rollback restores their absence
+	BackupPath      string                 // the "<binary>.bak" kept for rollback
+	createdIdentity map[string]os.FileInfo // pinned at exclusive publication, never inferred from a later pathname
 }
 
 // backupSuffix is appended to the running binary before it is swapped, so a
@@ -339,8 +340,8 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 // sha256 against checksums.txt, backs up the CURRENT binary to
 // "<exePath>.bak", and atomically swaps in the new one — the running binary
 // at exePath itself (not a reconstructed <dir>/crewship, so a renamed binary
-// is still updated in place), plus any companions already installed beside
-// it (full build only; the CLI archive has none). It does NOT decide whether
+// is still updated in place), plus installed optional companions and the
+// required native agent client (full build only; the CLI archive has none). It does NOT decide whether
 // an update is warranted — the caller gates on the version check first.
 // binDir (= dir of exePath) must be writable (installer channel).
 //
@@ -369,8 +370,8 @@ type PreparedUpdate struct {
 
 // PrepareInstallerUpdate downloads the release archive for `tag`, verifies its
 // sha256 against checksums.txt, extracts it, and assembles the set of files to
-// swap (the running binary at exePath plus any companion that both ships in the
-// archive and already exists beside it). It performs NO disk changes — a
+// swap (the running binary at exePath, installed optional companions and the
+// required native agent client, including when it was previously absent). It performs NO disk changes — a
 // failure here leaves the install untouched. binDir (= dir of exePath) must be
 // writable at Commit time (installer channel).
 func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bool, fromVersion string) (*PreparedUpdate, error) {
@@ -428,6 +429,13 @@ func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bo
 		return nil, fmt.Errorf("archive %s did not contain a %s binary", asset, binaryNameFor(runtime.GOOS))
 	}
 
+	// New full-server updates require the native runtime client. Reject legacy
+	// or incomplete full archives before stopping or mutating an installation;
+	// explicit rollback to the retained previous installation remains available.
+	if !cliOnly && len(extracted["crewship-agent-cli"]) == 0 {
+		return nil, fmt.Errorf("full server archive lacks required crewship-agent-cli; legacy full archives cannot be installed through this updater")
+	}
+
 	binDir := filepath.Dir(exePath)
 
 	// Assemble the full set of files to swap up front: the running binary,
@@ -475,33 +483,34 @@ func PrepareInstallerUpdate(ctx context.Context, tag, exePath string, cliOnly bo
 // stays consistent (no new-server + stale-sidecar mix). This is the only
 // disk-mutating half of an installer update.
 func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
-	// A renamed server or hard-linked companion must not be overwritten twice
-	// with distinct payloads. Validate before even touching backup files.
+	// Targets, backups and Windows parked originals are one namespace. A
+	// renamed server must never alias a companion's backup or parked file.
 	seenPaths := map[string]bool{}
 	var existingFiles []os.FileInfo
 	for _, target := range p.targets {
-		absolute, err := filepath.Abs(target.path)
-		if err != nil {
-			return nil, fmt.Errorf("resolve update destination: %w", err)
-		}
-		if seenPaths[absolute] {
-			return nil, fmt.Errorf("update destinations overlap: %s", target.path)
-		}
-		seenPaths[absolute] = true
-		info, err := os.Stat(target.path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// An absent existing target is rejected by the backup phase.
-				continue
+		for _, path := range []string{target.path, target.path + backupSuffix, target.path + ".old"} {
+			absolute, err := filepath.Abs(path)
+			if err != nil {
+				return nil, fmt.Errorf("resolve update destination: %w", err)
 			}
-			return nil, fmt.Errorf("inspect update destination: %w", err)
-		}
-		for _, previous := range existingFiles {
-			if os.SameFile(previous, info) {
-				return nil, fmt.Errorf("update destinations refer to the same file: %s", target.path)
+			if seenPaths[absolute] {
+				return nil, fmt.Errorf("update transaction paths overlap: %s", path)
 			}
+			seenPaths[absolute] = true
+			info, err := os.Stat(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, fmt.Errorf("inspect update destination: %w", err)
+			}
+			for _, previous := range existingFiles {
+				if os.SameFile(previous, info) {
+					return nil, fmt.Errorf("update transaction paths refer to the same file: %s", path)
+				}
+			}
+			existingFiles = append(existingFiles, info)
 		}
-		existingFiles = append(existingFiles, info)
 	}
 
 	// Back up every target BEFORE swapping any, so a mid-swap failure can
@@ -519,13 +528,14 @@ func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
 	}
 
 	res := &SelfUpdateResult{
-		FromVersion: p.fromVersion,
-		ToVersion:   p.toVersion,
-		BackupPath:  p.backupPath,
+		FromVersion:     p.fromVersion,
+		ToVersion:       p.toVersion,
+		BackupPath:      p.backupPath,
+		createdIdentity: make(map[string]os.FileInfo),
 	}
 	for _, target := range p.targets {
 		var err error
-		created := false
+		var created os.FileInfo
 		if target.create {
 			created, err = atomicCreateUpdateTarget(target.path, target.data)
 		} else {
@@ -535,9 +545,10 @@ func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
 			failed := *res
 			failed.Replaced = append([]string(nil), res.Replaced...)
 			failed.Created = append([]string(nil), res.Created...)
-			if target.create && created {
+			if target.create && created != nil {
 				failed.Replaced = append(failed.Replaced, target.path)
 				failed.Created = append(failed.Created, target.path)
+				failed.createdIdentity[target.path] = created
 			}
 			if !target.create {
 				failed.Replaced = append(failed.Replaced, target.path)
@@ -550,6 +561,7 @@ func (p *PreparedUpdate) Commit() (*SelfUpdateResult, error) {
 		res.Replaced = append(res.Replaced, target.path)
 		if target.create {
 			res.Created = append(res.Created, target.path)
+			res.createdIdentity[target.path] = created
 		}
 	}
 
@@ -786,6 +798,17 @@ func restoreInstallerUpdate(result *SelfUpdateResult, restore func([]string) err
 		first = restore(existing)
 	}
 	for _, path := range result.Created {
+		current, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		expected := result.createdIdentity[path]
+		if err != nil || expected == nil || !current.Mode().IsRegular() || !os.SameFile(expected, current) {
+			if first == nil {
+				first = fmt.Errorf("new companion changed since publication; refusing removal: %s", path)
+			}
+			continue
+		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) && first == nil {
 			first = fmt.Errorf("remove newly introduced companion: %w", err)
 		}
@@ -795,28 +818,33 @@ func restoreInstallerUpdate(result *SelfUpdateResult, restore func([]string) err
 
 // Publish an absent target exclusively; a concurrent installer-created file
 // must never be replaced or removed by this transaction's failure rollback.
-func atomicCreateUpdateTarget(dst string, payload []byte) (bool, error) {
+func atomicCreateUpdateTarget(dst string, payload []byte) (os.FileInfo, error) {
 	file, err := os.CreateTemp(filepath.Dir(dst), ".crewship-new-*")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer os.Remove(file.Name())
 	if _, err := file.Write(payload); err != nil {
 		file.Close()
-		return false, err
+		return nil, err
 	}
 	if err := file.Chmod(0755); err != nil {
 		file.Close()
-		return false, err
+		return nil, err
+	}
+	identity, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
 	}
 	if err := file.Close(); err != nil {
-		return false, err
+		return nil, err
 	}
 	if err := os.Link(file.Name(), dst); err != nil {
-		return false, err
+		return nil, err
 	}
 	if err := os.Remove(file.Name()); err != nil {
-		return true, err
+		return identity, err
 	}
-	return true, nil
+	return identity, nil
 }

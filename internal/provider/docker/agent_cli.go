@@ -161,7 +161,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 			return denied
 		}
 	}
-	if err := p.hostSpoolHidden(ctx, writable, filepath.Dir(p.cfg.agentCLIArtifact.Path)); err != nil {
+	if err := p.hostMountTreeHidden(ctx, writable, filepath.Dir(p.cfg.agentCLIArtifact.Path), true); err != nil {
 		return fmt.Errorf("native agent CLI staging is not private from writable crew mounts: %w", err)
 	}
 	if err := runtimestage.VerifyAgentCLIArtifact(p.cfg.agentCLIArtifact); err != nil {

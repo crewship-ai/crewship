@@ -980,3 +980,9 @@ offering controls that would discard it. Edit that configuration through your
 Crew manifest or CLI; the raw runtime editor keeps unsupported source read-only.
 Supported JSON edits preserve other fields, including environment, lock and
 CLI-check policy. A rejected raw edit applies neither configuration document.
+
+Full-server self-update requires the archive to include `crewship-agent-cli`.
+It rejects incomplete archives and older full archives without this companion
+before changing installed files. Rollback restores the previous server and the
+previous absence of a newly introduced companion. CLI-only updates keep their
+existing archive contract.

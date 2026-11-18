@@ -285,7 +285,11 @@ func TestRunServerUpdateRollbackRemovesNewRuntimeClient(t *testing.T) {
 			manager := &mockService{}
 			deps, _ := baseDeps(manager, []string{server, client})
 			deps.Commit = func(context.Context, any) (*SelfUpdateResult, error) {
-				return &SelfUpdateResult{Replaced: []string{server, client}, Created: []string{client}}, nil
+				identity, err := os.Lstat(client)
+				if err != nil {
+					return nil, err
+				}
+				return &SelfUpdateResult{Replaced: []string{server, client}, Created: []string{client}, createdIdentity: map[string]os.FileInfo{client: identity}}, nil
 			}
 			if failsStart {
 				manager.startErr = []error{errors.New("new server failed")}

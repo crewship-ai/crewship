@@ -239,7 +239,7 @@ func TestNewUpdateTargetDoesNotClobberConcurrentFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "crewship-agent-cli")
 	writeUpdateFixture(t, path, "concurrent installer")
 	created, err := atomicCreateUpdateTarget(path, []byte("replacement"))
-	if err == nil || created {
+	if err == nil || created != nil {
 		t.Fatal("exclusive new-file publication clobbered an existing target")
 	}
 	assertUpdateFile(t, path, "concurrent installer")
@@ -276,5 +276,66 @@ func TestPreparedUpdateRejectsAliasedTargetsBeforeBackup(t *testing.T) {
 				t.Fatal("invalid transaction mutated backups")
 			}
 		})
+	}
+}
+
+func TestInstallerRollbackRetainsReplacementAfterCommit(t *testing.T) {
+	dir := t.TempDir()
+	server, client := filepath.Join(dir, "server"), filepath.Join(dir, "crewship-agent-cli")
+	writeUpdateFixture(t, server, "old server")
+	p := &PreparedUpdate{targets: []payloadTarget{{path: server, data: []byte("new server")}, {path: client, data: []byte("new client"), create: true}}}
+	result, err := p.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(dir, "other-installer")
+	writeUpdateFixture(t, replacement, "another installer's client")
+	if err := os.Rename(replacement, client); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreInstallerUpdate(result); err == nil {
+		t.Fatal("rollback did not report changed new-file identity")
+	}
+	assertUpdateFile(t, client, "another installer's client")
+	assertUpdateFile(t, server, "old server")
+}
+
+func TestPreparedUpdateRejectsBackupPathAsTarget(t *testing.T) {
+	dir := t.TempDir()
+	client := filepath.Join(dir, "crewship-agent-cli")
+	server := client + ".bak"
+	writeUpdateFixture(t, server, "old server")
+	writeUpdateFixture(t, client, "old client")
+	prepared := &PreparedUpdate{targets: []payloadTarget{{path: server, data: []byte("new server")}, {path: client, data: []byte("new client")}}}
+	if _, err := prepared.Commit(); err == nil {
+		t.Fatal("accepted target overlapping another target's backup")
+	}
+	assertUpdateFile(t, server, "old server")
+	assertUpdateFile(t, client, "old client")
+	if _, err := os.Lstat(server + ".bak"); !os.IsNotExist(err) {
+		t.Fatal("alias refusal touched backups")
+	}
+}
+
+func TestFullInstallerRequiresNativeClientBeforeMutating(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIGNATURE_VERIFY", "")
+	fixture := newSigGateFixture(t, true)
+	archive := buildTarGz(t, map[string]string{"crewship": "new server"})
+	asset := AssetNameForTag("v9.9.9", false)
+	checksums := []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), asset))
+	pki := newTestPKI(t, testIdentity, testIssuer)
+	signatureVerifyOpts.Roots = pki.rootPool
+	fixture.assets[asset] = archive
+	fixture.assets["checksums.txt"] = checksums
+	fixture.assets["checksums.txt.sig"] = []byte(pki.sign(t, checksums))
+	fixture.assets["checksums.txt.pem"] = pki.leafPEM
+	server := filepath.Join(t.TempDir(), "server")
+	writeUpdateFixture(t, server, "old server")
+	if _, err := PrepareInstallerUpdate(t.Context(), "v9.9.9", server, false, "1.0.0"); err == nil {
+		t.Fatal("accepted full archive missing required native client")
+	}
+	assertUpdateFile(t, server, "old server")
+	if _, err := os.Lstat(server + ".bak"); !os.IsNotExist(err) {
+		t.Fatal("prepare touched backups")
 	}
 }
