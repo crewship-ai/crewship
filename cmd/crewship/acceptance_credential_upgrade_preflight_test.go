@@ -76,6 +76,30 @@ func TestAcceptance_CredentialUpgradePreflightRetainedData(t *testing.T) {
 	if after := run(); after["ready"] != true {
 		t.Fatalf("repaired retained metadata not ready: %v", after)
 	}
+	// Retained table-based MCP servers may have SQL NULL env_json. Runtime
+	// treats that as no environment references; the offline binary must not
+	// abort its safety report, or silently accept malformed non-null metadata.
+	for _, scope := range []string{"workspace", "crew"} {
+		table, owner := scope+"_mcp_servers", scope+"_id"
+		ownerID := "up-ws"
+		if scope == "crew" {
+			ownerID = "up-crew"
+		}
+		id := "up-null-" + scope
+		seed(`INSERT INTO `+table+`(id,`+owner+`,name,display_name,transport,command,env_json,enabled) VALUES(?,?,'nullable','Nullable','stdio','true',NULL,1)`, id, ownerID)
+		if nullable := run(); nullable["ready"] != true || nullable["state"] != "PASS" {
+			t.Fatalf("NULL MCP env did not produce a ready metadata report: %v", nullable)
+		}
+		seed(`UPDATE `+table+` SET env_json='not-json' WHERE id=?`, id)
+		if malformed := run(); malformed["ready"] != false || malformed["state"] != "UNKNOWN" {
+			t.Fatalf("malformed non-null MCP env escaped conservative inspection: %v", malformed)
+		}
+		seed(`UPDATE `+table+` SET env_json='null' WHERE id=?`, id)
+		if jsonNull := run(); jsonNull["ready"] != true || jsonNull["state"] != "PASS" {
+			t.Fatalf("JSON null MCP env did not match runtime no-reference semantics: %v", jsonNull)
+		}
+		seed(`DELETE FROM `+table+` WHERE id=?`, id)
+	}
 	if unknown := run("--source-build", ""); unknown["ready"] != false || unknown["state"] != "UNKNOWN" {
 		t.Fatalf("unverified running configuration passed: %v", unknown)
 	}

@@ -117,13 +117,13 @@ func InspectCredentialUpgrade(ctx context.Context, db *sql.DB, workspace string,
 				continue
 			}
 			for mrows.Next() {
-				var env string
+				var env sql.NullString
 				if err := mrows.Scan(&env); err != nil {
 					mrows.Close()
 					return nil, err
 				}
-				if strings.TrimSpace(env) != "" {
-					configs = append(configs, `{"mcpServers":{"metadata":{"env":`+env+`}}}`)
+				if strings.TrimSpace(env.String) != "" {
+					configs = append(configs, `{"mcpServers":{"metadata":{"env":`+env.String+`}}}`)
 				}
 			}
 			if err := mrows.Err(); err != nil {
