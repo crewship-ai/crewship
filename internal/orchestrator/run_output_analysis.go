@@ -96,7 +96,7 @@ func (o *Orchestrator) AnalyzeRetainedRun(ctx context.Context, run RunState) (Re
 	if !complete || terminal == nil {
 		return analysis, errors.New("retained semantic analysis requires validated terminal output")
 	}
-	analysis.Failed = inBand.seen || terminal.ExitCode != 0 || terminal.Reason != "exited"
+	analysis.Failed = inBand.failed() || terminal.ExitCode != 0 || terminal.Reason != "exited"
 	if cause := inBand.Err(); cause != nil {
 		analysis.ErrorMessage = cause.Error()
 		analysis.Metadata["in_band_error"] = true
