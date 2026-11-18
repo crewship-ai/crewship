@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNativeOAuthAccessTokenProcessSlot(t *testing.T) {
@@ -18,6 +19,88 @@ func TestNativeOAuthAccessTokenProcessSlot(t *testing.T) {
 				}
 				if got := envMap(t, env)[cred.EnvVarName]; got != cred.PlainValue {
 					t.Fatal("generic OAuth access-token slot missing from native process environment")
+				}
+			})
+		}
+	}
+}
+
+func TestNativeOAuthBedrockSnapshotCannotEnterTokenEnvironment(t *testing.T) {
+	cred := Credential{ID: "legacy-bedrock", Type: "OAUTH2", OAuthPrimary: true, Provider: "AWS_BEDROCK", EnvVarName: "NATIVE_OAUTH_ACCESS", PlainValue: "fixture-bedrock-material",
+		Fields: []CredentialField{{Key: "secret", EnvVar: "NATIVE_SECRET_PART", Value: "fixture-secret", IsSecret: true}}}
+	req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", Credentials: []Credential{cred}}
+	for _, env := range [][]string{BuildEnvVarsSidecar(req, true), BuildEnvVars(req, nil, true)} {
+		for _, entry := range env {
+			if strings.Contains(entry, cred.PlainValue) || strings.Contains(entry, cred.Fields[0].Value) {
+				t.Fatal("Bedrock snapshot bypassed the provider delivery guard")
+			}
+		}
+	}
+	if len(AgentEnvCredentialExposures(req, true)) != 0 {
+		t.Fatal("withheld Bedrock snapshot reported as native OAuth token delivery")
+	}
+}
+
+func TestNativeOAuthSecretPartsCannotClaimLoaderNamespace(t *testing.T) {
+	for _, name := range []string{"LD_AUDIT", "DYLD_INSERT_LIBRARIES", "CREWSHIP_NEW_RUNTIME_NAME", "BAD-NAME"} {
+		t.Run(name, func(t *testing.T) {
+			c := Credential{ID: "primary", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: "NATIVE_ACCESS", PlainValue: "fixture-access",
+				Fields: []CredentialField{{Key: "audit", EnvVar: name, Value: "fixture-part", IsSecret: true}}}
+			req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", Credentials: []Credential{c}}
+			if _, err := appendCredentialFileEnv(BuildEnvVarsSidecar(req, true), req.Credentials, t.TempDir(), true); err == nil {
+				t.Fatal("OAuth secret part claimed a reserved or invalid process name")
+			}
+		})
+	}
+}
+
+func TestNativeOAuthPartCannotReplaceAnotherCredentialFileAlias(t *testing.T) {
+	creds := []Credential{
+		{ID: "primary", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: "NATIVE_ACCESS", PlainValue: "fixture-access",
+			Fields: []CredentialField{{Key: "secret", EnvVar: "OTHER_FILE", Value: "fixture-part", IsSecret: true}}},
+		{ID: "other", Type: "GENERIC_SECRET", EnvVarName: "OTHER_FILE", PlainValue: "fixture-file"},
+	}
+	req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", Credentials: creds}
+	if _, err := appendCredentialFileEnv(BuildEnvVarsSidecar(req, true), creds, t.TempDir(), true); err == nil {
+		t.Fatal("OAuth part replaced another credential's native file alias")
+	}
+}
+
+func TestNativeOAuthFinalBoundaryRejectsRenderedExpiredMaterial(t *testing.T) {
+	for _, channel := range []string{"generic", "secret-part-only", "identifier-part-only", "anthropic", "explicit-mcp"} {
+		for _, stale := range []string{"expired", "handle-only"} {
+			t.Run(channel+"/"+stale, func(t *testing.T) {
+				c := Credential{ID: "primary", Type: "OAUTH2", OAuthPrimary: true, EnvVarName: "NATIVE_ACCESS", PlainValue: "fixture-access",
+					Fields: []CredentialField{{Key: "secret", EnvVar: "NATIVE_ACCESS_SECRET", Value: "fixture-part", IsSecret: true}, {Key: "region", EnvVar: "NATIVE_ACCESS_REGION", Value: "fixture-region"}}}
+				if channel == "anthropic" {
+					c.Provider = "ANTHROPIC"
+					c.EnvVarName = "ANTHROPIC_API_KEY"
+					c.PlainValue = "sk-ant-oat-fixture-access"
+				}
+				req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", Credentials: []Credential{c}}
+				env := BuildEnvVarsSidecar(req, true)
+				if channel == "explicit-mcp" {
+					req.CrewMCPConfigJSON = `{"mcpServers":{"fixture":{"command":"fixture","env":{"token":"${NATIVE_ACCESS}"}}}}`
+					env = injectMCPCredentialEnvVars(req, env, true, slog.Default())
+				}
+				if channel == "secret-part-only" {
+					env = []string{c.Fields[0].EnvVar + "=" + c.Fields[0].Value}
+				}
+				if channel == "identifier-part-only" {
+					env = []string{c.Fields[1].EnvVar + "=" + c.Fields[1].Value}
+				}
+				// Advance the snapshot deadline after render, without timing-dependent sleeps.
+				if stale == "expired" {
+					c.LeaseExpiresAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+				} else {
+					c.HandleOnly = true
+				}
+				if _, err := appendCredentialFileEnv(env, []Credential{c}, t.TempDir(), true); err == nil {
+					t.Fatal("already-rendered OAuth material survived its grant boundary")
+				}
+				req.Credentials = []Credential{c}
+				if _, err := appendCredentialFileEnv(BuildEnvVarsSidecar(req, true), req.Credentials, t.TempDir(), true); err != nil {
+					t.Fatal("an already-withheld stale snapshot blocked the fresh run")
 				}
 			})
 		}

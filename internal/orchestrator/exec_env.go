@@ -1927,11 +1927,11 @@ func fileOnlyCredential(cred Credential) bool {
 // appendCredentialFileEnv shares the writer's plan instead of sourcing .env.
 // Existing direct token/identifier assignments keep their native semantics.
 func appendCredentialFileEnv(env []string, creds []Credential, secretsDir string, keeperEnabled bool, mcpRefs ...map[string]bool) ([]string, error) {
-	if err := validateNativeOAuthSlots(env, creds, keeperEnabled, time.Now()); err != nil {
-		return nil, err
-	}
 	_, aliases, _, err := buildCredFilePlan(creds, secretsDir, keeperEnabled)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateNativeOAuthSlots(env, creds, keeperEnabled, time.Now(), aliases...); err != nil {
 		return nil, err
 	}
 aliasesLoop:

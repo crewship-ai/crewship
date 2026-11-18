@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/credname"
@@ -13,7 +14,7 @@ import (
 // generic native env delivery. Missing provenance stays MCP-only.
 func primaryOAuthMaterial(c Credential, keeper bool, now time.Time) bool {
 	p := credpolicy.For(c.Type)
-	return c.Type == "OAUTH2" && c.OAuthPrimary && c.ID != "" && !c.HandleOnly && c.PlainValue != "" &&
+	return c.Type == "OAUTH2" && c.OAuthPrimary && credEnvDeliverable(c) && c.ID != "" && !c.HandleOnly && c.PlainValue != "" &&
 		p.Delivery == credpolicy.DeliveryEnv && !(keeper && p.KeeperGated) && !credentialLeaseLapsed(c, now)
 }
 
@@ -49,8 +50,32 @@ func nativeOAuthEnvView(req AgentRunRequest, keeper bool, now time.Time) AgentRu
 
 // Validate declarations before an env overwrite can hide another owner. File
 // aliases are validated by appendCredentialFileEnv against the resulting env.
-func validateNativeOAuthSlots(env []string, creds []Credential, keeper bool, now time.Time) error {
+func validateNativeOAuthSlots(env []string, creds []Credential, keeper bool, now time.Time, fileAliases ...string) error {
 	for i, c := range creds {
+		if c.Type == "OAUTH2" && c.OAuthPrimary && (c.HandleOnly || credentialLeaseLapsed(c, now)) {
+			// Rendering and sidecar setup precede this final boundary. A lease
+			// may have elapsed since render; do not execute its stale env block.
+			if oauthSnapshotMaterialInEnv(env, c) {
+				return fmt.Errorf("OAuth credential snapshot became unavailable before process execution")
+			}
+			continue
+		}
+		if primaryOAuthMaterial(c, keeper, now) {
+			for _, f := range c.Fields {
+				if f.Value == "" || !envHasAssignment(env, f.EnvVar, f.Value) {
+					continue
+				}
+				if !credname.Valid(f.EnvVar) || nativeAliasReserved(f.EnvVar) {
+					return fmt.Errorf("OAuth field delivery uses invalid or reserved runtime name: %q", f.EnvVar)
+				}
+				for _, alias := range fileAliases {
+					name, _, _ := strings.Cut(alias, "=")
+					if f.EnvVar == name {
+						return fmt.Errorf("credential delivery name collision: %q", name)
+					}
+				}
+			}
+		}
 		if !primaryOAuthMaterial(c, keeper, now) || credentialOAuthKind(c) != oauthNone || c.EnvVarName == "" {
 			continue
 		}
@@ -78,4 +103,18 @@ func validateNativeOAuthSlots(env []string, creds []Credential, keeper bool, now
 		}
 	}
 	return nil
+}
+
+func oauthSnapshotMaterialInEnv(env []string, c Credential) bool {
+	if c.PlainValue != "" && (envHasAssignment(env, c.EnvVarName, c.PlainValue) ||
+		envHasAssignment(env, resolveEnvVar(&c), c.PlainValue) ||
+		(credentialOAuthKind(c) == oauthAnthropic && envHasAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN", c.PlainValue))) {
+		return true
+	}
+	for _, f := range c.Fields {
+		if f.Value != "" && envHasAssignment(env, f.EnvVar, f.Value) {
+			return true
+		}
+	}
+	return false
 }
