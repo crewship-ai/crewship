@@ -115,7 +115,7 @@ Existing host-admitted HOME, proxy and credential values remain;
 moving credentials outside agents belongs to the later gateway work.
 
 `agent_runs` state and `exec.command` payloads contain `managed_launch` admission
-evidence. `version` is read from a single canonical native mise v3 locked entry and
+evidence. `version` is read from a single canonical native mise v3/v4 locked entry and
 must match the exact configured pin
 and build revision; session self-reported versions remain separate observations.
 This evidence describes admitted artifacts, not successful authentication or a

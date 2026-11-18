@@ -8,14 +8,14 @@ import (
 
 var lockedToolTable = regexp.MustCompile(`^\[\[tools\.([A-Za-z0-9_-]+)\]\]$`)
 var lockedVersion = regexp.MustCompile(`^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)"$`)
-var nativeLockSchema = regexp.MustCompile(`^lockfile_version\s*=\s*3$`)
+var nativeLockSchema = regexp.MustCompile(`^lockfile_version\s*=\s*[34]$`)
 
-// LockedToolVersion reads the canonical v3 shape emitted by native mise lock.
+// LockedToolVersion reads the canonical v3/v4 tool tables emitted by native mise lock.
 // It is deliberately not a general TOML parser: multiline strings, ambiguous
 // tool entries, missing schema and noncanonical versions are unsupported.
 // Native mise validates the complete lock during the image's locked build.
 func LockedToolVersion(bundle *MiseLockBundle, tool string) (string, error) {
-	denied := errors.New("managed launch: unambiguous native v3 locked version required")
+	denied := errors.New("managed launch: unambiguous native v3/v4 locked version required")
 	if bundle == nil || bundle.Validate() != nil || !toolNameRe.MatchString(tool) {
 		return "", denied
 	}
