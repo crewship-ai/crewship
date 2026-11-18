@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Boot the actual Linux release archive in isolated state before publication."""
 import argparse
+import hashlib
+import platform
 import json
 import re
 import os
@@ -22,13 +24,25 @@ with tempfile.TemporaryDirectory(prefix='crewship-archive-smoke-') as temp:
     with tarfile.open(args.archive) as archive:
         archive.extractall(root, filter='data')
     binary = root / 'crewship'
-    for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh'):
+    for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh', 'crewship-agent-cli'):
         if not (root / name).is_file():
             raise SystemExit(f'Archive is missing {name}')
     version = subprocess.check_output([str(binary), 'version', '--format', 'json'], text=True)
     print(version)
     if not re.fullmatch(r'[0-9a-f]{40}', args.sha) or json.loads(version)['client']['commit'] != args.sha:
         raise SystemExit('Archive commit identity mismatch')
+    client = root / 'crewship-agent-cli'
+    probe_env = {k: v for k, v in os.environ.items() if not k.startswith('CREWSHIP_')}
+    probe_env['CREWSHIP_CONFIG'] = '/dev/null'
+    probe = json.loads(subprocess.check_output(
+        [str(client), 'agent-runtime-probe'], env=probe_env, text=True, timeout=20))
+    architecture = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
+    if (probe.get('protocol') != 1 or probe.get('commit') != args.sha
+            or probe.get('sha256') != hashlib.sha256(client.read_bytes()).hexdigest()
+            or probe.get('os') != 'linux' or probe.get('arch') != architecture
+            or not {'version', 'commands'}.issubset(probe.get('commands', []))):
+        raise SystemExit('Archive native agent CLI identity or capabilities mismatch')
+    print('Archive native agent CLI executing hash, commit and capabilities verified')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]

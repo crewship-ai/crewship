@@ -3,6 +3,10 @@ package update
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -269,5 +273,37 @@ func TestRunServerUpdate_RollbackFailureIsCritical(t *testing.T) {
 	// recovery and, since migrations ran, the snapshot.
 	if !strings.Contains(err.Error(), "manual") {
 		t.Errorf("failed-rollback error should call for manual recovery; got: %v", err)
+	}
+}
+
+func TestRunServerUpdateRollbackRemovesNewRuntimeClient(t *testing.T) {
+	for _, failsStart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("start_failure=%t", failsStart), func(t *testing.T) {
+			directory := t.TempDir()
+			server, client := filepath.Join(directory, "server"), filepath.Join(directory, "crewship-agent-cli")
+			writeUpdateFixture(t, client, "new native client")
+			manager := &mockService{}
+			deps, _ := baseDeps(manager, []string{server, client})
+			deps.Commit = func(context.Context, any) (*SelfUpdateResult, error) {
+				return &SelfUpdateResult{Replaced: []string{server, client}, Created: []string{client}}, nil
+			}
+			if failsStart {
+				manager.startErr = []error{errors.New("new server failed")}
+			} else {
+				deps.Health, _ = healthSeq(errors.New("unhealthy new server"), nil)
+			}
+			var restored []string
+			deps.Rollback = func(paths []string) error { restored = append(restored, paths...); return nil }
+			result, err := RunServerUpdate(t.Context(), *deps)
+			if err == nil || !result.RolledBack {
+				t.Fatalf("failed update did not roll back: %+v %v", result, err)
+			}
+			if !reflect.DeepEqual(restored, []string{server}) {
+				t.Fatalf("backup restore received newly created client: %v", restored)
+			}
+			if _, err := os.Lstat(client); !os.IsNotExist(err) {
+				t.Fatal("server rollback retained newly introduced client")
+			}
+		})
 	}
 }
