@@ -21,7 +21,10 @@ SDK must report matching executing provenance/capabilities, and the full running
 server must have the expected executing hash, clean revision, fresh database,
 readiness and embedded UI. PASS requires authenticated removal of the owned
 container and confirmed NotFound afterward. A gateway refusal to verify absence
-is a failed qualification, never proof of cleanup. Unit negative controls cover
+is a failed qualification, never proof of cleanup. Interrupt/TERM cancels the
+fixture context and attempts scoped cleanup with its separate 30-second budget.
+An ambiguous create reports its fixture label and cannot claim cleanup or PASS.
+Unit negative controls cover
 foreign ownership, failed deletion, unknown absence and a surviving container.
 
 This qualifies explicit-version root installation into a fresh custom prefix

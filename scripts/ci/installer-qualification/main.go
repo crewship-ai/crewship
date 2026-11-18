@@ -26,10 +26,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -52,7 +54,9 @@ func qualify() (retErr error) {
 	if len(revision) != 40 || strings.Trim(revision, "0123456789abcdef") != "" || artifactDir == "" || installer == "" {
 		return fmt.Errorf("explicit release artifacts, installer and full revision are required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(signalCtx, 8*time.Minute)
 	defer cancel()
 	stage, err := os.MkdirTemp("", "crewship-installer-qualification-")
 	if err != nil {
@@ -215,7 +219,7 @@ func qualify() (retErr error) {
 	env := []string{fmt.Sprintf("BOOTSTRAP_PORT=%d", bootstrapListener.Addr().(*net.TCPAddr).Port), fmt.Sprintf("PROXY_PORT=%d", proxyListener.Addr().(*net.TCPAddr).Port), fmt.Sprintf("INSTALLER_SHA=%x", installerHash), fmt.Sprintf("CA_SHA=%x", caHash), "CREWSHIP_VERSION=" + tag, "EXPECTED_REVISION=" + revision, "EXPECTED_BINARY_SHA=" + artifacts["crewship"], "EXPECTED_ARTIFACTS=" + string(artifactJSON), "EXPECTED_ARCH=" + runtime.GOARCH}
 	created, err := daemon.ContainerCreate(ctx, client.ContainerCreateOptions{Config: &container.Config{Image: "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e", User: "0", Cmd: []string{"bash", "-c", containerScript}, Env: env, Labels: map[string]string{"native.installer.fixture": fixtureID}}, HostConfig: &container.HostConfig{NetworkMode: "bridge"}})
 	if err != nil {
-		return fmt.Errorf("fresh container creation: %w", err)
+		return fmt.Errorf("fresh container creation unconfirmed (fixture label %s; no cleanup confirmation): %w", fixtureID, err)
 	}
 	cleaned := false
 	cleanup := func() error {
