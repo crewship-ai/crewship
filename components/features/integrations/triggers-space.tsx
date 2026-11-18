@@ -212,7 +212,9 @@ export function TriggerPage({
   React.useEffect(() => setRate(row?.endpoint?.routine ? String(row.endpoint.routine.rate_limit_per_min) : ""), [row])
 
   if (!row || !row.endpoint) {
-    return data.loading ? <PageLoading rows={4} /> : <PageNotFound what="trigger" back={{ label: "Back to Triggers", onClick: onBack }} />
+    if (data.loading) return <PageLoading rows={4} />
+    if (data.error) return <PageError title="Triggers could not load" description="Tools and Channels are not affected." onRetry={data.refresh} detail={data.error} />
+    return <PageNotFound what="trigger" back={{ label: "Back to Triggers", onClick: onBack }} />
   }
   const e = row.endpoint
   const hook = e.routine
