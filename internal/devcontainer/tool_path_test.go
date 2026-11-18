@@ -18,7 +18,7 @@ func TestEnsureAgentToolPath(t *testing.T) {
 		{"operator PATH is kept, tool dirs go first", map[string]string{"PATH": "/opt/x/bin:/usr/bin"},
 			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/x/bin:/usr/bin"},
 		{"Crewship's pre-#5459 generated order is migrated to declared pins first", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
-			"/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/bin"},
+			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/crew-tools/bin:/usr/bin"},
 		{"operator's own home-first order is kept", map[string]string{"PATH": "/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims"},
 			"/opt/crewship/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims"},
 		{"partially present entries retain precedence", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},

@@ -59,6 +59,8 @@ func TestDeclaredMisePinPrecedesPersistentHomeBinary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeTool(t, root, agentLocalBinDir, "glab", "0.0.1-persistent-home")
+			writeTool(t, root, crewToolsDir+"/bin", "glab", "0.0.2-crew-tools")
+			writeTool(t, root, "/usr/local/share/npm-global/bin", "glab", "0.0.3-npm-feature")
 			writeTool(t, root, MiseShimsDir, "glab", "1.131.0-declared")
 			writeTool(t, root, agentLocalBinDir, "only-home", "agent-installed")
 
@@ -97,7 +99,20 @@ func TestCreationToolPathKeepsOperatorOrder(t *testing.T) {
 			t.Fatalf("operator order changed: %q -> %q", operator, got)
 		}
 	}
-	if got := CreationToolPath("${containerEnv:PATH}:" + legacyDefaultContainerPath); !strings.Contains(got, "${containerEnv:PATH}:/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/usr/local/sbin") {
+	// A login capture where ~/.profile prepended twice is still the generated run.
+	if got := CreationToolPath("/home/agent/.local/bin:" + legacyDefaultContainerPath); !strings.HasPrefix(got, strings.Join(AgentToolPathDirs, ":")+":/usr/local/sbin") {
+		t.Fatalf("duplicated login capture kept home first: %s", got)
+	}
+	// The stored default becomes the full canonical order: feature and
+	// crew-tools directories must not be prepended ahead of the shims.
+	if got := CreationToolPath(legacyDefaultContainerPath); got != strings.Join(AgentToolPathDirs, ":")+":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" {
+		t.Fatalf("stored default not migrated to the canonical order: %s", got)
+	}
+	// An operator's own later placement of a shared directory is kept.
+	if got := CreationToolPath(legacyDefaultContainerPath + ":/usr/local/share/npm-global/bin"); !strings.HasSuffix(got, ":/bin:/usr/local/share/npm-global/bin") {
+		t.Fatalf("operator placement of npm-global moved: %s", got)
+	}
+	if got := CreationToolPath("${containerEnv:PATH}:" + legacyDefaultContainerPath); !strings.Contains(got, "${containerEnv:PATH}:/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin") {
 		t.Fatalf("migration did not keep references and tail: %s", got)
 	}
 }

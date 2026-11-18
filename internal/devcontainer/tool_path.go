@@ -67,8 +67,9 @@ const agentLocalBinDir = agentHome + "/.local/bin"
 // legacyGeneratedToolOrder is the native prefix Crewship itself wrote before
 // #5459: into DefaultCrewDevcontainerConfig, the seeded crews and, through
 // them, stored crew configs and runtime env. It is Crewship's own output, not
-// an operator decision, so creation paths migrate exactly this contiguous
-// sequence to the canonical order. Any other operator order is kept.
+// an operator decision, so creation paths migrate this contiguous run (after
+// de-duplication, wherever it occurs in a PATH) to the canonical order. An
+// operator PATH that does not contain the run keeps its order.
 var legacyGeneratedToolOrder = []string{agentLocalBinDir, AgentBinDir, MiseShimsDir}
 
 // CreationToolPath is NativeToolPath for image provisioning and runtime
@@ -98,7 +99,18 @@ func sanitizeToolPath(source string) string {
 
 func migrateGeneratedToolOrder(path string) string {
 	path = sanitizeToolPath(path)
-	parts := nativeToolPathParts(path)
+	// Match on first occurrences: a login capture where ~/.profile ran twice
+	// (L:L:A:M) is the same generated order and must not keep L first.
+	var parts []string
+	seen := map[string]bool{}
+	for _, part := range nativeToolPathParts(path) {
+		key := strings.TrimSpace(part)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, part)
+	}
 	n := len(legacyGeneratedToolOrder)
 	for i := 0; i+n <= len(parts); i++ {
 		match := true
@@ -109,8 +121,22 @@ func migrateGeneratedToolOrder(path string) string {
 			}
 		}
 		if match {
+			// Expand the run to the whole canonical list in place: otherwise
+			// NativeToolPath would prepend the missing feature and crew-tools
+			// directories ahead of the shims and let them shadow declared pins.
+			// A directory the operator placed elsewhere keeps its position.
+			elsewhere := map[string]bool{}
+			for k, part := range parts {
+				if k < i || k >= i+n {
+					elsewhere[strings.TrimSpace(part)] = true
+				}
+			}
 			out := append([]string(nil), parts[:i]...)
-			out = append(out, AgentBinDir, MiseShimsDir, agentLocalBinDir)
+			for _, dir := range AgentToolPathDirs {
+				if !elsewhere[dir] {
+					out = append(out, dir)
+				}
+			}
 			out = append(out, parts[i+n:]...)
 			return strings.Join(out, ":")
 		}

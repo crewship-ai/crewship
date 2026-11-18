@@ -25,6 +25,8 @@ import (
 // CREWSHIP_NATIVE_TOOLS_BUILD_COMMIT can bind the receipt to a deployed build.
 // CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES=1 checks feature/sbin tools on a
 // dedicated fixture whose oversized metadata must leave PATH inherited.
+// CREWSHIP_NATIVE_TOOLS_GLAB_PATH asserts the glab path selected by the
+// terminal, a child sh and zsh -l (declared pin precedence, #5459).
 // CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
 // (terminal, child, login and zsh) against the declared version after an update.
 func TestNativeToolsLiveTerminal(t *testing.T) {
@@ -105,14 +107,19 @@ code=$?; printf 'TOOL_STATUS:codex:%s\n' "$code"; test "$code" -eq 0 || fail=1
 claude_path=$(command -v claude); code=$?; printf 'TOOL_PATH:claude:%s\n' "$claude_path"; test "$code" -eq 0 || fail=1
 claude --version
 code=$?; printf 'TOOL_STATUS:claude:%s\n' "$code"; test "$code" -eq 0 || fail=1
+printf 'MODE_PATH:terminal:glab:%s\n' "$(command -v glab)"
+printf 'MODE_PATH:child:glab:%s\n' "$(sh -c 'command -v glab')"
+printf 'MODE_PATH:bash-login:glab:%s\n' "$(bash -lc 'command -v glab' 2>/dev/null)"
+if command -v zsh >/dev/null; then printf 'MODE_PATH:zsh-login:glab:%s\n' "$(zsh -l -c 'command -v glab' 2>/dev/null)"; fi
 sh -c 'glab --version && codex --version && claude --version'
 code=$?; printf 'CHILD_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 bash -lc 'glab --version && codex --version && claude --version'
 code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
 fp() { "$@" 'env | grep -vE "^(_|SHLVL|PWD|OLDPWD|PATH|LINES|COLUMNS|BASH_EXECUTION_STRING)=" | sort; declare -F | sort; printf "COMPLETIONS=%s\n" "$(complete -p 2>/dev/null | wc -l)"; alias' </dev/null 2>/dev/null; }
-login_fp=$(fp bash -l -i -c | cksum); nonlogin_fp=$(fp bash -i -c | cksum)
-test "$login_fp" = "$nonlogin_fp"; code=$?; printf 'FEATURE_INIT_PARITY:%s\n' "$code"; test "$code" -eq 0 || fail=1
+fp_dir=$(mktemp -d); fp bash -l -i -c > "$fp_dir/login"; fp bash -i -c > "$fp_dir/nonlogin"
+cmp -s "$fp_dir/login" "$fp_dir/nonlogin"; code=$?; printf 'FEATURE_INIT_PARITY:%s:login_lines=%s:nonlogin_lines=%s\n' "$code" "$(wc -l < "$fp_dir/login")" "$(wc -l < "$fp_dir/nonlogin")"
+if [ "$code" -ne 0 ]; then diff "$fp_dir/login" "$fp_dir/nonlogin" | head -20 | sed 's/^/FEATURE_INIT_DIFF:/'; fail=1; fi; rm -rf "$fp_dir"
 printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
 	if os.Getenv("CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES") == "1" {
@@ -171,6 +178,20 @@ done
 				match := regexp.MustCompile(`(?m)^TOOL_PATH:claude:([^\r\n]+)\r?$`).FindStringSubmatch(output.String())
 				if len(match) != 2 || match[1] != expected {
 					t.Fatalf("terminal claude path differs from declared expectation %q: %v", expected, match)
+				}
+			}
+			// Pin precedence (#5459): every Crewship-assembled mode must select
+			// the declared path. A bash login shell runs the user's ~/.profile
+			// and is recorded (MODE_PATH:bash-login) but not asserted.
+			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_PATH"); expected != "" {
+				for _, mode := range []string{"terminal", "child", "zsh-login"} {
+					match := regexp.MustCompile(`(?m)^MODE_PATH:` + mode + `:glab:([^\r\n]*)\r?$`).FindStringSubmatch(output.String())
+					if mode == "zsh-login" && match == nil {
+						continue
+					}
+					if len(match) != 2 || match[1] != expected {
+						t.Fatalf("%s selected glab %v, declared %q", mode, match, expected)
+					}
 				}
 			}
 			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_VERSION"); expected != "" {

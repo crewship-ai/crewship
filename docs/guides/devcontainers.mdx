@@ -295,18 +295,22 @@ self-updated CLI in `~/.local/bin` (a native Claude Code install writes
 mise does not declare has no shim and still resolves from `~/.local/bin`.
 The default devcontainer and the seeded crews still store the earlier literal
 `/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:…`; provisioning
-and runtime creation migrate exactly that Crewship-generated sequence. Any
-other order an operator writes in `containerEnv.PATH` is kept, including a
-deliberate home-first order. The change applies to an image built or a runtime
+and runtime creation migrate that Crewship-generated contiguous run of three
+directories wherever it occurs (after removing duplicates), including in a
+copied or edited variant of the default. A PATH without that run keeps its
+order, including a deliberate home-first order such as
+`/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims`. The change applies to an image built or a runtime
 created by the updated server; a running container keeps its environment, and
 its terminal keeps matching its agent exec until the container is recreated.
 
 This covers every environment Crewship assembles: non-login agent exec,
 routines, the terminal, child processes, zsh (which does not reset PATH) and
 the PATH the login hook restores. A **bash login shell** (`bash -l`, `bash
--lc`) finally runs the user's own `~/.profile` from the persistent home. The
-Debian default copied into that home prepends `~/.local/bin` whenever the
-directory exists, so in a bash login shell a binary there still wins over the
+-lc`, and postStart hooks, which run that way) finally runs `~/.profile` from
+the persistent home. The container entrypoint copies the image's
+`/etc/skel/.profile` there on first boot; from then on it is the user's file.
+The Debian default prepends `~/.local/bin` whenever the directory exists (the
+entrypoint creates it), so in a bash login shell a binary there still wins over the
 declared pin. Crewship does not rewrite files in the user's home; remove the
 stale binary, or that `~/.profile` line, when a login shell must select the
 declared version.
