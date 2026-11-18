@@ -513,8 +513,12 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 			  LIMIT 1`,
 			user.ID, workspaceID, workspaceID,
 		).Scan(&resolvedID, &role)
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusForbidden, "Not a member of this workspace")
+			return
+		}
+		if err != nil {
+			replyInternalError(w, m.logger, "look up workspace membership", err)
 			return
 		}
 

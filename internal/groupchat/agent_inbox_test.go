@@ -119,3 +119,23 @@ func TestChannelInboxRemovedAndReaddedTargetCannotReviveReadOrReply(t *testing.T
 		t.Fatal("revoked target published a reply")
 	}
 }
+
+func TestChannelMessageReplayAcknowledgesOriginalAfterJobFailure(t *testing.T) {
+	s, db, channel, job := seedInboxJob(t)
+	if _, err := db.Exec(`UPDATE workspace_conversation_agent_jobs SET state='failed' WHERE id=?`, job); err != nil {
+		t.Fatal(err)
+	}
+	var originalID string
+	if err := db.QueryRow(`SELECT message_id FROM workspace_conversation_agent_jobs WHERE id=?`, job).Scan(&originalID); err != nil {
+		t.Fatal(err)
+	}
+	input := SendInput{ClientID: "inbox-source", Content: "actual human source", MentionedAgentIDs: []string{"target"}}
+	replay, duplicate, err := s.Send(t.Context(), "w", "u0", channel, input)
+	if err != nil || !duplicate || replay.ID != originalID {
+		t.Fatalf("message replay=%+v duplicate=%v err=%v", replay, duplicate, err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_conversation_agent_jobs WHERE message_id=?`, originalID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("replay dispatched jobs=%d err=%v", n, err)
+	}
+}

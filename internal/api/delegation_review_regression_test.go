@@ -174,8 +174,8 @@ func TestQueuedFollowUpsKeepEachCommentsOwnOrigin(t *testing.T) {
 
 func TestChannelJobAdmissionRetainsHumanMutationFence(t *testing.T) {
 	h, store, conversation, user, agent, _ := conversationJobFixture(t)
-	job := enqueueConversationJob(t, h, store, conversation, user, agent, "requester-origin-review")
 	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, conversation.WorkspaceID, user)
+	job := enqueueConversationJob(t, h, store, conversation, user, agent, "requester-origin-review")
 	if _, err := h.prepareConversationJob(t.Context(), job); err != nil {
 		t.Fatal(err)
 	}

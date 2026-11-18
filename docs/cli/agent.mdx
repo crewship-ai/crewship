@@ -880,6 +880,24 @@ Backed by `POST /api/v1/crews/{crewId}/issues` and
 
 ---
 
+## `crewship agent inbox read`
+
+An agent can use `crewship agent inbox read` inside its active run to read and
+acknowledge the run's host-recorded human inbox source through the local
+sidecar. It takes no source or agent selector and uses the run token already
+provided in the agent environment. The workspace must enable the
+`agent_human_inbox` feature flag.
+
+```bash
+crewship agent inbox read
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--sidecar` | string | `http://127.0.0.1:9119` | Local sidecar HTTP origin. Accepts loopback addresses only. |
+
+---
+
 ## `crewship agent git-log`
 
 Show the git commit log from inside the agent's container — useful for inspecting what code-writing agents have committed locally before any push.
@@ -906,9 +924,3 @@ safely substitute the crew's current container, which may be a replacement.
 There is currently no automatic repair or force-clear CLI for such records.
 Operators must establish the original runtime's absence before repairing its
 stored identity/state. Repeated restarts alone do not resolve missing identity.
-
-An agent can use `crewship agent inbox read` inside its active run to read and
-acknowledge the run's host-recorded human inbox source through the local
-sidecar. It takes no source or agent selector and uses the run token already
-provided in the agent environment. The workspace must enable the
-`agent_human_inbox` feature flag.

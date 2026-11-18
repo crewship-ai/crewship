@@ -43,10 +43,10 @@ const liveInboxJob = `c.kind='channel' AND a.workspace_id=c.workspace_id AND a.d
 
 func (s *Store) AgentInbox(ctx context.Context, w, u, agent string) ([]AgentInboxMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT j.id,c.id,m.id,COALESCE(j.assignment_id,''),COALESCE(m.author_user_id,''),m.content,COALESCE(execution.status,j.state),COALESCE(j.reply_message_id,''),j.created_at,receipt.read_at,receipt.source_sha256
- FROM workspace_conversation_agent_jobs j JOIN workspace_conversations c ON c.id=j.conversation_id
+ FROM workspace_conversation_agent_jobs j INDEXED BY idx_agent_inbox_conversation_jobs CROSS JOIN workspace_conversations c ON c.id=j.conversation_id
  JOIN workspace_conversation_messages m ON m.id=j.message_id AND m.conversation_id=c.id
  JOIN agents a ON a.id=j.agent_id LEFT JOIN assignments execution ON execution.id=j.assignment_id AND execution.workspace_id=c.workspace_id AND execution.assigned_to_id=a.id LEFT JOIN agent_inbox_receipts receipt ON receipt.workspace_id=c.workspace_id AND receipt.agent_id=a.id AND receipt.source_kind='channel_message' AND receipt.source_id=j.id
- WHERE a.id=? AND `+accessible+` AND `+liveInboxJob+` AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL) ORDER BY j.created_at DESC,j.id DESC LIMIT 50`, agent, w, u, u, u)
+ WHERE j.agent_id=? AND `+accessible+` AND `+liveInboxJob+` AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL) ORDER BY j.created_at DESC,j.id DESC LIMIT 50`, agent, w, u, u, u)
 	if err != nil {
 		return nil, err
 	}

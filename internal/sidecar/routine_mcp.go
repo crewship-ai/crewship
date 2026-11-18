@@ -268,7 +268,7 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 }, documentCreateMCPCatalog()...), documentDraftMCPCatalog()...)
 
 func init() {
-	routineMCPTools = append(routineMCPTools, memoryMCPToolDescriptor{Name: "inbox_read", Description: "Read and acknowledge the exact human message or assigned task that caused your current run. Call before responding to a human message or doing its task. The host derives the source from your current run; you cannot choose another private conversation or grant permissions. Takes no arguments; a read receipt is recorded only when this tool succeeds.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
+	routineMCPTools = append(routineMCPTools, memoryMCPToolDescriptor{Name: "inbox_read", Description: "Where the workspace has enabled agent human inbox, read and acknowledge the human message or assigned task that started your current run. The host derives the source from this run. Takes no arguments. The workspace setting or a run without a human inbox source can make this tool unavailable.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
 	routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, designMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, artifactKindGuideMCPCatalog()...)

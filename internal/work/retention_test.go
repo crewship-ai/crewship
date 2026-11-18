@@ -553,3 +553,48 @@ func TestSweep_GuardIsInTheStatementNotTheScan(t *testing.T) {
 			res.RawBodiesRetained)
 	}
 }
+
+func TestSweepExpiresOnlyOldEndedInboxEvidence(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := t.Context()
+	if _, err := db.ExecContext(ctx, `INSERT INTO workspaces(id,name,slug) VALUES('ws1','Retention','retention');
+		INSERT INTO agents(id,workspace_id,name,slug) VALUES('agent-jamie','ws1','Jamie','jamie')`); err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(delta time.Duration) string { return clock.Now().Add(delta).UTC().Format(time.RFC3339Nano) }
+	old := stamp(-2 * DefaultDedupWindow)
+	for _, entry := range []struct {
+		id    string
+		ended any
+	}{
+		{"expired", old},
+		{"recent", stamp(-time.Hour)},
+		{"active", nil},
+	} {
+		job := accept(t, s, db, retWork())
+		if _, err := db.ExecContext(ctx, `INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,ended_at)
+			VALUES(?,?,1,1,'lease',?,?,?,?)`, entry.id, job.WorkID, old, old, old, entry.ended); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO agent_inbox_receipts(workspace_id,agent_id,source_kind,source_id,run_id,read_at,source_sha256)
+			VALUES('ws1','agent-jamie','chat_message',?,?,?,'fixture-digest')`, entry.id, entry.id, old); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO agent_inbox_run_sources(run_id,workspace_id,agent_id,source_kind,source_id,source_sha256,created_at)
+			VALUES(?,'ws1','agent-jamie','chat_message',?,'fixture-digest',?)`, entry.id, entry.id, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := DefaultRetentionPolicy()
+	policy.Batch = 1
+	result := sweep(t, s, policy)
+	if result.InboxEvidenceRemoved != 2 {
+		t.Fatalf("sweep=%+v", result)
+	}
+	for _, table := range []string{"agent_inbox_receipts", "agent_inbox_run_sources"} {
+		var retained int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id IN ('recent','active')").Scan(&retained); err != nil || retained != 2 {
+			t.Fatalf("%s retained=%d err=%v", table, retained, err)
+		}
+	}
+}

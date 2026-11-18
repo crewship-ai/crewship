@@ -303,16 +303,6 @@ func (s *Store) Send(ctx context.Context, w, u, id string, in SendInput) (Messag
 			}
 			m = existing
 			duplicate = true
-			for _, agent := range existing.MentionedAgentIDs {
-				var job string
-				if err := q.QueryRowContext(ctx, `SELECT id FROM workspace_conversation_agent_jobs WHERE message_id=? AND agent_id=?`, existing.ID, agent).Scan(&job); err != nil {
-					return err
-				}
-				if err := ValidateAgentJob(ctx, q, job); err != nil {
-					return err
-				}
-			}
-
 			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {

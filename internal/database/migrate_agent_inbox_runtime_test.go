@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/groupchat"
 )
 
 // Read actual index prefixes through SQLite. The general legacy policy helper
@@ -62,11 +64,14 @@ func TestAgentInboxUpgradeKeepsPendingQueuedAndRunningJobs(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO workspaces(id,name,slug) VALUES('legacy-ws','Legacy','legacy')`,
 		`INSERT INTO users(id,email) VALUES('legacy-user','legacy@example.test')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('legacy-member','legacy-ws','legacy-user','MEMBER')`,
 		`INSERT INTO crews(id,workspace_id,name,slug) VALUES('legacy-crew','legacy-ws','Legacy','legacy')`,
 		`INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('legacy-agent','legacy-ws','legacy-crew','Legacy','legacy')`,
 		`INSERT INTO chats(id,workspace_id,agent_id) VALUES('legacy-chat','legacy-ws','legacy-agent')`,
 		`INSERT INTO workspace_conversations(id,workspace_id,kind,title,created_at,updated_at)
 		 VALUES('legacy-channel','legacy-ws','channel','Legacy','2026-11-17','2026-11-17')`,
+		`INSERT INTO workspace_conversation_agents(conversation_id,agent_id,joined_by,joined_at)
+		 VALUES('legacy-channel','legacy-agent','legacy-user','2026-11-17')`,
 		`INSERT INTO workspace_conversation_messages(id,conversation_id,sequence,author_user_id,client_id,content,created_at)
 		 VALUES('pending-message','legacy-channel',1,'legacy-user','pending','pending','2026-11-17'),
 		       ('queued-message','legacy-channel',2,'legacy-user','queued','queued','2026-11-17'),
@@ -78,6 +83,10 @@ func TestAgentInboxUpgradeKeepsPendingQueuedAndRunningJobs(t *testing.T) {
 		 VALUES('pending-job','legacy-channel','pending-message','legacy-agent','legacy-user','pending',NULL,'2026-11-17','2026-11-17'),
 		       ('queued-job','legacy-channel','queued-message','legacy-agent','legacy-user','queued','queued-assignment','2026-11-17','2026-11-17'),
 		       ('running-job','legacy-channel','running-message','legacy-agent','legacy-user','queued','running-assignment','2026-11-17','2026-11-17')`,
+		`INSERT INTO work_items(id,workspace_id,source,source_ref,domain_kind,domain_id,agent_id,crew_id,session_id,state,generation,attempts,eligible_at,created_at,updated_at)
+		 VALUES('running-work','legacy-ws','assignment','running-assignment','assignment','running-assignment','legacy-agent','legacy-crew','legacy-chat','running',1,1,'2026-11-17','2026-11-17','2026-11-17')`,
+		`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at)
+		 VALUES('legacy-run','running-work',1,1,'legacy-worker','2099-01-01','2026-11-17','2026-11-17')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -94,5 +103,14 @@ func TestAgentInboxUpgradeKeepsPendingQueuedAndRunningJobs(t *testing.T) {
 		if err != nil || state != want || !legacy {
 			t.Fatalf("%s state=%q want=%q legacy=%v err=%v", id, state, want, legacy, err)
 		}
+	}
+	for _, id := range []string{"pending-job", "queued-job", "running-job"} {
+		if err := groupchat.ValidateAgentJob(t.Context(), db.DB, id); err != nil {
+			t.Fatalf("%s cannot pass the current authorization gate: %v", id, err)
+		}
+	}
+	job, content, err := groupchat.ReadInboxAssignment(t.Context(), db.DB, "legacy-ws", "legacy-crew", "legacy-agent", "running-assignment", "legacy-run")
+	if err != nil || job != "running-job" || content != "running" {
+		t.Fatalf("running job source=%q %q err=%v", job, content, err)
 	}
 }

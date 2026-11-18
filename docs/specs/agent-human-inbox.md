@@ -45,8 +45,9 @@ host state, not journal/SSE/WebSocket payloads. The tool returns the canonical
 source and a durable read timestamp. Repeating the same read preserves that
 timestamp. It does not complete work or approve anything.
 
-Legacy channel jobs without a source-authority snapshot fail closed at dispatch
-and acknowledgement. Older chat runs without a canonical mirrored admission
+Legacy channel jobs without a source-authority snapshot use the current requester,
+channel and target access checks for dispatch and acknowledgement. Newly admitted
+jobs must also match the recorded source authority and digest. Older chat runs without a canonical mirrored admission
 commitment may continue through their existing execution path but cannot invent
 an inbox read receipt. Portable workspace forks exclude runtime-bound receipts
 and run commitments; local database rollback checkpoints retain them.
@@ -55,7 +56,7 @@ and run commitments; local database rollback checkpoints retain them.
 
 The card operates in the existing authenticated workspace context. Restricted
 context retains its existing route deny policy. It listens to existing inbox,
-conversation, issue and run events and polls every five seconds. Generation-bound
+conversation, issue and run events and polls every 30 seconds when the workspace feature is enabled. Generation-bound
 queries discard stale responses after context or refresh changes. A source
 revocation is enforced on every server read; polling bounds refresh where no
 source event is delivered. Human send acceptance, agent read and work completion
@@ -86,8 +87,8 @@ receipt merely because `state` is running or completed.
 
 Statuses: 200 for an authorized projection (including an empty list), 401 for
 missing authentication/workspace context, 403 for denied workspace or restricted
-session access, 404 for an unavailable agent, and 503 if source projection is
-unavailable. Errors use a JSON `error` string.
+session access, 404 for an unavailable agent or a disabled flag, and 5xx for
+unavailable database or source reads. Errors use a JSON `error` string.
 
 ## Rollout and retention
 
@@ -98,5 +99,6 @@ jobs carry the source digest and current authority epoch.
 
 Host chat admission records an optional source commitment inside the existing
 work admission transaction. An active run without a recorded source returns
-a readable unavailable-source error. Work-attempt deletion removes its source
-commitment and read evidence as part of the same retention transaction.
+a readable unavailable-source error. The work retention sweep removes source
+commitments and read receipts for attempts that ended more than 30 days ago.
+An attempt deleted by a hard purge also loses its evidence in that transaction.

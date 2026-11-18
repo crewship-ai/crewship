@@ -69,8 +69,17 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
 	// is deliberately limited to the caller's own human-created delegated work;
 	// it does not publish another chat's derived assignment prompt or result.
 	rows, err := r.db.QueryContext(req.Context(), `SELECT m.id,m.identifier,m.title,m.status,m.created_at,
- (SELECT receipt.read_at FROM agent_inbox_receipts receipt JOIN assignments a ON a.id=receipt.source_id JOIN issue_work iw ON iw.mission_id=m.id JOIN work_items source_work ON source_work.source='assignment' AND source_work.domain_id=a.id AND source_work.workspace_id=m.workspace_id AND source_work.agent_id=m.delegate_agent_id
-  WHERE receipt.workspace_id=m.workspace_id AND receipt.agent_id=m.delegate_agent_id AND receipt.source_kind='assignment' AND receipt.source_revision=CAST(iw.brief_revision AS TEXT) AND a.issue_brief_revision=iw.brief_revision AND receipt.source_sha256=source_work.input_sha256 AND (a.mission_id=m.id OR EXISTS(SELECT 1 FROM mission_tasks mt WHERE mt.assignment_id=a.id AND mt.mission_id=m.id)) ORDER BY receipt.read_at LIMIT 1)
+ (SELECT receipt.read_at FROM issue_work iw
+  CROSS JOIN assignments execution ON execution.id IN (
+   SELECT direct.id FROM assignments direct WHERE direct.mission_id=m.id
+   UNION SELECT mt.assignment_id FROM mission_tasks mt WHERE mt.mission_id=m.id AND mt.assignment_id IS NOT NULL)
+  CROSS JOIN work_items source_work ON source_work.workspace_id=m.workspace_id AND source_work.domain_id=execution.id
+   AND source_work.source='assignment' AND source_work.domain_kind='assignment' AND source_work.replay_of IS NULL AND source_work.agent_id=m.delegate_agent_id
+  CROSS JOIN agent_inbox_receipts receipt ON receipt.workspace_id=m.workspace_id AND receipt.agent_id=m.delegate_agent_id
+   AND receipt.source_kind='assignment' AND receipt.source_id=execution.id
+  WHERE iw.mission_id=m.id AND receipt.source_revision=CAST(iw.brief_revision AS TEXT)
+   AND execution.issue_brief_revision=iw.brief_revision AND receipt.source_sha256=source_work.input_sha256
+  ORDER BY receipt.read_at LIMIT 1)
  FROM missions m JOIN agents a ON a.id=m.delegate_agent_id AND a.workspace_id=m.workspace_id
  WHERE m.workspace_id=? AND m.delegate_agent_id=? AND m.created_by_user_id=? AND a.deleted_at IS NULL
  AND EXISTS(SELECT 1 FROM workspace_members viewer JOIN users usr ON usr.id=viewer.user_id AND usr.suspended_at IS NULL JOIN workspaces live ON live.id=viewer.workspace_id AND live.deleted_at IS NULL WHERE viewer.workspace_id=m.workspace_id AND viewer.user_id=?)
@@ -108,7 +117,7 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
 	args = append(args, chataudience.Args(user.ID)...)
 	args = append(args, user.ID)
 	rows, err = r.db.QueryContext(req.Context(), `SELECT m.id,m.content,w.state,m.ts,c.id,COALESCE(a.slug,''),receipt.read_at,receipt.source_sha256
- FROM work_items w JOIN conversation_messages m ON m.id=w.source_ref AND m.role='user'
+ FROM work_items w INDEXED BY idx_agent_inbox_chat_work CROSS JOIN conversation_messages m ON m.id=w.source_ref AND m.role='user'
  JOIN chats c ON c.id=w.session_id AND c.id=m.session_id
  JOIN agents a ON a.id=w.agent_id AND a.id=m.agent_id AND a.workspace_id=w.workspace_id
  LEFT JOIN agent_inbox_receipts receipt ON receipt.workspace_id=w.workspace_id AND receipt.agent_id=a.id AND receipt.source_kind='chat_message' AND receipt.source_id=m.id
@@ -116,7 +125,7 @@ func (r *Router) agentHumanInbox(w http.ResponseWriter, req *http.Request) {
  AND c.workspace_id=w.workspace_id AND (`+chataudience.VisibleSQL+`) AND (`+chataudience.NoPrivateArtifactContextSQL+`)
  AND EXISTS(SELECT 1 FROM workspaces live WHERE live.id=c.workspace_id AND live.deleted_at IS NULL)
  AND EXISTS(SELECT 1 FROM users viewer WHERE viewer.id=? AND viewer.suspended_at IS NULL)
- ORDER BY m.ts DESC,m.id DESC LIMIT 50`, args...)
+ ORDER BY w.created_at DESC,w.id DESC LIMIT 50`, args...)
 	if err != nil {
 		replyError(w, 503, "human inbox unavailable")
 		return
@@ -172,16 +181,20 @@ func (h *InternalHandler) AgentInboxRead(w http.ResponseWriter, r *http.Request)
 		replyError(w, 400, "invalid inbox read")
 		return
 	}
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
+		return
+	}
+	boundCrew := InternalTokenCrewFromContext(r.Context())
 	var crew string
-	if err := h.db.QueryRowContext(r.Context(), `SELECT crew_id FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND crew_id IS NOT NULL`, body.AgentID, body.WorkspaceID).Scan(&crew); err != nil {
+	if err := h.db.QueryRowContext(r.Context(), `SELECT a.crew_id FROM agents a
+		JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id AND c.deleted_at IS NULL
+		WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND (?='' OR c.id=?)`,
+		body.AgentID, body.WorkspaceID, boundCrew, boundCrew).Scan(&crew); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "no human inbox source is available for this run")
 		} else {
 			replyInternalError(w, h.logger, "look up inbox run agent", err)
 		}
-		return
-	}
-	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) || !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &crew) {
 		return
 	}
 	tw, ta, tr, valid := internaltoken.ValidateAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, body.WorkspaceID, crew), r.Header.Get("X-Crewship-Run-Token"))
@@ -205,6 +218,7 @@ func (h *InternalHandler) AgentInboxRead(w http.ResponseWriter, r *http.Request)
  JOIN work_attempts current_attempt ON current_attempt.run_id=j.trace_id AND current_attempt.ended_at IS NULL
  JOIN work_items current_work ON current_work.id=current_attempt.work_id AND current_work.workspace_id=j.workspace_id AND current_work.agent_id=j.agent_id AND current_work.generation=current_attempt.generation AND current_work.state IN ('starting','running')
    JOIN agents a ON a.id=j.agent_id AND a.workspace_id=j.workspace_id AND a.crew_id=? AND a.deleted_at IS NULL
+ JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id AND c.deleted_at IS NULL
    WHERE j.trace_id=? AND j.workspace_id=? AND j.agent_id=? AND j.entry_type='run.started' AND current_work.crew_id=a.crew_id AND (j.actor_type='orchestrator' OR json_extract(j.payload,'$.host_admitted')=1)
  AND 1=(SELECT COUNT(*) FROM journal_entries duplicate WHERE duplicate.trace_id=j.trace_id AND duplicate.workspace_id=j.workspace_id AND duplicate.entry_type='run.started')
    AND NOT EXISTS(SELECT 1 FROM journal_entries ended WHERE ended.trace_id=j.trace_id AND ended.workspace_id=j.workspace_id AND ended.entry_type IN('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))`, crew, body.RunID, body.WorkspaceID, body.AgentID).Scan(&raw)
@@ -224,7 +238,9 @@ func (h *InternalHandler) AgentInboxRead(w http.ResponseWriter, r *http.Request)
 			if e == nil {
 				result = humanInboxEntry{ID: job, Kind: "channel_message", Content: content}
 				sourceHash = groupchat.InboxSourceDigest(content)
-				_ = q.QueryRowContext(r.Context(), `SELECT requested_by_user_id FROM workspace_conversation_agent_jobs WHERE id=?`, job).Scan(&notifyUser)
+				if err := q.QueryRowContext(r.Context(), `SELECT requested_by_user_id FROM workspace_conversation_agent_jobs WHERE id=?`, job).Scan(&notifyUser); err != nil {
+					return err
+				}
 			} else {
 				if !errors.Is(e, sql.ErrNoRows) {
 					return e

@@ -29,6 +29,11 @@ describe("agent human Inbox canonical sources", () => {
     await waitFor(() => expect(api).toHaveBeenCalledTimes(1))
     expect(screen.queryByTestId("agent-human-inbox")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Assign task" })).not.toBeInTheDocument()
+    await act(async () => {
+      events.get("inbox.updated")?.()
+      events.get("run.completed")?.()
+    })
+    expect(api).toHaveBeenCalledTimes(1)
   })
   it("does not infer agent read from a running delivery or operator viewing it", async () => {
     api.mockResolvedValue(ok({ items: [{ id: "job1", kind: "channel_message", content: "A human asked this", href: "/chat?conversation=channel1", state: "RUNNING", read_at: null }] }))

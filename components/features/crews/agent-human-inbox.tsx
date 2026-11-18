@@ -27,6 +27,7 @@ export function AgentHumanInbox({ workspaceId, agentId, agentSlug, crewId }: { w
 
 function HumanInbox({ workspaceId, agentId, agentSlug, crewId, user }: { workspaceId: string; agentId: string; agentSlug: string; crewId?: string | null; user: string }) {
   const generation = useRef(0)
+  const disabled = useRef(false)
   const [revision, setRevision] = useState(0)
   const key = ["agent-human-inbox", workspaceId, agentId, user, revision]
   const qs = `workspace_id=${encodeURIComponent(workspaceId)}`
@@ -43,17 +44,25 @@ function HumanInbox({ workspaceId, agentId, agentSlug, crewId, user }: { workspa
   const acceptedIssue = useRef<string | null>(null)
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current?.abort() } }, [])
   const invalidate = useCallback(() => { generation.current += 1; setRevision(generation.current) }, [])
-  useRealtimeEvent("inbox.updated", invalidate)
-  useRealtimeEvent("conversation.updated", invalidate)
-  useRealtimeEvent("issue.updated", invalidate)
-  useRealtimeEvent("run.completed", invalidate)
+  const refreshEnabledInbox = useCallback(() => {
+    if (!disabled.current) invalidate()
+  }, [invalidate])
+  useRealtimeEvent("inbox.updated", refreshEnabledInbox)
+  useRealtimeEvent("conversation.updated", refreshEnabledInbox)
+  useRealtimeEvent("issue.updated", refreshEnabledInbox)
+  useRealtimeEvent("run.completed", refreshEnabledInbox)
   const items = useQuery<{ items: Entry[] } | null>({
     queryKey: key, enabled: Boolean(user), gcTime: 0, staleTime: 0, retry: false,
     refetchInterval: query => query.state.data ? 30000 : false,
     queryFn: async ({ signal }) => {
       const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/human-inbox?${qs}`, { signal })
-      if (res.status === 404) return null
+      if (signal.aborted || !alive.current || revision !== generation.current) throw new Error("Source audience changed")
+      if (res.status === 404) {
+        disabled.current = true
+        return null
+      }
       if (!res.ok) throw new Error("Messages could not be loaded")
+      disabled.current = false
       const data = await res.json()
       if (signal.aborted || !alive.current || revision !== generation.current) throw new Error("Source audience changed")
       return data

@@ -36,8 +36,10 @@ CREATE INDEX idx_agent_inbox_run_sources_agent ON agent_inbox_run_sources(agent_
 INSERT INTO feature_flags (id,key,description,enabled,percentage)
 VALUES ('ffl_agent_human_inbox','agent_human_inbox','Human inbox UI and source-bound agent read receipts',0,0);
 
--- Work retention purges attempts when their durable work expires. Remove
--- their optional Inbox evidence in the same purge transaction.
+-- The work retention sweeper expires the evidence of ended attempts.
+-- A hard attempt purge also removes its evidence in the parent transaction.
+CREATE INDEX idx_agent_inbox_receipts_retention ON agent_inbox_receipts(read_at);
+CREATE INDEX idx_agent_inbox_run_sources_retention ON agent_inbox_run_sources(created_at);
 CREATE INDEX idx_agent_inbox_receipts_run ON agent_inbox_receipts(run_id);
 CREATE TRIGGER purge_agent_inbox_evidence_on_attempt_delete AFTER DELETE ON work_attempts
 BEGIN
