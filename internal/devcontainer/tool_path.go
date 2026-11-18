@@ -10,11 +10,17 @@ import (
 // creation and terminals. The first four entries are agent-owned locations;
 // the final two are feature locations otherwise supplied only by login scripts.
 // NativeToolPath only prepends missing entries: an operator's existing order
-// (including mise before persistent home binaries) remains authoritative.
+// remains authoritative.
+//
+// Declared mise pins precede the persistent home bin (#5459): the home volume
+// survives image rebuilds, so an older self-installed or self-updated CLI there
+// (a native Claude Code install writes ~/.local/bin/claude) would otherwise
+// shadow the version the crew declares. Agent-installed tools that mise does
+// not declare have no shim and still resolve from ~/.local/bin.
 var AgentToolPathDirs = []string{
-	"/home/agent/.local/bin",
 	AgentBinDir,
 	MiseShimsDir,
+	agentLocalBinDir,
 	crewToolsDir + "/bin",
 	"/usr/local/py-utils/bin",
 	"/usr/local/share/npm-global/bin",
@@ -50,8 +56,66 @@ func ensureAgentToolPath(env map[string]string) map[string]string {
 	if current == "" {
 		current = imagePathRef
 	}
-	env["PATH"] = NativeToolPath(current)
+	env["PATH"] = CreationToolPath(current)
 	return env
+}
+
+// agentLocalBinDir is the persistent home's user bin (pip --user, native CLI
+// installers, agent-installed tools).
+const agentLocalBinDir = agentHome + "/.local/bin"
+
+// legacyGeneratedToolOrder is the native prefix Crewship itself wrote before
+// #5459: into DefaultCrewDevcontainerConfig, the seeded crews and, through
+// them, stored crew configs and runtime env. It is Crewship's own output, not
+// an operator decision, so creation paths migrate exactly this contiguous
+// sequence to the canonical order. Any other operator order is kept.
+var legacyGeneratedToolOrder = []string{agentLocalBinDir, AgentBinDir, MiseShimsDir}
+
+// CreationToolPath is NativeToolPath for image provisioning and runtime
+// creation. It additionally migrates legacyGeneratedToolOrder, so a crew whose
+// stored config still carries the pre-#5459 literal gets declared pins first on
+// its next build or container creation. Terminals deliberately use
+// NativeToolPath on the created runtime's PATH instead: a container created
+// before this change keeps one order for terminal and agent exec alike.
+func CreationToolPath(sources ...string) string {
+	migrated := make([]string, len(sources))
+	for i, source := range sources {
+		migrated[i] = migrateGeneratedToolOrder(source)
+	}
+	return NativeToolPath(migrated...)
+}
+
+// sanitizeToolPath drops control bytes and U+FFFD. Older captured login paths
+// can contain undemuxed stdcopy bytes, and runc rejects NUL in env outright.
+func sanitizeToolPath(source string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == '\uFFFD' {
+			return -1
+		}
+		return r
+	}, source)
+}
+
+func migrateGeneratedToolOrder(path string) string {
+	path = sanitizeToolPath(path)
+	parts := nativeToolPathParts(path)
+	n := len(legacyGeneratedToolOrder)
+	for i := 0; i+n <= len(parts); i++ {
+		match := true
+		for j, dir := range legacyGeneratedToolOrder {
+			if strings.TrimSpace(parts[i+j]) != dir {
+				match = false
+				break
+			}
+		}
+		if match {
+			out := append([]string(nil), parts[:i]...)
+			out = append(out, AgentBinDir, MiseShimsDir, agentLocalBinDir)
+			out = append(out, parts[i+n:]...)
+			return strings.Join(out, ":")
+		}
+	}
+	return path
 }
 
 // imageEnvChanges renders env as `ENV KEY=value` Dockerfile instructions for
@@ -133,14 +197,7 @@ func NativeToolPath(sources ...string) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, source := range sources {
-		// Older captured login paths can contain undemuxed control bytes.
-		// runc rejects NUL in env, so sanitize before runtime creation.
-		source = strings.Map(func(r rune) rune {
-			if r < 0x20 || r == 0x7f || r == '\uFFFD' {
-				return -1
-			}
-			return r
-		}, source)
+		source = sanitizeToolPath(source)
 		for _, dir := range nativeToolPathParts(source) {
 			dir = strings.TrimSpace(dir)
 			if dir != "" && !seen[dir] {

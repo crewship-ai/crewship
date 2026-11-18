@@ -27,7 +27,7 @@ func applyAgentLoginPath(env []string, loginPath string, imageEnv map[string]str
 		}
 		sources = append(sources, fallback)
 	}
-	return replaceOrAppendEnv(env, "PATH", devcontainer.NativeToolPath(sources...))
+	return replaceOrAppendEnv(env, "PATH", devcontainer.CreationToolPath(sources...))
 }
 
 // Sources containing only shared tool directories do not provide a usable
@@ -74,7 +74,7 @@ func fallbackAgentPath(envPath, imagePath string) string {
 	if strings.TrimSpace(envPath) == "" {
 		envPath = imagePath
 	}
-	return devcontainer.NativeToolPath(envPath)
+	return devcontainer.CreationToolPath(envPath)
 }
 
 // envValue returns the value of key in a "KEY=VALUE" slice, or "" if absent.

@@ -222,8 +222,10 @@ and the saving depends on what a fresh build downloads.
 
 Provisioning, Docker runtime creation, explicit Apple runtime PATH and the
 interactive terminal use `devcontainer.NativeToolPath` and the single
-`AgentToolPathDirs` list. The list covers user-local bin, Crewship bin, mise
-shims, persistent crew-tools, pipx and npm-global feature bins. The generated
+`AgentToolPathDirs` list. The list covers, in this order, Crewship bin, mise
+shims, user-local bin, persistent crew-tools, pipx and npm-global feature bins.
+Provisioning and runtime creation additionally migrate Crewship's own earlier
+generated order (see declared pin precedence below). The generated
 POSIX login hook follows the same policy and is checked against that function.
 
 The policy preserves the relative order of existing PATH entries, removes
@@ -280,10 +282,34 @@ entries in a legacy container, but it does not replace a usable inherited PATH.
 New images install `/etc/profile.d/zz-crewship-tools.sh` from the same directory
 list for POSIX login shells. Adding stable mise shims does not remove inherited
 installation directories or prove how a production runtime constructed PATH.
-The default missing-directory order still puts persistent user binaries before
-mise shims; general pin precedence remains open in
-[#5459](https://github.com/crewship-ai/crewship/issues/5459). Preserving an
-explicit operator order does not resolve that separate issue.
+A command started through a mise shim (an agent CLI, for example) also passes
+mise's versioned `/opt/mise/data/installs/<tool>/<version>/bin` directories to
+its children, in the shims' position; they select the same declared versions.
+
+**Declared mise pins precede the persistent home bin.** The shared order is
+`/opt/crewship/bin`, `/opt/mise/data/shims`, `/home/agent/.local/bin`,
+`/opt/crew-tools/bin`, then the pipx and npm-global feature directories. The
+home volume survives image rebuilds, so an older self-installed or
+self-updated CLI in `~/.local/bin` (a native Claude Code install writes
+`~/.local/bin/claude`) no longer shadows the version the crew declares. A tool
+mise does not declare has no shim and still resolves from `~/.local/bin`.
+The default devcontainer and the seeded crews still store the earlier literal
+`/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:…`; provisioning
+and runtime creation migrate exactly that Crewship-generated sequence. Any
+other order an operator writes in `containerEnv.PATH` is kept, including a
+deliberate home-first order. The change applies to an image built or a runtime
+created by the updated server; a running container keeps its environment, and
+its terminal keeps matching its agent exec until the container is recreated.
+
+This covers every environment Crewship assembles: non-login agent exec,
+routines, the terminal, child processes, zsh (which does not reset PATH) and
+the PATH the login hook restores. A **bash login shell** (`bash -l`, `bash
+-lc`) finally runs the user's own `~/.profile` from the persistent home. The
+Debian default copied into that home prepends `~/.local/bin` whenever the
+directory exists, so in a bash login shell a binary there still wins over the
+declared pin. Crewship does not rewrite files in the user's home; remove the
+stale binary, or that `~/.profile` line, when a login shell must select the
+declared version.
 
 Changing the generated hook invalidates crew image cache keys. The next provision
 builds a new crew image even with unchanged declarations; underlying feature

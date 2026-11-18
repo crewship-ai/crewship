@@ -52,6 +52,10 @@ import "strings"
 // userUid/userGid (devcontainer.NormalizeDeclaredAgentUser) before building.
 // The literal is left as is on purpose: it is part of every defaulted crew's
 // stored definition, so editing it would mark all of them changed at once.
+// The same holds for its PATH, which predates #5459 and puts
+// /home/agent/.local/bin before the mise shims: provisioning and runtime
+// creation migrate that exact Crewship-generated sequence
+// (devcontainer.CreationToolPath), so declared pins still win.
 const DefaultCrewDevcontainerConfig = `{
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
   "containerEnv": {

@@ -61,7 +61,7 @@ func TestApplyAgentLoginPath_FallbackPrependsWellKnownDirs(t *testing.T) {
 	if !strings.HasSuffix(path, "/usr/local/bin:/usr/bin:/bin") {
 		t.Errorf("fallback PATH must preserve image PATH tail, got %q", path)
 	}
-	if !strings.HasPrefix(path, "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:") {
+	if !strings.HasPrefix(path, "/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:") {
 		t.Errorf("well-known dirs must be prepended, got %q", path)
 	}
 }
@@ -97,7 +97,7 @@ func TestApplyAgentLoginPath_MergesExistingPath(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly one PATH entry, got %d: %v", n, got)
 	}
-	want := "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/share/npm-global/bin:/opt/feature/bin:/usr/bin:/usr/local/py-utils/bin:/bin"
+	want := "/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/share/npm-global/bin:/opt/feature/bin:/usr/bin:/usr/local/py-utils/bin:/bin"
 	if v := envValue(got, "PATH"); v != want {
 		t.Errorf("PATH = %q\n   want %q", v, want)
 	}
