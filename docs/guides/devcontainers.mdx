@@ -256,6 +256,8 @@ environments, and no same-binary guarantee is made across image generations.
 For Apple, normalization happens only for an explicitly supplied runtime PATH;
 otherwise the image environment is inherited.
 
+The default-off [managed-launch pilot](/specs/managed-cli-launch) and opt-in [Codex outer-isolation child tools](/specs/codex-outer-sandbox) intentionally use restricted PATH policies outside this general tool-availability contract.
+
 The interactive terminal opens non-login Bash and reads only PATH from
 container inspect metadata. No probe process runs inside the container and no
 agent-run environment is copied. If inspection fails or the provider does not
