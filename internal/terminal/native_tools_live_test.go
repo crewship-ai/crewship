@@ -110,6 +110,9 @@ code=$?; printf 'CHILD_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 bash -lc 'glab --version && codex --version && claude --version'
 code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
+fp() { "$@" 'env | grep -vE "^(_|SHLVL|PWD|OLDPWD|PATH|LINES|COLUMNS|BASH_EXECUTION_STRING)=" | sort; declare -F | sort; printf "COMPLETIONS=%s\n" "$(complete -p 2>/dev/null | wc -l)"; alias' </dev/null 2>/dev/null; }
+login_fp=$(fp bash -l -i -c | cksum); nonlogin_fp=$(fp bash -i -c | cksum)
+test "$login_fp" = "$nonlogin_fp"; code=$?; printf 'FEATURE_INIT_PARITY:%s\n' "$code"; test "$code" -eq 0 || fail=1
 printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
 	if os.Getenv("CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES") == "1" {

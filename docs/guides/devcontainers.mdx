@@ -317,11 +317,24 @@ and Docker/BuildKit layers may be reused. Restarting the server does not rebuild
 every running container. Existing images need reprovisioning for the hook.
 Global mise installation readiness excludes project WORKDIR/config discovery.
 
-Non-login startup omits login-only exports, functions and completion. Feature
-compatibility and actual production agent login-shell acceptance remain open
-in [#5458](https://github.com/crewship-ai/crewship/issues/5458) and
-[#5452](https://github.com/crewship-ai/crewship/issues/5452); native-tool version
-checks alone do not satisfy those acceptance requirements.
+**The terminal shell is interactive non-login Bash**, the same startup an IDE
+devcontainer terminal uses. Devcontainer features initialize interactive shells
+through `/etc/bash.bashrc` and `containerEnv` (for example, the Node feature's
+`nvm` function and completion), and both of those apply. Measured on the
+default `javascript-node` image with common-utils, login and non-login
+interactive Bash differ only in PATH: the same exports, functions (including
+`nvm`), 139 completions and aliases, while the non-login PATH additionally
+keeps the system `sbin` directories that `/etc/profile` drops. The live
+terminal acceptance gate checks this parity. A script that only a login
+profile sources is not applied; declare its variables in `containerEnv`, which
+reaches agents, routines and the terminal alike.
+
+A container from an image built before the login hook existed still loses the
+mise shims in a login shell (`bash -lc`, postStart hooks run that way), because
+`/etc/profile` resets PATH and nothing restores it. The terminal and non-login
+agent exec are unaffected. Reprovision such a crew (`crewship crew provision
+<slug>`) once; the changed cache key means the next provision builds the image
+with the hook.
 
 ### Adapter CLIs are installed and verified
 
