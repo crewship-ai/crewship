@@ -10,12 +10,43 @@ import (
 // the same devcontainer function used by image provisioning and terminal exec.
 const defaultAgentPath = devcontainer.DefaultAgentPath
 
+// Merge the aggregated container PATH with the captured login additions; never
+// replace it with the capture alone. In the 2026-09-06 incident a BuildKit
+// capture contained only the bare image PATH and hid the mise shims that
+// provisioning had added, so agent CLI execs failed with "not found".
+// NativeToolPath also sanitizes persisted captures: older undemuxed exec output
+// could contain stdcopy control/NUL bytes, and runc rejects an environment with
+// NUL outright. Preserve that recovery when completing existing runtime inputs.
 func applyAgentLoginPath(env []string, loginPath string, imageEnv map[string]string) []string {
 	current := envValue(env, "PATH")
-	if strings.TrimSpace(sanitizeEnvValue(current)) == "" && strings.TrimSpace(sanitizeEnvValue(loginPath)) == "" {
-		current = imageEnv["PATH"]
+	sources := []string{current, loginPath}
+	if agentPathSourcesNeedImage(sources...) {
+		fallback := imageEnv["PATH"]
+		if strings.TrimSpace(sanitizeEnvValue(fallback)) == "" {
+			fallback = defaultAgentPath
+		}
+		sources = append(sources, fallback)
 	}
-	return replaceOrAppendEnv(env, "PATH", devcontainer.NativeToolPath(current, loginPath))
+	return replaceOrAppendEnv(env, "PATH", devcontainer.NativeToolPath(sources...))
+}
+
+// Sources containing only shared tool directories do not provide a usable
+// image/system PATH. Restore the image as the final source in that case, as
+// before centralization. Use the same shared list, without imposing another
+// directory order. A genuinely custom source keeps its explicit restriction.
+func agentPathSourcesNeedImage(sources ...string) bool {
+	known := make(map[string]bool, len(devcontainer.AgentToolPathDirs))
+	for _, dir := range devcontainer.AgentToolPathDirs {
+		known[dir] = true
+	}
+	for _, source := range sources {
+		for _, dir := range strings.Split(sanitizeEnvValue(source), ":") {
+			if dir = strings.TrimSpace(dir); dir != "" && !known[dir] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // sanitizeEnvValue drops control/NUL bytes and the U+FFFD replacement rune from

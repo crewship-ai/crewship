@@ -226,6 +226,36 @@ runtime PATH is completed by the same function. An already completed runtime
 PATH is unchanged when a terminal opens, so inherited agent exec and terminal
 exec select the same executable for that PATH.
 
+At Docker container creation, sources containing only shared tool directories
+also receive the image PATH as the final source (or the standard system PATH
+when image metadata is unavailable). This preserves recovery of system/image
+utilities when a captured login PATH contains only tool shims. The check uses
+the shared list, so crew-tools is now included in this native-only recovery.
+A source containing a genuinely custom directory keeps its explicit PATH
+restriction instead of acquiring image directories. Existing source order is
+preserved in either case.
+
+⚠️ **Behaviour change for agent and routine runs, not only terminals:** Docker
+no longer prepends pipx/npm-global unconditionally ahead of image and declared
+PATH entries. Newly provisioned image defaults can select the mise version of
+a command that previously resolved to an npm/pipx feature installation. This
+takes effect when the changed image/runtime is activated through normal
+rebuild/recreation. A crew intentionally using a feature-installed version
+must explicitly retain its preferred order in `containerEnv.PATH`; preserving
+existing entries does not preserve Docker's former unconditional prefix.
+
+The matching-selection guarantee is limited to containers created by the new
+server with the completed runtime PATH, inherited by non-login exec and the
+terminal before any shell startup customization. Existing containers keep
+their immutable environment: the terminal can add a missing crew-tools path
+while an agent exec still inherits an old PATH without it. Recreating from a
+legacy image also retains that image's inputs; a missing npm-global entry can
+be prepended ahead of existing mise shims. Its order can therefore differ from
+a newly provisioned image. Server restart alone does not migrate these
+environments, and no same-binary guarantee is made across image generations.
+For Apple, normalization happens only for an explicitly supplied runtime PATH;
+otherwise the image environment is inherited.
+
 The interactive terminal opens non-login Bash and reads only PATH from
 container inspect metadata. No probe process runs inside the container and no
 agent-run environment is copied. If inspection fails or the provider does not
