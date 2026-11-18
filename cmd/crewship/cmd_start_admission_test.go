@@ -32,6 +32,7 @@ func admissionTestConfig() *config.Config {
 	cfg.Container.ContainerPrefix = "pfx"
 	cfg.Container.SidecarBinaryPath = "/host/sidecar"
 	cfg.Container.EntrypointPath = "/host/entrypoint.sh"
+	cfg.Container.AgentCLIBinaryPath = "/host/agent-cli"
 	cfg.Storage.BasePath = "/host/base"
 	return cfg
 }
@@ -40,6 +41,15 @@ func TestDockerProviderConfig_CarriesTheAdmissionGateAndEveryField(t *testing.T)
 	gate := noopGate{}
 	got := dockerProviderConfig(admissionTestConfig(), gate)
 
+	if !got.RequireAgentCLI {
+		t.Error("product Docker runtime must require the native SDK")
+	}
+	if got.AgentCLIBinaryPath != "/host/agent-cli" {
+		t.Error("product provider lost its selected SDK companion")
+	}
+	if len(got.RequiredAgentCLICommands) < 2 {
+		t.Error("provider must carry its actual backend SDK command requirements")
+	}
 	if got.Admission != provider.AdmissionGate(gate) {
 		t.Error("docker provider config does not carry the admission gate")
 	}

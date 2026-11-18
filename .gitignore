@@ -87,6 +87,7 @@ crewship.db.pre-migrate-*
 /ping-go
 /crewshipd
 /crewship-sidecar
+/crewship-agent-cli
 # `go build ./scripts/<tool>` with no -o drops the binary in the repo root
 # named after its directory. That is how a 3.2 MB Mach-O arm64 executable
 # reached main in #1480 — an enumerated list only covers the binaries someone

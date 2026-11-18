@@ -44,6 +44,13 @@ func (f *adapterTestContainer) Exec(_ context.Context, cfg provider.ExecConfig) 
 	if len(cfg.Cmd) >= 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
 		f.execScripts = append(f.execScripts, cfg.Cmd[2])
 	}
+	if cfg.Stdin != nil {
+		body, err := io.ReadAll(cfg.Stdin)
+		if err != nil {
+			return nil, err
+		}
+		f.execScripts = append(f.execScripts, string(body))
+	}
 	if f.execErr != nil {
 		return nil, f.execErr
 	}

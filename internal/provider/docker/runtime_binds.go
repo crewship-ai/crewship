@@ -82,6 +82,17 @@ func stageRuntimeArtifacts(cfg Config, logger *slog.Logger) Config {
 			logger.Warn("managed launcher staging failed; pilot admission will refuse unqualified binds", "error", err)
 		}
 	}
+	if cfg.AgentCLIBinaryPath != "" {
+		artifact, err := runtimestage.StageAgentCLI(cfg.OutputBasePath, cfg.AgentCLIBinaryPath)
+		if err != nil {
+			cfg.agentCLIError = err
+			cfg.AgentCLIBinaryPath = ""
+			logger.Error("could not stage the native agent Crewship CLI; runtime preflight will refuse it", "error", err)
+		} else {
+			cfg.agentCLIArtifact = artifact
+			cfg.AgentCLIBinaryPath = artifact.Path
+		}
+	}
 	return cfg
 }
 
