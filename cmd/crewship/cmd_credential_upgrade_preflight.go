@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -43,7 +44,9 @@ func newCredentialUpgradePreflightCommand() *cobra.Command {
 				return fmt.Errorf("--source-build must be the full verified source revision")
 			}
 		}
-		result, err := inspectCredentialUpgrade(cmd.Context(), credentialUpgradeInspection{database, flagWorkspace, sandbox, source, keeper, cmd.Flags().Changed("codex-sandbox-mode") && cmd.Flags().Changed("keeper-enabled") && source != ""})
+		ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+		defer cancel()
+		result, err := inspectCredentialUpgrade(ctx, credentialUpgradeInspection{database, flagWorkspace, sandbox, source, keeper, cmd.Flags().Changed("codex-sandbox-mode") && cmd.Flags().Changed("keeper-enabled") && source != ""})
 		if err != nil {
 			return err
 		}

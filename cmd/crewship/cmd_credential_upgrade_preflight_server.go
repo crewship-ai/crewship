@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/buildinfo"
@@ -40,7 +41,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		if !in.ConfigurationKnown {
+		target := buildinfo.Resolve(version, commit, date).Commit
+		targetKnown := len(target) >= 7 && len(target) <= 40 && strings.Trim(target, "0123456789abcdef") == ""
+		if !in.ConfigurationKnown || !targetKnown {
 			report.Ready = false
 			if report.State == "PASS" {
 				report.State = "UNKNOWN"
@@ -51,6 +54,7 @@ func init() {
 			SourceBuild        string `json:"source_build"`
 			TargetBuild        string `json:"target_build"`
 			ConfigurationKnown bool   `json:"configuration_known"`
-		}{report, in.SourceBuild, buildinfo.Resolve(version, commit, date).Commit, in.ConfigurationKnown}, nil
+			TargetBuildKnown   bool   `json:"target_build_known"`
+		}{report, in.SourceBuild, target, in.ConfigurationKnown, targetKnown}, nil
 	}
 }

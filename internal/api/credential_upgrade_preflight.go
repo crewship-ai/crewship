@@ -129,6 +129,12 @@ func InspectCredentialUpgrade(ctx context.Context, db *sql.DB, workspace string,
 		if refsErr != nil {
 			a.Warnings = append(a.Warnings, "malformed typed MCP metadata; reference coverage unknown")
 		}
+		var bindings int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_mcp_bindings WHERE agent_id=? AND enabled=1 AND (COALESCE(credential_id,'')!='' OR COALESCE(env_var_name,'')!='' OR COALESCE(config_override_json,'') NOT IN ('','{}','null'))`, a.ID).Scan(&bindings); err != nil {
+			a.Warnings = append(a.Warnings, "agent MCP binding metadata unavailable; coverage unknown")
+		} else if bindings > 0 {
+			a.Warnings = append(a.Warnings, "additional agent MCP credential bindings or overrides require further metadata inspection; coverage unknown")
+		}
 		covered := map[string]bool{}
 		creds := []orchestrator.Credential{}
 		for _, d := range delivered {

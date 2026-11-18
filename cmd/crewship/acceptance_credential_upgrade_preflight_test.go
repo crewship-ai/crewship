@@ -84,6 +84,7 @@ func TestAcceptance_CredentialUpgradePreflightRetainedData(t *testing.T) {
 		t.Fatalf("malformed typed MCP configuration passed: %v", malformed)
 	}
 	seed(`UPDATE crews SET mcp_config_json=NULL WHERE id='up-crew'`)
+	seed(`INSERT INTO workspace_mcp_servers(id,workspace_id,name,display_name,transport,command,env_json,enabled) VALUES('up-server','up-ws','fixture','Fixture','stdio','true','{}',1)`)
 	seed(`INSERT INTO agent_mcp_bindings(id,agent_id,mcp_server_id,mcp_server_scope,credential_id,env_var_name) VALUES('up-mcp-binding','up-agent','up-server','workspace','up-ssh','MCP_AUTH')`)
 	if binding := run(); binding["ready"] != false || binding["state"] != "UNKNOWN" {
 		t.Fatalf("additional MCP credential binding passed without coverage: %v", binding)
@@ -98,6 +99,15 @@ func TestAcceptance_CredentialUpgradePreflightRetainedData(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE encrypted_value='not-a-decryptable-fixture-value'`).Scan(&count); err != nil || count != 2 {
 		t.Fatal("preflight changed stored credentials", err)
+	}
+	// Before the opt-in migration, no consent column existed. Inspection must
+	// remain read-only and treat its absence as no consent.
+	seed(`UPDATE agent_credentials SET env_var_name='NATIVE_OTHER_FILE' WHERE credential_id='up-file'`)
+	seed(`ALTER TABLE crews DROP COLUMN allow_codex_outer_sandbox`)
+	old := run()
+	agents := old["agents"].([]any)
+	if old["ready"] != false || len(agents) != 1 || agents[0].(map[string]any)["legacy_sandbox_blocked"] != true {
+		t.Fatalf("old schema inferred crew consent: %v", old)
 	}
 }
 
