@@ -398,7 +398,8 @@ func tailString(s string, n int) string {
 
 // runOrBatch dispatches one WRITE-ONLY preflight script: appended to the
 // merged script when the container handle is a batch that accepts it, executed
-// on its own otherwise — byte-for-byte the pre-#1646 behaviour.
+// on its own otherwise. Both paths carry script bodies over stdin so credential
+// file contents never become visible in the exec process's argv.
 //
 // Only for scripts whose stdout and exit code the caller does not read. A
 // probe that reads output must keep calling container.Exec directly; the
@@ -408,6 +409,10 @@ func runOrBatch(ctx context.Context, container provider.ContainerProvider, name 
 	if b, ok := container.(*preflightBatch); ok && b.accepts(cfg) {
 		b.add(name, cfg.WorkingDir, cfg.Cmd[2])
 		return nil
+	}
+	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" && cfg.Stdin == nil {
+		cfg.Stdin = strings.NewReader(cfg.Cmd[2])
+		cfg.Cmd = []string{"sh"}
 	}
 	result, err := container.Exec(ctx, cfg)
 	if err != nil {
