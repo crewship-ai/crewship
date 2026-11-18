@@ -139,6 +139,9 @@ func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpo
 	// somebody eventually forgets on a new branch.
 	res := probeProviderInner(ctx, provider, ctype, value, dialEndpoint)
 	res.Supported = probeSupported(provider, ctype)
+	if provider == "OPENAI_COMPAT" && !dialEndpoint {
+		res.Supported = false // The raw path checks syntax without dialing.
+	}
 	return res
 }
 

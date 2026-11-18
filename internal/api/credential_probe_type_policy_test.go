@@ -76,6 +76,16 @@ func TestNativeEndpointProbeCannotBecomeVendorAuthentication(t *testing.T) {
 	}
 }
 
+func TestNativeCompatSyntaxCheckDoesNotClaimUpstreamProbe(t *testing.T) {
+	transport := countNativeProbeCalls(t)
+	for _, typ := range []string{"API_KEY", "CLI_TOKEN"} {
+		got := probeProvider(t.Context(), "OPENAI_COMPAT", typ, `{"baseURL":"https://fixture.example/v1","apiKey":"synthetic-only"}`, false)
+		if transport.calls != 0 || got.Supported || !got.Valid {
+			t.Fatal("raw compatibility endpoint syntax check claimed an upstream probe")
+		}
+	}
+}
+
 func TestNativeProbeHTTPRejectsFileMaterialWithoutOutboundRequest(t *testing.T) {
 	transport := countNativeProbeCalls(t)
 	h := NewCredentialHandler(nil, newTestLogger())
