@@ -144,11 +144,17 @@ func (s *Store) SendAgentReply(ctx context.Context, jobID, content string) (Mess
 			return err
 		}
 		if state == "completed" {
+			if err := ValidateAgentJob(ctx, q, jobID); err != nil {
+				return err
+			}
 			m, err = scanMessage(q.QueryRowContext(ctx, `SELECT `+messageCols+` FROM workspace_conversation_messages m LEFT JOIN users u ON u.id=m.author_user_id WHERE m.id=?`, replyID))
 			return err
 		}
 		if state != "queued" {
 			return ErrConflict
+		}
+		if err := ValidateAgentJob(ctx, q, jobID); err != nil {
+			return err
 		}
 		if err = workspaceMember(ctx, q, w, requester); err != nil {
 			return err

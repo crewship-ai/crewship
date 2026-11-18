@@ -268,6 +268,7 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 }, documentCreateMCPCatalog()...), documentDraftMCPCatalog()...)
 
 func init() {
+	routineMCPTools = append(routineMCPTools, memoryMCPToolDescriptor{Name: "inbox_read", Description: "Read and acknowledge the exact human message or assigned task that caused your current run. Call before responding to a human message or doing its task. The host derives the source from your current run; you cannot choose another private conversation or grant permissions. Takes no arguments; a read receipt is recorded only when this tool succeeds.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)})
 	routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, designMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, artifactKindGuideMCPCatalog()...)
@@ -476,6 +477,13 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID, s.liveRunToken(r))
+	case "inbox_read":
+		var args map[string]json.RawMessage
+		if len(params.Arguments) > 0 && (json.Unmarshal(params.Arguments, &args) != nil || len(args) != 0) {
+			status, bodyBytes = 400, mustJSON(map[string]string{"error": "inbox_read takes no arguments"})
+		} else {
+			status, bodyBytes = s.readHumanInbox(r)
+		}
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
 	case "workspace_overview":

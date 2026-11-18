@@ -53,6 +53,13 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
  AND assignment.workspace_id=w.id AND assignment.assigned_to_id=a.id
  AND assignment.created_by_user_id=j.requested_by_user_id
  AND assignment.status IN ('PENDING','QUEUED','RUNNING') AND assignment.cancel_requested_at IS NULL`, jobID, assignmentID).Scan(&status)
+	if err == nil {
+		if sourceErr := groupchat.ValidateAgentJob(ctx, c, jobID); errors.Is(sourceErr, groupchat.ErrForbidden) {
+			err = sql.ErrNoRows
+		} else if sourceErr != nil {
+			return false, sourceErr
+		}
+	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}

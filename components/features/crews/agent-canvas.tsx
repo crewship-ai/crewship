@@ -38,6 +38,7 @@ import { AgentMemoryCards } from "./agent-memory"
 import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
+import { AgentHumanInbox } from "./agent-human-inbox"
 import { AgentCommandLine } from "./agent-command-line"
 import { RoutinesMovedNote } from "./agent-settings-parts"
 import { CrCard, CrLine, HeadChip, LeadMark } from "./cr-card"
@@ -398,6 +399,7 @@ export function AgentCanvas({
                 </CrCard>
               )}
               <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onStop={isRunning ? handleStop : undefined} cost30d={spend?.byAgent.get(agent.id) ?? null} revision={revision} />
+              <AgentHumanInbox workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id} />
               <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}

@@ -559,6 +559,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// fetches (approvals + assignments + escalations + peer messages).
 	aih := NewAgentInboxHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/human-inbox", authed(wsCtx(http.HandlerFunc(r.agentHumanInbox))))
 
 	// User preferences: generic key-value store for per-user UI settings
 	// (panel sizes, density, last-opened tabs, …). Migration v58 created

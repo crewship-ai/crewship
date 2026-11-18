@@ -104,6 +104,13 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
  JOIN workspace_conversations c ON c.id=ca.conversation_id
  WHERE a.id=? AND a.workspace_id=? AND cr.workspace_id=a.workspace_id AND a.deleted_at IS NULL AND cr.deleted_at IS NULL AND w.deleted_at IS NULL AND c.deleted_at IS NULL
  AND EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=a.workspace_id AND user_id=?)`, convID, agentID, workspaceID, userID).Scan(&crewID, &slug, &agentStatus)
+	if allowedErr == nil {
+		if sourceErr := groupchat.ValidateAgentJob(ctx, c, id); errors.Is(sourceErr, groupchat.ErrForbidden) {
+			allowedErr = sql.ErrNoRows
+		} else if sourceErr != nil {
+			return "", sourceErr
+		}
+	}
 	if allowedErr != nil && !errors.Is(allowedErr, sql.ErrNoRows) {
 		return "", allowedErr
 	}

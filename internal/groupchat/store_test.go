@@ -25,13 +25,16 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 	t.Cleanup(func() { handle.Close() })
 	db := handle.DB
 	for _, query := range []string{
-		`CREATE TABLE users(id TEXT PRIMARY KEY,full_name TEXT,avatar_url TEXT)`,
+		`CREATE TABLE feature_flags(id TEXT PRIMARY KEY,key TEXT UNIQUE,description TEXT,enabled INTEGER,percentage INTEGER)`,
+		`CREATE TABLE work_items(id TEXT PRIMARY KEY,source TEXT,domain_id TEXT,workspace_id TEXT,agent_id TEXT,state TEXT,generation INTEGER)`,
+		`CREATE TABLE work_attempts(run_id TEXT PRIMARY KEY,work_id TEXT,generation INTEGER,ended_at TEXT)`,
+		`CREATE TABLE users(id TEXT PRIMARY KEY,full_name TEXT,avatar_url TEXT,suspended_at TEXT,authority_revision INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE workspaces(id TEXT PRIMARY KEY,deleted_at TEXT)`,
-		`CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,created_at TEXT DEFAULT '',PRIMARY KEY(workspace_id,user_id))`,
+		`CREATE TABLE workspace_members(id TEXT NOT NULL DEFAULT '',access_revision INTEGER NOT NULL DEFAULT 0,workspace_id TEXT,user_id TEXT,created_at TEXT DEFAULT '',PRIMARY KEY(workspace_id,user_id))`,
 		`CREATE TABLE crews(id TEXT PRIMARY KEY,workspace_id TEXT,deleted_at TEXT,avatar_style TEXT)`,
 		`INSERT INTO crews(id,workspace_id) VALUES('crew','w')`,
 		`CREATE TABLE agents(id TEXT PRIMARY KEY,workspace_id TEXT,crew_id TEXT DEFAULT 'crew',name TEXT,slug TEXT DEFAULT 'agent',deleted_at TEXT,avatar_seed TEXT,avatar_style TEXT,avatar_svg_hash TEXT)`,
-		`CREATE TABLE assignments(id TEXT PRIMARY KEY,status TEXT,cancel_requested_at TEXT)`,
+		`CREATE TABLE assignments(id TEXT PRIMARY KEY,status TEXT,cancel_requested_at TEXT,workspace_id TEXT,assigned_to_id TEXT)`,
 		`CREATE TABLE inbox_items(id TEXT PRIMARY KEY,workspace_id TEXT,kind TEXT,source_id TEXT,state TEXT,payload_json TEXT,updated_at TEXT)`,
 		`CREATE TABLE inbox_item_reads(inbox_item_id TEXT,user_id TEXT,read_at TEXT,PRIMARY KEY(inbox_item_id,user_id))`,
 		`INSERT INTO workspaces(id) VALUES('w'),('other')`,
@@ -90,6 +93,14 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 		t.Fatal(err)
 	}
 
+	inboxMigration, err := os.ReadFile("../database/migrations/20261118135312_agent_inbox_receipts.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(inboxMigration)); err != nil {
+		t.Fatal(err)
+	}
+
 	for i := 0; i < 105; i++ {
 		u := fmt.Sprintf("u%d", i)
 		if _, err = db.Exec(`INSERT INTO users(id,full_name) VALUES(?,?)`, u, "User "+u); err != nil {
@@ -99,7 +110,7 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 		if i == 104 {
 			w = "other"
 		}
-		if _, err = db.Exec(`INSERT INTO workspace_members(workspace_id,user_id) VALUES(?,?)`, w, u); err != nil {
+		if _, err = db.Exec(`INSERT INTO workspace_members(id,workspace_id,user_id) VALUES(?,?,?)`, w+"-"+u, w, u); err != nil {
 			t.Fatal(err)
 		}
 	}

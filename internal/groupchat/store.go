@@ -303,6 +303,16 @@ func (s *Store) Send(ctx context.Context, w, u, id string, in SendInput) (Messag
 			}
 			m = existing
 			duplicate = true
+			for _, agent := range existing.MentionedAgentIDs {
+				var job string
+				if err := q.QueryRowContext(ctx, `SELECT id FROM workspace_conversation_agent_jobs WHERE message_id=? AND agent_id=?`, existing.ID, agent).Scan(&job); err != nil {
+					return err
+				}
+				if err := ValidateAgentJob(ctx, q, job); err != nil {
+					return err
+				}
+			}
+
 			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -333,8 +343,16 @@ func (s *Store) Send(ctx context.Context, w, u, id string, in SendInput) (Messag
 			return err
 		}
 		for _, agentID := range in.MentionedAgentIDs {
-			if _, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_agent_jobs(id,conversation_id,message_id,agent_id,requested_by_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID(), id, m.ID, agentID, u, m.CreatedAt, m.CreatedAt); err != nil {
+			result, err := q.ExecContext(ctx, `INSERT INTO workspace_conversation_agent_jobs(id,conversation_id,message_id,agent_id,requested_by_user_id,created_at,updated_at,read_authority_json,read_source_sha256)
+ SELECT ?,?,?,?,?,?,?,json_object('member_id',wm.id,'member_revision',wm.access_revision,'user_revision',usr.authority_revision),?
+ FROM workspace_members wm JOIN users usr ON usr.id=wm.user_id WHERE wm.workspace_id=? AND wm.user_id=? AND usr.suspended_at IS NULL`, newID(), id, m.ID, agentID, u, m.CreatedAt, m.CreatedAt, InboxSourceDigest(m.Content), w, u)
+			if err != nil {
 				return err
+			}
+			if n, err := result.RowsAffected(); err != nil {
+				return err
+			} else if n != 1 {
+				return ErrForbidden
 			}
 		}
 		_, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_outbox(id,conversation_id,message_id,created_at) VALUES(?,?,?,?)`, newID(), id, m.ID, m.CreatedAt)

@@ -416,8 +416,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// restored mailbox would be a queue of messages with nowhere to go. The
 	// delivered ones are already in workspace_conversation_messages, which does
 	// round-trip.
-	"session_mailbox":  IntentExcludeRuntime,
-	"chat_read_shares": IntentExcludeRuntime, // short-lived bearer links must not revive in a restored copy
+	// Agent read receipts bind an actual local run. A restored fork must not
+	// claim that its newly mapped work was read by a historical runtime.
+	"agent_inbox_receipts":    IntentExcludeRuntime,
+	"agent_inbox_run_sources": IntentExcludeRuntime,
+	"session_mailbox":         IntentExcludeRuntime,
+	"chat_read_shares":        IntentExcludeRuntime, // short-lived bearer links must not revive in a restored copy
 
 	// The memory revision anchor and mutation ledger. Excluded, and the cost is
 	// worth stating because it is not zero.
@@ -544,9 +548,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (access) / Art. 17 (deletion) compliance events with required
 	// `reason` fields — a regulator audit reading "we lost the
 	// GDPR log on a restore" is not a defensible posture.
-	"gdpr_actions": IntentInclude,
-	"hooks_config": IntentInclude,
-	"inbox_items":  IntentInclude,
+	"gdpr_actions":                  IntentInclude,
+	"hooks_config":                  IntentInclude,
+	"inbox_items":                   IntentInclude,
+	"run_failure_notice_deliveries": IntentInclude, // delivery tombstones must survive inbox retention and portable restores
 	// inbox_item_reads (A7, PRD-ISSUES-AND-ROUTINES-2026.md §9.7) is the
 	// per-user "did THIS person read THIS item" marker. IntentInclude, not
 	// operational: unlike notification_deliveries (dedup/retry state that

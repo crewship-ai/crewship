@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -115,6 +116,29 @@ func (s *Store) BeginHostChat(ctx context.Context, r HostChatRequest) (*Claimed,
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
 		return nil, false, ErrNotBound
+	}
+	// Store the optional source commitment with the existing admission.
+	// Missing older messages still start normally and have no inbox source.
+	enabled, err := featureflags.IsEnabledWith(ctx, tx, r.WorkspaceID, featureflags.AgentHumanInbox)
+	if err != nil {
+		return nil, false, err
+	}
+	if enabled {
+		var content string
+		err = tx.QueryRowContext(ctx, `SELECT content FROM conversation_messages
+			WHERE id=? AND session_id=? AND agent_id=? AND role='user' AND author_user_id=?`,
+			r.TriggerMessageID, r.ChatID, r.AgentID, r.UserID).Scan(&content)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, err
+		}
+		if err == nil {
+			digest := sha256.Sum256([]byte(content))
+			if _, err = tx.ExecContext(ctx, `INSERT INTO agent_inbox_run_sources
+				(run_id,workspace_id,agent_id,source_kind,source_id,source_sha256) VALUES(?,?,?,'chat_message',?,?)`,
+				r.RunID, r.WorkspaceID, r.AgentID, r.TriggerMessageID, hex.EncodeToString(digest[:])); err != nil {
+				return nil, false, err
+			}
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, false, err

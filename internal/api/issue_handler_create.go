@@ -311,6 +311,10 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ownerUserID, delegateAgentID = explicitOwner, explicitDelegate
 	}
 
+	op, handled := h.beginHumanIssueCreate(w, r, tx, crewID, req)
+	if handled {
+		return
+	}
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
@@ -357,11 +361,6 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "persist issue creation activity", err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
-		internalError(w, r, h.logger, "commit issue", err)
-		return
-	}
-
 	resp := issueResponse{
 		ID:            id,
 		WorkspaceID:   wsID,
@@ -399,11 +398,20 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// best-effort — the attribution object is still returned without a
 		// name if the lookup fails.
 		var creatorName sql.NullString
-		_ = h.db.QueryRowContext(r.Context(),
+		_ = tx.QueryRowContext(r.Context(),
 			`SELECT full_name FROM users WHERE id = ?`, callerID).Scan(&creatorName)
 		resp.CreatedBy = &issueCreatorResponse{Type: "user", ID: callerID, Name: creatorName.String}
 		via := "user_api"
 		resp.AuthoredVia = &via
+	}
+
+	if err := completeHumanIssueOperation(r, tx, op, id, resp); err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit issue", err)
+		return
 	}
 
 	// Record the creation on the journal (via the shared activity chokepoint)

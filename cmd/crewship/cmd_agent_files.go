@@ -233,11 +233,13 @@ func extractFileList(body any) []map[string]any {
 
 var agentInboxCmd = &cobra.Command{
 	Use:               "inbox <agent-slug-or-id>",
-	Short:             "Show messages received by an agent from peers",
+	Short:             "Inspect an agent inbox or send human messages and tasks",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeAgentSlug,
-	Long: `List peer-to-peer messages addressed to this agent. Useful for
-debugging cross-agent collaboration: did the message arrive? was it read?`,
+	Long: `Without a subcommand, show the existing peer and workload summary.
+Use inbox human <agent> for authorized human messages and tasks with explicit
+agent read receipts; operator reads never mark them agent-read.
+Use inbox send or inbox task to send through canonical conversation/issue APIs.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
@@ -274,6 +276,8 @@ func printInboxTable(body any) error {
 		if m, ok := body.(map[string]any); ok {
 			if v, ok := m["messages"].([]any); ok {
 				msgs = v
+			} else if v, ok := m["peer_messages"].([]any); ok {
+				msgs = v
 			}
 		}
 	}
@@ -296,9 +300,18 @@ func printInboxTable(body any) error {
 		}
 		from, _ := m["from"].(string)
 		if from == "" {
+			from, _ = m["from_agent_name"].(string)
+		}
+		if from == "" {
+			from, _ = m["from_agent_slug"].(string)
+		}
+		if from == "" {
 			from, _ = m["sender"].(string)
 		}
 		body, _ := m["body"].(string)
+		if body == "" {
+			body, _ = m["question"].(string)
+		}
 		if body == "" {
 			body, _ = m["content"].(string)
 		}

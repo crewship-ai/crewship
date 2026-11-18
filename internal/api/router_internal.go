@@ -68,6 +68,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
 	r.registerMooringAgentTaskRoutes(internalAuth)
+	r.mux.Handle("POST /api/v1/internal/agent-inbox/read", internalAuth(http.HandlerFunc(internal.AgentInboxRead)))
 	if r.craftNativeHTTP != nil && r.craftNativeHTTP.agents != nil {
 		r.mux.Handle("POST /api/v1/internal/craft-native/task", internalAuth(http.HandlerFunc(r.craftNativeHTTP.agents.toolCall)))
 	}

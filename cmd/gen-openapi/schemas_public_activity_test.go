@@ -74,3 +74,25 @@ func TestPublicActivityCatalogIsWiredIntoGenerator(t *testing.T) {
 		t.Fatalf("audit response is missing pagination: %#v", props)
 	}
 }
+
+func TestAgentHumanInboxResponseNamesCanonicalReceiptFields(t *testing.T) {
+	doc := buildDocument([]route{{method: "GET", path: "/api/v1/agents/{agentId}/human-inbox"}})
+	op := doc["paths"].(map[string]any)["/api/v1/agents/{agentId}/human-inbox"].(map[string]any)["get"].(map[string]any)
+	schema := op["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	props := schema["properties"].(map[string]any)
+	if props["read_semantics"] == nil {
+		t.Fatal("missing read semantics")
+	}
+	row := props["items"].(map[string]any)["items"].(map[string]any)
+	required := row["required"].([]string)
+	if len(required) != 7 {
+		t.Fatalf("canonical entry required fields=%v", required)
+	}
+	fields := row["properties"].(map[string]any)
+	if fields["read_at"].(map[string]any)["nullable"] != true {
+		t.Fatal("unknown agent read must remain nullable")
+	}
+	if fields["content"] == nil || fields["state"] == nil || fields["href"] == nil {
+		t.Fatal("canonical source or state missing")
+	}
+}

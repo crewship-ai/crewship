@@ -27,13 +27,8 @@ func newAgentProposalCommand(edit bool) *cobra.Command {
 	}
 	cmd := &cobra.Command{Use: use, Short: "Publish inert issue intent from a verified agent run", Args: cobra.ExactArgs(n), RunE: func(cmd *cobra.Command, args []string) error {
 		endpoint, _ := cmd.Flags().GetString("sidecar")
-		u, err := url.Parse(endpoint)
-		if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
-			return fmt.Errorf("--sidecar must be an HTTP loopback origin")
-		}
-		ip := net.ParseIP(u.Hostname())
-		if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
-			return fmt.Errorf("--sidecar must use loopback")
+		if err := validateAgentSidecarOrigin(endpoint); err != nil {
+			return err
 		}
 		token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 		if token == "" {
@@ -99,6 +94,20 @@ func newAgentProposalCommand(edit bool) *cobra.Command {
 	}
 	return cmd
 }
+
+// validateAgentSidecarOrigin prevents a run token from being sent off loopback.
+func validateAgentSidecarOrigin(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+		return fmt.Errorf("--sidecar must be an HTTP loopback origin")
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("--sidecar must use loopback")
+	}
+	return nil
+}
+
 func init() {
 	for _, cmd := range chatCmd.Commands() {
 		if cmd.Name() == "proposal" {
