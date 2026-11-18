@@ -112,7 +112,7 @@ func (f *inBandFailure) observe(e AgentEvent) {
 			return
 		}
 		if isErr, _ := meta["is_error"].(bool); !isErr {
-			if meta["subtype"] == "turn.completed" {
+			if meta["subtype"] == "turn.completed" && meta["codex_terminal"] == true {
 				f.pendingReconnect = ""
 			}
 			return

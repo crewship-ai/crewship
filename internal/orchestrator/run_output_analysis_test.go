@@ -212,3 +212,15 @@ func requireProtectedHostTestUID(t *testing.T) {
 		t.Skip("protected capture requires host UID distinct from workload/sidecar; required qualification uses distinct unprivileged UID")
 	}
 }
+
+func TestRetainedAnalysisCodexCapturedReconnect(t *testing.T) {
+	data, err := os.ReadFile("testdata/codex-reconnect/0.159.0-stream-recovered.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, run := retainedAnalysisFixture(t, "CODEX_CLI", string(data), "", 0)
+	analysis, err := o.AnalyzeRetainedRun(t.Context(), run)
+	if err != nil || analysis.Failed || analysis.Unknown {
+		t.Fatalf("recovered retained turn: analysis=%+v err=%v", analysis, err)
+	}
+}

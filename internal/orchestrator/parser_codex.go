@@ -140,9 +140,10 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 		handler(AgentEvent{
 			Type: "result",
 			Metadata: map[string]interface{}{
-				"subtype":  "turn.completed",
-				"usage":    usage,
-				"is_error": false,
+				"subtype":        "turn.completed",
+				"codex_terminal": usage != nil,
+				"usage":          usage,
+				"is_error":       false,
 			},
 			Timestamp: time.Now(),
 		})
@@ -171,7 +172,7 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 
 	case "error":
 		detail := codexErrorMessage(msg)
-		if len(msg.Error) == 0 && isCodexReconnectProgress(msg.Message) {
+		if isCodexReconnectProgress(line, msg.Message) {
 			// Codex exec emits retry progress as an error with a message and
 			// no retry code. A failed turn has its own structured event. Keep
 			// progress visible and require a later turn.completed.
@@ -196,7 +197,11 @@ const codexReconnectSubtype = "codex_reconnecting"
 
 var codexReconnectPattern = regexp.MustCompile(`^Reconnecting(?:\.\.\.|…)[[:space:]]+([1-9][0-9]*)/([1-9][0-9]*)(?:[[:space:]]+\(.+\))?$`)
 
-func isCodexReconnectProgress(message string) bool {
+func isCodexReconnectProgress(line []byte, message string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(line, &fields) != nil || len(fields) != 2 || fields["type"] == nil || fields["message"] == nil {
+		return false
+	}
 	parts := codexReconnectPattern.FindStringSubmatch(strings.TrimSpace(message))
 	if parts == nil {
 		return false

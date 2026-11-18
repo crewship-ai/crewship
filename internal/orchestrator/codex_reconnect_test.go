@@ -40,10 +40,12 @@ func TestRunAgent_CodexReconnectDoesNotClearFailures(t *testing.T) {
 		exit         int
 	}{
 		{name: "incomplete retry", stream: retry},
+		{name: "invalid completion", stream: retry + `{"type":"turn.completed"}` + "\n"},
 		{name: "previous turn completed", stream: complete + retry},
 		{name: "turn failed", stream: retry + `{"type":"turn.failed","error":{"message":"retry exhausted"}}` + "\n" + complete},
 		{name: "fatal error remains sticky", stream: `{"type":"error","message":"authentication failed"}` + "\n" + retry + complete},
 		{name: "unrecognized retry", stream: `{"type":"error","message":"Reconnecting... 6/5 (invalid retry shape)"}` + "\n" + complete},
+		{name: "unknown structured error", stream: `{"type":"error","message":"Reconnecting... 2/5 (authentication rejected)","retryable":false}` + "\n" + complete},
 		{name: "nested error", stream: `{"type":"error","error":{"message":"Reconnecting... 2/5 (unknown envelope)"}}` + "\n" + complete},
 		{name: "nonzero exit", stream: retry + complete, exit: 17},
 	} {
