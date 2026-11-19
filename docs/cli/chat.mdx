@@ -300,6 +300,11 @@ run has ended (see the [WebSocket reference](/api-reference/websocket)).
 Another member's `done`, a naturally completed run, a server shutdown or a
 missing run cannot confirm a stop.
 
+For protected output capture, a recorded `execution_cancelled` result also
+requires proof that the exact execution's process tree stopped (or its
+container is authoritatively gone). A stopped leader or exit 137 alone does
+not confirm cancellation.
+
 **Server requirement.** Confirmation needs a server with the
 `cancel_accepted`/`cancel_result` protocol (this release or later). Against an
 older server the stop still works, but nothing confirms it: when the run's

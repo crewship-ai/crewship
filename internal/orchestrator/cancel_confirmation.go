@@ -58,7 +58,11 @@ func (o *Orchestrator) confirmProtectedRunStop(ctx context.Context, location Run
 		lastErr = err
 		if stopped {
 			snapshot, readErr := o.ReadRetainedRunResult(ctx, run)
-			if readErr == nil && snapshot.Complete && snapshot.Result.Reason == "exited" {
+			if readErr == nil && snapshot.Complete && (snapshot.Result.Reason == "exited" ||
+				(snapshot.Result.Reason == "execution_cancelled" && o.forcedHostEndConfirmed(ctx, run, snapshot))) {
+				// CaptureHost labels requested nonzero stops execution_cancelled.
+				// Accept that result only with its exact whole-tree stop proof,
+				// as recovery already requires; a killed leader alone is insufficient.
 				return snapshot, nil
 			}
 		}
