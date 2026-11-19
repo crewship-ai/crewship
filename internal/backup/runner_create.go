@@ -572,7 +572,15 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 				outputCaptured[crew.ID] = true
 			}
 		}
-		attachmentBlobsResult.Missing = append(attachmentBlobsResult.Missing, chatAttachmentsNotCarried(dump, outputCaptured)...)
+		alreadyMissing := map[string]bool{}
+		for _, sha := range attachmentBlobsResult.Missing {
+			alreadyMissing[sha] = true
+		}
+		for _, sha := range chatAttachmentsNotCarried(dump, outputCaptured) {
+			if !alreadyMissing[sha] {
+				attachmentBlobsResult.Missing = append(attachmentBlobsResult.Missing, sha)
+			}
+		}
 		if len(attachmentBlobsResult.Missing) > 0 {
 			slog.Warn("backup: attachment rows reference files that are not in the bundle",
 				"count", len(attachmentBlobsResult.Missing), "root_unset", attachmentBlobsResult.RootUnset, "workspace_id", target.ID)

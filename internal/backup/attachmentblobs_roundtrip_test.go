@@ -275,6 +275,8 @@ func TestBackup_ChatAttachmentWithoutOutputIsReportedMissing(t *testing.T) {
 	sourceRoot := filepath.Join(t.TempDir(), "source-storage")
 	seedAttachment(t, source, sourceRoot, workspaceID, "att_issue", "an issue attachment")
 	seedChatAttachment(t, source, sourceRoot, workspaceID, "att_chat", "a chat attachment")
+	// The same file sent in a second chat: one distinct sha, counted once.
+	seedChatAttachment(t, source, sourceRoot, workspaceID, "att_chat_again", "a chat attachment")
 
 	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
 		Scope:          backup.ScopeWorkspace,

@@ -163,14 +163,21 @@ func chatAttachmentsNotCarried(dump *DBDump, outputCaptured map[string]bool) []s
 	if dump == nil {
 		return nil
 	}
+	// Distinct sha256 values, as Contents.AttachmentsMissing documents.
 	var out []string
+	seen := map[string]bool{}
 	for _, row := range dump.Tables["attachments"] {
 		if !isChatAttachmentRow(row) {
 			continue
 		}
 		key := rowString(row, "storage_key")
+		sha := rowString(row, "sha256")
+		if seen[sha] {
+			continue
+		}
 		if !validChatAttachmentKey(key) || !outputCaptured[strings.SplitN(key, "/", 2)[0]] {
-			out = append(out, rowString(row, "sha256"))
+			seen[sha] = true
+			out = append(out, sha)
 		}
 	}
 	return out
