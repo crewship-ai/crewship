@@ -241,6 +241,13 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "cascade soft-delete crew agents", err)
 		return
 	}
+	// Their explicit credential grants go with them, audited per credential in
+	// this transaction (#5529) — the same revoke `agent delete` performs.
+	if _, err := revokeDeletedAgentCredentialGrantsTx(r.Context(), tx, workspaceID,
+		agentGrantScopeCrew, crewID, grantRevokeReasonCrewDeleted, clientIP(r)); err != nil {
+		replyInternalError(w, h.logger, "revoke crew agents' credential grants", err)
+		return
+	}
 
 	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
 	// Missions carry a UNIQUE(workspace_id, identifier) constraint (#1733 — it
