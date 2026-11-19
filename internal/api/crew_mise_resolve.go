@@ -102,7 +102,10 @@ func (h *CrewMiseLockHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, err := h.resolver.ResolveCrewMiseLock(ctx, selected, cfg, input.Bump)
 	if err != nil {
-		h.logger.Warn("crew mise lock resolution failed", "crew_id", r.PathValue("crewId"))
+		// Resolver inputs are tools and a lock only (no env, tasks or
+		// credentials), so its error is safe to log and is the only trace an
+		// operator gets of why a proposal failed (#5545).
+		h.logger.Warn("crew mise lock resolution failed", "crew_id", r.PathValue("crewId"), "error", err)
 		replyError(w, 502, "mise lock resolution failed; no proposal was applied")
 		return
 	}

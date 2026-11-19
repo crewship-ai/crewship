@@ -27,15 +27,34 @@ type MiseLockBundle struct {
 
 var miseLockPathPart = regexp.MustCompile(`^[A-Za-z0-9_.~+-]+$`)
 
+// Relative auxiliary roots a native mise lock may reference.
+const (
+	miseLockAuxV3 = ".mise/locks"
+	miseLockAuxV4 = "locks"
+)
+
 func validMiseLockPath(name string) bool {
 	if name == "mise.lock" {
 		return true
 	}
-	if len(name) > 256 || !strings.HasPrefix(name, ".mise/locks/") || path.Clean(name) != name {
+	if len(name) > 256 || path.Clean(name) != name {
 		return false
 	}
+	// Auxiliary npm/aube files live under the lock's own auxiliary root:
+	// `.mise/locks/<tool>/…` for lockfile v3, `locks/<tool>/…` beside a global
+	// lockfile v4 (#5545). mise.lock references that relative path, so both
+	// layouts are kept exactly as mise wrote them.
 	parts := strings.Split(name, "/")
-	if len(parts) < 4 {
+	switch {
+	case strings.HasPrefix(name, miseLockAuxV3+"/"):
+		if len(parts) < 4 {
+			return false
+		}
+	case strings.HasPrefix(name, miseLockAuxV4+"/"):
+		if len(parts) < 3 {
+			return false
+		}
+	default:
 		return false
 	}
 	for _, part := range parts {
@@ -105,7 +124,7 @@ func writeMiseLock(ctx context.Context, containerID string, b *MiseLockBundle, e
 	// Remove stale auxiliary files from a previous build only after checking
 	// their controlled parent chain. A partial bundle must not borrow hidden
 	// files from the base image.
-	if err := run("set -eu; test ! -L /opt; test ! -L /opt/mise; test ! -L /opt/mise/config; test ! -L /opt/mise/config/.mise; rm -rf /opt/mise/config/.mise/locks; rm -f /opt/mise/config/mise.lock"); err != nil {
+	if err := run("set -eu; test ! -L /opt; test ! -L /opt/mise; test ! -L /opt/mise/config; test ! -L /opt/mise/config/.mise; rm -rf /opt/mise/config/.mise/locks; test ! -L /opt/mise/config/locks; rm -rf /opt/mise/config/locks; rm -f /opt/mise/config/mise.lock"); err != nil {
 		return err
 	}
 	for _, name := range names {
