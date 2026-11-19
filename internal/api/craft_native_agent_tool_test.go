@@ -37,7 +37,7 @@ func nativeAgentToolFixture(t *testing.T) (*artifactPrincipalFixture, *craftNati
 	mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
 	m.human.agents = m
 	f.pages.artifactMasterToken = "synthetic-native-agent-master"
-	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 	if err != nil {
 		t.Fatal(err)
 	}

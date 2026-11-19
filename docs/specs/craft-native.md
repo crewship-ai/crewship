@@ -595,7 +595,8 @@ admission before accepting work.
 
 An authenticated human with current Page write access may send
 `POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
-`{chat_id, message_id, whole_document: true}`. The message must be that human's
+`{chat_id, message_id, whole_document: true}` and an optional
+`mode: "propose" | "apply"`. The message must be that human's
 persisted original user message in the actual registered agent's chat, saved
 as a native Craft instruction in a private chat that human created: such a
 message started no turn. An ordinary turn or a group chat message is refused,
@@ -607,6 +608,16 @@ work attempt are required before the actual run credential can access the
 native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
+
+The mode follows Q16 (owner decision 2026-10-19). The author's targeted
+instruction is the mandate. Without `mode`, a document in the author's personal
+space (private, unfiled, not crew-owned, owned by the author) is changed
+directly, and any other document gets a proposal. `mode: "apply"` on a shared
+document is the explicit direct mandate. The work input records the resolved
+mode and whether the human chose it. A proposing task is refused `craft_apply`
+and lease acquisition with `409 {reason: "proposal_required"}`, even when the
+lease is free. The publishing transaction checks the same rule again. An
+implicit apply ends as soon as the document leaves the personal space.
 
 The normal human CLI uses the same explicit consent, Page authority and
 instruction send:

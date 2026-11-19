@@ -248,6 +248,12 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 	store := mooring.NewNativeStore(m.human.pages.db, cfg)
 	switch input.Operation {
 	case "acquire":
+		// A proposing task never needs the editor; holding it would only
+		// lock the person out of their own shared document.
+		if err = m.directMandate(bound.Context(), e); err != nil {
+			craftNativeAgentMandateError(w, err)
+			return
+		}
 		lease, err := m.human.leases.Acquire(bound.Context(), e.grant.Scope, craftNativeAgentPrincipal(e))
 		if err != nil {
 			if errors.Is(err, mooring.ErrEditLeaseBusy) {
@@ -289,9 +295,16 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, 200, nativeAgentLeaseResult(renewed))
 			return
 		}
-		receipt, err := m.applyTool(bound.Context(), e, store, profile, input)
+		if err = m.directMandate(bound.Context(), e); err != nil {
+			craftNativeAgentMandateError(w, err)
+			return
+		}
+		direct := context.WithValue(bound.Context(), craftNativeAgentDirectWriteKey{}, true)
+		receipt, err := m.applyTool(direct, e, store, profile, input)
 		if err != nil {
-			if e.tool.uncertain {
+			if errors.Is(err, errCraftNativeAgentProposalRequired) {
+				craftNativeAgentMandateError(w, err)
+			} else if e.tool.uncertain {
 				replyError(w, 503, "original native save outcome unconfirmed; reconcile the exact original request")
 			} else if errors.Is(err, errNativeAgentChangeRequestLimit) {
 				replyError(w, 429, "this run has reached its change request limit")
@@ -345,6 +358,28 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		}
 		writeJSON(w, 200, result)
 	}
+}
+
+// directMandate refuses apply before anything is attempted, so the agent learns
+// to propose instead without spending a request ID. The publishing transaction
+// checks the same rule again (authorize).
+func (m *craftNativeAgentManager) directMandate(ctx context.Context, e *craftNativeAgentEntry) error {
+	tx, err := m.human.pages.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return m.checkDirectMandate(ctx, tx, e)
+}
+
+// craftNativeAgentMandateError gives the authorized agent a machine-readable
+// reason, so it can switch to craft_propose over the same base version.
+func craftNativeAgentMandateError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errCraftNativeAgentProposalRequired) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "this task may only propose a change; call craft_propose over the same base_version", "reason": "proposal_required"})
+		return
+	}
+	craftNativeDocumentError(w, err)
 }
 
 func (m *craftNativeAgentManager) toolAuthority(ctx context.Context, e *craftNativeAgentEntry) error {
