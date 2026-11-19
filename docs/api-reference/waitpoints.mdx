@@ -7,7 +7,18 @@ tag: Experimental
 ---
 
 Waitpoints are durable approval/external-completion pauses created by a routine
-`wait` step. Tokens are opaque capabilities; do not expose them in logs.
+`wait` step.
+
+A waitpoint has two different values, and only one of them is a secret:
+
+- its **token** (`wp_…`) is the waitpoint's public id. It is what the inbox,
+  the pending list, a WAITING run's `waitpoint_token` and the authenticated
+  approve route carry. It is not a credential: on its own it completes nothing.
+- its **callback URL** carries a separate secret (`wpt_…`) that completes the
+  waitpoint without signing in. It does not exist until a MANAGER
+  [mints it](#mint-a-callback-url), is shown once, and is stored only as a
+  SHA-256 digest — it cannot be listed or read back. Treat it like a webhook
+  URL.
 
 ## List pending waitpoints
 
@@ -20,7 +31,7 @@ Requires workspace authentication and membership. The response is an array
 
 | Field | Type | Description |
 |---|---|---|
-| `token` | string | The waitpoint's opaque capability — what `approve` and the external route take |
+| `token` | string | The waitpoint's public id (`wp_…`) — what `approve` and `callback-token` take. Not a credential |
 | `pipeline_run_id` | string | The parked run |
 | `step_id` | string | The `wait` step |
 | `kind` | string | The wait kind (`approval`, …) |
@@ -30,7 +41,7 @@ Requires workspace authentication and membership. The response is an array
 | `created_at` | string | When the run parked |
 | `decision_form` | object? | The typed decision form the step declared (see [Typed decisions](/cli/routine#typed-decisions-and-named-actions)). Omitted when the step has none |
 | `inbox_item_id` | string? | The inbox card that carries this waitpoint. Omitted when none was written |
-| `callback_url` | string? | The public token-authenticated completion endpoint (below). **Only present when the step has no `decision_form`** — a typed decision has to be made through the authenticated route, so nothing outside the workspace is handed a way to complete it |
+| `callback_available` | boolean | Whether a [callback URL can be minted](#mint-a-callback-url) for this waitpoint. `false` when the step has a `decision_form` (a typed decision has to be made through the authenticated route) and for a held routine action (OWNER/ADMIN only). The URL itself is never listed |
 
 A database failure is `500`.
 
@@ -72,6 +83,32 @@ a role below MANAGER `403`, and an agent or principal-less caller `403` with
 `reason: waitpoint_decider_not_allowed` (see above); an unavailable waitpoint
 store is `503`; and completion failures are `500`.
 
+## Mint a callback URL
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token
+```
+
+Mints the secret an external system presents on the route below and returns
+the URL **once**:
+
+```json
+{"token": "wp_…", "callback_url": "https://…/api/v1/waitpoint-tokens/wpt_…", "rotated": false}
+```
+
+Crewship keeps only a digest, so a lost URL cannot be recovered: mint again.
+Minting again also **revokes** the previous URL (`rotated: true`), which is how
+a leaked URL is cut off. This is an `update`/MANAGER+ operation — the URL can
+release the gate without authentication, so it needs the same role as
+approving — and every mint is written to the audit log as
+`waitpoint.callback_token.minted`.
+
+`201` on success; `404` when the token names no waitpoint in this workspace;
+`409` when the waitpoint is no longer pending; `422` when it can only be decided
+by an authenticated person (`decision_form`, held routine action); `401`/`403`
+for authentication and role; `503` when the waitpoint store is unavailable.
+CLI: `crewship routine waitpoints callback-url <token>`.
+
 ## Complete from an external service
 
 ```http
@@ -81,10 +118,15 @@ Content-Type: application/json
 {"approved": true, "payload": {"ticket": "INC-42"}}
 ```
 
-This route has no JWT: the high-entropy token is the authentication. The body
+This route has no JWT. Its `{token}` path segment is the high-entropy secret
+from a [minted callback URL](#mint-a-callback-url), and that secret is the
+authentication; the waitpoint's public `token` (`wp_…`) is **not** accepted
+here. The body
 is optional and `approved` defaults to `true` (unlike the authenticated approve
 route). `payload` accepts any JSON and is stored for the resumed step. It
-returns `{"ok":true,"approved":true|false}`; an empty token is `400`, an
-already-decided or expired token is `409`, malformed JSON is `400`, an
+returns `{"ok":true,"approved":true|false}`; an empty path segment is `400`; a value
+that is not a live callback secret (the public token, a rotated-out secret, a
+waitpoint nobody minted a URL for) and an already-decided or expired waitpoint
+are all `409`, without saying which; malformed JSON is `400`, an
 unavailable or non-completing waitpoint store is `503`, and other completion
 failures are `500`.

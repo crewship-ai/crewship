@@ -45,13 +45,19 @@ func TestChatDecisionWaitpointIdentityNeverGrantsCallbackAuthority(t *testing.T)
 	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("bearer accepted as E2 ID %v", err)
 	}
-	// Existing callback holders keep the exact legacy behavior.
+	// The waitpoint id is not a callback capability either (#1910) …
 	req = httptest.NewRequest("POST", "/", nil)
 	req.SetPathValue("token", d.token)
 	rr = httptest.NewRecorder()
 	d.r.PipelinesHandler.CompleteWaitpointToken(rr, req)
-	if rr.Code != 200 {
-		t.Fatalf("legacy callback broken %d %s", rr.Code, rr.Body.String())
+	if rr.Code != 409 || d.read(t).Decision.Status != "pending" {
+		t.Fatalf("waitpoint id grants callback authority %d %s", rr.Code, rr.Body.String())
+	}
+	// … only a minted secret is, and this card has a typed decision form,
+	// which the callback cannot complete, so none can be minted.
+	store := d.r.PipelinesHandler.waitpoints.(*pipeline.SQLWaitpointStore)
+	if _, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token); !errors.Is(err, pipeline.ErrCallbackNotOffered) {
+		t.Fatalf("callback minted for a typed decision: %v", err)
 	}
 }
 

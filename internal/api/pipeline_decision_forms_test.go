@@ -36,8 +36,11 @@ func TestDecisionFormAPIRequiresNamedTypedAnswerAcrossDoors(t *testing.T) {
 		want       int
 	}{
 		{`{"approved":true}`, "MANAGER", false, 400},
-		{`{"approved":true,"payload":{"action_id":"go","data":{"count":0,"enabled":false}}}`, "", true, 403},
-		{`{}`, "", true, 403},
+		// The waitpoint id is not a callback secret (#1910), and a typed
+		// decision can never have one minted, so the public route resolves
+		// nothing: the same non-disclosing 409 as an unknown token.
+		{`{"approved":true,"payload":{"action_id":"go","data":{"count":0,"enabled":false}}}`, "", true, 409},
+		{`{}`, "", true, 409},
 		{`{"approved":true,"action_id":"go","data":{"count":0,"enabled":false}}`, "MEMBER", false, 403},
 		{`{"approved":true,"action_id":"stop","data":{"count":0,"enabled":false}}`, "MANAGER", false, 400},
 		{`{"approved":true,"action_id":"go","data":{"count":"0","enabled":false}}`, "MANAGER", false, 400},

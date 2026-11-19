@@ -401,12 +401,7 @@ exits non-zero, rather than printing a URL with nothing after the last slash.
 </Warning>
 
 `pipeline_waitpoints.token` is the same kind of secret and is **not** covered
-here. It is that table's primary key, it is the handle carried by
-`inbox_items.source_id` and by a WAITING run's `waitpoint_token`, and
-`GET …/pipelines/waitpoints` reads it back out of the column to rebuild the
-public `POST /api/v1/waitpoint-tokens/{token}` callback URL on demand. It is a
-*retrievable* shared secret by contract rather than a show-once credential, so
-hashing it means redesigning that contract first.
+here: it was a *retrievable* shared secret by contract. See 20261119153114 below, which changed the contract and then hashed it.
 
 ## 20260811081130 — Drop a redundant trust-grant index
 
@@ -798,6 +793,54 @@ artifact_projects` stays off. Running the statement again changes nothing.
 
 To turn Projects off after the upgrade, see
 [Turning Projects off](/configuration/artifacts#turning-projects-off).
+
+## 20261119153114 — Waitpoint ids become public, callback secrets hashed
+
+`pipeline_waitpoints.token` used to be both the waitpoint's identity (primary
+key, `inbox_items.source_id`, a WAITING run's `waitpoint_token`, the approve
+route's path segment) **and** the bearer credential for the unauthenticated
+`POST /api/v1/waitpoint-tokens/{token}` callback (#1910). As the identity it was
+on every member surface — and any member could read a working callback URL from
+`GET …/pipelines/waitpoints` — while the database held it in the clear.
+
+`20261119153114_waitpoint_callback_token_hash` adds `callback_token_hash` and a
+partial `UNIQUE` index. From then on `token` holds a public id (`wp_` + 32 hex),
+and the callback secret (`wpt_` + 64 hex) is minted on demand by a MANAGER
+(`POST …/waitpoints/{token}/callback-token`, `crewship routine waitpoints
+callback-url`), shown once, and stored only as `sh1:` + SHA-256 — the same
+unkeyed scheme as 20260810171000 above.
+
+SQLite cannot compute SHA-256, so existing rows are converted in Go when the
+waitpoint store is constructed, before anything serves. For each row whose
+`token` does not start with `wp_`, in one transaction:
+
+- `callback_token_hash` becomes the digest of the existing token, **in place**:
+  an external system that already holds a callback URL for a pending waitpoint
+  keeps working until a MANAGER mints a new one;
+- `token` becomes a fresh `wp_` id, so the cleartext leaves the row;
+- the copies of the old value move to the new id: `inbox_items.source_id`
+  (`kind = 'waitpoint'`), `notification_deliveries.source_id` and `dedup_key`
+  (`source_kind = 'waitpoint'`) and `audit_logs.entity_id`
+  (`entity_type = 'waitpoint'`).
+
+A row that fails (lock contention) is left exactly as it was, is logged with a
+digest fingerprint rather than the token, and is retried by the store's 30 s
+sweeper. Until then the authenticated routes still find it; the public callback
+does not (it never falls back to cleartext). Running the conversion again
+changes nothing.
+
+<Warning>
+**Client-visible changes.** The pending list no longer contains
+`callback_url`; it has `callback_available` instead, and the URL comes only
+from the mint call. The public callback no longer accepts the listed `token`.
+A token captured **before** the upgrade still works on the authenticated
+approve route (it is resolved through its digest, within the caller's
+workspace) and, for a pending waitpoint, on the public callback.
+</Warning>
+
+A forked restore (`--as-workspace` / `--as-crew`) gives each copied waitpoint a
+new `wp_` id and **no** callback digest: a fork does not inherit the source's
+live capabilities.
 
 ## How to read this in operation
 

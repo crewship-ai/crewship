@@ -140,7 +140,7 @@ func executionSchemaComponents() map[string]any {
 	span := obj(map[string]any{"seq": integer(), "kind": str(), "name": str(), "started_at": timeString(), "duration_ms": integer(), "status": str(), "detail": anyObject, "input": anyObject, "output": anyObject, "input_truncated": boolean(), "output_truncated": boolean()})
 	stateEntry := obj(map[string]any{"key": str(), "value": str(), "updated_at": timeString()})
 	stateBucket := obj(map[string]any{"schedule_id": str(), "entries": arr(refOrString("StateEntry"))})
-	waitpoint := obj(map[string]any{"decision_form": obj(map[string]any{"fields": arr(map[string]any{"type": "object", "additionalProperties": true}), "actions": arr(obj(map[string]any{"id": str(), "label": str(), "approved": map[string]any{"type": "boolean"}}))}), "token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_url": str()})
+	waitpoint := obj(map[string]any{"decision_form": obj(map[string]any{"fields": arr(map[string]any{"type": "object", "additionalProperties": true}), "actions": arr(obj(map[string]any{"id": str(), "label": str(), "approved": map[string]any{"type": "boolean"}}))}), "token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_available": boolean()})
 	// pipeline_runs_replay.go's replayOutcome: only source_run_id is
 	// unconditional; the other three carry omitempty.
 	replayOutcome := obj(map[string]any{"source_run_id": str(), "new_run_id": str(), "status": str(), "error": str()}, "source_run_id")
