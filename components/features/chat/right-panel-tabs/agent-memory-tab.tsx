@@ -42,8 +42,11 @@ export function AgentMemoryTab({ agentId, workspaceId }: { agentId: string; work
   const [revision, setRevision] = useState(0)
   // Memory is written during and at the end of a run; there is no memory event.
   const reload = useCallback(() => setRevision((n) => n + 1), [])
-  // Only this agent's finished run can have written its memory.
-  useRealtimeEventSafe("run.completed", useCallback((event: { payload: Record<string, unknown> }) => { if (event.payload?.agent_id === agentId) reload() }, [agentId, reload]))
+  // Only this agent's finished run can have written its memory. A failed,
+  // cancelled or timed-out run (run.failed) may have written it too.
+  const reloadForAgent = useCallback((event: { payload: Record<string, unknown> }) => { if (event.payload?.agent_id === agentId) reload() }, [agentId, reload])
+  useRealtimeEventSafe("run.completed", reloadForAgent)
+  useRealtimeEventSafe("run.failed", reloadForAgent)
   useRealtimeEventSafe("realtime.reconnected", reload)
   const ws = workspaceId ? encodeURIComponent(workspaceId) : ""
   const inventory = useWorkspaceResource<Inventory>(ws ? `/api/v1/agents/${encodeURIComponent(agentId)}/memory?workspace_id=${ws}` : "", revision)

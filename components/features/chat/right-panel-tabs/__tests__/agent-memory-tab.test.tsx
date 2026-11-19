@@ -82,10 +82,20 @@ describe("AgentMemoryTab", () => {
     const before = memoryCalls()
     await act(async () => { handlers.get("run.completed")!({ payload: { run_id: "r9", agent_id: "agent-2" } }) })
     expect(memoryCalls()).toBe(before)
-    expect(handlers.has("run.failed")).toBe(false)
     documents = [{ id: "agent:jamie/AGENT.md", name: "AGENT.md", scope: "agent", state: "available", content: "Now prefers bullet points.", bytes: 30 }]
     await act(async () => { handlers.get("run.completed")!({ payload: { run_id: "r1", agent_id: "agent-1" } }) })
     await waitFor(() => expect(screen.getByText("Now prefers bullet points.")).toBeInTheDocument())
     expect(handlers.has("realtime.reconnected")).toBe(true)
+  })
+
+  it("rereads memory when this agent's run fails, since a failed run can still write it", async () => {
+    render(<AgentMemoryTab agentId="agent-1" workspaceId="ws-1" />)
+    await screen.findByText("Prefers short release notes.")
+    const before = memoryCalls()
+    await act(async () => { handlers.get("run.failed")!({ payload: { run_id: "r8", agent_id: "agent-2", status: "FAILED" } }) })
+    expect(memoryCalls()).toBe(before)
+    documents = [{ id: "agent:jamie/AGENT.md", name: "AGENT.md", scope: "agent", state: "available", content: "Saved before the timeout.", bytes: 30 }]
+    await act(async () => { handlers.get("run.failed")!({ payload: { run_id: "r2", agent_id: "agent-1", status: "TIMEOUT" } }) })
+    await waitFor(() => expect(screen.getByText("Saved before the timeout.")).toBeInTheDocument())
   })
 })
