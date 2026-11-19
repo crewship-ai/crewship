@@ -265,9 +265,10 @@ func seedChatAttachment(t *testing.T, db *sql.DB, outputRoot, workspaceID, id, c
 }
 
 // A chat attachment's bytes ride in the crew's /output section, not in
-// attachment-blobs/, so a workspace backup must neither look for it in the
-// content-addressed tree nor mark the bundle incomplete over it (#5588).
-func TestBackup_ChatAttachmentNotReportedMissing(t *testing.T) {
+// attachment-blobs/ (#5588). When that section is not in the bundle (here:
+// no container), the attachment must be reported missing, not dropped in
+// silence, and it must never count as an included blob.
+func TestBackup_ChatAttachmentWithoutOutputIsReportedMissing(t *testing.T) {
 	ctx := context.Background()
 	source := openMigratedDB(t)
 	workspaceID := seedWorkspace(t, source)
@@ -287,13 +288,17 @@ func TestBackup_ChatAttachmentNotReportedMissing(t *testing.T) {
 		t.Fatalf("CreateBackup: %v", err)
 	}
 	c := created.Manifest.Contents
-	if c.AttachmentsIncluded != 1 || c.AttachmentsMissing != 0 {
-		t.Errorf("attachments included=%d missing=%d, want 1/0 (the chat row is not a content-addressed blob)",
+	if c.AttachmentsIncluded != 1 || c.AttachmentsMissing != 1 {
+		t.Errorf("attachments included=%d missing=%d, want 1/1: the issue blob is carried, the chat file has no captured output tree",
 			c.AttachmentsIncluded, c.AttachmentsMissing)
 	}
+	found := false
 	for _, it := range c.Incomplete {
 		if it.Kind == backup.IncompleteAttachmentMissing {
-			t.Errorf("bundle marked incomplete over a chat attachment: %+v", it)
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("bundle without the chat attachment's bytes is not marked incomplete: %+v", c.Incomplete)
 	}
 }

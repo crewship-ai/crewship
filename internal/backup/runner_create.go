@@ -561,6 +561,18 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			_ = sealedFile.Close()
 			return nil, err
 		}
+		// Chat attachments ride in their crew's /output section, not in
+		// attachment-blobs/. One whose crew's output tree was not captured
+		// (no container, a plan without files, a failed copy) is not in the
+		// bundle, and must be reported missing rather than dropped in
+		// silence (#5588).
+		outputCaptured := map[string]bool{}
+		for _, crew := range target.CrewTargets {
+			if c, ok := captures[crew.Slug]; ok && crewOutputCaptured(c) {
+				outputCaptured[crew.ID] = true
+			}
+		}
+		attachmentBlobsResult.Missing = append(attachmentBlobsResult.Missing, chatAttachmentsNotCarried(dump, outputCaptured)...)
 		if len(attachmentBlobsResult.Missing) > 0 {
 			slog.Warn("backup: attachment rows reference files that are not in the bundle",
 				"count", len(attachmentBlobsResult.Missing), "root_unset", attachmentBlobsResult.RootUnset, "workspace_id", target.ID)

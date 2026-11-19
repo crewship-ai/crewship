@@ -142,6 +142,40 @@ func chatAttachmentKeyPath(outputRoot, key string) (string, bool) {
 	return p, true
 }
 
+// crewOutputCaptured reports whether a crew's /output tree made it into the
+// bundle: at least one file was copied and the section did not fail.
+func crewOutputCaptured(c CrewCapture) bool {
+	if c.OutputFiles == 0 {
+		return false
+	}
+	for _, failed := range c.FailedSections {
+		if strings.HasPrefix(failed, ContainerOutputPath+":") {
+			return false
+		}
+	}
+	return true
+}
+
+// chatAttachmentsNotCarried returns the sha256 of every chat attachment row
+// whose crew (the first storage_key component) is not in outputCaptured, or
+// whose key is unusable. Those bytes are not in a logical bundle.
+func chatAttachmentsNotCarried(dump *DBDump, outputCaptured map[string]bool) []string {
+	if dump == nil {
+		return nil
+	}
+	var out []string
+	for _, row := range dump.Tables["attachments"] {
+		if !isChatAttachmentRow(row) {
+			continue
+		}
+		key := rowString(row, "storage_key")
+		if !validChatAttachmentKey(key) || !outputCaptured[strings.SplitN(key, "/", 2)[0]] {
+			out = append(out, rowString(row, "sha256"))
+		}
+	}
+	return out
+}
+
 // WriteAttachmentBlobsSection copies every blob the dump's attachments rows
 // reference into dst under attachment-blobs/<sha[:2]>/<sha>, streaming each
 // file. root is the SOURCE instance's storage root. A referenced blob that is
