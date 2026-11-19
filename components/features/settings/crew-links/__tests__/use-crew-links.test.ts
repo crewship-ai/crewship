@@ -132,3 +132,109 @@ describe("useCrewLinks writes", () => {
     expect(result.current.loadError).toBe(true)
   })
 })
+
+// ── applyLevels: the ladder's one write path ────────────────────────────────
+
+type Row = { id: string; from_crew_id: string; to_crew_id: string; direction: string; status: string; forward_file_access: string; reverse_file_access: string; access_version: number }
+
+/** A tiny stateful server: POST widens or creates, PUT sets a level, DELETE removes. */
+function stateful(initial: Row[], refusePut = false) {
+  let rows = initial.map((r) => ({ ...r }))
+  api.mockImplementation(async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    if (init?.method === "POST") {
+      const hit = rows.find((r) => (r.from_crew_id === body.from_crew_id && r.to_crew_id === body.to_crew_id) || (r.from_crew_id === body.to_crew_id && r.to_crew_id === body.from_crew_id))
+      if (hit) {
+        const widened = hit.from_crew_id !== body.from_crew_id ? "bidirectional" : body.direction
+        if (widened !== hit.direction) { hit.direction = widened; hit.access_version += 1 }
+      } else rows.push({ id: `cc-${rows.length + 1}`, from_crew_id: body.from_crew_id, to_crew_id: body.to_crew_id, direction: body.direction, status: "active", forward_file_access: body.forward_file_access ?? "none", reverse_file_access: body.reverse_file_access ?? "none", access_version: 1 })
+      return json({ id: "x" }, 201)
+    }
+    if (init?.method === "PUT") {
+      if (refusePut) return json({ detail: "link changed" }, 409)
+      const id = url.split("/crew-connections/")[1].split("/")[0]
+      const row = rows.find((r) => r.id === id)!
+      if (row.from_crew_id === body.requester_crew_id) row.forward_file_access = body.level; else row.reverse_file_access = body.level
+      row.access_version += 1
+      return json({})
+    }
+    if (init?.method === "DELETE") {
+      const id = url.split("/crew-connections/")[1].split("?")[0]
+      rows = rows.filter((r) => r.id !== id)
+      return json(null, 204)
+    }
+    if (url.startsWith("/api/v1/crew-connections")) return json(rows)
+    if (url.startsWith("/api/v1/crews")) return json([ENG, OPS])
+    return json(null, 404)
+  })
+}
+const row = (from: string, to: string, direction: string, f: string, r: string): Row => ({ id: "cc-1", from_crew_id: from, to_crew_id: to, direction, status: "active", forward_file_access: f, reverse_file_access: r, access_version: 1 })
+const methods = () => writes().map(([, init]) => (init as RequestInit).method)
+
+describe("useCrewLinks.applyLevels", () => {
+  it("creates a link, then sets the file level with the version the server now holds", async () => {
+    stateful([])
+    const { result } = await mount()
+    await act(async () => { expect(await result.current.applyLevels(ENG, OPS, { out: "deliver", in: "off" })).toBe("done") })
+    expect(methods()).toEqual(["POST", "PUT"])
+    const put = writes()[1]
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ requester_crew_id: "c-eng", level: "read_write", expected_version: 1 })
+    expect(toast.success).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("Engineering → Ops: Deliver files")
+  })
+
+  it("does not write a file level a new direction already has", async () => {
+    stateful([])
+    const { result } = await mount()
+    await act(async () => { await result.current.applyLevels(ENG, OPS, { out: "work", in: "off" }) })
+    expect(methods()).toEqual(["POST"])
+  })
+
+  it("only sets the file level when the direction already exists", async () => {
+    stateful([row("c-eng", "c-ops", "unidirectional", "read", "none")])
+    const { result } = await mount()
+    await act(async () => { await result.current.applyLevels(ENG, OPS, { out: "deliver", in: "off" }) })
+    expect(methods()).toEqual(["PUT"])
+  })
+
+  it("adds the reverse direction to a one-way link as a two-way link, then its level", async () => {
+    stateful([row("c-eng", "c-ops", "unidirectional", "read", "none")])
+    const { result } = await mount()
+    await act(async () => { await result.current.applyLevels(ENG, OPS, { out: "view", in: "view" }) })
+    expect(methods()).toEqual(["POST", "PUT"])
+    expect(JSON.parse(String((writes()[0][1] as RequestInit).body)).direction).toBe("bidirectional")
+  })
+
+  it("turns a one-way link around by delete and create, then sets the new direction's level", async () => {
+    stateful([row("c-ops", "c-eng", "unidirectional", "read", "none")])
+    const { result } = await mount()
+    // Ops handed to Engineering; now Engineering hands to Ops, and Ops no longer does.
+    await act(async () => { await result.current.applyLevels(ENG, OPS, { out: "view", in: "off" }) })
+    expect(methods()).toEqual(["DELETE", "POST", "PUT"])
+  })
+
+  it("asks before removing the last direction and writes nothing yet", async () => {
+    stateful([row("c-eng", "c-ops", "unidirectional", "read", "none")])
+    const { result } = await mount()
+    await act(async () => { expect(await result.current.applyLevels(ENG, OPS, { out: "off", in: "off" })).toBe("asked") })
+    expect(writes()).toHaveLength(0)
+    expect(result.current.pendingUnlink).toEqual({ self: ENG, other: OPS })
+  })
+
+  it("keeps the other direction when one goes Off", async () => {
+    stateful([row("c-eng", "c-ops", "bidirectional", "read", "read_write")])
+    const { result } = await mount()
+    await act(async () => { await result.current.applyLevels(ENG, OPS, { out: "off", in: "deliver" }) })
+    // Delete and re-create one-way as Ops → Engineering; Ops' level was carried over, so no PUT.
+    expect(methods()).toEqual(["DELETE", "POST"])
+    expect(JSON.parse(String((writes()[1][1] as RequestInit).body))).toMatchObject({ from_crew_id: "c-ops", to_crew_id: "c-eng", direction: "unidirectional", forward_file_access: "read_write" })
+  })
+
+  it("reports a refused level change and reloads, so the control returns to what the server holds", async () => {
+    stateful([row("c-eng", "c-ops", "unidirectional", "read", "none")], true)
+    const { result } = await mount()
+    await act(async () => { expect(await result.current.applyLevels(ENG, OPS, { out: "deliver", in: "off" })).toBe("failed") })
+    expect(toast.error).toHaveBeenCalledWith("link changed", { duration: Infinity })
+    expect(result.current.connections[0].forward_file_access).toBe("read")
+  })
+})

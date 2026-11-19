@@ -8,7 +8,12 @@ import { readApiError } from "@/lib/api-error"
 import { useAbilities } from "@/hooks/use-abilities"
 import { isManagerTier } from "@/lib/permissions/tiers"
 
-import { connectionBetween, stateOf, type Connection, type Crew, type CrewAgent, type FileAccess, type PairState } from "./crew-links-model"
+import { LEVEL_LABEL, connectionBetween, pairLevels, planLevels, stateOf, type Connection, type Crew, type CrewAgent, type FileAccess, type Level, type PairState } from "./crew-links-model"
+
+/** `quiet`: the caller says one thing for the whole change instead of one toast per write. */
+interface WriteOptions { quiet?: boolean }
+
+export type ApplyResult = "done" | "asked" | "failed"
 
 const PAIR_WORDS: Record<PairState, string> = { none: "not linked", out: "sends work", in: "receives work", both: "both ways" }
 
@@ -89,7 +94,7 @@ export function useCrewLinks(workspaceId: string | null) {
   }, [workspaceId])
 
   /** Set the pair (self, other) to `next`, seen from `self`. */
-  const setPair = useCallback(async (self: Crew, other: Crew, next: PairState): Promise<boolean> => {
+  const setPair = useCallback(async (self: Crew, other: Crew, next: PairState, opts: WriteOptions = {}): Promise<boolean> => {
     if (!workspaceId || !canManage) return false
     const existing = connectionBetween(latest.current, self.id, other.id)
     const current = stateOf(existing, self.id)
@@ -160,7 +165,7 @@ export function useCrewLinks(workspaceId: string | null) {
         await reload()
         return false
       }
-      toast.success(`${self.name} → ${other.name}: ${PAIR_WORDS[next]}`)
+      if (!opts.quiet) toast.success(`${self.name} → ${other.name}: ${PAIR_WORDS[next]}`)
       await reload()
       return true
     } catch {
@@ -173,7 +178,7 @@ export function useCrewLinks(workspaceId: string | null) {
   }, [workspaceId, canManage, reload, setPendingUnlink])
 
   /** What `requester` may do with `target`'s shared files. */
-  const setFileAccess = useCallback(async (requester: Crew, target: Crew, level: FileAccess): Promise<boolean> => {
+  const setFileAccess = useCallback(async (requester: Crew, target: Crew, level: FileAccess, opts: WriteOptions = {}): Promise<boolean> => {
     if (!workspaceId || !canManage) return false
     const connection = connectionBetween(latest.current, requester.id, target.id)
     if (!connection?.access_version) {
@@ -188,7 +193,7 @@ export function useCrewLinks(workspaceId: string | null) {
         body: JSON.stringify({ requester_crew_id: requester.id, level, expected_version: connection.access_version }),
       })
       if (!res.ok) toast.error(await readApiError(res, "Could not update shared-file access"))
-      else toast.success("Shared-file access updated")
+      else if (!opts.quiet) toast.success("Shared-file access updated")
       await reload()
       return res.ok
     } catch {
@@ -198,6 +203,40 @@ export function useCrewLinks(workspaceId: string | null) {
       setPending(false)
     }
   }, [workspaceId, canManage, reload])
+
+  /**
+   * Move a pair to two ladders: `out` is what `self` may do with `other`,
+   * `in` the other way round. One write path for the crew page (one ladder
+   * moves, saved at once) and the link dialog (both, on Save): the pair is
+   * created, widened, turned or narrowed first, then each changed direction's
+   * file level is set against the version the server now holds. Removing the
+   * last direction only asks ("asked"); ConfirmDialog does the rest.
+   */
+  const applyLevels = useCallback(async (self: Crew, other: Crew, next: { out: Level; in: Level }): Promise<ApplyResult> => {
+    if (!workspaceId || !canManage) return "failed"
+    const before = pairLevels(connectionBetween(latest.current, self.id, other.id), self.id)
+    const plan = planLevels(before, next)
+    if (!plan.pair && plan.files.length === 0) return "done"
+    if (plan.unlink) {
+      await setPair(self, other, "none")
+      return "asked"
+    }
+    if (plan.pair && !(await setPair(self, other, plan.pair, { quiet: true }))) return "failed"
+    for (const { side, level } of plan.files) {
+      const [requester, target] = side === "out" ? [self, other] : [other, self]
+      const conn = connectionBetween(latest.current, self.id, other.id)
+      // Old servers send no file levels: the ladder was Off / Work only and there is nothing to set.
+      if (!conn || conn.forward_file_access === undefined) continue
+      const held = (conn.from_crew_id === requester.id ? conn.forward_file_access : conn.reverse_file_access) ?? "none"
+      if (held === level) continue
+      if (!(await setFileAccess(requester, target, level, { quiet: true }))) return "failed"
+    }
+    const said = (["out", "in"] as const)
+      .filter((side) => next[side] !== before[side])
+      .map((side) => `${side === "out" ? self.name : other.name} → ${side === "out" ? other.name : self.name}: ${LEVEL_LABEL[next[side]]}`)
+    toast.success(said.join(" · "))
+    return "done"
+  }, [workspaceId, canManage, setPair, setFileAccess])
 
   /**
    * Remove the link the page is asking about. Throws on a refusal, so the
@@ -236,7 +275,7 @@ export function useCrewLinks(workspaceId: string | null) {
   const cancelUnlink = useCallback(() => setPendingUnlink(null), [setPendingUnlink])
 
   return {
-    crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess,
+    crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess, applyLevels,
     pendingUnlink, confirmUnlink, cancelUnlink,
   }
 }
