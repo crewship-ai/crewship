@@ -24,12 +24,14 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/credhostgate"
+	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/keeper/health"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -378,6 +380,13 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 				envVar = "KEEPER_SECRET"
 			}
 		}
+	}
+
+	// Check the resolved slot, including stored assignment and derived names,
+	// before dedup, approval consumption, lease mutation or secret retrieval.
+	if credname.RuntimeReserved(envVar) {
+		replyError(w, http.StatusBadRequest, "credential uses a reserved runtime environment name")
+		return
 	}
 
 	// #1329: dedup chokepoint. Must run after credential resolution (so
@@ -889,10 +898,15 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The native request already arrived through this crew's live sidecar.
+	// Preserve image HOME/PATH/mise defaults; never copy the requesting shell's
+	// environment or other credentials. Every crew exec needs the same proxy
+	// baseline, including lower-case CLI variables and Node fetch opt-in.
+	execEnv := append(orchestrator.SidecarProxyEnv(), envVar+"="+plainValue)
 	execResult, execErr := h.container.Exec(execCtx, provider.ExecConfig{
 		ContainerID: execContainer,
 		Cmd:         []string{"sh", "-c", body.Command},
-		Env:         []string{envVar + "=" + plainValue},
+		Env:         execEnv,
 		User:        execUser,
 	})
 

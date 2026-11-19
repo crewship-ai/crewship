@@ -35,6 +35,23 @@ func (p *nativeKeeperRuntimeProxy) Exec(ctx context.Context, cfg provider.ExecCo
 	if cfg.User != "1001:1001" {
 		return nil, fmt.Errorf("fixture Keeper exec must use agent UID")
 	}
+	values := map[string]string{}
+	for _, assignment := range cfg.Env {
+		name, value, ok := strings.Cut(assignment, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid Keeper environment assignment")
+		}
+		if _, exists := values[name]; exists {
+			return nil, fmt.Errorf("duplicate Keeper environment name")
+		}
+		values[name] = value
+	}
+	for _, assignment := range orchestrator.SidecarProxyEnv() {
+		name, value, _ := strings.Cut(assignment, "=")
+		if values[name] != value {
+			return nil, fmt.Errorf("Keeper execution missing canonical proxy name %s", name)
+		}
+	}
 	p.calls.Add(1)
 	return p.ContainerProvider.Exec(ctx, cfg)
 }
@@ -113,7 +130,11 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hostURL := fmt.Sprintf("http://%s:%d", ctr.HostAddress(), hostPort)
 	runKey := internaltoken.DeriveAgentRunKey(master, ws, crew)
-	if err := orchestrator.NativeKeeperSidecarForTest(ctx, ctr, containerID, &orchestrator.SidecarIPCConfig{BaseURL: hostURL, Token: internaltoken.DeriveCrewToken(master, ws, crew), WorkspaceID: ws, CrewID: crew, AgentID: agent, AgentSlug: agent, ContainerID: containerID, AgentRunKey: runKey, RunID: "native-live"}, []orchestrator.SidecarCrewMember{{ID: agent, Slug: agent}, {ID: peer, Slug: peer}}, logger); err != nil {
+	// Only the owned LAN fixture host is admitted by this actual sidecar. The
+	// surrounding shared fixture container remains free-network; this qualifies
+	// proxy transport and sidecar policy, not kernel-level egress enforcement.
+	network := &orchestrator.SidecarNetworkPolicy{Mode: "restricted", AllowedDomains: []string{ctr.HostAddress()}, AllowPrivateEndpoints: true}
+	if err := orchestrator.NativeKeeperSidecarForTest(ctx, ctr, containerID, &orchestrator.SidecarIPCConfig{BaseURL: hostURL, Token: internaltoken.DeriveCrewToken(master, ws, crew), WorkspaceID: ws, CrewID: crew, AgentID: agent, AgentSlug: agent, ContainerID: containerID, AgentRunKey: runKey, RunID: "native-live"}, []orchestrator.SidecarCrewMember{{ID: agent, Slug: agent}, {ID: peer, Slug: peer}}, network, logger); err != nil {
 		t.Fatal("production crew sidecar startup failed", err)
 	}
 	call := func(capability, input string, args ...string) ([]byte, int) {
@@ -178,7 +199,8 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 		t.Fatal("boot agent read the peer's Keeper request")
 	}
 	require("", "credential", "unassign", created.ID, peer)
-	for _, command := range []string{"/opt/crew-tools/fixture-glab api user", "printenv GITLAB_TOKEN", "false"} {
+	proxyCommand := "printenv GITLAB_TOKEN HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy NODE_USE_ENV_PROXY"
+	for _, command := range []string{"/opt/crew-tools/fixture-glab api user", proxyCommand, "false"} {
 		out, code := call(capability, command, "keeper", "execute", created.ID, "--id", "--intent", intent, "--command-stdin")
 		want := 0
 		if command == "false" {
@@ -187,12 +209,23 @@ func nativeKeeperCrewScenario(t *testing.T, ctx context.Context, db *sql.DB, ctr
 		if code != want || decodeNativeKeeperCrewReply(out, code, &decision) != nil || decision.Decision != "ALLOW" || decision.ExitCode == nil || *decision.ExitCode != want {
 			t.Fatalf("native %s result incorrect: exit=%d", command, code)
 		}
-		if command == "printenv GITLAB_TOKEN" && !strings.Contains(decision.Output, "REDACTED") {
-			t.Fatal("redaction receipt missing from actual standard-tool output")
+		if command == proxyCommand {
+			if !strings.Contains(decision.Output, "REDACTED") || strings.Count(decision.Output, "http://127.0.0.1:9119") != 4 || strings.Count(decision.Output, "127.0.0.1,localhost,::1") != 2 {
+				t.Fatal("actual Keeper child lacks redaction or canonical proxy environment")
+			}
 		}
 	}
 	if authenticated.Load() != 1 || executor.calls.Load() != 3 {
 		t.Fatal("independent standard-tool authentication or execution receipts missing")
+	}
+	// Standard, unwrapped glab must reach the real sidecar policy, which rejects
+	// this reserved .invalid host before DNS/upstream access. A direct client's
+	// DNS/connect failure cannot supply the exact sidecar denial receipt.
+	blocked := "/opt/crew-tools/fixture-glab api http://keeper-native-denied.invalid/api/v4/user --hostname gitlab.com"
+	blockedOut, blockedCode := call(capability, blocked, "keeper", "execute", created.ID, "--id", "--intent", intent, "--command-stdin")
+	var blockedReply nativeCrewKeeperReply
+	if blockedCode == 0 || decodeNativeKeeperCrewReply(blockedOut, blockedCode, &blockedReply) != nil || blockedReply.Decision != "ALLOW" || blockedReply.ExitCode == nil || *blockedReply.ExitCode == 0 || !strings.Contains(blockedReply.Output, "domain not allowed") || authenticated.Load() != 1 || executor.calls.Load() != 4 {
+		t.Fatal("standard Keeper tool did not prove actual sidecar proxy denial")
 	}
 	before := executor.calls.Load()
 	// Distinct commands keep independent decisions out of the production

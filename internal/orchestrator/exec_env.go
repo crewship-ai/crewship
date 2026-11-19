@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
@@ -2004,14 +2005,7 @@ aliasesLoop:
 }
 
 func nativeAliasReserved(name string) bool {
-	if strings.HasPrefix(name, "CREWSHIP_") || strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "DYLD_") {
-		return true
-	}
-	switch name {
-	case "HOME", "PATH", "SHELL", "IFS", "ENV", "BASH_ENV", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY", "CODEX_HOME", "GEMINI_CLI_SYSTEM_SETTINGS_PATH", "OPENCODE_CONFIG_CONTENT", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GOOGLE_GEMINI_BASE_URL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "CODEX_API_KEY":
-		return true
-	}
-	return false
+	return credname.RuntimeReserved(name) || providerAuthSlot(name)
 }
 
 func providerAuthSlot(name string) bool {
