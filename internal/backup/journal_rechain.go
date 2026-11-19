@@ -103,26 +103,31 @@ type resignProvenance struct {
 //
 // All of these must hold:
 //   - the manifest says crew scope and names exactly one crew;
-//   - the dump carries rows only in tables DumpCrew selects (a workspace
-//     dump carries many more, and the payload cannot be edited without the
-//     key);
-//   - the dump holds exactly one crews row, the manifest's crew;
+//   - the encrypted dump names that crew (DBDump.CrewID, written by
+//     DumpCrew). A bundle older than that marker must instead carry rows
+//     only in DumpCrew's tables and exactly that one crews row;
 //   - it carries no compaction checkpoints (DumpCrew never selects them);
 //   - every chained journal row names that crew.
 func isCrewJournalExtract(manifest *Manifest, dump *DBDump) bool {
 	if manifest == nil || dump == nil || manifest.Scope != ScopeCrew || len(manifest.Contents.Crews) != 1 {
 		return false
 	}
-	for table, rows := range dump.Tables {
-		if len(rows) > 0 && !crewDumpTables[table] {
+	crewID := dump.CrewID
+	if crewID == "" {
+		// A bundle written before DumpCrew recorded its crew: fall back
+		// to the payload's shape. Only DumpCrew's tables carry rows, and
+		// the one crews row is the crew.
+		for table, rows := range dump.Tables {
+			if len(rows) > 0 && !crewDumpTables[table] {
+				return false
+			}
+		}
+		crews := dump.Tables["crews"]
+		if len(crews) != 1 {
 			return false
 		}
+		crewID = rowString(crews[0], "id")
 	}
-	crews := dump.Tables["crews"]
-	if len(crews) != 1 {
-		return false
-	}
-	crewID := rowString(crews[0], "id")
 	if crewID == "" || crewID != manifest.Contents.Crews[0].ID {
 		return false
 	}

@@ -186,3 +186,31 @@ func TestJournalChain_ManifestScopeFlipDoesNotLaunderGaps(t *testing.T) {
 		t.Errorf("notice claims a crew-extract renumbering for a relabelled workspace bundle: %s", payloadJSON)
 	}
 }
+
+// A custom crew plan that leaves out the agents category drops the crews row
+// from the dump (crews belongs to that category), so the crew cannot be read
+// off the tables. The crew marker DumpCrew writes into the encrypted dump must
+// still let the extract be renumbered.
+func TestJournalChain_CustomPlanCrewForkVerifies(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, db)
+	seedJournalChain(t, db, workspaceID, 6)
+
+	const passphrase = "crew-custom-plan-pass-123"
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	created, err := backup.CreateBackup(ctx, db, backup.CreateOptions{
+		Scope: backup.ScopeCrew, CrewID: "c_alpha", OutputDir: t.TempDir(),
+		Actor: actor, Passphrase: passphrase, Categories: []string{"journal"},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup crew journal-only: %v", err)
+	}
+	res, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+		Path: created.Path, Passphrase: passphrase, Actor: actor, AsCrew: "alpha-journal",
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup --as-crew: %v", err)
+	}
+	mustVerify(t, db, res.RestoredWorkspaceID, "journal-only crew copy (--as-crew)")
+}

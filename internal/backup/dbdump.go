@@ -401,6 +401,13 @@ type DBDump struct {
 	WorkspaceID string                      `json:"workspace_id"`
 	Tables      map[string][]map[string]any `json:"tables"`
 
+	// CrewID is set by DumpCrew only: the crew a crew-scope dump was cut
+	// for. It rides inside the encrypted payload, so unlike the manifest's
+	// scope it cannot be changed without the key, and unlike the crews
+	// table it survives a custom plan that leaves the agents category out.
+	// isCrewJournalExtract decides from it (#5578).
+	CrewID string `json:"crew_id,omitempty"`
+
 	// scope is DumpWorkspace's independent completeness derivation (#2009),
 	// computed in the dump's own snapshot. Not serialised into the payload:
 	// the create path records it in the manifest.
@@ -836,6 +843,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
+		CrewID:      crewID,
 		Tables:      map[string][]map[string]any{},
 	}
 	// Tables to include for crew scope — subset of workspace, filtered
