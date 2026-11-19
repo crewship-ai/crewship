@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
 )
@@ -151,6 +152,11 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 	required := []string{"/output", "/workspace", "/crew", "/home/agent", "/opt/crew-tools", managedlaunch.LauncherPath, "/usr/local/bin/entrypoint.sh"}
 	if p.cfg.agentCLIArtifact != nil {
 		required = append(required, agentCLIExecutable)
+		// Re-verify the staged bytes here too, like the launcher, so this
+		// attestation does not depend on qualifyAgentCLI having just run.
+		if runtimestage.VerifyAgentCLIArtifact(p.cfg.agentCLIArtifact) != nil {
+			return denied
+		}
 	}
 	for _, destination := range required {
 		if !seen[destination] {
@@ -159,6 +165,3 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 	}
 	return nil
 }
-
-// agentCLIExecutable is where createMounts binds the staged native agent CLI.
-const agentCLIExecutable = "/usr/local/bin/crewship"

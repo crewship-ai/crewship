@@ -15,8 +15,14 @@ import (
 )
 
 func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
-	for _, which := range []string{"valid", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate"} {
+	for _, which := range []string{"valid", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate", "agent-cli-tampered", "agent-cli-wrong-destination", "agent-cli-volume"} {
 		t.Run(which, func(t *testing.T) {
+			var artifact *runtimestage.AgentCLIArtifact
+			if strings.HasPrefix(which, "agent-cli") {
+				if artifact = stageTestAgentCLI(t); artifact == nil {
+					return // compiled-out platform: no agent CLI staging
+				}
+			}
 			root := t.TempDir()
 			crew := "outer-crew"
 			slug := "fixture"
@@ -119,21 +125,34 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 			case "volume-driver":
 				volumes["crew-volume"]["Driver"] = "foreign"
 			case "agent-cli":
-				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
-				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false})
 			case "agent-cli-unconfigured":
-				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false})
 			case "agent-cli-missing":
-				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				p.cfg.agentCLIArtifact = artifact
 			case "agent-cli-rw":
-				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
-				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": true})
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": true})
 			case "agent-cli-source":
-				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				p.cfg.agentCLIArtifact = artifact
 				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/tmp/forged", "Destination": "/usr/local/bin/crewship", "RW": false})
 			case "agent-cli-duplicate":
-				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
-				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false}, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false}, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false})
+			case "agent-cli-tampered":
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false})
+				if err := os.Chmod(filepath.Dir(artifact.Path), 0755); err != nil {
+					t.Fatal(err)
+				}
+			case "agent-cli-wrong-destination":
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false}, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship2", "RW": false})
+			case "agent-cli-volume":
+				p.cfg.agentCLIArtifact = artifact
+				mounts = append(mounts, map[string]any{"Type": "volume", "Name": "shadow", "Destination": "/usr/local/bin/crewship", "RW": false})
+				volumes["shadow"] = map[string]any{"Name": "shadow", "Driver": "local"}
 			case "wrong-image":
 				metadata["Image"] = "sha256:" + strings.Repeat("b", 64)
 			case "not-running":
