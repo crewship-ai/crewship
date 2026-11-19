@@ -22,10 +22,11 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 		// Crew is the identity of the crew-level sidecar a routine script
 		// step runs against (#2761): it has no agent. Accepted only when the
 		// caller's internal token is bound to that same crew.
-		Crew       string `json:"crew_id"`
-		Credential string `json:"credential_id"`
-		Provider   string `json:"provider"`
-		Run        string `json:"run_id"`
+		Crew           string `json:"crew_id"`
+		Credential     string `json:"credential_id"`
+		Provider       string `json:"provider"`
+		Run            string `json:"run_id"`
+		SourceRevision string `json:"source_revision"`
 	}
 	req.Body = http.MaxBytesReader(w, req.Body, 4096)
 	dec := json.NewDecoder(req.Body)
@@ -89,6 +90,27 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
      OR EXISTS (SELECT 1 FROM credential_bindings cb WHERE cb.credential_id=c.id AND cb.workspace_id=c.workspace_id
       AND (cb.scope='WORKSPACE' OR (cb.scope='CREW' AND cb.crew_id=?) OR (cb.scope='AGENT' AND cb.agent_id=?))))))`,
 			body.Credential, ws, body.Provider, body.Agent, time.Now().UTC().Format(time.RFC3339), crew, crew, body.Agent).Scan(&kind)
+		if err == sql.ErrNoRows && body.Provider == sidecarOpenAICompatProvider {
+			// ENDPOINT_URL is projected as OPENAI_COMPAT only in the proxy
+			// snapshot. Its stored provider/type stay unchanged. Re-resolve the
+			// selected source in this SAME transaction: a stale sidecar cannot
+			// authorize a removed grant, changed selection or foreign crew.
+			delivered, _, loadErr := loadDeliveredCredentialSnapshot(req.Context(), tx, body.Agent)
+			if loadErr == nil {
+				assigned := resolvedDeliveredCredentialEntries(r.logger, body.Agent, delivered)
+				ep := resolveLocalModelEndpoint(req.Context(), tx, r.logger, body.Agent, ws, assigned)
+				collision := false
+				for _, c := range assigned {
+					if providerNeedsEndpointValue(c.Provider) {
+						collision = true
+						break
+					}
+				}
+				if !collision && ep.CredentialID == body.Credential && body.SourceRevision != "" && body.SourceRevision == ep.SourceRevision && ep.BaseURL != "" && (ep.APIKey != "" || len(ep.Headers) > 0) {
+					kind, err = CredTypeEndpointURL, nil
+				}
+			}
+		}
 		if err != nil {
 			replyError(w, http.StatusForbidden, "credential scope unavailable")
 			return

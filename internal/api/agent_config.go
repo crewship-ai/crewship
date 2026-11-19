@@ -612,21 +612,33 @@ func (h *InternalHandler) appendProxiedEndpointCredential(creds []mcpCredEntry, 
 		}
 		return creds, false
 	}
-	return append(creds, mcpCredEntry{
-		// A synthetic id: the entry is derived from a credential the sidecar is
-		// not told about, and a blank id would collide in the CredStore's own
-		// bookkeeping (and in the scrubber's per-credential pattern names).
-		ID:       "local-model-endpoint",
-		EnvVar:   "",
-		Value:    ep.APIKey,
-		Type:     string(CredTypeAPIKey),
-		Provider: sidecarOpenAICompatProvider,
-		BaseURL:  ep.BaseURL,
-		Headers:  ep.Headers,
+	// Replace the selected source's raw snapshot. Keeping both entries under
+	// one real ID would collide in revocation/grace bookkeeping, and a legal
+	// source slot such as OPENAI_API_KEY could expose its JSON in agent env.
+	projected := make([]mcpCredEntry, 0, len(creds)+1)
+	for _, c := range creds {
+		if c.ID == ep.CredentialID && c.Type == CredTypeEndpointURL {
+			continue
+		}
+		projected = append(projected, c)
+	}
+	return append(projected, mcpCredEntry{
+		// This is a proxy-only projection of the real Vault row, not another
+		// credential. Admission, audit and cost all use this source identity.
+		ID:             ep.CredentialID,
+		SourceRevision: ep.SourceRevision,
+		EnvVar:         "",
+		Value:          ep.APIKey,
+		Type:           string(CredTypeAPIKey),
+		Provider:       sidecarOpenAICompatProvider,
+		BaseURL:        ep.BaseURL,
+		Headers:        ep.Headers,
 		// #2052: the derived entry is only as crew-wide as the credential it
 		// came from. A per-agent ENDPOINT_URL override carries that member's
 		// grantees; the workspace default carries none and stays crew-wide.
-		AgentIDs: ep.AgentIDs,
+		AgentIDs:       ep.AgentIDs,
+		AgentGrants:    ep.AgentGrants,
+		LeaseExpiresAt: ep.LeaseExpiresAt,
 	}), true
 }
 
@@ -867,7 +879,12 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 	}
 
 	logDeliveredCredentialNotices(h.logger, agentID, delivered, slotNotices)
+	return resolvedDeliveredCredentialEntries(h.logger, agentID, delivered), nil
+}
 
+// The runtime and transactional proxy admission must apply the same decoding,
+// sentinel and endpoint-shape rules to the already-authorized snapshot.
+func resolvedDeliveredCredentialEntries(logger *slog.Logger, agentID string, delivered []deliveredCredential) []mcpCredEntry {
 	creds := []mcpCredEntry{}
 	for _, d := range delivered {
 		ce := mcpCredEntry{
@@ -886,13 +903,13 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		// Handle-only (#2376): the entry travels so the [KEEPER] block can
 		// name it; the value is never decrypted here, Keeper on or off.
 		if d.HandleOnly {
-			logHandleOnlyWithheld(h.logger, agentID, d.EnvVar)
+			logHandleOnlyWithheld(logger, agentID, d.EnvVar)
 			creds = append(creds, ce)
 			continue
 		}
 		dec, err := decryptCredential(d.EncryptedValue)
 		if err != nil {
-			h.logger.Error("decrypt credential for resolve", "id", ce.ID, "error", err)
+			logger.Error("decrypt credential for resolve", "id", ce.ID, "error", err)
 			continue
 		}
 		// Defence in depth: even with the SQL filter above, a future
@@ -903,6 +920,9 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			continue
 		}
 		ce.Value = dec
+		if d.Type == CredTypeEndpointURL {
+			ce.SourceRevision = endpointSourceRevision(d.EncryptedValue)
+		}
 
 		// A provider whose upstream lives in the credential (OPENAI_COMPAT)
 		// stores {baseURL,apiKey,headers} as one object. Split it here, at the
@@ -917,7 +937,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 				// somehow got stored malformed is refused here rather than
 				// delivered blank, which would boot an agent pointing at
 				// nothing and fail at the first call.
-				h.logger.Error("endpoint credential rejected at delivery",
+				logger.Error("endpoint credential rejected at delivery",
 					"id", ce.ID, "provider", d.Provider, "error", err)
 				continue
 			}
@@ -937,7 +957,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		// the wrong thing, which costs more to diagnose than its absence.
 		fields, err := decryptDeliveredFields(d, decryptCredential)
 		if err != nil {
-			h.logger.Error("decrypt credential field for resolve", "id", ce.ID, "error", err)
+			logger.Error("decrypt credential field for resolve", "id", ce.ID, "error", err)
 			continue
 		}
 		for _, f := range fields {
@@ -947,7 +967,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		}
 		creds = append(creds, ce)
 	}
-	return creds, nil
+	return creds
 }
 
 // dropHostBoundCreds removes every entry whose credential is host-bound and not

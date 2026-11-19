@@ -293,10 +293,11 @@ type MCPCredential struct {
 // Credential holds a decrypted credential ready for injection into a container
 // environment, with priority ordering for failover selection.
 type Credential struct {
-	ID         string `json:"id,omitempty"`
-	EnvVarName string `json:"env_var"`
-	PlainValue string `json:"value"`
-	Priority   int    `json:"priority"`
+	SourceRevision string `json:"source_revision,omitempty"`
+	ID             string `json:"id,omitempty"`
+	EnvVarName     string `json:"env_var"`
+	PlainValue     string `json:"value"`
+	Priority       int    `json:"priority"`
 	// Type is one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2,
 	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.

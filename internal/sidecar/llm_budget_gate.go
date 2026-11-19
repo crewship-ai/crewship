@@ -92,7 +92,11 @@ func (p *Proxy) admitLLM(w http.ResponseWriter, r *http.Request, actor string, c
 	if cred != nil {
 		id = cred.ID
 	}
-	if err := p.onLLMAdmission(r.Context(), actor, id, provider); err != nil {
+	ctx := r.Context()
+	if cred != nil && cred.SourceRevision != "" {
+		ctx = context.WithValue(ctx, endpointSourceRevisionKey{}, cred.SourceRevision)
+	}
+	if err := p.onLLMAdmission(ctx, actor, id, provider); err != nil {
 		status := http.StatusForbidden
 		msg := errLLMBudgetAdmission.Error()
 		var refused *llmAdmissionError
@@ -107,6 +111,8 @@ func (p *Proxy) admitLLM(w http.ResponseWriter, r *http.Request, actor string, c
 	}
 	return true
 }
+
+type endpointSourceRevisionKey struct{}
 
 func (s *Server) buildLLMAdmission() func(context.Context, string, string, string) error {
 	return func(ctx context.Context, actor, credential, provider string) error {
@@ -123,12 +129,14 @@ func (s *Server) buildLLMAdmission() func(context.Context, string, string, strin
 			// Only the identity authenticated for this request may attribute
 			// admission to a run. A shared sidecar's boot run is not its caller.
 			run, _ := ctx.Value(authenticatedLLMRunKey{}).(string)
+			revision, _ := ctx.Value(endpointSourceRevisionKey{}).(string)
 			body, err = json.Marshal(struct {
-				Agent      string `json:"agent_id"`
-				Credential string `json:"credential_id"`
-				Provider   string `json:"provider"`
-				Run        string `json:"run_id,omitempty"`
-			}{actor, credential, provider, run})
+				Agent          string `json:"agent_id"`
+				Credential     string `json:"credential_id"`
+				Provider       string `json:"provider"`
+				Run            string `json:"run_id,omitempty"`
+				SourceRevision string `json:"source_revision,omitempty"`
+			}{actor, credential, provider, run, revision})
 		case s.ipc.CrewOnly && s.ipc.CrewID != "":
 			// The crew-level sidecar of a routine script step (#2761) has no
 			// agent; it asks under the crew its token is bound to. Only a

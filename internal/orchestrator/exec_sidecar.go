@@ -1293,10 +1293,11 @@ func startSidecar(
 // boot payload straight into that type, so a tag that drifts here does not fail
 // to compile, it silently delivers a credential with a missing field.
 type sidecarCred struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Token    string `json:"token"`
-	Priority int    `json:"priority"`
+	SourceRevision string `json:"source_revision,omitempty"`
+	ID             string `json:"id"`
+	Provider       string `json:"provider"`
+	Token          string `json:"token"`
+	Priority       int    `json:"priority"`
 	// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
 	// so a leased provider key stops being served when its TTL lapses,
 	// instead of living as long as the container.
@@ -1459,6 +1460,7 @@ func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
 			lease = ""
 		} // Each agent's own deadline is authoritative.
 		sc = append(sc, sidecarCred{
+			SourceRevision:  c.SourceRevision,
 			ID:              c.ID,
 			Provider:        prov,
 			Token:           c.PlainValue,

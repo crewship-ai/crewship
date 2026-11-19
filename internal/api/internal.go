@@ -172,11 +172,12 @@ func rightmostUntrustedXFF(xffHeaders []string, trusted []*net.IPNet) (net.IP, b
 }
 
 type mcpCredEntry struct {
-	ID       string `json:"id"`
-	EnvVar   string `json:"env_var"`
-	Value    string `json:"value"`
-	Priority int    `json:"priority"`
-	Type     string `json:"type"`
+	SourceRevision string `json:"source_revision,omitempty"`
+	ID             string `json:"id"`
+	EnvVar         string `json:"env_var"`
+	Value          string `json:"value"`
+	Priority       int    `json:"priority"`
+	Type           string `json:"type"`
 	// True only for the stored OAUTH2 access token resolved through a grant
 	// or binding. Explicit MCP references and synthetic companions leave it
 	// false, even when their type is also OAUTH2.

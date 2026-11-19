@@ -1013,7 +1013,11 @@ func (p *Proxy) forwardWithGraceRetry(r, outReq *http.Request, spec llmroute.Spe
 	}
 
 	if p.onLLMAdmission != nil {
-		if err := p.onLLMAdmission(r.Context(), actorID, cred.ID, spec.ID); err != nil {
+		ctx := r.Context()
+		if cred.SourceRevision != "" {
+			ctx = context.WithValue(ctx, endpointSourceRevisionKey{}, cred.SourceRevision)
+		}
+		if err := p.onLLMAdmission(ctx, actorID, cred.ID, spec.ID); err != nil {
 			return resp, false, nil
 		}
 	}

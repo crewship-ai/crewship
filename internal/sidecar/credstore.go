@@ -37,10 +37,11 @@ const (
 
 // Credential holds a decrypted credential for injection into outbound requests.
 type Credential struct {
-	ID       string       `json:"id"`
-	Provider ProviderType `json:"provider"`
-	Token    string       `json:"token"`
-	Priority int          `json:"priority"`
+	SourceRevision string       `json:"source_revision,omitempty"`
+	ID             string       `json:"id"`
+	Provider       ProviderType `json:"provider"`
+	Token          string       `json:"token"`
+	Priority       int          `json:"priority"`
 	// LeaseExpiresAt is the grant's credential-lease deadline in RFC3339 UTC,
 	// carried in the boot payload from the server-side grant that delivered this
 	// credential (#1373). Empty means a STANDING grant with no expiry — the
