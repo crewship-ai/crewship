@@ -53,11 +53,21 @@ func TestChatDecisionWaitpointIdentityNeverGrantsCallbackAuthority(t *testing.T)
 	if rr.Code != 409 || d.read(t).Decision.Status != "pending" {
 		t.Fatalf("waitpoint id grants callback authority %d %s", rr.Code, rr.Body.String())
 	}
-	// … only a minted secret is, and this card has a typed decision form,
-	// which the callback cannot complete, so none can be minted.
+	// … only a minted secret is, and it never reaches the card.
 	store := d.r.PipelinesHandler.waitpoints.(*pipeline.SQLWaitpointStore)
-	if _, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token); !errors.Is(err, pipeline.ErrCallbackNotOffered) {
-		t.Fatalf("callback minted for a typed decision: %v", err)
+	secret, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if encoded, _ := json.Marshal(d.read(t)); secret == d.id || strings.Contains(string(encoded), secret) {
+		t.Fatal("the callback secret reached the chat card")
+	}
+	req = httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("token", secret)
+	rr = httptest.NewRecorder()
+	d.r.PipelinesHandler.CompleteWaitpointToken(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("minted callback broken %d %s", rr.Code, rr.Body.String())
 	}
 }
 

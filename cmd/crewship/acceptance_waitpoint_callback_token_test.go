@@ -60,9 +60,11 @@ func TestAcceptance_WaitpointCallbackURL_MintedOnceAndHashed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("callback-url: %v\n%s", err, out)
 		}
+		// The printed URL is built from the instance URL the server derives
+		// for the request; the test talks to the httptest listener directly.
 		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(line, srvURL+"/api/v1/waitpoint-tokens/wpt_") {
-				return strings.TrimSpace(line)
+			if i := strings.Index(line, "/api/v1/waitpoint-tokens/wpt_"); i >= 0 && strings.HasPrefix(line, "http") {
+				return srvURL + strings.TrimSpace(line[i:])
 			}
 		}
 		t.Fatalf("callback-url printed no URL:\n%s", out)

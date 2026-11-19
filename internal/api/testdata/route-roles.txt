@@ -461,6 +461,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/save roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/test_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run roleCreate
