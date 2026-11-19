@@ -527,6 +527,8 @@ crewship backup restore old-bundle.tar.zst
 #   restore could not report them individually.
 ```
 
+A generated column on the target (for example `journal_entries.run_id`) is not counted: the bundle carries its value because `SELECT *` returns it, but SQLite recomputes it on insert, so nothing is lost (#5612).
+
 Why it is worth a warning rather than a shrug: dropping a column is harmless when the row still makes sense without it, and it is *silent data loss* when it does not. If the dropped column was part of the row's primary key or a `NOT NULL`, the insert violates a constraint, `INSERT OR IGNORE` discards the whole row, and nothing errors — the bundle verifies, the restore reports success, and the rows are simply not there. `rows_inserted` cannot show you the difference, because a row that never landed is not counted anywhere.
 
 The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own in general: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later. `issue_counters` (below) is the one table this restore *does* know how to repair, because #2034 taught it that table's specific rename.

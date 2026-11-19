@@ -1,0 +1,1 @@
+- **A restore no longer reports the generated `journal_entries.run_id` as a dropped column.** SQLite recomputes generated columns on insert, so the warning that every workspace restore printed about it pointed at schema skew that did not exist (#5612).
