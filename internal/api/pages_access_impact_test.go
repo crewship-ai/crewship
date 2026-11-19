@@ -71,7 +71,7 @@ func TestPageAccessRejectsStaleAdministratorContext(t *testing.T) {
 // access report and the impact preview share this decoration, so both must say
 // what the server enforces (artifact_admin_read_test.go).
 func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
-	rec := &pageRecord{PrivateAudience: true, OwnerUserID: "author"}
+	rec := &pageRecord{PrivateAudience: true, OwnerUserID: "author", NativeCraftApplication: "wordcraft"}
 	ws := &pageAccessWorkspace{Members: []pageAccessMember{
 		{ID: "author", Role: "MEMBER"},
 		{ID: "admin", Role: "ADMIN"},
@@ -99,16 +99,27 @@ func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
 		}
 	}
 
-	// A private workbook or Project admits its owner alone
-	// (gridcraft_access.go, pages_artifact_project.go): the OWNER reads.
-	for name, typed := range map[string]*pageRecord{
-		"workbook": {PrivateAudience: true, OwnerUserID: "author", HasWorkbook: true},
-		"project":  {PrivateAudience: true, OwnerUserID: "author", HasProject: true},
+	// The workspace OWNER's Edit follows the type's real write path. Records
+	// are shaped the way each creation path leaves them: an artifact Project
+	// carries only its version head, so it has none of these flags.
+	for name, tc := range map[string]struct {
+		rec  *pageRecord
+		edit bool
+	}{
+		"native sheet":           {&pageRecord{NativeCraftApplication: "gridcraft"}, true},
+		"docs document":          {&pageRecord{HasDocument: true}, true},
+		"collaboration document": {&pageRecord{HasCollaboration: true}, true},
+		"artifact project":       {&pageRecord{ArtifactContentType: "artifact_project"}, false},
+		"artifact slides":        {&pageRecord{ArtifactContentType: "artifact_slides"}, false},
+		"gridcraft workbook":     {&pageRecord{HasWorkbook: true}, false},
+		"mooring document":       {&pageRecord{HasMooring: true}, false},
+		"schema-1 slides":        {&pageRecord{HasSlides: true, SlidesSchema: 1}, false},
 	} {
+		tc.rec.PrivateAudience, tc.rec.OwnerUserID = true, "author"
 		owner := []pageAccessSubjectWire{{SubjectType: pageSubjectUser, SubjectID: "owner", Paths: []string{pageReachRole}}}
-		decoratePageAccess(owner, typed, ws, nil)
-		if owner[0].EffectivePermissions != (pageAccessPermissions{Read: true}) {
-			t.Errorf("private %s OWNER: %+v", name, owner[0].EffectivePermissions)
+		decoratePageAccess(owner, tc.rec, ws, nil)
+		if want := (pageAccessPermissions{Read: true, Edit: tc.edit}); owner[0].EffectivePermissions != want {
+			t.Errorf("private %s OWNER: %+v, want %+v", name, owner[0].EffectivePermissions, want)
 		}
 	}
 
