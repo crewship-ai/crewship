@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -14,8 +15,12 @@ func (sourceClassificationContext) Value(any) any { return nil }
 // Only validated direct-human TEXT sources acquire durable classification. The
 // existing source row remains authoritative; this marker prevents an absent
 // ephemeral source from making retained projections legacy-public after restore.
-func (h *QueryHandler) insertEscalationSource(ctx context.Context, workspace, id string, classified bool, query string, args []any) error {
-	if !classified {
+//
+// A routine step's escalation records its step effect in the same transaction
+// as the row (#5332); response is what the handler will answer.
+func (h *QueryHandler) insertEscalationSource(ctx context.Context, workspace, id string, classified bool, response any, query string, args []any) error {
+	stepEffect := routineStepEffectFrom(ctx) != nil
+	if !classified && !stepEffect {
 		_, err := h.db.ExecContext(ctx, query, args...)
 		return err
 	}
@@ -26,6 +31,12 @@ func (h *QueryHandler) insertEscalationSource(ctx context.Context, workspace, id
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, query, args...); err != nil {
 		return err
+	}
+	if err = recordRoutineStepEffectTx(ctx, tx, http.StatusCreated, response); err != nil {
+		return err
+	}
+	if !classified {
+		return tx.Commit()
 	}
 	appendTx := journal.AppendTx
 	_, unconfigured := h.journal.(noopEmitter)
