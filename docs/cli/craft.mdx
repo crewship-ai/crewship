@@ -123,7 +123,7 @@ crewship craft versions @PAGE_ID --format json
   "truncated": false,
   "versions": [
     {"version": "3", "createdAt": "2026-10-31T10:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "restoredFrom": "1", "current": true},
-    {"version": "2", "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}, "current": false},
+    {"version": "2", "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "proposal": {"id": "ncp_0123456789abcdef01234567", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}}, "current": false},
     {"version": "1", "createdAt": "2026-10-31T08:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "current": false}
   ]
 }
@@ -132,6 +132,12 @@ crewship craft versions @PAGE_ID --format json
 Versions are newest first; `current` marks the head. At most 200 entries are
 returned; `truncated: true` means older versions exist and remain restorable.
 Entries carry no document bytes.
+
+A version saved by accepting an agent proposal carries `proposal` with the
+proposal's `id` and its agent `author`. The entry's own `author` is the person
+who accepted it: the approver and the writer. In the example, version 2 is
+Pavel's accepted save of the Drafting Agent's proposal. `crewship craft version`
+returns the same `proposal` object for that version.
 
 ### Read one saved version
 
@@ -198,6 +204,17 @@ lease and that the document is still at the proposal's base version, all in one
 transaction. If the document changed meanwhile, the proposal becomes `stale` and
 nothing is applied. `reject-proposal` needs write rights but no lease. Decisions
 are final.
+
+A decided proposal names who decided it and when: `decided_by` (`actor_id`,
+`display_name`, `kind`) and `decided_at`. `kind` is `human` for the person who
+accepted or rejected it, and also for the person whose `accept-proposal` found
+the document changed and recorded it `stale`. `kind` is `system`
+(`system:superseded`) only when a newer agent proposal marked an open proposal
+stale before anyone decided. An open proposal has neither field.
+
+```json
+{"id": "ncp_0123456789abcdef01234567", "author": {"actor_id": "agent:AGENT_ID", "display_name": "Drafting Agent", "kind": "agent", "agent_id": "AGENT_ID"}, "base_version": 1, "summary": "Insert greeting", "created_at": "2026-10-31T08:30:00Z", "state": "accepted", "result_version": 2, "decided_by": {"actor_id": "user:USER_ID", "display_name": "Pavel", "kind": "human"}, "decided_at": "2026-10-31T09:00:00Z"}
+```
 
 Use the actual generation returned by the server; it is a canonical positive
 int64 decimal **string**. Handoff targets an opaque server-issued request ID,

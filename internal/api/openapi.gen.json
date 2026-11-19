@@ -16432,6 +16432,31 @@
         ],
         "type": "object"
       },
+      "NativeCraftDecider": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "Recorded decider, `user:\u003cid\u003e` or `system:superseded`.",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "system"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "display_name",
+          "kind"
+        ],
+        "type": "object"
+      },
       "NativeCraftDocument": {
         "additionalProperties": false,
         "properties": {
@@ -16799,6 +16824,19 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "decided_at": {
+            "description": "When the proposal was decided. Absent while open.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftDecider"
+              }
+            ],
+            "description": "Who decided a non-open proposal. kind human: the person who accepted or rejected it, or whose accept found the document content changed and recorded it stale. kind system (system:superseded): only when a newer proposal's sweep marked it stale before anyone decided. Absent while open."
           },
           "id": {
             "pattern": "^ncp_[a-f0-9]{24}$",
@@ -17437,6 +17475,14 @@
             "description": "True only for the newest version, the one the editor opens.",
             "type": "boolean"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17527,6 +17573,14 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17580,6 +17634,23 @@
           "currentVersion",
           "versions",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "NativeCraftVersionProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/NativeCraftVersionAuthor"
+          },
+          "id": {
+            "pattern": "^ncp_[a-f0-9]{24}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author"
         ],
         "type": "object"
       },
