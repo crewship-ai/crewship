@@ -33,6 +33,7 @@ vi.mock("@/lib/store", () => ({
 }))
 
 vi.mock("@/components/features/inbox/inbox-bell", () => ({ InboxBell: () => null }))
+vi.mock("@/components/layout/crewship-brand", () => ({ CrewshipMenu: () => null }))
 vi.mock("@/components/features/activity/activity-bell", () => ({ ActivityBell: () => null }))
 vi.mock("@/components/command-palette", () => ({ CommandPalette: () => null }))
 vi.mock("../app-toolbar-provisioning", () => ({ ProvisioningBadge: () => null }))

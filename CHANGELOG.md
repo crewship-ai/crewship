@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **The Crewship sail moved to the top bar and the update banner is gone (#5552).** "Crewship X is available" no longer takes a row under the top bar of every page. The sail now sits after Activity and Inbox on every page and on phones, in the same lit blue tile it had at the foot of the rail. A newer release puts a dot on it; its panel names the version, links the release notes, can mark that version as seen, and keeps Documentation, What's new, Report a problem and About Crewship. The rail ends with its navigation.
+
 - **Credential tests cannot send file/login material to API-token probes (#5466).** Probe dispatch now checks the credential type, preserves metered provider-login and dedicated Claude OAuth checks, refuses unknown types, and reports unsupported checks without an authentication-success audit claim. Native CLI create/update apply the same policy.
 - **Tmux runs use their own native credential environment (#5467).** Existing server-only token/path variables are excluded from the target CLI, image PATH/mise settings are preserved, and setup payloads move from process arguments to stdin. Run-private files are created with restricted permissions and removed after the run settles.
 

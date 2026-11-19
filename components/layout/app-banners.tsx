@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button"
 
 /**
  * App banners (Harbor 2): the state of the whole app, under the top bar.
- * There are only three kinds — the realtime connection, the container runtime
- * and an available update — and at most ONE shows at a time. A page's own
+ * There are only two kinds — the realtime connection and the container
+ * runtime — and at most ONE shows at a time. (An available update was the
+ * third until #5552 moved it onto the Crewship sail in the top bar.) A page's own
  * offline banner (`OfflineBanner` in page-state.tsx) joins the same queue, so
  * "Reconnecting…" is never said twice on one screen.
  *
@@ -18,10 +19,10 @@ import { Button } from "@/components/ui/button"
  * renders only while it holds it. The highest priority wins; two claims of
  * the same priority keep the order they were made in.
  */
-export type AppBannerKind = "realtime" | "offline" | "runtime" | "update"
+export type AppBannerKind = "realtime" | "offline" | "runtime"
 
 /**
- * Realtime > a page's offline banner > Runtime > Update. The app's realtime
+ * Realtime > a page's offline banner > Runtime. The app's realtime
  * banner outranks the page's (and the chat's reconnect banner, which claims
  * the "offline" kind): they say the same thing, so the app's one speaks.
  */
@@ -29,7 +30,6 @@ export const APP_BANNER_PRIORITY: Record<AppBannerKind, number> = {
   realtime: 4,
   offline: 3,
   runtime: 2,
-  update: 1,
 }
 
 interface Claim {
