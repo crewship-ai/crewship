@@ -249,17 +249,11 @@ func (h *OnboardingHandler) onboardingTarget(ctx context.Context, userID string)
 	return t, err
 }
 
-// replyNoOnboardingWorkspace answers a write route whose caller has no
-// workspace it may onboard: 400 when they belong to no workspace at all (the
-// pre-#4876 answer), 403 when they only belong to workspaces someone else
-// set up.
-func replyNoOnboardingWorkspace(w http.ResponseWriter, t onboardingTargetWorkspace) {
-	if t.memberships == 0 {
-		replyError(w, http.StatusBadRequest, "No workspace found for user")
-		return
-	}
-	replyError(w, http.StatusForbidden, "Onboarding sets up a workspace you own; this account only belongs to workspaces someone else set up")
-}
+// errOnboardingNotOwner is the 403 a write route answers when the caller
+// only belongs to workspaces someone else set up (#4876). A caller with no
+// workspace at all keeps the pre-#4876 400. Both are written inline at each
+// call site so the OpenAPI generator's handler-body scan sees them.
+const errOnboardingNotOwner = "Onboarding sets up a workspace you own; this account only belongs to workspaces someone else set up"
 
 // workspaceHasCredential reports whether the workspace holds at least one
 // active model credential the setup agent can actually be assigned. A stale,
@@ -536,8 +530,12 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := target.workspaceID
 	ownerOnly := strings.TrimSpace(req.AppliedProposalID) != "" || strings.TrimSpace(req.CrewTemplateSlug) != ""
+	if target.memberships == 0 {
+		replyError(w, http.StatusBadRequest, "No workspace found for user")
+		return
+	}
 	if workspaceID == "" || (ownerOnly && target.role != "OWNER") {
-		replyNoOnboardingWorkspace(w, target)
+		replyError(w, http.StatusForbidden, errOnboardingNotOwner)
 		return
 	}
 

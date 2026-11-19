@@ -87,8 +87,12 @@ func (h *OnboardingHandler) StartSetupAgent(w http.ResponseWriter, r *http.Reque
 		replyInternalError(w, h.logger, "start setup agent: resolve workspace", err)
 		return
 	}
+	if target.memberships == 0 {
+		replyError(w, http.StatusBadRequest, "No workspace found for user")
+		return
+	}
 	if target.role != "OWNER" {
-		replyNoOnboardingWorkspace(w, target)
+		replyError(w, http.StatusForbidden, errOnboardingNotOwner)
 		return
 	}
 	wsID := target.workspaceID
