@@ -26,6 +26,7 @@ Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/a
 | GET | [`/api/v1/crews/{crewId}/provision`](#provision-status) | Get crew provision status |
 | POST | [`/api/v1/crews/{crewId}/provision`](#trigger-provision) | Trigger a provision |
 | GET | [`/api/v1/crews/{crewId}/provision/revisions`](#environment-revisions) | Read bounded immutable build history |
+| POST | [`/api/v1/crews/{crewId}/provision/lock-resolve`](#native-mise-lock-proposal) | Propose a lock using the crew's owned immutable image |
 | POST | [`/api/v1/crews/{crewId}/rebuild`](#rebuild) | Rebuild without reusing the build cache |
 | POST | [`/api/v1/crews/{crewId}/restart-agents`](#restart-agents) | Recreate the runtime container without rebuilding |
 | GET | [`/api/v1/crews/{crewId}/image-status`](#image-status) | Report whether the running container is behind its image tag |
@@ -34,6 +35,50 @@ Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/a
 | DELETE | [`/api/v1/cache/images/{tag}`](#delete-cached-image) | Delete a cached image |
 
 ---
+
+## Native mise lock proposal
+
+```
+POST /api/v1/crews/{crewId}/provision/lock-resolve
+```
+
+**Auth:** OWNER/ADMIN with `crews:write` and original authenticated human
+session or CLI credential. Internal, project-agent and run contexts are denied.
+The selected image must be an immutable cached image associated with a saved
+environment revision of this live crew in the current workspace. The provider
+also verifies installation ownership and crew-image provenance labels.
+
+**Request:** `crewId` path parameter and one JSON object, maximum 4 MiB:
+
+```json
+{"config":{"tools":{"node":"22"}},"bump":false}
+```
+
+Only `config.tools`, optional `config.lock`, and optional `bump` are accepted.
+`tools` contains 1–20 validated selectors. A lock is the complete native bundle
+`{"schema_version":1,"files":{"mise.lock":"..."}}`, optionally including
+validated relative `.mise/locks/` auxiliary paths. Limits are 128 files, 128 KiB
+per UTF-8 file and 512 KiB total. Environment values, tasks and caller-selected
+image IDs are rejected, never forwarded. The ordinary CLI command is
+`crewship crew provision lock-resolve mise.json --crew <slug>`.
+
+**Response:** `200` JSON `CrewMiseLockProposal`: `tools` contains the native
+previous/resolved version sets and `version_changed`; `selectors_sha256`, optional
+`previous_lock_sha256`, `lock_sha256` and `lock_changed` bind the proposal;
+`resolver_image_id`, `platform`, `mise_version` identify its builder; `lock`
+contains the complete proposed native bundle. Hashes are identities, not approval
+or runtime qualification. No configuration, saved revision or runtime is changed.
+Review and apply the proposal locally with `crew provision lock-apply`, then
+explicitly update and provision the crew using the normal CLI flow.
+
+**Statuses:** `200` proposal; `400` malformed, unknown or oversized input;
+`401` unauthenticated; `403` insufficient role/scope or nonhuman source;
+`404` missing, deleted or other-workspace crew; `409` no completed immutable
+selected environment; `429` both bounded server resolver slots occupied;
+`500` database failure; `502` resolver failed, timed out or could not clean up;
+`503` provider does not support remote resolution. A failed resolver emits no
+proposal and applies nothing. Registry network access is required by the
+existing hardened disposable builder; host files and credentials are not mounted.
 
 ## Environment revisions
 

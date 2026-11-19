@@ -951,18 +951,21 @@ crewship crew provision status <slug-or-id> --watch
 
 ### `crewship crew provision lock-resolve`
 
-Resolve a local mise JSON/TOML file in a disposable Docker builder. This command
-requires a trusted local Linux image and registry network access. It changes no
-Crewship server state and does not install or activate the returned bundle.
+Resolve a mise JSON/TOML file in a disposable Docker builder. Choose either a
+trusted local Linux image (`--image`) or a provisioned crew on your selected
+server (`--crew`). Both need registry network access. Neither installs or
+activates the proposed lock or changes crew configuration.
 
 ```bash
 crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>
 crewship crew provision lock-resolve mise.json --image sha256:<local-image-id> --bump
+crewship --profile dev crew provision lock-resolve mise.json --crew my-crew > proposal.json
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--image` | `string` | required | Immutable local Docker image ID containing mise and the documented resolver utilities. |
+| `--image` | `string` | — | Immutable local Docker image ID containing mise and the documented resolver utilities. Mutually exclusive with `--crew`. |
+| `--crew` | `string` | — | Crew slug or ID. Resolve remotely using its server-selected, immutable provisioned image. Requires an OWNER/ADMIN human session or CLI credential with `crews:write`. |
 | `--bump` | `bool` | `false` | Update an existing input lock within its selectors; exact version pins remain exact. |
 
 Output JSON includes `tools` (native previous/resolved versions), selector and
@@ -970,6 +973,17 @@ complete-bundle hashes, `lock_changed`, `lock`, `resolver_image_id`, `platform`
 and `mise_version`. Hashes bind the proposal, not an authorization to apply it.
 Supply the proposed lock through the ordinary manifest/build path. See
 [resolver limits and trust requirements](/guides/devcontainers#resolving-or-updating-a-lock-with-crewship).
+
+Remote mode calls `POST /api/v1/crews/{crewId}/provision/lock-resolve` with
+`config.tools`, optional `config.lock`, and `bump`. It sends no environment
+values, tasks, caller-selected image or credentials from the mise file. The
+server requires the selected cached image to match a saved environment revision
+of that crew in the current workspace, and the provider verifies installation
+ownership before reusing the existing hardened resolver. Missing/foreign images,
+agent credentials and unsupported providers fail closed. Two builders at most
+run concurrently per server; a busy server returns 429 and can be retried later.
+Review the returned proposal, then use `lock-apply` and the normal explicit crew
+configuration/provisioning path. A proposal does not qualify the running crew.
 
 ---
 

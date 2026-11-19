@@ -362,6 +362,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range policyComponents {
 		schemas[name] = schema
 	}
+	_, miseComponents := crewMiseLockSchemaCatalog()
+	for name, schema := range miseComponents {
+		schemas[name] = schema
+	}
 	_, draftKeyComponents := localDraftKeySchemaCatalog()
 	for name, schema := range draftKeyComponents {
 		schemas[name] = schema
@@ -751,6 +755,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	policyRoutes, _ := artifactCreationPolicySchemaCatalog()
 	for key, schema := range policyRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	miseRoutes, _ := crewMiseLockSchemaCatalog()
+	for key, schema := range miseRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	draftKeyRoutes, _ := localDraftKeySchemaCatalog()

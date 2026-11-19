@@ -297,6 +297,7 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/start roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/tasks roleCreate
 POST /api/v1/crews/{crewId}/port-expose/{id}/revoke roleCreate
 POST /api/v1/crews/{crewId}/provision roleCreate
+POST /api/v1/crews/{crewId}/provision/lock-resolve roleManage
 POST /api/v1/crews/{crewId}/rebuild roleCreate
 POST /api/v1/crews/{crewId}/refresh-image roleCreate
 POST /api/v1/crews/{crewId}/restart-agents roleCreate
