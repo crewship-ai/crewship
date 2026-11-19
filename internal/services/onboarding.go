@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -141,10 +142,11 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 		// Create agent
 		agentID := s.idFunc()
 		if _, err = tx.ExecContext(ctx, `
-			INSERT INTO agents (id, crew_id, workspace_id, name, slug, cli_adapter, llm_provider, llm_model, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO agents (id, crew_id, workspace_id, name, slug, cli_adapter, llm_provider, llm_model,
+				avatar_seed, avatar_style, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, agentID, crewID, p.WorkspaceID, p.AgentName, p.AgentSlug, p.CliAdapter,
-			p.LLMProvider, p.LLMModel, p.Now, p.Now); err != nil {
+			p.LLMProvider, p.LLMModel, p.AgentSlug, avatarstyle.Default, p.Now, p.Now); err != nil {
 			s.logger.Error("insert agent", "error", err)
 			return nil, err
 		}

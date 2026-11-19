@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -200,11 +201,11 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
 				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy,
-				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				timeout_seconds, memory_enabled, webhook_secret, avatar_seed, avatar_style, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
 			a.CLIAdapter, a.LLMProvider, overrides.modelFor(a.LLMProvider, a.LLMModel), a.ToolProfile, a.SystemPrompt,
-			1800, true, webhookSecret, now, now); err != nil {
+			1800, true, webhookSecret, agentSlug, avatarstyle.Default, now, now); err != nil {
 			return nil, fmt.Errorf("create agent %s: %w", a.Name, err)
 		}
 	}

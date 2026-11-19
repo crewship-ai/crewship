@@ -60,3 +60,19 @@ func List() string {
 func Problem(style string) string {
 	return "unknown avatar style " + `"` + style + `"` + " (one of: " + List() + ")"
 }
+
+// WithDefaults fills in what the web create dialog would have sent: the seed
+// is the agent's slug and the style is Default. A blank or missing value is
+// replaced; anything the caller chose is kept. Every path that creates an
+// agent goes through here so none leaves the face unpinned (#3051).
+func WithDefaults(slug string, seed, style *string) (*string, *string) {
+	if seed == nil || strings.TrimSpace(*seed) == "" {
+		s := slug
+		seed = &s
+	}
+	if style == nil || *style == "" {
+		d := Default
+		style = &d
+	}
+	return seed, style
+}
