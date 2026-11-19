@@ -5,8 +5,15 @@ import { z } from "zod"
 
 import { apiFetch } from "@/lib/api-fetch"
 
+/** What the server says about an invitation (`status` of GET …/invitations):
+ *  still open, past its expiry, or withdrawn. */
+export type InvitationStatus = "pending" | "expired" | "revoked"
+
 const invitationSchema = z.object({
   id: z.string(),
+  // Dropped by the schema until now, which made a revoked invitation read as
+  // an expired one. An older server sends none: the date then decides.
+  status: z.enum(["pending", "expired", "revoked"]).optional().catch(undefined),
   email: z.string(),
   role: z.string(),
   expires_at: z.string(),
@@ -66,6 +73,20 @@ export async function revokeInvitation(workspaceId: string, invitationId: string
   const ws = encodeURIComponent(workspaceId)
   const res = await apiFetch(`/api/v1/workspaces/${ws}/invitations/${encodeURIComponent(invitationId)}?workspace_id=${ws}`, { method: "DELETE" })
   if (!res.ok) throw await refusal(res, "Couldn’t revoke the invitation")
+}
+
+/** The server's word, or — from a server that sends none — what the expiry
+ *  date says. Revoked is only ever the server's word. */
+export function invitationStatus(inv: Pick<Invitation, "status" | "expires_at">, now = Date.now()): InvitationStatus {
+  if (inv.status) return inv.status
+  return daysUntil(inv.expires_at, now) < 0 ? "expired" : "pending"
+}
+
+/** True for an invitation that is still open and ends within two days, or
+ *  already ran out: the ones worth a look. A revoked one is settled. */
+export function invitationNeedsLook(inv: Pick<Invitation, "status" | "expires_at">, now = Date.now()): boolean {
+  const status = invitationStatus(inv, now)
+  return status === "expired" || (status === "pending" && daysUntil(inv.expires_at, now) <= 2)
 }
 
 /** Whole days until `iso`, negative once past. */

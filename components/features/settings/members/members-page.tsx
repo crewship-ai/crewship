@@ -3,16 +3,19 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Download, Eye, Mail, MessageSquare, Terminal, TriangleAlert, Users, X } from "lucide-react"
+import { Download, Mail, Terminal, TriangleAlert, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useShowMore } from "@/hooks/use-show-more"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
-import { ALL_CAPABILITIES, CAPABILITY_BUNDLES, CAPABILITY_LABELS, Capability, type CapabilityBundle, type CapabilityValue } from "@/lib/capabilities"
+import { ALL_CAPABILITIES, CAPABILITY_BUNDLES, Capability, type CapabilityBundle, type CapabilityValue } from "@/lib/capabilities"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { PageBanner } from "@/components/layout/app-banners"
 import { Button } from "@/components/ui/button"
+import { Segmented } from "@/components/ui/segmented"
+import { ShowMore } from "@/components/ui/show-more"
 import { Skeleton } from "@/components/ui/skeleton"
 import { personLabel } from "@/components/ui/user-avatar"
 import { Peek } from "@/components/ui/peek"
@@ -20,33 +23,29 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
 import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsKpiStrip, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { SettingsCard } from "@/components/features/settings/shared"
 import { PageError } from "@/components/layout/page-state"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
 import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
 
 import {
-  ACCESS_PROFILES,
   AREAS,
-  ASSIGNABLE_ROLES,
   DEFAULT_MEMBER_FILTERS,
+  CAPABILITY_NAME,
   MEMBER_FLAGS,
   PROFILE_LABEL,
   ROLES,
   ROLE_LABEL,
-  aboveRole,
-  accessProfile,
+  activeFilterCount,
   byRoleThenName,
   memberMatches,
   membersUrlQuery,
   parseMembersUrl,
+  accessProfile,
   profileText,
   roleChoices,
   type Member,
@@ -56,10 +55,12 @@ import {
 import { useMembers } from "./use-members"
 import { useAccessWrites } from "./use-access"
 import { MemberDetail } from "./member-detail"
-import { AREA_ICON, ConfirmWhen, ROLE_ICON } from "./member-bits"
-import { InvitationList, PeopleList, PeopleTable, joinedDate, type PeopleGroup } from "./people-table"
-import { MembersAttention, RevealCard, membersFindings } from "./members-attention"
-import { useInvitations, useRevealPolicy } from "./use-invitations"
+import { ConfirmWhen, ROLE_ICON } from "./member-bits"
+import { PeopleList, PeopleTable, joinedDate, type PeopleGroup } from "./people-table"
+import { InvitationRows } from "./invitations-card"
+import { MembersLook, lookCount, lookGroups, lookSummary, type LookKind } from "./members-look"
+import { BulkAbilitiesDialog, BulkBar, type AbilityChange } from "./bulk-bar"
+import { invitationStatus, useInvitations, useRevealPolicy } from "./use-invitations"
 
 type GroupBy = "role" | "name"
 
@@ -74,23 +75,27 @@ interface Confirm {
 }
 
 /**
- * Settings › Members: who is here, what each person manages, and what each
- * person may do — for everyone at once.
+ * Settings › Members: who is here, what each person manages, what they may do
+ * and where — for everyone at once.
  *
- * The ROLE is what a person manages (people, crews, settings); what they may
- * DO is nine grants, read here as three areas — Routines, Content, Secrets —
- * so a row says "Routines · Content 3/4 · Secrets · reveal" instead of nine
- * dots. Top to bottom the page answers what needs a person (who reads secrets
- * in plaintext, who holds more than their role suggests, invitations running
- * out), then the roster grouped by role.
+ * Three words, each one question about a person. ROLE is what they manage
+ * (people, crews, settings). ABILITIES are what they may do themselves: nine
+ * grants, read as one line — the nearest preset and what differs ("Power user
+ * + create skills"). REACH is where it applies: the whole workspace, or only
+ * what is shared with a Guest.
+ *
+ * Three views, named in the panel: Everyone (the roster, one card, grouped by
+ * role), Needs a look (one card per kind of finding) and Invited. The panel
+ * lists the views and the five roles; abilities, single abilities and reach
+ * are facets of the Filter, so it never grows with the workspace.
  *
  *   - one person: click the row — a side panel (full screen on a phone) with
- *     the role, a preset, every ability by area, crews and removal;
- *   - many people: tick the rows, then Set access / Grant / Revoke / Role.
+ *     three cards, Role, Abilities and Reach, and the way out;
+ *   - many people: tick the rows, then Role or Abilities.
  *
- * Granting anything high-stakes and every role change ask first; capability
- * edits are drafts until Save. The filters live in the URL (?role= ?area=
- * ?flag= ?status= ?cap= ?q=); ?member= is what ⌘K and old
+ * Granting anything high-stakes and every role change ask first; ability and
+ * reach edits are drafts until Save. The filters live in the URL (?role=
+ * ?area= ?cap= ?reach= ?flag= ?status= ?q=); ?member= is what ⌘K and old
  * /settings?tab=members links resolve to, and opens that person.
  */
 export function MembersPage() {
@@ -115,11 +120,11 @@ export function MembersPage() {
   const capsFailed = capsReadable && capsQuery.isError
   const access = useAccessWrites(ws, roster.refresh)
 
-  // Capability edits are a draft until Save, like every other editor in
-  // Settings (components/ui/page-save-bar): a dot, a profile or a bulk action
-  // changes `drafts` — user id → the whole set they would hold — and the
+  // Ability edits are a draft until Save, like every other editor in
+  // Settings (components/ui/page-save-bar): a switch, a preset or a bulk
+  // change edits `drafts` — user id → the whole set they would hold — and the
   // page's one floating bar commits them all, or Discard drops them. What the
-  // matrix, the counts and the filters show is the set WITH the draft.
+  // roster, the counts and the filters show is the set WITH the draft.
   //
   // A draft belongs to the workspace it was made in. Switching workspaces asks
   // first (the page's Save guard); should one switch anyway, the drafts of the
@@ -168,6 +173,7 @@ export function MembersPage() {
   const [groupBy, setGroupBy] = React.useState<GroupBy>("role")
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set())
   const [confirm, setConfirm] = React.useState<Confirm | null>(null)
+  const [bulkAbilities, setBulkAbilities] = React.useState(false)
 
   const sorted = React.useMemo(() => [...members].sort(byRoleThenName), [members])
   const shown = sorted.filter((m) => memberMatches(m, filters, caps))
@@ -184,19 +190,35 @@ export function MembersPage() {
       return next.size === prev.size ? prev : next
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown.length, filters.q, filters.role, filters.area, filters.flag, filters.status, filters.cap])
+  }, [shown.length, filters.q, filters.role, filters.area, filters.flag, filters.status, filters.cap, filters.reach])
 
   const invitationsQuery = useInvitations(workspaceId, isManager)
-  const invitations = invitationsQuery.data ?? []
+  const invitations = React.useMemo(() => invitationsQuery.data ?? [], [invitationsQuery.data])
+  // A revoked invitation was withdrawn: it stays listed (with its status) but
+  // is not "invited" any more.
+  const invitedCount = invitations.filter((i) => invitationStatus(i) !== "revoked").length
   const revealEnabled = useRevealPolicy(workspaceId, isManager).data ?? null
 
+  // Which view the page shows. A view a role may not open falls back to the
+  // roster instead of an empty card.
+  const view: "everyone" | "look" | "invited" =
+    filters.status === "invited" && isManager ? "invited" : filters.status === "look" && capsReadable ? "look" : "everyone"
+
+  const order = React.useMemo(() => (groupBy === "name"
+    ? [...shown].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+    : ROLES.flatMap((r) => shown.filter((m) => m.role === r))),
+  [groupBy, shown])
+  // 25 at a time, from the top again whenever the filters or the grouping change.
+  const paged = useShowMore(order, { resetKey: JSON.stringify([filters, groupBy]) })
   const groups: PeopleGroup[] = React.useMemo(() => {
-    if (groupBy === "name") {
-      const byName = [...shown].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
-      return byName.length ? [{ key: "all", label: "A–Z", people: byName }] : []
-    }
-    return ROLES.map((r) => ({ key: r, label: `${ROLE_LABEL[r]}s`, people: shown.filter((m) => m.role === r) })).filter((g) => g.people.length > 0)
-  }, [groupBy, shown])
+    if (groupBy === "name") return paged.shown.length ? [{ key: "all", label: "", people: paged.shown, total: order.length }] : []
+    return ROLES.map((r) => ({
+      key: r, label: `${ROLE_LABEL[r]}s`,
+      people: paged.shown.filter((m) => m.role === r),
+      // The header counts the whole group, not the page.
+      total: order.filter((m) => m.role === r).length,
+    })).filter((g) => g.people.length > 0)
+  }, [groupBy, paged.shown, order])
 
   // ── Writes, each asking first when it should ─────────────────────────
 
@@ -208,42 +230,46 @@ export function MembersPage() {
   }
 
   const onCell = (m: Member, cap: CapabilityValue, next: boolean) => {
-    const label = CAPABILITY_LABELS[cap].en
-    askHighStakes(`Grant ${label}?`,
-      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description}</>,
-      `Grant ${label}`, next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
+    const label = CAPABILITY_NAME[cap]
+    askHighStakes(`Give ${label}?`,
+      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {label.toLowerCase()}.</>,
+      `Give ${label}`, next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
       () => stage([m], (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))))
   }
 
   const highStakesGains = (people: Member[], add: readonly string[]) =>
     [...new Set(add.filter((c) => HIGH_STAKES_CAPABILITIES.has(c as CapabilityValue) && people.some((m) => !(caps?.[m.user.id] ?? []).includes(c))))] as CapabilityValue[]
 
+  const gainText = (gains: CapabilityValue[]) => gains.map((c) => CAPABILITY_NAME[c]).join(", ")
+
   const onProfile = (m: Member, preset: CapabilityBundle) => {
     const gains = highStakesGains([m], CAPABILITY_BUNDLES[preset])
     askHighStakes(`Set ${nameOf(m)} to ${PROFILE_LABEL[preset]}?`,
-      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
+      <>This gives high-stakes abilities: {gainText(gains)}.</>,
       `Set to ${PROFILE_LABEL[preset]}`, gains, () => stage([m], () => [...CAPABILITY_BUNDLES[preset]]))
   }
 
-  /** Take high-stakes grants away (the panel's "Turn … off"): a draft, no
+  /** Take high-stakes abilities away (the panel's "Turn it off"): a draft, no
    *  question — taking access away is what Discard undoes. */
   const onRevoke = (m: Member, revoke: CapabilityValue[]) => stage([m], (cur) => cur.filter((c) => !revoke.includes(c as CapabilityValue)))
 
   const clearSelection = () => setSelected(new Set())
   const bulk = {
-    profile: (preset: CapabilityBundle) => {
+    /** The merged Abilities dialog: a preset for everyone, and/or single
+     *  abilities given or taken away. Same draft, same high-stakes question. */
+    abilities: (change: AbilityChange) => {
       const people = selectedPeople
-      const gains = highStakesGains(people, CAPABILITY_BUNDLES[preset])
-      askHighStakes(`Set ${people.length} people to ${PROFILE_LABEL[preset]}?`,
-        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
-        "Apply profile", gains, () => { stage(people, () => [...CAPABILITY_BUNDLES[preset]]); clearSelection() })
-    },
-    cap: (cap: CapabilityValue, next: boolean) => {
-      const people = selectedPeople
-      askHighStakes(`Grant ${CAPABILITY_LABELS[cap].en} to ${people.length} people?`,
-        <>{CAPABILITY_LABELS[cap].description}</>,
-        "Grant", next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
-        () => { stage(people, (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))); clearSelection() })
+      const next = (cur: string[]) => {
+        const base = change.preset ? [...CAPABILITY_BUNDLES[change.preset]] : cur
+        return [...base, ...change.give].filter((c) => !change.take.includes(c as CapabilityValue))
+      }
+      const gains = [...new Set(people.flatMap((m) => {
+        const cur = caps?.[m.user.id] ?? []
+        return next(cur).filter((c) => HIGH_STAKES_CAPABILITIES.has(c as CapabilityValue) && !cur.includes(c))
+      }))] as CapabilityValue[]
+      askHighStakes(`Change abilities for ${people.length} ${people.length === 1 ? "person" : "people"}?`,
+        <>This gives high-stakes abilities: {gainText(gains)}.</>,
+        "Apply", gains, () => { stage(people, next); clearSelection() })
     },
     role: (r: string) => {
       const eligible = selectedPeople.filter((m) => m.role !== r && roleChoices(role, m, m.user.id === currentUserId).includes(r))
@@ -251,7 +277,7 @@ export function MembersPage() {
         title: `Make ${eligible.length} ${eligible.length === 1 ? "person" : "people"} ${ROLE_LABEL[r]}?`,
         body: <>
           {eligible.length < selectedPeople.length && <>{selectedPeople.length - eligible.length} of the selected already have this role or are above yours, and stay as they are. </>}
-          Their capabilities do not change.
+          Their abilities do not change. You can only give roles below your own.
         </>,
         action: "Change role",
         when: "now",
@@ -260,20 +286,14 @@ export function MembersPage() {
     },
   }
 
-  const onRemove = async (m: Member) => {
-    const ok = await roster.remove(m)
-    if (ok && openedId === m.user.id) open(null)
-    return ok
-  }
-
   const exportCsv = () => {
     const cols = ALL_CAPABILITIES.filter((c) => c !== Capability.Chat)
     const cell = (v: string) => `"${v.replace(/"/g, '""')}"`
     const lines = [
-      ["Name", "Email", "Role", ...(caps ? ["Access profile", ...cols.map((c) => CAPABILITY_LABELS[c].en)] : []), "Joined"].map(cell).join(","),
+      ["Name", "Email", "Role", ...(caps ? ["Reach", "Abilities", ...cols.map((c) => CAPABILITY_NAME[c])] : []), "Joined"].map(cell).join(","),
       ...shown.map((m) => [
         m.user.full_name ?? "", m.user.email, ROLE_LABEL[m.role] ?? m.role,
-        ...(caps ? [m.role === "OWNER" ? "Owner" : profileText(accessProfile(caps[m.user.id])), ...cols.map((c) => ((caps[m.user.id] ?? []).includes(c) ? "yes" : ""))] : []),
+        ...(caps ? [m.access_mode === "restricted" ? "Guest" : m.access_mode ? "Whole workspace" : "", m.role === "OWNER" ? "Everything" : profileText(accessProfile(caps[m.user.id])), ...cols.map((c) => ((caps[m.user.id] ?? []).includes(c) ? "yes" : ""))] : []),
         m.created_at.slice(0, 10),
       ].map(cell).join(",")),
     ].join("\n")
@@ -287,16 +307,36 @@ export function MembersPage() {
 
   // ── Side panel ───────────────────────────────────────────────────────
 
+  const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
+  const toggle = <K extends "area" | "cap" | "reach">(key: K, value: MemberFilters[K]) => pick({ [key]: filters[key] === value ? "" : value } as Partial<MemberFilters>)
+  const activeFilters = activeFilterCount(filters, capsReadable) - Number(Boolean(filters.status))
   const toolbar = (
     <>
       <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search name or email…" aria-label="Search members" />
       {capsReadable && (
-        <SidebarFilterPopover label="Filter by capability" activeCount={Number(Boolean(filters.cap))} onClear={() => setFilters({ cap: "" })} panelClassName="min-w-[240px]">
-          <SidebarFacet label="Has capability" resetLabel="Anyone" resetActive={!filters.cap} onReset={() => setFilters({ cap: "" })} first>
+        <SidebarFilterPopover label="Filter" activeCount={Number(Boolean(filters.cap)) + Number(Boolean(filters.area)) + Number(Boolean(filters.reach))}
+          onClear={() => pick({ cap: "", area: "", reach: "" })} panelClassName="min-w-[260px]">
+          <SidebarFacet label="Abilities" resetLabel="Any" resetActive={!filters.area} onReset={() => pick({ area: "" })} first>
+            {[...AREAS.map((a) => ({ key: a.key as string, label: a.label })), { key: "chat", label: "Chat only" }].map((a) => (
+              <SidebarFacetOption key={a.key} active={filters.area === a.key} onToggle={() => toggle("area", a.key)}>
+                {a.label}
+                <span className="ml-auto text-micro tabular-nums text-muted-foreground">{capsLoading ? "…" : countWith({ area: a.key })}</span>
+              </SidebarFacetOption>
+            ))}
+          </SidebarFacet>
+          <SidebarFacet label="Single ability" resetLabel="Any" resetActive={!filters.cap} onReset={() => pick({ cap: "" })}>
             {ALL_CAPABILITIES.filter((c) => c !== Capability.Chat).map((cap) => (
-              <SidebarFacetOption key={cap} active={filters.cap === cap} onToggle={() => setFilters({ cap: filters.cap === cap ? "" : cap })}>
-                <span className={cn(HIGH_STAKES_CAPABILITIES.has(cap) && "text-destructive")}>{CAPABILITY_LABELS[cap].en}</span>
+              <SidebarFacetOption key={cap} active={filters.cap === cap} onToggle={() => toggle("cap", cap)}>
+                <span className={cn(HIGH_STAKES_CAPABILITIES.has(cap) && "text-destructive")}>{CAPABILITY_NAME[cap]}</span>
                 <span className="ml-auto text-micro tabular-nums text-muted-foreground">{capsLoading ? "…" : countWith({ cap })}</span>
+              </SidebarFacetOption>
+            ))}
+          </SidebarFacet>
+          <SidebarFacet label="Reach" resetLabel="Any" resetActive={!filters.reach} onReset={() => pick({ reach: "" })}>
+            {([["whole", "Whole workspace"], ["guest", "Guest"]] as const).map(([key, label]) => (
+              <SidebarFacetOption key={key} active={filters.reach === key} onToggle={() => toggle("reach", key)}>
+                {label}
+                <span className="ml-auto text-micro tabular-nums text-muted-foreground">{countWith({ reach: key })}</span>
               </SidebarFacetOption>
             ))}
           </SidebarFacet>
@@ -305,53 +345,34 @@ export function MembersPage() {
     </>
   )
 
-  const dot = (cls: string) => <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", cls)} aria-hidden />
   const ico = (Icon: React.ElementType, cls = "text-muted-foreground") => <Icon className={cn("h-3.5 w-3.5 shrink-0", cls)} aria-hidden />
-  const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
+  const findings = capsReadable && caps && !capsLoading ? lookGroups({ members, caps: caps as Record<string, string[]>, invitations, revealEnabled }) : null
+  const lookTotal = findings ? lookCount(findings) : 0
   const nav = (
     <>
-      <DrillNavSection collapsible={false} label="People" count={members.length}>
-        <DrillNavItem index={0} selected={!filters.status && !filters.role && !filters.area && !filters.flag} onSelect={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, q: filters.q })}
+      <DrillNavSection collapsible={false} label="People">
+        <DrillNavItem index={0} selected={view === "everyone" && !filters.role} onSelect={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, q: filters.q })}
           icon={ico(Users)} label="Everyone" meta={members.length} />
+        {capsReadable && (
+          <DrillNavItem index={1} selected={view === "look"} pressed={view === "look"} muted={!lookTotal}
+            onSelect={() => setFilters({ status: view === "look" ? "" : "look", flag: "" })}
+            icon={ico(TriangleAlert)} label="Needs a look" meta={findings ? lookTotal || "" : "…"} />
+        )}
         {isManager && (
-          <DrillNavItem index={1} selected={filters.status === "invited"} pressed={filters.status === "invited"} muted={!invitations.length}
-            onSelect={() => setFilters({ status: filters.status === "invited" ? "" : "invited" })}
-            icon={ico(Mail)} label="Invited" meta={invitationsQuery.isLoading ? "…" : invitations.length} />
+          <DrillNavItem index={2} selected={view === "invited"} pressed={view === "invited"} muted={!invitedCount}
+            onSelect={() => setFilters({ status: view === "invited" ? "" : "invited", flag: "" })}
+            icon={ico(Mail)} label="Invited" meta={invitationsQuery.isLoading ? "…" : invitedCount} />
         )}
       </DrillNavSection>
       <DrillNavSection collapsible={false} label="Role">
         {ROLES.map((r, i) => {
           const n = countWith({ role: r })
           return (
-            <DrillNavItem key={r} index={i} selected={filters.role === r && !filters.status} pressed={filters.role === r} muted={!n}
+            <DrillNavItem key={r} index={i} selected={view === "everyone" && filters.role === r} pressed={filters.role === r} muted={!n}
               onSelect={() => pick({ role: filters.role === r ? "" : r })} icon={ico(ROLE_ICON[r])} label={ROLE_LABEL[r]} meta={n} />
           )
         })}
       </DrillNavSection>
-      {capsReadable && (
-        <DrillNavSection collapsible={false} label="Can do">
-          {[...AREAS.map((a) => ({ key: a.key as string, label: a.label, sub: a.caps.map((c) => c.short.toLowerCase()).join(" · "), icon: ico(AREA_ICON[a.key], "text-primary-hover") })),
-            { key: "chat", label: "Chat only", sub: undefined, icon: ico(MessageSquare) }].map((a, i) => {
-            const n = countWith({ area: a.key })
-            return (
-              <DrillNavItem key={a.key} index={i} selected={filters.area === a.key && !filters.status} pressed={filters.area === a.key} muted={!n}
-                onSelect={() => pick({ area: filters.area === a.key ? "" : a.key })} icon={a.icon} label={a.label} sub={a.sub} meta={capsLoading ? "…" : n} />
-            )
-          })}
-        </DrillNavSection>
-      )}
-      {capsReadable && (
-        <DrillNavSection collapsible={false} label="Needs a look">
-          {MEMBER_FLAGS.map((f, i) => {
-            const n = countWith({ flag: f.key })
-            return (
-              <DrillNavItem key={f.key} index={i} selected={filters.flag === f.key && !filters.status} pressed={filters.flag === f.key} muted={!n}
-                onSelect={() => pick({ flag: filters.flag === f.key ? "" : f.key })}
-                icon={dot(f.key === "reveal" ? "bg-destructive" : "bg-warn")} label={f.label} sub={f.hint} meta={capsLoading ? "…" : n} />
-            )
-          })}
-        </DrillNavSection>
-      )}
     </>
   )
 
@@ -359,59 +380,38 @@ export function MembersPage() {
 
   const chips: { key: string; label: string; clear: Partial<MemberFilters> }[] = []
   if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } })
-  if (filters.role) chips.push({ key: "role", label: ROLE_LABEL[filters.role], clear: { role: "" } })
-  if (filters.status) chips.push({ key: "status", label: "Invited", clear: { status: "" } })
-  if (filters.area && capsReadable) chips.push({ key: "area", label: filters.area === "chat" ? "Chat only" : `Can do: ${AREAS.find((a) => a.key === filters.area)?.label ?? filters.area}`, clear: { area: "" } })
+  if (filters.role) chips.push({ key: "role", label: `Role: ${ROLE_LABEL[filters.role]}`, clear: { role: "" } })
+  if (filters.area && capsReadable) chips.push({ key: "area", label: `Abilities: ${filters.area === "chat" ? "Chat only" : AREAS.find((a) => a.key === filters.area)?.label ?? filters.area}`, clear: { area: "" } })
+  if (filters.cap && capsReadable) chips.push({ key: "cap", label: `Ability: ${CAPABILITY_NAME[filters.cap] ?? filters.cap}`, clear: { cap: "" } })
+  if (filters.reach && capsReadable) chips.push({ key: "reach", label: `Reach: ${filters.reach === "guest" ? "Guest" : "Whole workspace"}`, clear: { reach: "" } })
   if (filters.flag && capsReadable) chips.push({ key: "flag", label: MEMBER_FLAGS.find((f) => f.key === filters.flag)?.label ?? filters.flag, clear: { flag: "" } })
-  if (filters.cap && capsReadable) chips.push({ key: "cap", label: `Has: ${CAPABILITY_LABELS[filters.cap as CapabilityValue]?.en ?? filters.cap}`, clear: { cap: "" } })
-
-  const revealers = caps ? members.filter((m) => (caps[m.user.id] ?? []).includes(Capability.CredentialReveal)).length : null
-  const aboveCount = caps ? members.filter((m) => aboveRole(m, caps[m.user.id]).length > 0).length : null
-  const chatOnlyCount = caps ? countWith({ ...DEFAULT_MEMBER_FILTERS, area: "chat" }) : null
-  const findings = capsReadable && caps && !capsLoading ? membersFindings({
-    members, caps: caps as Record<string, string[]>, invitations, revealEnabled,
-    onFlag: (flag) => pick({ ...DEFAULT_MEMBER_FILTERS, flag }),
-    onOpen: open,
-    onInvited: () => setFilters({ status: "invited" }),
-  }) : null
 
   // J / K in the Peek walk the people in the order the roster shows them.
-  const order = groups.flatMap((g) => g.people)
   const at = opened ? order.findIndex((m) => m.user.id === opened.user.id) : -1
   const prev = at > 0 ? order[at - 1] : null
   const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null
 
-  const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
-  const cardActions = (
-    <>
-      {!isMobile && (
-        <div role="group" aria-label="Group by" className="inline-flex gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
-          {([["role", "By role"], ["name", "A–Z"]] as const).map(([g, l]) => (
-            <button key={g} type="button" aria-pressed={groupBy === g} onClick={() => setGroupBy(g)}
-              className={cn("h-6 rounded-md px-2.5 text-xs transition-colors", groupBy === g ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
-              {l}
-            </button>
-          ))}
-        </div>
-      )}
-      <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={exportCsv} disabled={shown.length === 0}>
-        <Download className="mr-1.5 h-3 w-3" />Export CSV
-      </Button>
-    </>
-  )
+  const showAll = (kind: LookKind) => (kind === "invites"
+    ? setFilters({ ...DEFAULT_MEMBER_FILTERS, status: "invited" })
+    : setFilters({ ...DEFAULT_MEMBER_FILTERS, flag: kind === "reveal" ? "reveal" : "risky-low-role" }))
+  const revealCandidates = caps ? sorted.filter((m) => m.role !== "OWNER" && m.user.id !== currentUserId && !(caps[m.user.id] ?? []).includes(Capability.CredentialReveal)) : []
 
-  const tabs: { key: string; label: string; n?: number | null; on: boolean; run: () => void; tone?: string }[] = [
-    { key: "all", label: "Everyone", n: members.length, on: !filters.status && !filters.flag, run: () => setFilters({ status: "", flag: "" }) },
-    ...(isManager ? [{ key: "invited", label: "Invited", n: invitations.length, on: filters.status === "invited", run: () => setFilters({ status: "invited", flag: "" }) }] : []),
-    ...(capsReadable && revealers ? [{ key: "reveal", label: "Can reveal", n: revealers, tone: "bg-destructive", on: filters.flag === "reveal" && !filters.status, run: () => pick({ flag: "reveal" }) }] : []),
-    ...(capsReadable && aboveCount ? [{ key: "above", label: "Above role", n: aboveCount, tone: "bg-warn", on: filters.flag === "risky-low-role" && !filters.status, run: () => pick({ flag: "risky-low-role" }) }] : []),
+  const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
+
+  const headline = view === "look" ? "Access worth a second pair of eyes. Nothing here is broken."
+    : view === "invited" ? "People who were sent a link and have not joined yet"
+    : `${members.length} ${members.length === 1 ? "person" : "people"}${isManager && !invitationsQuery.isLoading && invitedCount > 0 ? ` · ${invitedCount} invited` : ""}`
+
+  const mobileTabs: { key: string; label: string; n?: number | string; on: boolean; run: () => void }[] = [
+    { key: "all", label: "Everyone", n: members.length, on: view === "everyone", run: () => setFilters({ status: "", flag: "" }) },
+    ...(capsReadable ? [{ key: "look", label: "Needs a look", n: findings ? lookTotal : "…", on: view === "look", run: () => setFilters({ status: "look", flag: "" }) }] : []),
+    ...(isManager ? [{ key: "invited", label: "Invited", n: invitedCount, on: view === "invited", run: () => setFilters({ status: "invited", flag: "" }) }] : []),
   ]
   const mobileNav = (
     <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="tablist" aria-label="Show">
-      {tabs.map((t) => (
+      {mobileTabs.map((t) => (
         <button key={t.key} type="button" role="tab" aria-selected={t.on} onClick={t.run}
-          className={cn("inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
-          {t.tone && <span className={cn("h-1.5 w-1.5 rounded-full", t.tone)} aria-hidden />}
+          className={cn("inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
           {t.label}{t.n != null && <span className="text-micro tabular-nums text-muted-foreground">{t.n}</span>}
         </button>
       ))}
@@ -423,7 +423,7 @@ export function MembersPage() {
       panelId="drill-members"
       title="Members"
       icon={Users}
-      description="Who is in this workspace, what each person manages and what they may do."
+      description={wsLoading || roster.loading ? "" : headline}
       toolbar={toolbar}
       nav={nav}
       mobileNav={mobileNav}
@@ -434,35 +434,10 @@ export function MembersPage() {
       ) : (
         <div className={cn("space-y-4 p-4 md:p-6", selected.size > 0 && "pb-24")}>
           {isMobile && addMember && <div className="flex flex-wrap gap-2" data-slot="members-actions">{addMember}</div>}
-          {chips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {chips.map((c) => (
-                <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
-                  className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
-                  {c.label}
-                  <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20">
-                    <X className="h-3 w-3" />
-                  </button>
-                </motion.span>
-              ))}
-              <button type="button" onClick={() => setFilters(DEFAULT_MEMBER_FILTERS)} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear all</button>
-            </div>
-          )}
-
-          {/* v67's strip of five figures. The two that ask for a look filter
-              the roster; a read-only role is told once, under it. */}
-          <SettingsKpiStrip slot="members-summary" items={[
-            { icon: Users, label: "People", value: members.length },
-            ...(isManager ? [{ icon: Mail, label: "Invited", value: invitationsQuery.isLoading ? "…" : invitations.length, onClick: () => setFilters({ status: filters.status === "invited" ? "" : "invited" }), pressed: filters.status === "invited" }] : []),
-            ...(chatOnlyCount != null ? [{ icon: MessageSquare, label: "Chat only", value: chatOnlyCount, onClick: () => pick({ area: filters.area === "chat" ? "" : "chat" }), pressed: filters.area === "chat" && !filters.status }] : []),
-            ...(revealers != null ? [{ icon: Eye, label: "Can reveal secrets", value: revealers, onClick: () => pick({ flag: filters.flag === "reveal" ? "" : "reveal" }), pressed: filters.flag === "reveal" && !filters.status }] : []),
-            ...(aboveCount != null ? [{ icon: TriangleAlert, label: "Above their role", value: aboveCount, onClick: () => pick({ flag: filters.flag === "risky-low-role" ? "" : "risky-low-role" }), pressed: filters.flag === "risky-low-role" && !filters.status }] : []),
-          ]} />
-          {((!filters.status && shown.length !== members.length) || !isAdmin) && (
-            <SettingsSummary slot="members-note">
-              {!filters.status && shown.length !== members.length && <SummaryItem n={shown.length}>of {members.length} shown</SummaryItem>}
-              {!isAdmin && <span className="ml-auto">{isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}</span>}
-            </SettingsSummary>
+          {!isAdmin && (
+            <p className="text-xs text-muted-foreground" data-slot="members-note">
+              {isManager ? "Only admins change what people may do." : "Read-only — managers and admins make changes."}
+            </p>
           )}
 
           {roster.error && (
@@ -480,34 +455,71 @@ export function MembersPage() {
             </PageBanner>
           )}
 
-          {findings && !filters.status && <MembersAttention findings={findings} />}
-
-          {capsReadable && caps && filters.flag === "reveal" && !filters.status && (
-            <RevealCard revealEnabled={revealEnabled} holders={revealers ?? 0} canGrant={isAdmin}
-              candidates={sorted.filter((m) => m.role !== "OWNER" && m.user.id !== currentUserId && !(caps[m.user.id] ?? []).includes(Capability.CredentialReveal))}
-              onGrant={(m) => onCell(m, Capability.CredentialReveal, true)} />
-          )}
-
-          {filters.status === "invited" ? (
-            <SettingsCard icon={Mail} title="Invitations" description="Sent, not accepted yet. An expired one cannot be accepted — invite again.">
-              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} workspaceId={ws} manage={isAdmin} callerRole={role} onChanged={() => void invitationsQuery.refetch()} />}
-            </SettingsCard>
-          ) : (
-            <SettingsCard icon={Users} title="People"
-              description={capsReadable ? "The role says what they manage · the chips say what they may do" : `${members.length} people, by role`}
-              actions={cardActions}>
-              {shown.length === 0 ? (
-                <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nobody matches these filters.</p>
-              ) : isMobile ? (
-                <PeopleList groups={groups} caps={caps} currentUserId={currentUserId} onOpen={open} />
-              ) : (
-                <PeopleTable groups={groups} caps={caps} serverCaps={serverCaps} currentUserId={currentUserId} canSelect={isAdmin}
-                  selected={selected} openedId={openedId}
-                  onSelect={(id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })}
-                  onSelectMany={(ids, on) => setSelected(on ? new Set(ids) : new Set())}
-                  onOpen={open} />
+          {view === "invited" && (
+            <SettingsCard icon={Mail} title="Invitations" description="A link is valid for 7 days. A revoked or expired one cannot be accepted — invite again.">
+              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : (
+                <InvitedList invitations={invitations} workspaceId={ws} manage={isAdmin} callerRole={role} onChanged={() => void invitationsQuery.refetch()} />
               )}
             </SettingsCard>
+          )}
+
+          {view === "look" && findings && (
+            <MembersLook groups={findings} currentUserId={currentUserId} callerRole={role} workspaceId={ws} revealEnabled={revealEnabled}
+              holders={findings.find((g) => g.kind === "reveal")?.people.length ?? 0} grantCandidates={revealCandidates} canGrantReveal={isAdmin}
+              onTurnOff={onRevoke} onOpen={open} onShowAll={showAll}
+              onGrantReveal={(m) => onCell(m, Capability.CredentialReveal, true)} onInvitationsChanged={() => void invitationsQuery.refetch()} />
+          )}
+          {view === "look" && !findings && <Skeleton className="h-40 rounded-card" />}
+
+          {view === "everyone" && (
+            <>
+              {findings && findings.length > 0 && activeFilters === 0 && (
+                <PageBanner tone="warn" icon={TriangleAlert} data-slot="members-look-banner"
+                  action={<Button variant="outline" size="sm" className="coarse:h-[44px]" onClick={() => setFilters({ status: "look", flag: "" })}>Review</Button>}>
+                  <b>{lookTotal} {lookTotal === 1 ? "thing needs" : "things need"} a look</b>
+                  <span className="block font-normal">{lookSummary(findings)}</span>
+                </PageBanner>
+              )}
+              <SettingsCard icon={Users} title="People" hideHeader>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-2.5" data-slot="members-toolbar">
+                  <b className="text-control font-semibold tabular-nums">
+                    {shown.length === members.length ? `${members.length} ${members.length === 1 ? "person" : "people"}` : `${shown.length} of ${members.length} people`}
+                  </b>
+                  {chips.map((c) => (
+                    <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
+                      className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
+                      {c.label}
+                      <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20 coarse:h-6 coarse:w-6">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </motion.span>
+                  ))}
+                  {chips.length > 1 && (
+                    <button type="button" onClick={() => setFilters({ ...DEFAULT_MEMBER_FILTERS, status: filters.status })} className="px-1.5 text-label text-muted-foreground hover:text-foreground">Clear all</button>
+                  )}
+                  <span className="ml-auto flex items-center gap-2">
+                    {!isMobile && (
+                      <Segmented ariaLabel="Group by" value={groupBy} onChange={setGroupBy} options={[{ value: "role", label: "By role" }, { value: "name", label: "A–Z" }]} />
+                    )}
+                    <Button variant="outline" size="sm" className="px-2.5 text-xs coarse:h-[44px]" onClick={exportCsv} disabled={shown.length === 0}>
+                      <Download className="mr-1.5 h-3 w-3" />Export CSV
+                    </Button>
+                  </span>
+                </div>
+                {shown.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-xs text-muted-foreground">Nobody matches these filters.</p>
+                ) : isMobile ? (
+                  <PeopleList groups={groups} caps={caps} currentUserId={currentUserId} onOpen={open} />
+                ) : (
+                  <PeopleTable groups={groups} caps={caps} serverCaps={serverCaps} currentUserId={currentUserId} canSelect={isAdmin}
+                    selected={selected} openedId={openedId}
+                    onSelect={(id, on) => setSelected((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n })}
+                    onSelectMany={(ids, on) => setSelected(on ? new Set(ids) : new Set())}
+                    onOpen={open} />
+                )}
+                <ShowMore shown={paged.shown.length} total={paged.total} nextCount={paged.nextCount} onMore={paged.showMore} noun="people" paged={paged.paged} />
+              </SettingsCard>
+            </>
           )}
         </div>
       )}
@@ -517,9 +529,10 @@ export function MembersPage() {
       <AnimatePresence>
         {selected.size > 0 && !isMobile && (
           <BulkBar count={selected.size} busy={busy} lifted={pendingCount > 0} canChangeRole={isManager} callerRole={role}
-            onProfile={bulk.profile} onCap={bulk.cap} onRole={bulk.role} onClear={clearSelection} reduce={Boolean(reduce)} />
+            onAbilities={() => setBulkAbilities(true)} onRole={bulk.role} onClear={clearSelection} reduce={Boolean(reduce)} />
         )}
       </AnimatePresence>
+      <BulkAbilitiesDialog open={bulkAbilities} onOpenChange={setBulkAbilities} count={selected.size} onApply={bulk.abilities} />
 
       <Peek
         open={opened !== null}
@@ -535,6 +548,7 @@ export function MembersPage() {
             <div className="flex justify-center empty:hidden [&>*]:pointer-events-auto">
               <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
             </div>
+            <p className="text-label text-muted-foreground" data-slot="member-when">A role change applies at once. Abilities and reach wait for Save.</p>
             <p className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground" data-slot="member-cli">
               <Terminal className="h-3 w-3 shrink-0" aria-hidden />
               <code className="truncate font-mono text-micro">crewship workspace member capabilities list {opened.user.id}</code>
@@ -543,9 +557,11 @@ export function MembersPage() {
         ) : undefined}
       >
         {opened && (
-          <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin} inPeek
+          <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
             granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
-            onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
+            onChangeRole={roster.changeRole} tryRemove={roster.tryRemove} handOverPage={roster.handOverPage}
+            onRemoved={(m) => { if (openedId === m.user.id) open(null) }}
+            onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
         )}
       </Peek>
 
@@ -569,56 +585,23 @@ export function MembersPage() {
   )
 }
 
+/** The Invited view's list, paged like every list of hundreds. */
+function InvitedList({ invitations, ...rest }: { invitations: React.ComponentProps<typeof InvitationRows>["invitations"] } & Omit<React.ComponentProps<typeof InvitationRows>, "invitations">) {
+  const paged = useShowMore(invitations)
+  if (invitations.length === 0) return <p className="px-4 py-6 text-center text-label text-muted-foreground">No invitations.</p>
+  return (
+    <>
+      <InvitationRows invitations={paged.shown} {...rest} />
+      <ShowMore shown={paged.shown.length} total={paged.total} nextCount={paged.nextCount} onMore={paged.showMore} noun="invitations" paged={paged.paged} />
+    </>
+  )
+}
+
 /** Hands the capability draft to the page's save bar. It renders inside
  *  DrillPage, which is where the bar's provider lives. */
 function RegisterDraft({ count, saving, save, discard }: { count: number; saving: boolean; save: () => Promise<void>; discard: () => void }) {
   usePageSave({ label: "Members", count, saving, save, discard })
   return null
-}
-
-/** What to do with the ticked rows: a bar floating over the bottom of the
- *  page, like a mail client's selection bar. */
-function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, onCap, onRole, onClear, reduce }: {
-  count: number
-  busy: boolean
-  /** The save bar is showing: sit above it, not on it. */
-  lifted: boolean
-  canChangeRole: boolean
-  callerRole?: string | null
-  onProfile: (p: CapabilityBundle) => void
-  onCap: (cap: CapabilityValue, next: boolean) => void
-  onRole: (r: string) => void
-  onClear: () => void
-  reduce: boolean
-}) {
-  const caps = ALL_CAPABILITIES.filter((c) => c !== Capability.Chat)
-  const menu = (label: string, items: { key: string; label: string; danger?: boolean; run: () => void }[], heading: string) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={busy}>
-        <Button variant="outline" size="sm" className={selectionBarButton}>{label}<ChevronDown className="h-3 w-3" /></Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuLabel className="text-micro font-semibold text-primary-hover">{heading}</DropdownMenuLabel>
-        {items.map((i) => (
-          <DropdownMenuItem key={i.key} onSelect={i.run} className={cn("text-xs", i.danger && "text-destructive")}>{i.label}</DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-  const callerRank = ASSIGNABLE_ROLES.indexOf(callerRole as (typeof ASSIGNABLE_ROLES)[number])
-  const roles = callerRole === "OWNER" ? [...ASSIGNABLE_ROLES] : ASSIGNABLE_ROLES.filter((_, i) => callerRank < 0 ? false : i < callerRank)
-  return (
-    <motion.div role="toolbar" aria-label="Change the selected people" data-slot="members-bulk"
-      initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
-      className={cn(selectionBar, "fixed left-1/2 -translate-x-1/2 transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
-      <span className="px-1 text-xs"><span className="font-semibold tabular-nums">{count}</span> selected</span>
-      {menu("Set access", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Preset")}
-      {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
-      {menu("Revoke", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, run: () => onCap(c, false) })), "Revoke from all selected")}
-      {canChangeRole && roles.length > 0 && menu("Role", roles.map((r) => ({ key: r, label: ROLE_LABEL[r], run: () => onRole(r) })), "Change role")}
-      <Button variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")} onClick={onClear}>Clear</Button>
-    </motion.div>
-  )
 }
 
 /**

@@ -2,8 +2,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-// v67 parity for Settings › Members (PAR-101, 102, 104): the KPI strip, the
-// sans table header, the flat pills and chips and the d MMM joined date.
+// v67 parity for Settings › Members (PAR-101, 103, 104): the sans table
+// header, the flat pills and the d MMM joined date. (PAR-102's strip of five
+// figures is gone: every fact is shown once, in the panel or the banner.)
 // jsdom has no layout, so these pin the structure and the classes behind the
 // sizes; e2e/settings-h2.spec.ts measures them in a browser after deploy.
 
@@ -68,36 +69,29 @@ async function renderPage() {
   window.history.replaceState(null, "", "/settings/members")
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>)
-  await screen.findByRole("table", { name: "People and what they may do" })
-  await waitFor(() => expect(document.querySelector("[data-area]")).not.toBeNull())
+  await screen.findByRole("table", { name: "People and their roles" })
+  await waitFor(() => expect(document.querySelector("[data-slot=abilities-line]")).not.toBeNull())
 }
 
-describe("PAR-102 summary strip", () => {
-  it("is five KPI tiles: People, Invited, Chat only, Can reveal secrets, Above their role", async () => {
+describe("no strip of figures", () => {
+  it("repeats nothing the panel and the banner already say", async () => {
     await renderPage()
-    const strip = document.querySelector<HTMLElement>("[data-slot=members-summary]")!
-    const tiles = Array.from(strip.querySelectorAll<HTMLElement>("[data-slot=settings-kpi]"))
-    await waitFor(() => expect(tiles.map((t) => t.querySelector("small")!.textContent)).toEqual(["People", "Invited", "Chat only", "Can reveal secrets", "Above their role"]))
-    const value = (label: string) => tiles.find((t) => t.querySelector("small")!.textContent === label)!.querySelector("b")!
-    expect(value("People")).toHaveTextContent("4")
-    expect(value("Can reveal secrets")).toHaveTextContent("2")
-    expect(value("People").className).toContain("tabular-nums")
-    expect(value("People").className).not.toContain("font-mono")
-    // The two that ask for a look are buttons that filter the roster.
-    expect(tiles[3].tagName).toBe("BUTTON")
+    expect(document.querySelector("[data-slot=members-summary]")).toBeNull()
+    expect(document.querySelector("[data-slot=settings-kpi]")).toBeNull()
+    expect(document.querySelectorAll("[data-slot=members-look-banner]")).toHaveLength(1)
   })
 })
 
 describe("PAR-104 table and pills", () => {
   it("heads the table in sans, sentence case", async () => {
     await renderPage()
-    const table = screen.getByRole("table", { name: "People and what they may do" })
+    const table = screen.getByRole("table", { name: "People and their roles" })
     const heads = Array.from(table.querySelectorAll("thead th"))
     for (const th of heads) {
       expect(th.className).not.toContain("font-mono")
       expect(th.className).not.toContain("uppercase")
     }
-    expect(heads.map((t) => t.textContent).filter(Boolean)).toEqual(["Person", "Role", "Can do", "Joined", "Open"])
+    expect(heads.map((t) => t.textContent).filter(Boolean)).toEqual(["Person", "Role", "Abilities", "Joined", "Open"])
     // Role groups read like every other grouped list (v67 .grp): "Owners 1".
     for (const g of Array.from(table.querySelectorAll("th[scope=rowgroup]"))) {
       expect(g.className).not.toContain("uppercase")
@@ -106,7 +100,7 @@ describe("PAR-104 table and pills", () => {
     for (const g of Array.from(table.querySelectorAll("th[scope=rowgroup]"))) expect(g.className).not.toContain("font-mono")
   })
 
-  it("draws the role as a flat sans pill and the chips without icons", async () => {
+  it("draws the role as a flat sans pill and abilities as one line", async () => {
     await renderPage()
     const row = document.querySelector<HTMLElement>("tr[data-member=u-ada]")!
     const role = row.querySelector<HTMLElement>("[data-slot=role-pill]")!
@@ -114,14 +108,12 @@ describe("PAR-104 table and pills", () => {
     expect(role.className).toContain("font-sans")
     expect(role.className).not.toContain("font-mono")
     expect(role.querySelector("svg")).toBeNull()
-    for (const chip of Array.from(document.querySelectorAll<HTMLElement>("[data-area]"))) {
-      expect(chip.querySelector("svg"), chip.getAttribute("data-area") ?? "").toBeNull()
-      expect(chip.className).toContain("rounded-full")
-      expect(chip.className).toContain("px-2")
-    }
-    const restricted = document.querySelector<HTMLElement>("tr[data-member=u-mel] [data-slot=restricted-pill]")!
-    expect(restricted).toHaveTextContent("Restricted")
-    expect(restricted.querySelector("svg")).toBeNull()
+    const line = row.querySelector<HTMLElement>("[data-slot=abilities-line]")!
+    expect(line).toHaveTextContent("Chat only + reveal secrets")
+    expect(line.querySelector("svg")).toBeNull()
+    const guest = document.querySelector<HTMLElement>("tr[data-member=u-mel] [data-slot=guest-pill]")!
+    expect(guest).toHaveTextContent("Guest")
+    expect(guest.querySelector("svg")).toBeNull()
   })
 
   it("writes Joined as day and month, in sans", async () => {
@@ -138,7 +130,7 @@ describe("PAR-103 panel groups", () => {
   it("are plain sentence-case headings, with no fold chevron", async () => {
     await renderPage()
     const sections = Array.from(document.querySelectorAll("[data-slot=drill-section]"))
-    expect(sections.map((e) => e.firstElementChild!.textContent!.replace(/\d+$/, "").trim())).toEqual(["People", "Role", "Can do", "Needs a look"])
+    expect(sections.map((e) => e.firstElementChild!.textContent!.replace(/\d+$/, "").trim())).toEqual(["People", "Role"])
     for (const section of sections) {
       expect(section.querySelector("button[aria-expanded]")).toBeNull()
       expect(section.querySelector("svg.lucide-chevron-down")).toBeNull()

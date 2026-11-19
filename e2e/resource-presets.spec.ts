@@ -57,10 +57,10 @@ for (const width of [1280, 390]) test(`explicit preset consent and stale recover
     await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
   })
   await page.goto("/settings/members?member=fixture-guest")
-  await page.getByRole("button", { name: "Edit resource access" }).click()
+  await page.getByRole("button", { name: "Share something" }).click()
   const choose = async (kind: string, level: string) => {
-    await page.getByLabel("Resource kind", { exact: true }).selectOption(kind)
-    await page.getByLabel("Resource", { exact: true }).selectOption(`fixture-${kind}`)
+    await page.getByLabel("What", { exact: true }).selectOption(kind)
+    await page.getByLabel("Which one", { exact: true }).selectOption(`fixture-${kind}`)
     await expect(page.getByRole("combobox", { name: "Ordered preset" })).toBeEnabled()
     await page.getByRole("combobox", { name: "Ordered preset" }).selectOption(JSON.stringify([`${kind}-levels`, 1, level]))
   }
@@ -75,7 +75,9 @@ for (const width of [1280, 390]) test(`explicit preset consent and stale recover
   await expect(page.getByRole("alert").filter({ hasText: "Access changed" })).toBeVisible()
   expect(applies).toBe(1); expect(reads).toBe(1)
   await page.getByRole("button", { name: "Reload current policy" }).click()
-  await expect(page.getByLabel("Resource", { exact: true })).toHaveValue("")
+  // A reload remounts the editor: the share form is closed again.
+  await expect(page.getByLabel("Which one", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Share something" }).click()
   await choose("routine", "view")
   await page.getByRole("button", { name: "Preview preset" }).click()
   await expect(page.getByText(/eligible past and future regular outputs/)).toBeVisible()
@@ -86,7 +88,7 @@ for (const width of [1280, 390]) test(`explicit preset consent and stale recover
   expect(policy.rights).toContainEqual({ kind: "project", id: "fixture-project", operation: "delete_issues" })
   expect(policy.grant_details?.find(right => right.operation === "delete_issues")?.issuer_id).toBe("original-owner")
   await page.goto("/settings/members?member=fixture-guest")
-  await page.getByRole("button", { name: "Edit resource access" }).click()
+  await page.getByRole("button", { name: "Share something" }).click()
   await choose("routine", "view")
   await expect(page.getByText("Saved view v1 · selected — intent, not effective authority")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)

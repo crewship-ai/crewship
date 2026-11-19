@@ -457,16 +457,15 @@ test.describe("v67 parity", () => {
         await expect(page.getByRole("region", { name: "Who may reveal" }).getByText(/can read secrets in plaintext/)).toHaveCount(0)
       })
 
-      test("PAR-101/102/103/104 members: primary Add member, five KPI tiles, sans table head", async ({ page }) => {
+      test("PAR-101/103/104 members: primary Add member, no strip of figures, sans table head", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/members")
-        const strip = page.locator("[data-slot=members-summary]")
-        await expect(strip).toBeVisible()
-        expect(await strip.locator("[data-slot=settings-kpi]").count()).toBeGreaterThanOrEqual(3)
+        // Every fact once: the counts live in the panel and the banner, not in a strip.
+        await expect(page.locator("[data-slot=members-summary]")).toHaveCount(0)
         if (width >= 1024) {
           const add = page.getByRole("button", { name: "Add member" })
           await expect(add).toHaveAttribute("data-variant", "default")
-          const th = page.locator("table[aria-label='People and what they may do'] thead th").nth(1)
+          const th = page.locator("table[aria-label='People and their roles'] thead th").nth(1)
           await expect(th).toBeVisible()
           await expect(th).toHaveCSS("text-transform", "none")
           await sansNotMono(th)

@@ -93,8 +93,8 @@ describe("accessProfile — the nearest preset plus what differs", () => {
   it("spells out what was added and taken away", () => {
     const p = accessProfile([...POWER, "credentials:reveal"])
     expect(p).toEqual({ key: "power", added: ["credentials:reveal"], removed: [] })
-    expect(profileText(p)).toBe("Power user +Reveal")
-    expect(profileText(accessProfile(POWER.filter((c) => c !== "routine.run")))).toBe("Power user −Run")
+    expect(profileText(p)).toBe("Power user + reveal secrets")
+    expect(profileText(accessProfile(POWER.filter((c) => c !== "routine.run")))).toBe("Power user without run routines")
   })
 
   it("prefers the larger preset on a tie", () => {
@@ -178,7 +178,7 @@ describe("roleChoices — the server's ladder, drawn the same way", () => {
 
 describe("URL state", () => {
   it("round-trips the person and the filters", () => {
-    const state = { member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", area: "secrets", flag: "reveal" as const, status: "invited" as const, q: "ann" } }
+    const state = { member: "u-mel", filters: { role: "ADMIN", cap: "credentials:reveal", area: "secrets", flag: "reveal" as const, status: "invited" as const, reach: "guest" as const, q: "ann" } }
     expect(parseMembersUrl(membersUrlQuery(state))).toEqual(state)
   })
 
@@ -194,6 +194,48 @@ describe("URL state", () => {
 
   it("reads the palette's ?member= link", () => {
     expect(parseMembersUrl("?member=u-fredy").member).toBe("u-fredy")
+  })
+})
+
+describe("the abilities line", () => {
+  const POWER = ["chat", "routine.create", "routine.run", "issue.create", "memory.write"]
+  const BUILDER = [...POWER, "skill.create", "credential.create", "credential.rotate", "credentials:reveal"]
+
+  it("reads the nearest preset plus what differs, in the page's words", () => {
+    expect(profileText(accessProfile([...POWER, "skill.create"]))).toBe("Power user + create skills")
+    expect(profileText(accessProfile(BUILDER.filter((c) => c !== "credentials:reveal")))).toBe("Builder without reveal secrets")
+    expect(profileText(accessProfile([...POWER, "page.create"]))).toBe("Power user + create artifacts")
+  })
+
+  it("never shows a wire id", () => {
+    for (const c of ["routine.create", "credential.create", "credentials:reveal", "page.create"]) {
+      expect(profileText(accessProfile(["chat", c]))).not.toMatch(/[.:]/)
+    }
+  })
+})
+
+describe("the reach filter", () => {
+  const f = (over: Partial<typeof DEFAULT_MEMBER_FILTERS>) => ({ ...DEFAULT_MEMBER_FILTERS, ...over })
+  const guest = { ...mel, access_mode: "restricted" as const }
+  const trusted = { ...vic, access_mode: "trusted" as const }
+
+  it("keeps guests or the whole-workspace people", () => {
+    expect([guest, trusted].filter((m) => memberMatches(m, f({ reach: "guest" }), caps))).toEqual([guest])
+    expect([guest, trusted].filter((m) => memberMatches(m, f({ reach: "whole" }), caps))).toEqual([trusted])
+  })
+
+  it("ignores the filter for a member whose access mode was not sent", () => {
+    expect(memberMatches(mel, f({ reach: "guest" }), caps)).toBe(true)
+  })
+
+  it("counts as an active filter for an admin only", () => {
+    expect(activeFilterCount(f({ reach: "guest" }), true)).toBe(1)
+    expect(activeFilterCount(f({ reach: "guest" }), false)).toBe(0)
+  })
+
+  it("reads the Needs a look view from the URL", () => {
+    expect(parseMembersUrl("?status=look").filters.status).toBe("look")
+    expect(parseMembersUrl("?status=invited").filters.status).toBe("invited")
   })
 })
 
