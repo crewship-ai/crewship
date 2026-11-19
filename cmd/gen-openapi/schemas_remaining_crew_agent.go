@@ -332,7 +332,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// The one response that carries a waitpoint callback secret (#1910): it is
 	// minted here, shown once, and never listed or readable again.
 	components["WorkflowWaitpointCallbackTokenMintedV1"] = object(map[string]any{"token": str(), "callback_url": str(), "rotated": boolean()})
-	routes["POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token"] = DomainSchema{Response: ref("WorkflowWaitpointCallbackTokenMintedV1"), SuccessStatuses: []string{"201"}}
+	routes["POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token"] = DomainSchema{NoRequest: true, Response: ref("WorkflowWaitpointCallbackTokenMintedV1"), SuccessStatuses: []string{"201"}}
 
 	// The exact payloads for these pipeline subroutes are versioned by the
 	// pipeline handlers. Keeping named object contracts here documents their
