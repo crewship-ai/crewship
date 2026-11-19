@@ -1000,7 +1000,17 @@ mounts and RAM suspension explicitly.
 ### Resolving or updating a lock with Crewship
 
 `crewship crew provision lock-resolve mise.json --image sha256:<local-image-id>`
-resolves a mise JSON/TOML tool configuration in a disposable Docker builder.
+can also use `--crew <slug>` instead of `--image` for a remote server. This
+requires an OWNER/ADMIN human session or CLI credential and an already
+provisioned immutable environment owned by that installation. The server selects
+the crew image; the request cannot select arbitrary host images. Only tools and
+the optional existing lock are sent from the local mise file. Environment values
+and tasks are excluded. The result remains a proposal: review it with
+`crewship crew provision lock-apply`, then explicitly update and provision the
+crew through the normal CLI flow. No local Docker access is needed in remote
+mode, and no agent runtime or qualification gate is bypassed.
+
+The local command resolves a mise JSON/TOML tool configuration in a disposable Docker builder.
 Supply a trusted, already-present Linux image containing `/usr/local/bin/mise`,
 `/usr/bin/env`, `/bin/sleep` and `/bin/tar`. No image is pulled automatically.
 The resolver selects `linux-x64` or `linux-arm64` from that image's architecture;

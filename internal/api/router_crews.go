@@ -744,6 +744,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision/revisions", authed(wsCtx(http.HandlerFunc(provisioning.EnvironmentRevisions))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/provision", roleCreate, provisioning.ProvisionTrigger)
+	miseResolver := newCrewMiseLockHandler(r.db, r.logger, r.activeContainer())
+	r.authedMut("POST", "/api/v1/crews/{crewId}/provision/lock-resolve", roleManage, miseResolver.Resolve)
 	// ProvisionRebuild delegates admission and responses to ProvisionTrigger.
 	// openapi: responses 202,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
