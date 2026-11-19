@@ -193,7 +193,7 @@ crewship system onboarding          # same as `onboarding status`
 | Command | Description |
 |---------|-------------|
 | `status` | Show whether onboarding is complete (default if no subcommand). Someone who only belongs to workspaces other people own is always complete — the wizard sets up a workspace of one's own. Output defaults to JSON; `--format yaml/ndjson` honored. |
-| `setup` | Run the onboarding setup wizard (crew + agent + credential). |
+| `setup` | Run the onboarding setup wizard (crew + agent + credential). It acts on the oldest workspace you **own**. A template or applied-proposal setup requires ownership (`403` otherwise). A blank setup (`--crew`/`--agent`, which this command always runs) also accepts a workspace where you are ADMIN or MANAGER, but then it does not rename the workspace or change its language and telemetry settings. A MEMBER or VIEWER gets `403`. |
 | `complete` | Mark onboarding as finished without running the wizard. |
 
 ### `crewship system onboarding status`

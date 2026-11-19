@@ -133,20 +133,16 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Onboarding sets up a workspace of one's own. Someone who only joined
-	// workspaces other people own (an invited ADMIN, MANAGER, MEMBER or
-	// VIEWER) has nothing to set up: report done, and create nothing — the
-	// Crewship Guide below is the owner's, not a side effect of a member's
-	// read (#4876). Not persisted, so a later workspace of their own still
-	// gets the wizard.
-	var memberships, owned int
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN role = 'OWNER' THEN 1 ELSE 0 END), 0)
-		FROM workspace_members WHERE user_id = ?`, user.ID).Scan(&memberships, &owned); err != nil {
-		replyInternalError(w, h.logger, "query onboarding memberships", err)
+	// Onboarding sets up a workspace of one's own (#4876). Someone who owns
+	// none — only joined workspaces other people set up — has nothing to set
+	// up: report done and create nothing. Not persisted, so a workspace of
+	// their own later still gets the wizard.
+	target, err := h.onboardingTarget(r.Context(), user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve onboarding workspace", err)
 		return
 	}
-	if memberships > 0 && owned == 0 {
+	if target.memberships > 0 && target.role != "OWNER" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"completed": true})
 		return
 	}
@@ -208,7 +204,7 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// steps and ready for a conversation. Best-effort and silent on
 	// failure: Status answering "am I done yet" must never break because a
 	// side conversation partner could not be created.
-	if wsID, ok := h.firstWorkspaceID(r.Context(), user.ID); ok {
+	if wsID := target.workspaceID; target.role == "OWNER" {
 		if h.workspaceHasCredential(r.Context(), wsID) {
 			if _, err := ensureOnboardingSetupCrew(r.Context(), h.db, h.logger, wsID, user.ID); err != nil {
 				h.logger.Warn("onboarding status: ensure Crewship Guide", "error", err, "workspace_id", wsID)
@@ -221,19 +217,48 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// firstWorkspaceID mirrors the workspace lookup Setup() already does
-// (oldest membership wins), factored out so Status can make the same
-// best-effort check without duplicating the query text.
-func (h *OnboardingHandler) firstWorkspaceID(ctx context.Context, userID string) (string, bool) {
-	var workspaceID string
-	err := h.db.QueryRowContext(ctx, `
-		SELECT wm.workspace_id FROM workspace_members wm
-		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
-	`, userID).Scan(&workspaceID)
-	if err != nil {
-		return "", false
+// onboardingTargetWorkspace is the workspace onboarding acts on for a user.
+type onboardingTargetWorkspace struct {
+	workspaceID string // "" when the user may onboard no workspace
+	role        string // the user's role in workspaceID
+	memberships int    // all of the user's workspace memberships
+}
+
+// onboardingTarget resolves the one workspace every onboarding route (Status,
+// Setup, StartSetupAgent) acts on: the oldest live workspace the user OWNS,
+// else the oldest one where they hold the crew-create tier (ADMIN/MANAGER),
+// which only blank Setup accepts. It is never a workspace where the user is
+// a MEMBER or VIEWER, and an owned workspace always wins over an older
+// shared one, so a user invited first who later created a workspace of
+// their own is onboarded into theirs (#4876).
+func (h *OnboardingHandler) onboardingTarget(ctx context.Context, userID string) (onboardingTargetWorkspace, error) {
+	var t onboardingTargetWorkspace
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM workspace_members WHERE user_id = ?`, userID).Scan(&t.memberships); err != nil {
+		return t, err
 	}
-	return workspaceID, true
+	err := h.db.QueryRowContext(ctx, `
+		SELECT wm.workspace_id, wm.role FROM workspace_members wm
+		JOIN workspaces w ON w.id = wm.workspace_id AND w.deleted_at IS NULL
+		WHERE wm.user_id = ? AND wm.role IN ('OWNER', 'ADMIN', 'MANAGER')
+		ORDER BY CASE wm.role WHEN 'OWNER' THEN 0 ELSE 1 END, wm.created_at ASC, wm.workspace_id ASC
+		LIMIT 1`, userID).Scan(&t.workspaceID, &t.role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return t, nil
+	}
+	return t, err
+}
+
+// replyNoOnboardingWorkspace answers a write route whose caller has no
+// workspace it may onboard: 400 when they belong to no workspace at all (the
+// pre-#4876 answer), 403 when they only belong to workspaces someone else
+// set up.
+func replyNoOnboardingWorkspace(w http.ResponseWriter, t onboardingTargetWorkspace) {
+	if t.memberships == 0 {
+		replyError(w, http.StatusBadRequest, "No workspace found for user")
+		return
+	}
+	replyError(w, http.StatusForbidden, "Onboarding sets up a workspace you own; this account only belongs to workspaces someone else set up")
 }
 
 // workspaceHasCredential reports whether the workspace holds at least one
@@ -500,18 +525,19 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user's first workspace
-	var workspaceID string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT wm.workspace_id FROM workspace_members wm
-		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
-	`, user.ID).Scan(&workspaceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusBadRequest, "No workspace found for user")
-		return
-	}
+	// The workspace onboarding acts on (#4876): one the caller owns, or for
+	// blank setup one where they hold the crew-create tier. Never the oldest
+	// membership regardless of role — that let an invited MEMBER rename a
+	// shared workspace and deploy crews onto its owner's credential.
+	target, err := h.onboardingTarget(r.Context(), user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "find workspace", err)
+		return
+	}
+	workspaceID := target.workspaceID
+	ownerOnly := strings.TrimSpace(req.AppliedProposalID) != "" || strings.TrimSpace(req.CrewTemplateSlug) != ""
+	if workspaceID == "" || (ownerOnly && target.role != "OWNER") {
+		replyNoOnboardingWorkspace(w, target)
 		return
 	}
 
@@ -601,10 +627,18 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		credName = "API Key"
 	}
 
+	// An ADMIN/MANAGER running blank setup in a workspace someone else owns
+	// gets the crew, but not the owner's choices: no rename, no workspace
+	// language/telemetry prefs.
+	workspaceName := req.WorkspaceName
+	if target.role != "OWNER" {
+		workspaceName = ""
+	}
+
 	result, err := h.svc.Setup(r.Context(), services.SetupParams{
 		UserID:          user.ID,
 		WorkspaceID:     workspaceID,
-		WorkspaceName:   req.WorkspaceName,
+		WorkspaceName:   workspaceName,
 		CrewName:        req.CrewName,
 		CrewSlug:        makeSlug(req.CrewName),
 		AgentName:       req.AgentName,
@@ -634,7 +668,9 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// #1203: only persist once the service's own guard has confirmed this
 	// call actually claimed onboarding (err == nil above rules out the
 	// ErrOnboardingAlreadyCompleted / already-refused case).
-	h.persistOnboardingPrefs(r.Context(), workspaceID, req)
+	if target.role == "OWNER" {
+		h.persistOnboardingPrefs(r.Context(), workspaceID, req)
+	}
 
 	writeJSON(w, http.StatusCreated, result)
 }

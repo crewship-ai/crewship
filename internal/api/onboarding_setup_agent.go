@@ -80,11 +80,18 @@ func (h *OnboardingHandler) StartSetupAgent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	wsID, ok := h.firstWorkspaceID(r.Context(), user.ID)
-	if !ok {
-		replyError(w, http.StatusBadRequest, "No workspace found for user")
+	// Only in a workspace the caller owns (#4876): the Guide is the owner's
+	// onboarding conversation and runs on the workspace's model credential.
+	target, err := h.onboardingTarget(r.Context(), user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "start setup agent: resolve workspace", err)
 		return
 	}
+	if target.role != "OWNER" {
+		replyNoOnboardingWorkspace(w, target)
+		return
+	}
+	wsID := target.workspaceID
 
 	// The precondition this whole file exists to enforce — see the
 	// SEQUENCING DECISION above. Refuse BEFORE calling
