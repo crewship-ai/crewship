@@ -40,6 +40,10 @@ func assertGone(t *testing.T, pidFile string) {
 	}
 }
 
+// Emit readiness and the result together; this test is about the startup
+// deadline, so it has no external work to schedule inside the work deadline.
+const slowStartupPhaseFixture = `sleep 1; printf '%s%s' "$READY" '{"order":["slow"]}'`
+
 func TestEngineSeparatesStartupFromWorkBudget(t *testing.T) {
 	const printReady = `printf '%s' "$READY"; `
 	tests := []struct {
@@ -51,7 +55,7 @@ func TestEngineSeparatesStartupFromWorkBudget(t *testing.T) {
 	}{
 		// Start-up longer than the whole work budget is still accepted.
 		{"slow startup within budget", 3 * time.Second, 200 * time.Millisecond,
-			`sleep 1; ` + printReady + `cat >/dev/null; printf '{"order":["slow"]}'`, ""},
+			slowStartupPhaseFixture, ""},
 		{"hang before ready", 200 * time.Millisecond, 5 * time.Second,
 			`echo $$ > "$PIDFILE"; exec sleep 30`, PhaseStartup},
 		{"hang after ready", 5 * time.Second, 200 * time.Millisecond,
@@ -87,6 +91,30 @@ func TestEngineSeparatesStartupFromWorkBudget(t *testing.T) {
 			}
 			assertGone(t, pidFile)
 		})
+	}
+}
+
+// This phase-only fixture must not spend its tiny work budget launching an
+// unrelated external process after readiness. A private slow cat makes that
+// dependency deterministic without applying load to the host or changing any
+// engine deadline. Only this child command receives the modified PATH.
+func TestSlowStartupPhaseFixtureAvoidsExternalWork(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cat"), []byte("#!/bin/sh\nexec sleep 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	engine := Engine{StartupTimeout: 3 * time.Second, WorkTimeout: 200 * time.Millisecond,
+		command: func(ctx context.Context) (*exec.Cmd, error) {
+			cmd := exec.CommandContext(ctx, "sh", "-c", slowStartupPhaseFixture)
+			cmd.Env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"), "READY=" + readyMarker}
+			return cmd, nil
+		}}
+	result, err := engine.Run(t.Context(), Request{})
+	if err != nil {
+		t.Fatalf("phase fixture depended on external work: %v", err)
+	}
+	if len(result.Order) != 1 || result.Order[0] != "slow" {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
