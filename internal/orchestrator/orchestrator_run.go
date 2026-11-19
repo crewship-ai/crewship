@@ -2101,6 +2101,12 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		}
 	}
 
+	if req.sidecarActive || req.SkipSidecar {
+		if script := o.sidecarInboxGrantScript(req, env); script != "" {
+			batch.add(preflightStepInboxGrant, "", script)
+		}
+	}
+
 	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
 	manifestCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,

@@ -95,3 +95,5 @@ public contract here. Superseded a spec? Move it to
 
 - [Response shapes](response-shape-contract.md): how generated OpenAPI responses
   are graded; consumed by `cmd/gen-openapi` and `scripts/api-contract`.
+
+- [Agent human inbox](agent-human-inbox.md) — workspace rollout, source authority and read receipts.

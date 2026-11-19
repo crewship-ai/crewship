@@ -56,9 +56,12 @@ type RestoreOptions struct {
 	// up the provenance that authorises a FilesOnly restore and to
 	// resolve the bundle's crew slugs onto this instance's crew rows.
 	ResumeWorkspaceID string
-	Actor             Actor
-	DockerOps         DockerOps
-	ContainerFor      func(id, slug string) string // map crew (id, slug) -> container ID
+	// OnDatabaseCommit refreshes live consumers of restored rows before
+	// any post-commit work can fail. Dry runs and files-only restores skip it.
+	OnDatabaseCommit func(context.Context)
+	Actor            Actor
+	DockerOps        DockerOps
+	ContainerFor     func(id, slug string) string // map crew (id, slug) -> container ID
 	// DryRun, when true, runs every validation (checksum, schema-skew,
 	// decrypt, payload walk) but commits no DB writes and performs no
 	// docker CopyTo. RestoreResult reports what WOULD have happened.
@@ -1416,6 +1419,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if transcriptRelease != nil {
 			transcriptRelease()
 			transcriptRelease = nil
+		}
+		if serviceDatabaseCommitted && opts.OnDatabaseCommit != nil {
+			opts.OnDatabaseCommit(context.WithoutCancel(ctx))
 		}
 		if finishErr != nil {
 			return nil, finishErr

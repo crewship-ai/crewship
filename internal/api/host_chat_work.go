@@ -41,6 +41,7 @@ func (h *InternalHandler) beginHostChatWork(w http.ResponseWriter, r *http.Reque
 			return false, false, true
 		} // Existing dispatcher remains its owner.
 	}
+	request.CaptureInboxSource = h.agentInboxEnabled != nil && h.agentInboxEnabled(request.WorkspaceID)
 	_, fresh, err = store.BeginHostChat(r.Context(), request)
 	if err != nil {
 		if errors.Is(err, work.ErrNoWork) {

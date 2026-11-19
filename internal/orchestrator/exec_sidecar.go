@@ -291,6 +291,34 @@ func sidecarRunEndScript(runToken string) string {
 		"RUNEND_AUTH_HEREDOC\n"
 }
 
+// sidecarInboxGrantScript registers inbox discovery for one live run on the
+// healthy crew sidecar. Both proofs travel on preflight stdin, never argv.
+func (o *Orchestrator) sidecarInboxGrantScript(req AgentRunRequest, env []string) string {
+	if o.agentInboxEnabled == nil || !o.agentInboxEnabled(req.WorkspaceID) {
+		return ""
+	}
+	token := agentRunTokenFromEnv(env)
+	if !runTokenShape.MatchString(token) {
+		return ""
+	}
+	o.mu.RLock()
+	master := o.ipcToken
+	o.mu.RUnlock()
+	key := agentRunKey(master, req.WorkspaceID, req.CrewID, o.loggerForRun(req))
+	if token != internaltoken.DeriveAgentRunToken(key, req.WorkspaceID, req.AgentID, req.RunID) {
+		return ""
+	}
+	grant := internaltoken.DeriveAgentInboxGrant(key, token)
+	if grant == "" {
+		return ""
+	}
+	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/inbox-grant " +
+		"-K /dev/fd/3 3<<'INBOXGRANT_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
+		"header = " + strconv.Quote("Authorization: Bearer "+token) + "\n" +
+		"header = " + strconv.Quote(internaltoken.AgentInboxGrantHeader+": "+grant) + "\n" +
+		"INBOXGRANT_AUTH_HEREDOC\n"
+}
+
 // runCapabilityShape mirrors the sidecar's check of an artifactrun capability.
 var runCapabilityShape = regexp.MustCompile(`^urcv1\.[0-9a-f]{64}$`)
 

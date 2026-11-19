@@ -48,6 +48,7 @@ func StartRetentionSweeper(ctx context.Context, store *Store, logger *slog.Logge
 			"raw_body_bytes_freed", res.RawBodyBytesFreed,
 			"deliveries_removed", res.DeliveriesRemoved,
 			"raw_bodies_retained", res.RawBodiesRetained,
+			"inbox_evidence_removed", res.InboxEvidenceRemoved,
 			"batches", res.Batches)
 	}
 	run()

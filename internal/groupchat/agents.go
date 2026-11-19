@@ -136,12 +136,18 @@ func (s *Store) SendAgentReply(ctx context.Context, jobID, content string) (Mess
 	var m Message
 	err := s.write(ctx, func(q querier) error {
 		var conversationID, agentID, state, replyID, w, requester string
-		err := q.QueryRowContext(ctx, `SELECT j.conversation_id,COALESCE(j.agent_id,''),j.state,COALESCE(j.reply_message_id,''),c.workspace_id,COALESCE(j.requested_by_user_id,'') FROM workspace_conversation_agent_jobs j JOIN workspace_conversations c ON c.id=j.conversation_id JOIN workspaces w ON w.id=c.workspace_id WHERE j.id=? AND c.deleted_at IS NULL AND w.deleted_at IS NULL`, jobID).Scan(&conversationID, &agentID, &state, &replyID, &w, &requester)
+		var inboxBound bool
+		err := q.QueryRowContext(ctx, `SELECT j.conversation_id,COALESCE(j.agent_id,''),j.state,COALESCE(j.reply_message_id,''),c.workspace_id,COALESCE(j.requested_by_user_id,''),j.read_authority_json IS NOT NULL OR j.read_source_sha256 IS NOT NULL FROM workspace_conversation_agent_jobs j JOIN workspace_conversations c ON c.id=j.conversation_id JOIN workspaces w ON w.id=c.workspace_id WHERE j.id=? AND c.deleted_at IS NULL AND w.deleted_at IS NULL`, jobID).Scan(&conversationID, &agentID, &state, &replyID, &w, &requester, &inboxBound)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrForbidden
 		}
 		if err != nil {
 			return err
+		}
+		if inboxBound {
+			if err := ValidateAgentJob(ctx, q, jobID); err != nil {
+				return err
+			}
 		}
 		if state == "completed" {
 			m, err = scanMessage(q.QueryRowContext(ctx, `SELECT `+messageCols+` FROM workspace_conversation_messages m LEFT JOIN users u ON u.id=m.author_user_id WHERE m.id=?`, replyID))

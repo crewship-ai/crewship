@@ -9,6 +9,9 @@ import (
 	"database/sql"
 )
 
+// AgentHumanInbox controls the workspace human inbox and source receipts.
+const AgentHumanInbox = "agent_human_inbox"
+
 // IsEnabled resolves key's effective value for workspaceID: a
 // per-workspace override (feature_flag_overrides) wins over the flag's
 // instance-wide default (feature_flags.enabled). A flag key with no

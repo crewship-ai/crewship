@@ -86,7 +86,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.
-	wch := NewWorkspaceConversationsHandler(groupchat.New(r.db), r.logger)
+	wch := NewWorkspaceConversationsHandler(groupchat.New(r.db).WithInboxEnabled(r.agentInboxFlags.Enabled), r.logger)
+	wch.agentInboxEnabled = r.agentInboxFlags.Enabled
 	wch.hub = r.hub
 	// openapi: query offset:integer limit:integer
 	r.mux.Handle("GET /api/v1/conversations", authed(wsCtx(http.HandlerFunc(wch.List))))
@@ -148,6 +149,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	issues.agentInboxEnabled = r.agentInboxFlags.Enabled
 	r.issueMutationHandler = issues
 	issues.routines = r.PipelinesHandler
 	issues.SetJournal(r.Journal())
@@ -268,6 +270,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("DELETE", "/api/v1/workflow-templates/{id}", roleCreate, wt.Delete)
 	// Feature Flags (instance-default + per-workspace override). SPEC-2: new in this PR.
 	ff := NewFeatureFlagHandler(r.db, r.hub, r.logger)
+	ff.agentInboxFlags = &r.agentInboxFlags
 	r.mux.Handle("GET /api/v1/feature-flags", authed(wsCtx(http.HandlerFunc(ff.List))))
 	r.authedInstanceMut("POST", "/api/v1/feature-flags", ff.Create)
 	r.authedInstanceMut("PATCH", "/api/v1/feature-flags/{key}", ff.Update)
@@ -559,6 +562,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// fetches (approvals + assignments + escalations + peer messages).
 	aih := NewAgentInboxHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/human-inbox", authed(wsCtx(http.HandlerFunc(r.agentHumanInbox))))
 
 	// User preferences: generic key-value store for per-user UI settings
 	// (panel sizes, density, last-opened tabs, …). Migration v58 created

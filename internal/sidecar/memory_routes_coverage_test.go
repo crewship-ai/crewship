@@ -70,6 +70,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /agent/run/end": guardHandlerIdentity,
 	// #5339: registers a capability only for the run its OWN token binds.
 	"POST /agent/run/artifact-capability": guardHandlerIdentity,
+	"POST /agent/run/inbox-grant":         guardHandlerIdentity,
 	"POST /api/v1/documents/create":       guardHandlerIdentity,
 	"POST /api/v1/gridcraft":              guardHandlerIdentity,
 	"POST /api/v1/mooring":                guardHandlerIdentity, // handleMooring binds and forwards the signed live run

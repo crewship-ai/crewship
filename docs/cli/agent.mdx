@@ -826,6 +826,78 @@ Backed by `GET /api/v1/agents/{id}/inbox`.
 
 ---
 
+## `crewship agent inbox human`
+
+Read visible canonical human channel messages, delegated tasks you created and
+your authorized host-chat turns. Viewing this list never marks a message read
+for the agent. The argument-free agent MCP tool `inbox_read` creates the
+source-bound read receipt during an actual current run.
+
+```bash
+crewship --workspace my-workspace agent inbox human viktor --format json
+```
+
+Backed by `GET /api/v1/agents/{agentId}/human-inbox`.
+
+## `crewship agent inbox send`
+
+Send a human message through an existing workspace channel, mentioning exactly
+this agent. The agent must already be joined; this command does not widen the
+channel audience. Reuse the same client ID on retries.
+
+```bash
+crewship --workspace my-workspace agent inbox send viktor --conversation channel-id --message "Please check the build" --client-id request-1
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--conversation` | string | | Required existing channel ID. |
+| `--message` | string | | Required human message text. |
+| `--client-id` | string | | Required stable send identity; reuse for retries. |
+
+Backed by `POST /api/v1/conversations/{conversationId}/messages`.
+
+## `crewship agent inbox task`
+
+Create and start a canonical issue delegated to this agent. Existing start and
+approval gates remain in force. Creation retries reuse the same issue. If a
+start response is lost, authorized canonical readback may report existing state;
+it does not claim that the retry executed work or mark the agent read.
+
+```bash
+crewship --workspace my-workspace agent inbox task viktor --crew engineering --title "Check build" --instructions "Inspect the build output" --client-id task-1
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--crew` | string | | Required crew slug or ID. |
+| `--title` | string | | Required issue title. |
+| `--instructions` | string | | Required issue instructions. |
+| `--client-id` | string | | Required stable issue creation identity. |
+
+Backed by `POST /api/v1/crews/{crewId}/issues` and
+`POST /api/v1/crews/{crewId}/issues/{identifier}/start`.
+
+---
+
+## `crewship agent inbox read`
+
+An agent can use `crewship agent inbox read` inside its active run to read and
+acknowledge the run's host-recorded human inbox source through the local
+sidecar. It takes no source or agent selector and uses the run token already
+provided in the agent environment. The workspace must enable the
+`agent_human_inbox` feature flag.
+
+```bash
+crewship agent inbox read
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--sidecar` | string | `http://127.0.0.1:9119` | Local sidecar HTTP origin. Accepts loopback addresses only. |
+
+---
+
 ## `crewship agent git-log`
 
 Show the git commit log from inside the agent's container — useful for inspecting what code-writing agents have committed locally before any push.

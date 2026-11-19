@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/missionactivity"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -245,6 +246,10 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
+
+	if r.Header.Get(featureflags.AgentInboxRequestHeader) == "1" && !requireHumanInboxWrite(w, wsID, h.agentInboxEnabled) {
+		return
+	}
 
 	// The run-inputs body is read and decoded BEFORE the write transaction
 	// opens: the server's ReadTimeout bounds the bytes a slow client may

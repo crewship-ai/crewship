@@ -324,6 +324,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		a.CredentialReadiness = readiness
 	}
 
+	a.HumanInboxEnabled = h.agentInboxEnabled != nil && h.agentInboxEnabled(workspaceID)
 	writeJSON(w, http.StatusOK, a)
 }
 

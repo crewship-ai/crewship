@@ -40,7 +40,8 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
 	}
 	defer c.ExecContext(context.Background(), "ROLLBACK")
 	var status string
-	err = c.QueryRowContext(ctx, `SELECT a.status FROM workspace_conversation_agent_jobs j
+	var inboxBound bool
+	err = c.QueryRowContext(ctx, `SELECT a.status,j.read_authority_json IS NOT NULL OR j.read_source_sha256 IS NOT NULL FROM workspace_conversation_agent_jobs j
  JOIN assignments assignment ON assignment.id=j.assignment_id
  JOIN workspace_conversations conversation ON conversation.id=j.conversation_id
  JOIN workspaces w ON w.id=conversation.workspace_id
@@ -52,7 +53,14 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
  AND conversation.deleted_at IS NULL AND w.deleted_at IS NULL AND a.deleted_at IS NULL AND crew.deleted_at IS NULL
  AND assignment.workspace_id=w.id AND assignment.assigned_to_id=a.id
  AND assignment.created_by_user_id=j.requested_by_user_id
- AND assignment.status IN ('PENDING','QUEUED','RUNNING') AND assignment.cancel_requested_at IS NULL`, jobID, assignmentID).Scan(&status)
+ AND assignment.status IN ('PENDING','QUEUED','RUNNING') AND assignment.cancel_requested_at IS NULL`, jobID, assignmentID).Scan(&status, &inboxBound)
+	if err == nil && inboxBound {
+		if sourceErr := groupchat.ValidateAgentJob(ctx, c, jobID); errors.Is(sourceErr, groupchat.ErrForbidden) {
+			err = sql.ErrNoRows
+		} else if sourceErr != nil {
+			return false, sourceErr
+		}
+	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}

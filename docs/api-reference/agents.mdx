@@ -1123,6 +1123,14 @@ required path parameter and workspace context scopes the lookup.
 
 ---
 
+## Agent Human Inbox
+
+`GET /api/v1/agents/{agentId}/human-inbox` lists the requesting user's
+authorized human messages and delegated issue sources for one agent. The
+workspace must enable `agent_human_inbox`. The response contains `items`
+and `read_semantics`. An item's `read_at` is null until the agent makes a
+source-bound authenticated read. Reading this endpoint makes no changes.
+
 ## Agent Peer Cards
 
 Per-`(agent, user)` markdown notes — the agent's own "what I know about this person" file.

@@ -183,6 +183,12 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"DELETE /api/v1/inbox":               {Response: object(map[string]any{"deleted": integer()})},
 		"GET /api/v1/agents/{agentId}/inbox": {Response: object(map[string]any{"approvals_pending": integer(), "assignments_open": map[string]any{"type": "integer", "description": "Assignments routed to this agent in PENDING, QUEUED, or RUNNING state, regardless of case."}, "escalations_open": integer(), "peer_messages": array(anyObject()), "cost_usd_this_month": map[string]any{"type": "number"}, "llm_calls_this_month": integer(), "tokens_used_this_month": integer()})},
 	}
+	inbox["GET /api/v1/agents/{agentId}/human-inbox"] = DomainSchema{Response: object(map[string]any{
+		"items": array(object(map[string]any{
+			"id": str(), "kind": str(), "content": str(), "state": str(), "href": str(), "created_at": str(), "read_at": nullable(str()),
+		}, "id", "kind", "content", "state", "href", "created_at", "read_at")),
+		"read_semantics": str(),
+	}, "items", "read_semantics")}
 	audit := map[string]DomainSchema{
 		"GET /api/v1/audit": {Response: object(map[string]any{"data": array(auditEntry), "pagination": pagination})},
 	}

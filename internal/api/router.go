@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -63,6 +64,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	agentInboxFlags       featureflags.AgentInboxState
 	craftNativeHTTPConfig CraftNativeHTTPConfig
 	craftNativeStartupErr error
 	craftNativeHTTP       *craftNativeHTTP
@@ -917,6 +919,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.refreshAgentInboxFlags(context.Background())
+	if r.orch != nil {
+		r.orch.SetAgentInboxEnabled(r.agentInboxFlags.Enabled)
+	}
 	var passwordLimitsErr error
 	r.publicPagePasswords, passwordLimitsErr = r.publicPagePasswords.Resolve()
 	if passwordLimitsErr != nil {
@@ -1317,4 +1323,10 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 
 	// Static files / other paths — no rate limiting
 	r.mux.ServeHTTP(w, req)
+}
+
+func (r *Router) refreshAgentInboxFlags(ctx context.Context) {
+	if err := r.agentInboxFlags.Refresh(ctx, r.db); err != nil && r.logger != nil {
+		r.logger.Warn("refresh agent inbox flag", "error", err)
+	}
 }

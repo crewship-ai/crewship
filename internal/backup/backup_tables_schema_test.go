@@ -104,6 +104,8 @@ var workspaceTablesNotBundled = map[string]string{
 	"provider_device_logins":     "device-approval polling sessions owned by this process; never resume one on another instance",
 	"routine_webhook_receipts":   "receipt identities refer to this instance's pipeline runtime history",
 	"pipeline_signal_deliveries": "signal delivery ids and run ids refer to this instance's pipeline runtime history",
+	"agent_inbox_run_sources":    "private run source commitments are tied to a local runtime, not a portable execution grant",
+	"agent_inbox_receipts":       "source-bound agent read evidence belongs to a local run; restored work starts with read state unknown",
 	"session_mailbox":            "undelivered chat turns addressed to a live session that does not survive the restore; delivered ones are in workspace_conversation_messages",
 	"chat_read_shares":           "short-lived bearer links to a live chat; restoring token hashes would revive access in a copied workspace",
 	"webhook_deliveries":         "inbound delivery ledger incl. raw request bodies; dedup keys only mean something against work_items, which do not travel",

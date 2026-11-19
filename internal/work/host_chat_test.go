@@ -292,3 +292,13 @@ func TestHostChatLeaseExpiredFailedExitReleasesCapacity(t *testing.T) {
 		t.Fatalf("settled failures still hold server capacity: %v", err)
 	}
 }
+
+func TestAgentInboxDisabledHostChatDoesNotReadFlagOrSourceTables(t *testing.T) {
+	store, db, _ := newTestStore(t)
+	if _, err := db.Exec("DROP TABLE feature_flag_overrides; DROP TABLE feature_flags; DROP TABLE agent_inbox_run_sources"); err != nil {
+		t.Fatal(err)
+	}
+	if _, fresh, err := store.BeginHostChat(t.Context(), hostChatRequest("inbox-off")); err != nil || !fresh {
+		t.Fatalf("ordinary host chat depended on inbox state: fresh=%v err=%v", fresh, err)
+	}
+}

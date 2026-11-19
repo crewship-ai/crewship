@@ -120,6 +120,9 @@ type SweepResult struct {
 	// kept: still inside a window, or still non-terminal. It is the number that
 	// distinguishes "nothing was due" from "the predicate is wrong".
 	RawBodiesRetained int
+	// InboxEvidenceRemoved counts read receipts and source commitments removed
+	// for ended work attempts after the dedup retention window.
+	InboxEvidenceRemoved int
 	// Batches is how many write transactions were taken.
 	Batches int
 }
@@ -146,7 +149,44 @@ func (s *Store) Sweep(ctx context.Context, p RetentionPolicy) (SweepResult, erro
 	if err := s.sweepDedup(ctx, p, now, &res); err != nil {
 		return res, err
 	}
-	return res, nil
+	err := s.sweepInboxEvidence(ctx, p.Batch, now.Add(-p.DedupWindow), &res)
+	return res, err
+}
+
+func (s *Store) sweepInboxEvidence(ctx context.Context, batch int, cutoff time.Time, res *SweepResult) error {
+	stamp := tsformat.Format(cutoff)
+	for _, q := range []string{
+		`DELETE FROM agent_inbox_receipts WHERE rowid IN (
+		 SELECT proof.rowid FROM agent_inbox_receipts proof WHERE proof.read_at < ?
+		 AND EXISTS (SELECT 1 FROM work_attempts a WHERE a.run_id=proof.run_id AND a.ended_at < ?)
+		 ORDER BY proof.read_at LIMIT ?)`,
+		`DELETE FROM agent_inbox_run_sources WHERE rowid IN (
+		 SELECT source.rowid FROM agent_inbox_run_sources source WHERE source.created_at < ?
+		 AND EXISTS (SELECT 1 FROM work_attempts a WHERE a.run_id=source.run_id AND a.ended_at < ?)
+		 ORDER BY source.created_at LIMIT ?)`,
+	} {
+		for {
+			if err := quiesce.Yield(ctx); err != nil {
+				return err
+			}
+			updated, err := s.db.ExecContext(ctx, q, stamp, stamp, batch)
+			if err != nil {
+				return fmt.Errorf("work: expire agent inbox evidence: %w", err)
+			}
+			n, err := updated.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				res.Batches++
+				res.InboxEvidenceRemoved += int(n)
+			}
+			if n < int64(batch) {
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // rawBodyCandidate is one row the walk found, with everything the deadline

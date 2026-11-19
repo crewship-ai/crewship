@@ -627,6 +627,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// to the very test that exists to stop routes going unclassified.
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/end":
 				s.handleRunEnd(w, r)
+			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/inbox-grant":
+				s.handleInboxGrant(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/artifact-capability":
 				s.handleRunArtifactCapability(w, r)
 				return
