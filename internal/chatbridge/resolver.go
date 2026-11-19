@@ -247,6 +247,14 @@ type credentialResponse struct {
 	GraceToken      string `json:"grace_token,omitempty"`
 	GraceExpiresAt  string `json:"grace_expires_at,omitempty"`
 	GraceRotationID string `json:"grace_rotation_id,omitempty"`
+	// SourceRevision mirrors mcpCredEntry.SourceRevision: the revision of the
+	// exact Vault value behind the ENDPOINT_URL proxy projection. The host
+	// admits that projection only with it, so dropping it made every chat run
+	// through an authenticated endpoint fail with 403 (#5542).
+	SourceRevision string `json:"source_revision,omitempty"`
+	// HandleOnly mirrors mcpCredEntry.HandleOnly (#2376): the value is
+	// deliberately empty and must not be delivered as an empty env value.
+	HandleOnly bool `json:"handle_only,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2). Absent for every credential that has none, so an unchanged
 	// credential decodes to an unchanged struct. Dropping this key here would
@@ -676,6 +684,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			GraceToken:      c.GraceToken,
 			GraceExpiresAt:  c.GraceExpiresAt,
 			GraceRotationID: c.GraceRotationID,
+			SourceRevision:  c.SourceRevision,
+			HandleOnly:      c.HandleOnly,
 		}
 		for _, f := range c.Fields {
 			creds[i].Fields = append(creds[i].Fields, orchestrator.CredentialField{
