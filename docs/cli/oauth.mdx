@@ -95,16 +95,29 @@ client.
 
 `--oauth-provider` fills the authorize URL, token URL and default scopes from
 the same catalogue `crewship oauth providers` prints. For a provider the
-catalogue does not carry — a self-hosted GitLab, a private IdP — give the
-endpoints yourself:
+catalogue does not carry — a self-hosted GitLab reachable on a public
+address, an IdP the catalogue lacks — give the endpoints yourself:
 
 ```bash
 crewship credential create --name gitlab-internal --type OAUTH2 \
   --oauth-client-id <client-id> \
-  --oauth-auth-url  https://gitlab.acme.internal/oauth/authorize \
-  --oauth-token-url https://gitlab.acme.internal/oauth/token \
+  --oauth-auth-url  https://gitlab.acme.com/oauth/authorize \
+  --oauth-token-url https://gitlab.acme.com/oauth/token \
   --oauth-scopes    "api read_user"
 ```
+
+<Warning>
+**The token endpoint must resolve to a public address.** The server
+exchanges the authorization code and refreshes tokens through the same
+SSRF guard as every other outbound integration call: a token URL that
+resolves to a private, loopback or link-local address
+(`10.0.0.0/8`, `192.168.0.0/16`, `127.0.0.1`, `*.internal` names that point
+there, …) is refused at connection time. Creating such a credential still
+succeeds, but `crewship oauth connect` ends with *token exchange failed* and
+the credential stays `PENDING`. The crew's `allow_private_endpoints` setting
+and approved refresh hosts do not lift this guard. An IdP that is only
+reachable on a private network is not supported (#5525).
+</Warning>
 
 The row is created with **no value** and status `PENDING`. It stays that way,
 and fails every agent run that resolves it, until the flow below completes.
