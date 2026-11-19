@@ -17,10 +17,11 @@ const ROLES = {
 
 // What a full session sees, in order. Calendar is checked separately: it is a
 // row only where the Calendar page exists, and its place in Work is not what
-// this spec is about.
+// this spec is about. Saved work lives at /artifacts in every build; Pages is
+// never a destination (owner, 8 Nov 2026; lib/nav-sections.ts, #5132).
 const CORE_HREFS = [
   "/", "/inbox", "/chat", "/activity",
-  "/issues", "/routines", "/pages",
+  "/issues", "/routines", "/artifacts",
   "/crews", "/skills", "/credentials", "/integrations",
 ]
 
