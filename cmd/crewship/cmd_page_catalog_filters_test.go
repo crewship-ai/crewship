@@ -11,7 +11,7 @@ import (
 func TestPageCLICatalogFacetFiltersEncodeRepeatedValues(t *testing.T) {
 	stub := pageStub(t)
 	stub.OnGet("/api/v1/pages", func(r *http.Request, _ []byte) (int, []byte, string) {
-		want := url.Values{"q": {"Žluťoučký & launch?"}, "kind": {"project", "word", "slides", "design"}, "access": {"private", "open"}, "version": {"shared", "unshared"}, "owner": {"me", "user/cuser123", "crew/ops"}, "folder": {"~unfiled"}, "empty": {"exclude"}, "sort": {"name"}, "limit": {"7"}, "offset": {"14"}, "test_items": {"include"}, "archived": {"only"}, "audience": {"all"}}
+		want := url.Values{"q": {"Žluťoučký & launch?"}, "kind": {"project", "docs", "word", "slides", "design"}, "access": {"private", "open"}, "version": {"shared", "unshared"}, "owner": {"me", "user/cuser123", "crew/ops"}, "folder": {"~unfiled"}, "empty": {"exclude"}, "sort": {"name"}, "limit": {"7"}, "offset": {"14"}, "test_items": {"include"}, "archived": {"only"}, "audience": {"all"}}
 		got := r.URL.Query()
 		got.Del("workspace_id")
 		if !reflect.DeepEqual(got, want) {
@@ -22,7 +22,7 @@ func TestPageCLICatalogFacetFiltersEncodeRepeatedValues(t *testing.T) {
 		}
 		return 200, []byte(`[]`), "application/json"
 	})
-	_, err := runPageCLI(t, "", "page", "list", "-q", "Žluťoučký & launch?", "--kind", "project,word", "--kind", "slides,design", "--access", "private,open", "--version-state", "shared", "--version-state", "unshared", "--owner", "me,user/cuser123", "--owner", "crew/ops", "--folder", "~unfiled", "--empty", "exclude", "--sort", "name", "--limit", "7", "--offset", "14", "--test-items", "include", "--archived", "only", "--audience", "all", "--format", "json")
+	_, err := runPageCLI(t, "", "page", "list", "-q", "Žluťoučký & launch?", "--kind", "project,docs,word", "--kind", "slides,design", "--access", "private,open", "--version-state", "shared", "--version-state", "unshared", "--owner", "me,user/cuser123", "--owner", "crew/ops", "--folder", "~unfiled", "--empty", "exclude", "--sort", "name", "--limit", "7", "--offset", "14", "--test-items", "include", "--archived", "only", "--audience", "all", "--format", "json")
 	if err != nil {
 		t.Fatal(err)
 	}

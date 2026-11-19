@@ -1907,7 +1907,9 @@
               "design",
               "library",
               "dashboard",
-              "app"
+              "app",
+              "word",
+              "sheet"
             ],
             "type": "string"
           },
@@ -1983,7 +1985,9 @@
               "design",
               "library",
               "dashboard",
-              "app"
+              "app",
+              "word",
+              "sheet"
             ],
             "type": "string"
           },
@@ -137746,7 +137750,7 @@
             }
           },
           {
-            "description": "Caller-visible kind, derived from the same selected metadata as the index row. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "description": "Caller-visible kind, derived from the same selected metadata as the index row. docs is a structured Docs document (has_document without a typed kind); word is native Word only (artifact_kind word). Repeat the parameter or separate values with commas; values are ORed within this facet.",
             "explode": true,
             "in": "query",
             "name": "kind",
@@ -137757,6 +137761,7 @@
                   "project",
                   "dashboard",
                   "page",
+                  "docs",
                   "word",
                   "sheet",
                   "slides",

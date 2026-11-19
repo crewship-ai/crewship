@@ -15,7 +15,7 @@ const artifactKindGuideTool = "artifact_kind_guide"
 func artifactKindGuideMCPCatalog() []memoryMCPToolDescriptor {
 	schema, _ := json.Marshal(map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"kind"},
-		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kindguide.Kinds(), "description": "The artifact kind named in the Page context, or docs, slides, design, library, dashboard or app."}},
+		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kindguide.Kinds(), "description": "The artifact kind named in the Page context, or docs, slides, design, library, dashboard, app, word or sheet (native Craft)."}},
 	})
 	return []memoryMCPToolDescriptor{{
 		Name: artifactKindGuideTool,

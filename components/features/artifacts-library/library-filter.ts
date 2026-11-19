@@ -214,7 +214,8 @@ export function serverCatalogParams(filters: LibraryFilters, sort: SortKey, opti
   const query = parseQuery(filters.q)
   if (query.kinds.length || query.is.length || query.owner.length) return null
   // Without the Design switch, the server leaves Design storage out, as the browser does.
-  const kinds = options.design ? [] : LIBRARY_KINDS.map(entry => entry.kind).filter(kind => kind !== "design")
+  // The server names a Docs document `docs` and native Word alone `word` (#5597).
+  const kinds = options.design ? [] : ["docs", ...LIBRARY_KINDS.map(entry => entry.kind).filter(kind => kind !== "design")]
   const params = new URLSearchParams({ empty: "exclude", sort })
   if (query.text) params.set("q", query.text)
   if (kinds.length) params.set("kind", kinds.join(","))
