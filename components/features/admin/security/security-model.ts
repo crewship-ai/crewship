@@ -1,4 +1,5 @@
 import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types"
+import type { InstanceGovRow, InstanceHealthRow } from "./use-instance-keeper"
 
 /**
  * Admin › Security: the model behind the page. Posture, Keeper and the Keeper
@@ -17,22 +18,31 @@ export type Section = "overview" | "matrix" | "activity" | SettingsSection
 /** Settings sections, in the order an operator meets them, each with the scope
  *  its changes reach. Mirrors the server: the judge, its rules and the
  *  background-check models are instance-wide (authedInstanceMut); the workspace
- *  judge, watchdog, alerts and leases live on the workspace governance row. */
+ *  judge, watchdog, alerts and access time live on the workspace governance row. */
 export const SETTINGS: { key: SettingsSection; label: string; scope: Scope; about: string }[] = [
-  { key: "judge", label: "Credential judge", scope: "instance", about: "The model that allows, denies or escalates a secret" },
+  { key: "judge", label: "Credential judge", scope: "instance", about: "The model that decides each credential request" },
   { key: "rules", label: "Decision rules", scope: "instance", about: "What the judge may use, and when a person confirms" },
-  { key: "defaults", label: "Defaults for new workspaces", scope: "instance", about: "What a new workspace's watchdog starts with; existing workspaces do not change" },
-  { key: "workspace-judge", label: "Judge per workspace", scope: "workspace", about: "A different judge for some workspaces, including a hosted one" },
+  { key: "defaults", label: "New workspaces", scope: "instance", about: "What a new workspace starts with; existing workspaces do not change" },
+  { key: "workspace-judge", label: "Judge", scope: "workspace", about: "Its own judge for some workspaces, including a hosted one" },
   { key: "background", label: "Background checks", scope: "instance", about: "The models behind the scheduled reviews" },
   { key: "watchdog", label: "Watchdog", scope: "workspace", about: "Samples tool calls and raises findings" },
-  { key: "alerts", label: "Alerts & approvals", scope: "workspace", about: "Who hears about a finding, who confirms" },
-  { key: "leases", label: "Credential leases", scope: "workspace", about: "Whether an approval lasts or expires" },
+  { key: "alerts", label: "Alerts and approval", scope: "workspace", about: "Who hears about a finding, and who confirms" },
+  { key: "leases", label: "Access time", scope: "workspace", about: "How long an approved secret stays readable" },
+]
+
+/** What reaches every workspace on the server: one page each, in the panel. */
+export type InstanceItem = "judge" | "rules" | "background" | "defaults"
+export const INSTANCE_ITEMS: { key: InstanceItem; label: string; hint: string; head: string }[] = [
+  { key: "judge", label: "Credential judge", hint: "The model that decides", head: "The model that decides each credential request. Changes apply to the next request, without a restart." },
+  { key: "rules", label: "Decision rules", hint: "When a person must confirm", head: "What the judge may use when it decides, and when a person confirms." },
+  { key: "background", label: "Background checks", hint: "Models behind the reviews", head: "The models behind the scheduled reviews. Each change applies at once." },
+  { key: "defaults", label: "New workspaces", hint: "What a new one starts with", head: "A new workspace copies these when it is created. No existing workspace changes." },
 ]
 
 export const SCOPE_LABEL: Record<Scope, string> = { instance: "Instance", workspace: "Per workspace" }
 export const SCOPE_HINT: Record<Scope, string> = {
   instance: "Applies to every workspace on this server",
-  workspace: "Set for the workspaces ticked in the panel",
+  workspace: "Set for each workspace",
 }
 
 const SECTIONS = new Set<string>(["overview", "matrix", "activity", ...SETTINGS.map((s) => s.key)])
@@ -45,11 +55,11 @@ export const isSection = (s: string | null | undefined): s is Section => !!s && 
 export type Stream = "requests" | "skill_review" | "behavior" | "memory_health" | "negative_learning"
 
 export const STREAMS: { key: Stream; label: string; about: string }[] = [
-  { key: "requests", label: "Credential requests", about: "An agent asked for a secret; the judge decided" },
-  { key: "skill_review", label: "Skill review", about: "Skills proposed for a crew, checked before use" },
-  { key: "behavior", label: "Behavior", about: "Sampled tool calls, while the watchdog is on" },
-  { key: "memory_health", label: "Memory health", about: "Daily sweep of AGENT.md and CREW.md" },
-  { key: "negative_learning", label: "Negative learning", about: "Lessons proposed from failures" },
+  { key: "requests", label: "Credential requests", about: "An agent asks for a secret; the judge allows, denies or escalates" },
+  { key: "skill_review", label: "Skill review", about: "New and changed skills, checked before agents load them" },
+  { key: "behavior", label: "Behaviour", about: "Tool calls the watchdog sampled and flagged" },
+  { key: "memory_health", label: "Memory health", about: "Audits of what agents remembered" },
+  { key: "negative_learning", label: "Lessons from failures", about: "What a failed run should teach the crew" },
 ]
 
 export function streamOf(e: Pick<KeeperLogEntry, "request_type">): Stream | null {
@@ -58,7 +68,8 @@ export function streamOf(e: Pick<KeeperLogEntry, "request_type">): Stream | null
   return (STREAMS.some((s) => s.key === t) ? t : null) as Stream | null
 }
 
-export type DecisionFilter = "all" | "ALLOW" | "DENY" | "ESCALATE"
+/** PENDING is "Waiting": a request nobody has decided yet. */
+export type DecisionFilter = "all" | "ALLOW" | "DENY" | "ESCALATE" | "PENDING"
 
 export function filterActivity(entries: KeeperLogEntry[], stream: Stream | "all", decision: DecisionFilter): KeeperLogEntry[] {
   return entries.filter((e) =>
@@ -193,4 +204,83 @@ export function judgeState(status: KeeperStatus | null): { tone: Tone; text: str
   if (!status.ollama_url) return { tone: "bad", text: "No judge server set" }
   if (status.ollama_probed === false) return { tone: "muted", text: "Judge not checked yet" }
   return { tone: "bad", text: "Judge not answering" }
+}
+
+
+// ── Watch presets, access time, second approver: how a workspace reads ──────
+
+/** The five stable watch preset keys (internal/keeper/governance/presets.go)
+ *  and the words the page uses for each. */
+export const PRESET_LABEL: Record<string, string> = {
+  credentials: "Credentials",
+  egress: "Network egress",
+  memory: "Memory",
+  destructive: "Destructive commands",
+  secret_files: "Secret files",
+}
+export const PRESET_KEYS = ["credentials", "egress", "memory", "destructive", "secret_files"] as const
+
+/** The six facts the judge may compute (internal/keeper/evidence), in words. */
+export const FACT_LABEL: Record<string, string> = {
+  credential_bound_to_agent: "Credential is bound to the agent",
+  prior_requests_same_pair: "Earlier requests by the same pair",
+  agent_denies_last_7d: "The agent's denials in 7 days",
+  open_assigned_work: "Open work assigned to it",
+  workspace_last_backup: "Last workspace backup",
+  narrower_credential_available: "A narrower credential exists",
+}
+
+/** The four credential levels, read from internal/keeper/tier.go: the label,
+ *  the shortest reason each accepts, and how the secret reaches the agent. */
+export const CREDENTIAL_LEVELS: { level: 1 | 2 | 3 | 4; label: string; minReason: number; handover: string }[] = [
+  { level: 1, label: "Low", minReason: 10, handover: "Handed over for the whole run. Allowed on sight, without asking the judge." },
+  { level: 2, label: "Medium", minReason: 15, handover: "Handed over for the whole run. Always asks the judge." },
+  { level: 3, label: "High", minReason: 25, handover: "Handed over per read and time-boxed (see Access lasts)." },
+  { level: 4, label: "Critical", minReason: 35, handover: "Handed over per read and time-boxed. A person always confirms, and a second approver always." },
+]
+
+/** Access lasts, in words: 0 keeps a grant until it is revoked. */
+export const accessLabel = (seconds: number): string =>
+  !seconds ? "Until revoked" : seconds % 86400 === 0 ? `${seconds / 86400} d` : seconds % 3600 === 0 ? `${seconds / 3600} h` : `${Math.round(seconds / 60)} min`
+
+interface SecondApproverInput {
+  require_second_approver: boolean
+  effective_second_approver?: { min_security_level: number; source: string }
+}
+
+/** The second approver as ENFORCED, not as the switch: the tier table makes one
+ *  mandatory from some level whatever the switch says. */
+export function secondApprover(r: SecondApproverInput): { text: string; required: boolean; fromLevel: number | null } {
+  const e = r.effective_second_approver
+  if (r.require_second_approver || e?.source === "workspace") return { text: "Required", required: true, fromLevel: e?.min_security_level ?? 1 }
+  if (e?.source === "tier") return { text: `From level ${e.min_security_level}`, required: false, fromLevel: e.min_security_level }
+  return { text: "No", required: false, fromLevel: null }
+}
+
+// ── Findings that come from the workspaces, and the judge health alarms ─────
+
+/** "N workspaces have the watchdog off": nothing their agents do is sampled. */
+export function watchdogFinding(rows: Pick<InstanceGovRow, "enabled">[]): Finding | null {
+  const off = rows.filter((r) => !r.enabled).length
+  if (off === 0) return null
+  return {
+    key: "watchdog_off", severity: "medium",
+    title: `${off} ${off === 1 ? "workspace has" : "workspaces have"} the watchdog off`,
+    detail: "Nothing their agents do is sampled.",
+    action: { label: "Show them", href: "/admin/security?view=workspaces&watch=off" },
+  }
+}
+
+/** A workspace's own judge is degraded when it fails more often than the
+ *  server's alarm line, over enough decisions to mean something. */
+export function ownJudgeDegraded(h: InstanceHealthRow, row: Pick<InstanceGovRow, "gov_model_provider"> | undefined): boolean {
+  if (!row?.gov_model_provider || h.samples < h.min_samples) return false
+  return h.judge_failure_rate > (h.alarm_judge_failure_rate ?? Number.POSITIVE_INFINITY)
+}
+
+/** Judge health keeps only what has something to report: an alarm, or an own
+ *  judge that is failing. The rest is a count, not a list of hundreds. */
+export function healthToReport(health: InstanceHealthRow[], rows: InstanceGovRow[]): InstanceHealthRow[] {
+  const byId = new Map(rows.map((r) => [r.workspace_id, r]))
+  return health.filter((h) => h.alarm || ownJudgeDegraded(h, byId.get(h.workspace_id)))
 }
