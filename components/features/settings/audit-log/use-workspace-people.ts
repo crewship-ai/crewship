@@ -5,7 +5,12 @@ import { useEffect, useMemo, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { personLabel } from "@/components/ui/user-avatar"
 
-import type { AuditPerson } from "./audit-toolbar"
+export interface AuditPerson {
+  id: string
+  label: string
+  /** Their profile photo, when they have one. */
+  avatarUrl?: string | null
+}
 
 /** The workspace's people, for the Person filter. Empty until it loads; a
  *  failure leaves the filter with "Everyone" only. */

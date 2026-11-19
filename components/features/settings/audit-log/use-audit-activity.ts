@@ -59,6 +59,7 @@ export function useAuditActivity(workspaceId: string | null, source: AuditSource
               action: String(r.action ?? ""),
               entityType: String(r.entity_type ?? ""),
               userId: (user || (r.user_id as string | null)) ?? null,
+              entityId: (r.entity_id as string | null) ?? null,
             })
           }
           const totalPages = Number(raw?.pagination?.total_pages ?? 1)

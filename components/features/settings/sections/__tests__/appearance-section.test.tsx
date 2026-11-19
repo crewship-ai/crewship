@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, act, within } from "@testing-library/react"
 
 const setTheme = vi.fn()
 let theme = "dark"
@@ -49,11 +49,12 @@ afterEach(() => {
 })
 
 describe("AppearanceSection", () => {
-  it("renders the Theme, Accent and Layout & motion cards", () => {
+  it("is Your look, then Colours, Text and layout, Motion, Devices and workspace, in that order", () => {
     render(<AppearanceSection />)
-    for (const name of ["Theme", "Accent", "Layout & motion"]) {
-      expect(screen.getByRole("region", { name }), name).toBeTruthy()
-    }
+    const names = ["Your look", "Colours", "Text and layout", "Motion", "Devices and workspace"]
+    const regions = names.map((name) => screen.getByRole("region", { name }))
+    regions.slice(1).forEach((r, i) => expect(regions[i].compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING, names[i + 1]).toBeTruthy())
+    for (const gone of ["Style", "Theme", "Accent", "Layout & motion", "Workspace default"]) expect(screen.queryByRole("region", { name: gone }), gone).toBeNull()
   })
 
   it("offers three theme tiles with the stored one pressed", () => {
@@ -61,7 +62,7 @@ describe("AppearanceSection", () => {
     render(<AppearanceSection />)
     const group = screen.getByRole("radiogroup", { name: "Theme" })
     const tiles = Array.from(group.querySelectorAll("[role=radio]"))
-    expect(tiles.map((t) => t.getAttribute("aria-label"))).toEqual(["Dark", "Light", "System"])
+    expect(tiles.map((t) => t.getAttribute("aria-label"))).toEqual(["Light", "Dark", "System"])
     expect(screen.getByRole("radio", { name: "System" }).getAttribute("aria-checked")).toBe("true")
     fireEvent.click(screen.getByRole("radio", { name: "Light" }))
     expect(setTheme).toHaveBeenCalledWith("light")
@@ -70,9 +71,10 @@ describe("AppearanceSection", () => {
   // v67 `.swatches`: named by tooltip and accessible name only (PAR-097).
   it("labels every accent swatch", () => {
     render(<AppearanceSection />)
+    const group = screen.getByRole("radiogroup", { name: "Accent colour" })
     for (const { label } of ACCENTS) {
       expect(screen.getByRole("radio", { name: label })).toHaveAttribute("title", label)
-      expect(screen.queryByText(label)).toBeNull()
+      expect(within(group).queryByText(label)).toBeNull()
     }
   })
 
@@ -109,16 +111,31 @@ describe("AppearanceSection", () => {
   })
 
 
-  it("offers the team colour as its own row, and says where it comes from", () => {
+  it("offers the team colour as the ninth swatch, and says where it comes from", () => {
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent(/admin can set a brand colour/i)
-    expect(screen.queryByRole("radio", { name: "Team colour" })).toBeNull()
+    const without = screen.getByRole("radio", { name: "Team colour" })
+    expect(without).toBeDisabled()
+    expect(without.getAttribute("title")).toMatch(/admin can set one in General › Artifacts appearance/i)
     cleanup()
     workspaceHex = "#E11D48"
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent("The workspace brand colour from General › Artifacts appearance")
-    fireEvent.click(screen.getByRole("radio", { name: "Team colour" }))
+    const team = screen.getByRole("radio", { name: "Team colour" })
+    expect(team).toBeEnabled()
+    expect(team.getAttribute("title")).toContain("the workspace brand colour")
+    fireEvent.click(team)
     expect(document.documentElement.dataset.accent).toBe("workspace")
+    expect(screen.getByTestId("accent-name")).toHaveTextContent("Team colour")
+  })
+
+  it("names the current accent in the hint, including an accent only a style carries", () => {
+    render(<AppearanceSection />)
+    expect(screen.getByTestId("accent-name")).toHaveTextContent("Blue")
+    fireEvent.click(screen.getByRole("radio", { name: "Teal" }))
+    expect(screen.getByTestId("accent-name")).toHaveTextContent("Teal")
+    fireEvent.click(screen.getByRole("button", { name: "Change style" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Terracotta" }))
+    expect(screen.getByTestId("accent-name")).toHaveTextContent("Clay")
+    expect(screen.getByTestId("look-summary")).toHaveTextContent("Terracotta · Clay ·")
   })
 
   it("sets text size on <html> and keeps it with the appearance", () => {
@@ -145,12 +162,11 @@ describe("AppearanceSection", () => {
     expect(store.get("crewship_sidebar_mode")).toBe("pinned")
   })
 
-  it("previews the accent with real controls, and offers every preset as a tile", () => {
+  it("offers every preset as a swatch, and no separate accent preview any more", () => {
     render(<AppearanceSection />)
-    // v67 `.s-prev`: a primary button, a link, a selected row, a focused field.
-    expect(screen.getByRole("group", { name: "Accent preview" })).toHaveTextContent("PrimaryA linkSelected rowFocused field")
+    expect(screen.queryByRole("group", { name: "Accent preview" })).toBeNull()
     const tiles = screen.getByRole("radiogroup", { name: "Accent colour" }).querySelectorAll('[role="radio"]')
-    expect(tiles).toHaveLength(ACCENTS.length)
+    expect(tiles).toHaveLength(ACCENTS.length + 1)
   })
 
   it("has no base palette and no light-sidebar choice any more", () => {
@@ -185,9 +201,10 @@ describe("AppearanceSection autosave and Undo", () => {
     return action!
   }
 
-  it("says that changes save as you make them", () => {
+  it("says it once, in the line under the look: it applies at once", () => {
     render(<AppearanceSection />)
-    expect(screen.getByTestId("appearance-autosave")).toHaveTextContent("Changes save as you make them.")
+    expect(screen.queryByTestId("appearance-autosave")).toBeNull()
+    expect(screen.getByTestId("look-source")).toHaveTextContent("applies at once")
   })
 
   it("offers Undo after an accent change and puts the accent and the inherited mark back", () => {
@@ -223,6 +240,7 @@ describe("AppearanceSection autosave and Undo", () => {
   it("Undo of a style pick restores the style, its accent and its marks", () => {
     render(<AppearanceSection />)
     const before = document.documentElement.dataset.accent ?? "blue"
+    fireEvent.click(screen.getByRole("button", { name: "Change style" }))
     fireEvent.click(screen.getByRole("radio", { name: /^Plum$/ }))
     expect(readStyleState()?.style).toBe("plum")
     act(() => lastUndo().onClick())

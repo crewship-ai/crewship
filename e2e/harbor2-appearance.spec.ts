@@ -67,6 +67,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
   test("picking a style paints it and it is still there after a reload", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     const gallery = page.getByRole("radiogroup", { name: "Style" })
     await expect(gallery).toBeVisible()
     await expect(gallery.getByRole("radio", { name: "Harbor", exact: true })).toHaveAttribute("aria-checked", "true")
@@ -81,17 +82,19 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
 
     await page.reload()
     await expect.poll(() => attr(page, "data-style")).toBe("plum")
+    await page.getByRole("button", { name: "Change style" }).click()
     await expect(page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Plum", exact: true })).toHaveAttribute("aria-checked", "true")
     const plumGround = await ground()
     expect(plumGround).not.toBe(harborGround)
 
-    await page.getByRole("button", { name: "Reset style" }).click()
+    await page.getByRole("button", { name: "Reset to default" }).click()
     await expect.poll(() => attr(page, "data-style")).toBe("harbor")
   })
 
   test("a corner knob changes the radius tokens and nothing else", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     await expect(page.getByRole("group", { name: "Corners" })).toBeVisible()
     const radius = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-slot='card'], .rounded-card")!).borderTopLeftRadius))
     await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
@@ -106,6 +109,7 @@ test.describe("Style gallery (STY-01, APR-03, APR-11)", () => {
   test("a dark-only style sets Dark, disables Light and System, and Switch to Harbor undoes it", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     await page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Harbor Night", exact: true }).click()
     await expect.poll(() => isDark(page)).toBe(true)
     await expect.poll(() => attr(page, "data-style")).toBe("harbor-night")
@@ -135,6 +139,7 @@ for (const [label, viewport, minColumns, maxColumns] of [
     test("the grid collapses, nothing overflows and the one preview shows", async ({ page }) => {
       await seed(page, "dark")
       await page.goto("/settings?tab=appearance")
+      await page.getByRole("button", { name: "Change style" }).click()
       const gallery = page.getByRole("radiogroup", { name: "Style" })
       await expect(gallery).toBeVisible()
       const tiles = gallery.getByRole("radio")
@@ -155,6 +160,7 @@ for (const [label, viewport, minColumns, maxColumns] of [
     test("picking works here too", async ({ page }) => {
       await seed(page, "dark")
       await page.goto("/settings?tab=appearance")
+      await page.getByRole("button", { name: "Change style" }).click()
       const tile = page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Slate", exact: true })
       await tile.scrollIntoViewIfNeeded()
       await tile.click()
@@ -166,16 +172,17 @@ for (const [label, viewport, minColumns, maxColumns] of [
 test.describe("Style gallery on a touch device", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
 
-  test("tiles and Reset style are at least 44 px tall", async ({ page }) => {
+  test("tiles and Reset to default are at least 44 px tall", async ({ page }) => {
     await seed(page, "dark")
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     const gallery = page.getByRole("radiogroup", { name: "Style" })
     await expect(gallery).toBeVisible()
     for (const tile of (await gallery.getByRole("radio").all()).slice(0, 4)) {
       await tile.scrollIntoViewIfNeeded()
       expect((await tile.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     }
-    const reset = page.getByRole("button", { name: "Reset style" })
+    const reset = page.getByRole("button", { name: "Reset to default" })
     await reset.scrollIntoViewIfNeeded()
     expect((await reset.boundingBox())!.height).toBeGreaterThanOrEqual(43.5)
   })

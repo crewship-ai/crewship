@@ -165,10 +165,11 @@ test.describe("desktop", () => {
   test("T16 the journal chain is verified on request", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings/audit")
-    const banner = page.locator("[data-slot=journal-verify]")
-    await expect(banner).toHaveAttribute("data-state", "idle")
-    await banner.getByRole("button", { name: "Verify now" }).click()
-    await expect(banner).toHaveAttribute("data-state", /ok|broken|error/)
+    const line = page.locator("[data-slot=journal-integrity]")
+    await expect(line).toHaveAttribute("data-state", "idle")
+    await line.getByRole("button", { name: "Check now" }).click()
+    await expect(page.getByRole("dialog", { name: "Record integrity" })).toBeVisible()
+    await expect(line).toHaveAttribute("data-state", /ok|broken|error/)
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
@@ -232,7 +233,7 @@ test.describe("desktop", () => {
     await expect(range.getByRole("radio")).toHaveCount(6)
     await range.getByRole("radio", { name: "Last 30 days" }).click()
     await expect(page).toHaveURL(/audit_range=30d/)
-    await expect(page.locator("[data-slot=audit-display]").getByRole("switch", { name: "Group repeated events" })).toBeVisible()
+    await expect(page.locator("[data-slot=audit-events-head]").getByRole("button", { name: "Group repeats" })).toBeVisible()
     const row = page.locator("[data-audit-weight] > button[aria-controls]").first()
     test.skip((await row.count()) === 0, "environment prerequisite: no audit events in the last 30 days")
     await row.click()

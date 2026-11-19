@@ -69,6 +69,15 @@ describe("facetCounts", () => {
   })
 })
 
+describe("facetCounts with an entity", () => {
+  it("counts only the events about that entity", () => {
+    const e = (at: string, entityId: string, userId: string): ActivityEvent => ({ at, action: "crew.update", entityType: "CREW", userId, entityId })
+    const c = facetCounts([e("2026-09-29T09:00:00Z", "c1", "u1"), e("2026-09-29T10:00:00Z", "c2", "u2")], f({ entityId: "c1" }), {})
+    expect(c.category.all).toBe(1)
+    expect(c.person).toEqual({ u1: 1 })
+  })
+})
+
 describe("auditSeverity — the Journal's scale", () => {
   it("reads failures as errors, removals as warnings, changes as notices and the rest as info", () => {
     expect(auditSeverity("agent.run.failed")).toBe("error")
