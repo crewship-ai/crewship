@@ -1,43 +1,65 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, Building2, CalendarDays, ChevronRight, HardDrive, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Building2, CalendarDays, HardDrive, ShieldCheck } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useShowMore } from "@/hooks/use-show-more"
 import { Button } from "@/components/ui/button"
+import { ShowMore } from "@/components/ui/show-more"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
-import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
-import { Dot, Gate, TONE_PILL, TONE_TEXT } from "./backups-kit"
+import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { Dot, Gate, TONE_TEXT } from "./backups-kit"
 import {
-  formatAgo, formatSize, proofLabel, stripCells, verdictHeadline,
-  type AttentionItem, type Night, type OverviewResponse, type SpaceInfo, type StatusRow, type WorkspaceCoverage,
+  coverageCounts, coverageRows, formatSize, stripCells, verdictHeadline,
+  type AttentionItem, type CoverageState, type Night, type OverviewResponse, type SpaceInfo, type StatusRow, type WorkspaceCoverage,
 } from "./backups-model"
 import { useBackupsOverview } from "./use-backups-overview"
+import type { Resource } from "./use-backups-data"
 import type { SectionCtx } from "./backups-scope"
 
 /**
  * Backups › Overview, in the Settings card grammar (like Security › Overview).
  *
- * One line of state on top — the restore verdict, how often, where, and how
- * many workspaces are covered — then what needs a person (including a
- * local-only copy, which is a problem like any other), the
- * five questions a client asks, coverage per workspace, the last fourteen
- * nights, and the room on this disk.
+ * The head says the server's verdict in one sentence. Then what needs a
+ * person (a local-only copy is one of those items, said once), and a two-column
+ * grid: what is protected (the five questions), the coverage in four counts
+ * that each open Coverage filtered, the last fourteen nights and the room on
+ * this disk. Each fact appears once: no strip repeating the panel's counts.
+ * A workspace's own page uses the same body in one column, without Coverage
+ * and Space.
  */
-export function BackupsOverview({ ctx, coverage, onOpenWorkspace }: {
+export function BackupsOverview({ ctx, resource, coverage, onOpenCoverage }: {
   ctx: SectionCtx
+  /** The page's own read of the overview (it also feeds the head and the panel badge). */
+  resource?: Resource<OverviewResponse>
+  /** Each workspace's newest backup when the page covers the whole instance. */
   coverage?: WorkspaceCoverage[]
-  onOpenWorkspace?: (id: string) => void
+  /** A Coverage count opens Coverage narrowed to it. */
+  onOpenCoverage?: (state?: CoverageState) => void
 }) {
-  const res = useBackupsOverview(ctx.scope, ctx.selected, ctx.workspaces)
+  if (resource) return <OverviewGate res={resource} ctx={ctx} coverage={coverage} onOpenCoverage={onOpenCoverage} />
+  return <OwnOverview ctx={ctx} coverage={coverage} onOpenCoverage={onOpenCoverage} />
+}
+
+function OwnOverview(props: { ctx: SectionCtx; coverage?: WorkspaceCoverage[]; onOpenCoverage?: (state?: CoverageState) => void }) {
+  const res = useBackupsOverview(props.ctx.scope, props.ctx.selected, props.ctx.workspaces)
+  return <OverviewGate res={res} {...props} />
+}
+
+function OverviewGate({ res, ctx, coverage, onOpenCoverage }: { res: Resource<OverviewResponse>; ctx: SectionCtx; coverage?: WorkspaceCoverage[]; onOpenCoverage?: (state?: CoverageState) => void }) {
   return (
     <Gate resource={res} what="The backup overview" skeleton="h-[320px]">
-      {(data) => <OverviewBody data={data} ctx={ctx} coverage={coverage} onOpenWorkspace={onOpenWorkspace} />}
+      {(data) => <OverviewBody data={data} ctx={ctx} coverage={coverage} onOpenCoverage={onOpenCoverage} />}
     </Gate>
   )
 }
 
+/** The head's one sentence: how the restore stands, how often, where. */
+export function overviewSentence(data: OverviewResponse): string {
+  const s = data.status
+  return [verdictHeadline(s.verdict).text, s.how_often.value, s.offsite_verified ? s.where.value : "this server only"].filter(Boolean).join(" · ")
+}
 
 /**
  * The attention list, with the local-only copy the page used to draw as a
@@ -54,68 +76,58 @@ export function attentionItems(data: OverviewResponse): AttentionItem[] {
   return [...extra, ...data.needs_attention]
 }
 
-export function OverviewBody({ data, ctx, now = new Date(), coverage, onOpenWorkspace, hideSpace }: {
+export function OverviewBody({ data, ctx, now = new Date(), coverage, onOpenCoverage, hideSpace }: {
   data: OverviewResponse
   ctx: SectionCtx
   now?: Date
   /** Each workspace's newest backup when the page covers the whole instance
    *  (the server lists them for a workspaces scope only). */
   coverage?: WorkspaceCoverage[]
-  /** A coverage row opens that workspace's backups. */
-  onOpenWorkspace?: (id: string) => void
-  /** The disk is the instance's; a workspace's page leaves it out. */
+  onOpenCoverage?: (state?: CoverageState) => void
+  /** A workspace's page: one column, no Coverage and no disk (both are the instance's). */
   hideSpace?: boolean
 }) {
   const s = data.status
+  const rows = coverage ?? data.workspaces
+  const scoped = ctx.scope === "instance" ? ctx.workspaces : ctx.workspaces.filter((w) => ctx.selected.has(w.id))
+  const counts = coverageCounts(coverageRows(rows, scoped))
   const head = verdictHeadline(s.verdict)
-  const cov = coverage ?? data.workspaces
-  const covered = cov?.filter((w) => w.status === "ok").length ?? 0
-  return (
+  const cards = (
     <>
-      <SettingsSummary slot="backups-summary">
-        <span className="inline-flex items-center">
-          <span className={cn("mr-1.5 h-1.5 w-1.5 rounded-full", head.tone === "ok" ? "bg-success" : head.tone === "warn" ? "bg-warn" : head.tone === "bad" ? "bg-destructive" : "bg-muted-foreground/50")} aria-hidden />
-          <span data-slot="backup-verdict" data-tone={head.tone} className="text-foreground">{head.text}</span>
-        </span>
-        <SummaryItem>{s.how_often.value}</SummaryItem>
-        <SummaryItem tone={s.offsite_verified ? undefined : "danger"}>{s.offsite_verified ? s.where.value : "This server only"}</SummaryItem>
-        {cov && <SummaryItem n={covered} tone={covered < cov.length ? "warn" : "success"}>{`of ${cov.length} workspaces covered`}</SummaryItem>}
-        {!!data.crewless_workspaces && <SummaryItem n={data.crewless_workspaces}>{data.crewless_workspaces === 1 ? "workspace without crews" : "workspaces without crews"}</SummaryItem>}
-      </SettingsSummary>
-
-      <NeedsAttention items={attentionItems(data)} ctx={ctx} />
-
       <SettingsCard icon={ShieldCheck} tint={`var(--${head.tone === "bad" ? "destructive" : head.tone === "warn" ? "warn" : "success"})`}
-        title={s.label} description={s.summary ?? "What is protected, how often, where and for how long"}>
+        title="What is protected" description={s.summary ?? s.label}>
         <ProtectionRow label="Protects" row={s.protects} />
         <ProtectionRow label="How often" row={s.how_often} />
-        <ProtectionRow label="Where" row={s.where} />
+        <ProtectionRow label="Where" row={s.where} quiet />
         <ProtectionRow label="How long" row={s.how_long} />
         <ProtectionRow label="Really restored?" row={s.really_restored} />
       </SettingsCard>
-
-      {cov && cov.length > 0 && <CoverageCard rows={cov} ctx={ctx} now={now} onOpen={onOpenWorkspace} />}
-
-      <SettingsCard icon={CalendarDays} tint="var(--success)" title="Last 14 nights" description="What each night’s run did; hover a night for the details">
+      {!hideSpace && rows && <CoverageCard counts={counts} crewless={data.crewless_workspaces} onOpen={onOpenCoverage} />}
+      <SettingsCard icon={CalendarDays} tint="var(--success)" title="Last 14 nights" description="What each night’s run did"
+        actions={!hideSpace ? <Button type="button" size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={() => ctx.go("history")}>All runs</Button> : undefined}>
         <NightStrip nights={data.nights} today={localDay(now)} />
       </SettingsCard>
-
-      {!hideSpace && <SpaceCard space={data.space} />}
+      {!hideSpace && <SpaceCard space={data.space} onStorage={() => ctx.go("storage")} />}
+    </>
+  )
+  return (
+    <>
+      <NeedsAttention items={attentionItems(data)} ctx={ctx} />
+      {hideSpace ? cards : <div className="grid items-start gap-4 md:grid-cols-2" data-slot="overview-grid">{cards}</div>}
     </>
   )
 }
 
-/** One of the five questions as a line of a checklist: how it stands (the
- *  dot), the question, the answer, and what the answer is missing. */
-function ProtectionRow({ label, row }: { label: string; row: StatusRow }) {
+/** One of the five questions: the question and its answer, once. */
+function ProtectionRow({ label, row, quiet }: { label: string; row: StatusRow; quiet?: boolean }) {
   const tone = row.detail_tone ?? "ok"
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-4 py-2.5 last:border-b-0 sm:flex-nowrap" data-question={label}>
-      <span className={cn("h-2 w-2 shrink-0 rounded-full", tone === "bad" ? "bg-destructive" : tone === "warn" ? "bg-warn" : tone === "muted" ? "bg-muted-foreground/50" : "bg-success")} aria-hidden />
-      <span className="w-36 shrink-0 text-control">{label}</span>
-      <span className="min-w-0 flex-1 text-control">{row.value}</span>
-      {row.detail && <span className={cn("text-label max-sm:basis-full max-sm:pl-5 sm:text-right", TONE_TEXT[tone])}>{row.detail}</span>}
-    </div>
+    <SettingsRow label={label} description={<>
+      {row.value}
+      {row.detail && !quiet && <span className={cn("block", TONE_TEXT[tone])}>{row.detail}</span>}
+    </>} data-testid={`question-${label}`}>
+      {null}
+    </SettingsRow>
   )
 }
 
@@ -132,14 +144,16 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
     }
   }
   const bad = items.some((i) => i.severity === "bad")
+  // Hundreds of workspaces can mean hundreds of findings: ten, then more.
+  const page = useShowMore(items, { step: 10 })
   return (
     <SettingsCard icon={items.length ? AlertTriangle : ShieldCheck} tint={bad ? "var(--destructive)" : items.length ? "var(--warn)" : "var(--success)"}
-      title="Needs attention" description={items.length ? "What to fix first, most pressing on top" : "Nothing needs attention"}
+      title="Needs attention" description={items.length ? "Most pressing first" : "Nothing needs attention"}
       actions={<span className="text-xs tabular-nums text-muted-foreground">{items.length}</span>}>
       {items.length === 0 ? (
         <p className="px-4 py-3 text-xs text-success">Nothing needs attention.</p>
-      ) : items.map((it) => (
-        <div key={it.id} data-attention={it.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
+      ) : page.shown.map((it) => (
+        <div key={it.id} data-attention={it.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0 max-sm:flex-wrap">
           {/* The severity words every Needs attention card uses (People, Security). */}
           <StatusPill tone={it.severity === "bad" ? "danger" : "warn"} label={it.severity === "bad" ? "High" : "Medium"} className="shrink-0" />
           <div className="min-w-0 flex-1">
@@ -147,12 +161,13 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
             <div className="text-xs text-muted-foreground">{it.detail}</div>
           </div>
           {it.action && (
-            <Button type="button" size="sm" variant={it.action.kind === "back_up_now" ? "default" : "outline"} className="h-7 shrink-0 text-xs" onClick={() => act(it.action!)}>
+            <Button type="button" size="sm" variant={it.action.kind === "back_up_now" ? "default" : "outline"} className="h-7 shrink-0 text-xs coarse:h-[44px]" onClick={() => act(it.action!)}>
               {it.action.label}
             </Button>
           )}
         </div>
       ))}
+      <ShowMore shown={page.shown.length} total={page.total} nextCount={page.nextCount} onMore={page.showMore} noun="findings" paged={page.paged} />
     </SettingsCard>
   )
 }
@@ -199,52 +214,37 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
   )
 }
 
-const COVERAGE_LABEL: Record<WorkspaceCoverage["status"], string> = { ok: "covered", warn: "stale", bad: "not covered" }
+const COVERAGE_ROWS: { state: CoverageState; label: (n: number) => string; hint: string; dot: string }[] = [
+  { state: "covered", label: (n) => `${n} covered`, hint: "Backed up in the last 36 h", dot: "bg-success" },
+  { state: "stale", label: (n) => `${n} stale`, hint: "Last backup older than 36 h, incomplete, or no plan covers it", dot: "bg-warn" },
+  { state: "never", label: (n) => `${n} never backed up`, hint: "No backup exists yet", dot: "bg-destructive" },
+  { state: "none", label: (n) => `${n} with nothing to back up`, hint: "No crews yet", dot: "bg-muted-foreground/50" },
+]
 
-function CoverageCard({ rows, ctx, now, onOpen }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date; onOpen?: (id: string) => void }) {
-  const th = settingsTh
-  const td = settingsTd
-  const logo = (id: string) => ctx.workspaces.find((w) => w.id === id)?.logoUrl
+/** Four counts, each opening Coverage narrowed to it. */
+function CoverageCard({ counts, crewless, onOpen }: { counts: ReturnType<typeof coverageCounts>; crewless?: number; onOpen?: (state?: CoverageState) => void }) {
+  const none = Math.max(counts.none, crewless ?? 0)
   return (
-    <SettingsCard icon={Building2} title="Workspaces" description={onOpen ? "When each was last kept, by which plan, how far it is proven · open one for its backups" : "The newest backup of each selected workspace"}>
-      <div className="overflow-x-auto">
-        <table className={settingsTable} aria-label="Workspaces">
-          <thead><tr><th className={th}>Workspace</th><th className={th}>Last backup</th><th className={th}>Plan</th><th className={th}>Checked to</th><th className={th} /></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.workspace_id} data-coverage={r.status} aria-label={r.name}
-                className={cn(onOpen && settingsTableRowLink)} tabIndex={onOpen ? 0 : undefined}
-                onClick={onOpen ? () => onOpen(r.workspace_id) : undefined}
-                onKeyDown={onOpen ? (e) => { if (e.key === "Enter") onOpen(r.workspace_id) } : undefined}>
-                <td className={td}>
-                  <span className="flex items-center gap-2.5 whitespace-nowrap">
-                    <WorkspaceTile id={r.workspace_id} name={r.name} logoUrl={logo(r.workspace_id)} />
-                    <span className="font-medium">{r.name}</span>
-                    {r.workspace_id === ctx.currentWorkspaceId && <span className="text-xs text-muted-foreground">· here</span>}
-                  </span>
-                </td>
-                <td className={cn(td, "whitespace-nowrap", !r.last_backup_at && "text-muted-foreground")}>{formatAgo(r.last_backup_at, now)}</td>
-                <td className={cn(td, "whitespace-nowrap", !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
-                <td className={cn(td, "text-muted-foreground")}>{proofLabel(r.proof)}</td>
-                <td className={cn(td, "text-right")}>
-                  <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <StatusPill tone={TONE_PILL[r.status]} label={COVERAGE_LABEL[r.status]} />
-                    {r.status !== "ok" && (
-                      <Button type="button" size="sm" className="h-7 text-xs" onClick={() => ctx.backUpNow([r.workspace_id])}>Back up now</Button>
-                    )}
-                    {onOpen && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden />}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <SettingsCard icon={Building2} title="Coverage" description={`${counts.total} workspaces`}
+      actions={onOpen && <Button type="button" size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => onOpen()}>All workspaces</Button>}>
+      {COVERAGE_ROWS.map((r) => {
+        const n = r.state === "none" ? none : counts[r.state]
+        return (
+          <button key={r.state} type="button" disabled={!onOpen} onClick={() => onOpen?.(r.state)} data-coverage-count={r.state}
+            className="flex w-full items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 enabled:hover:bg-[var(--row-hover-bg)] coarse:min-h-[44px]">
+            <span className="min-w-0 flex-1">
+              <span className="block text-control text-foreground">{r.label(n)}</span>
+              <span className="block text-label text-muted-foreground">{r.hint}</span>
+            </span>
+            <span className={cn("h-2 w-2 shrink-0 rounded-full", r.dot)} aria-hidden />
+          </button>
+        )
+      })}
     </SettingsCard>
   )
 }
 
-export function SpaceCard({ space }: { space: SpaceInfo }) {
+export function SpaceCard({ space, onStorage }: { space: SpaceInfo; onStorage?: () => void }) {
   const pct = (n: number) => (space.total_bytes > 0 ? Math.max(0, Math.min(100, (n / space.total_bytes) * 100)) : 0)
   const used = Math.max(0, space.total_bytes - space.free_bytes)
   const backups = pct(space.backups_bytes)
@@ -252,7 +252,8 @@ export function SpaceCard({ space }: { space: SpaceInfo }) {
   const fig = "text-control tabular-nums"
   return (
     <SettingsCard icon={HardDrive} tint="var(--purple)" title="Space"
-      description={space.min_free_percent != null ? `A run that would leave less than ${space.min_free_percent} % free does not start` : "This server"}>
+      description={space.min_free_percent != null ? `A run that would leave less than ${space.min_free_percent} % free does not start` : "This server"}
+      actions={onStorage && <Button type="button" size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={onStorage}>Storage</Button>}>
       <SettingsRow label="Backups use"><span className={fig}>{formatSize(space.backups_bytes)}</span></SettingsRow>
       <SettingsRow label="Disk">
         <span className={cn(fig, space.refusal && TONE_TEXT.bad)}>{`${formatSize(space.free_bytes)} free`}</span>

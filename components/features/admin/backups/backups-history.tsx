@@ -9,14 +9,19 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { useShowMore } from "@/hooks/use-show-more"
+import { ShowMore } from "@/components/ui/show-more"
+import { StatusPill } from "@/components/ui/status-pill"
 import {
-  SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, selectionBar, selectionBarAction, selectionBarButton,
-  settingsTable, settingsTh, settingsTd, settingsTableRowLink,
+  SettingsCard, SettingsRow, SettingsSegmented, nativeSelect, selectionBar, selectionBarAction, selectionBarButton,
 } from "@/components/features/settings/shared"
-import { Chip, Gate, WsName } from "./backups-kit"
-import { formatPhases, formatSize, formatWhen, proofLabel, runPlanLabel, runResult, type BackupRun } from "./backups-model"
+import { BackupsTable, Chip, Gate, ProofSteps, WsName, type TableColumn } from "./backups-kit"
+import {
+  TRIGGER_LABEL, formatHold, formatSize, formatWhen, runDuration, runPlanLabel, runResult, runsCapNote, type BackupRun, type RunPhase,
+} from "./backups-model"
 import { checkBundle, downloadHref, pinBundle, useBackupRuns, workspaceFor } from "./use-backup-runs"
-import { perform } from "./use-backups-data"
+import { perform, type Resource } from "./use-backups-data"
+import { ManifestDialog } from "./backups-run-dialogs"
 import type { RunFilter, RunQuery, SectionCtx } from "./backups-scope"
 
 const FILTERS: { value: RunFilter; label: string }[] = [
@@ -41,6 +46,7 @@ export function matchesQuery(r: BackupRun, q: RunQuery | undefined, now: number 
     .some((v) => v?.toLowerCase().includes(text))) return false
   if (q.kind && r.kind !== q.kind) return false
   if (q.proof && (r.proof_level ?? 0) < Number(q.proof)) return false
+  if (q.plan && r.plan_name !== q.plan) return false
   if (q.period && now - Date.parse(r.started_at) > Number(q.period) * 86_400_000) return false
   return true
 }
@@ -56,32 +62,42 @@ export function matches(r: BackupRun, f: RunFilter): boolean {
   }
 }
 
-const TH = settingsTh
-const TD = cn(settingsTd, "align-top")
+
+const stackSub = (r: BackupRun) => `${r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—"} · ${runPlanLabel(r)} · ${formatSize(r.size_bytes)}`
 
 /**
- * Backups › Backup history: every run in the scope, what it went through, and
- * how far each backup is proven — checksum, contents checked, test restore —
- * never folded into one "restorable". Built like Security › Activity: a
- * summary line, one table, and a run opens in a side sheet.
+ * Backups › Runs: every run in the scope, what it went through, and how far
+ * each backup is proven (Checksum, Contents checked, Test restore), never
+ * folded into one "restorable". The server sends the newest 500; they are paged
+ * here, and when 500 came back the table says so. A run opens in a side sheet.
  */
-export function BackupsHistory({ ctx }: { ctx: SectionCtx }) {
+export function BackupsHistory({ ctx, resource }: { ctx: SectionCtx; resource?: Resource<BackupRun[]> & { source: "runs" | "legacy" } }) {
+  if (resource) return <HistoryGate res={resource} ctx={ctx} />
+  return <OwnHistory ctx={ctx} />
+}
+
+function OwnHistory({ ctx }: { ctx: SectionCtx }) {
   const res = useBackupRuns(ctx.scope, ctx.selected, ctx.workspaces)
+  return <HistoryGate res={res} ctx={ctx} />
+}
+
+function HistoryGate({ res, ctx }: { res: Resource<BackupRun[]> & { source: "runs" | "legacy" }; ctx: SectionCtx }) {
   return (
-    <Gate resource={res} what="Backup history" skeleton="h-[280px]">
+    <Gate resource={res} what="Runs" skeleton="h-[280px]">
       {(runs) => <HistoryBody runs={runs} ctx={ctx} legacy={res.source === "legacy"} reload={res.reload} />}
     </Gate>
   )
 }
 
 export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { runs: BackupRun[]; ctx: SectionCtx; legacy?: boolean; reload?: () => void; now?: Date }) {
-  // On the nested page the side panel owns the facet; on its own the section
+  // On the nested page the page owns the result chips; on its own the section
   // draws the same choice as a segmented control.
   const [localFilter, setLocalFilter] = React.useState<RunFilter>("all")
   const filter = ctx.inDrill ? ctx.runFilter ?? "all" : localFilter
   const [plan, setPlan] = React.useState<string>("")
   const [open, setOpen] = React.useState<string | null>(ctx.focusRun)
   const [checking, setChecking] = React.useState<BackupRun | null>(null)
+  const [inside, setInside] = React.useState<BackupRun | null>(null)
   const [checked, setChecked] = React.useState<Record<string, { level: 1 | 2; ok: boolean; detail: string }>>({})
 
   const slice = ctx.runSlice
@@ -93,12 +109,11 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
   const [picked, setPicked] = React.useState<Set<string>>(() => new Set())
   const plans = [...new Set(inScope.filter((r) => r.plan_name).map((r) => r.plan_name!))]
   const list = inScope.filter((r) => matches(r, filter) && (!plan || r.plan_name === plan))
-  const current = inScope.find((r) => r.id === open) ?? null
-  const count = (f: RunFilter) => inScope.filter((r) => matches(r, f)).length
-  const nFailed = count("failed"), nIncomplete = count("incomplete"), nPinned = count("pinned")
-  const filterLabel = FILTERS.find((f) => f.value === filter)?.label
+  const paged = useShowMore(list, { step: 25, resetKey: `${filter}|${plan}|${JSON.stringify(ctx.runQuery)}|${slice?.fromMs}-${slice?.toMs}|${ctx.scope}|${[...ctx.selected].length}` })
+  const current = runs.find((r) => r.id === open) ?? null
+  const cap = legacy ? null : runsCapNote(runs.length)
   const pickedRuns = list.filter((r) => picked.has(r.id) && r.bundle_path)
-  const allOn = list.length > 0 && list.every((r) => picked.has(r.id))
+  const pagedAllOn = paged.shown.length > 0 && paged.shown.every((r) => picked.has(r.id))
   const tick = (ids: string[], on: boolean) => setPicked((prev) => { const n = new Set(prev); for (const id of ids) { if (on) n.add(id); else n.delete(id) } return n })
   const pinAll = async (pin: boolean) => {
     let ok = 0
@@ -117,28 +132,34 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
     }
   }
 
+  const columns: TableColumn<BackupRun>[] = [
+    { key: "started", header: "Started", cell: (r) => formatWhen(r.started_at, now) },
+    { key: "scope", header: "Scope", cell: (r) => (r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />) },
+    { key: "plan", header: "Plan", cell: (r) => runPlanLabel(r), className: "min-w-[10rem]" },
+    { key: "size", header: "Size", right: true, cell: (r) => <span className="font-mono">{formatSize(r.size_bytes)}</span> },
+    { key: "result", header: "Result", cell: (r) => { const res = runResult(r); return <Chip tone={res.tone}>{res.text}</Chip> } },
+    { key: "proof", header: "Checked to", cell: (r) => proofCell(r, checked[r.bundle_path ?? ""]?.level) },
+    { key: "pin", header: <span className="sr-only">Pinned</span>, cell: (r) => (r.pinned ? <Pin className="h-3.5 w-3.5 text-muted-foreground" aria-label="Pinned" /> : null) },
+  ]
+  const lead = selectable ? {
+    header: <input type="checkbox" aria-label="Select every run shown" checked={pagedAllOn} disabled={paged.shown.length === 0}
+      onChange={(e) => tick(paged.shown.map((r) => r.id), e.target.checked)} className="size-3.5 accent-[var(--primary)]" />,
+    cell: (r: BackupRun) => (
+      <input type="checkbox" aria-label={`Select the run of ${formatWhen(r.started_at, now)}`} checked={picked.has(r.id)} disabled={!r.bundle_path}
+        onChange={(e) => tick([r.id], e.target.checked)} className="size-3.5 accent-[var(--primary)] disabled:opacity-30 coarse:size-5" />
+    ),
+  } : undefined
+
   return (
     <>
       {legacy && (
-        <p className="text-xs text-muted-foreground">Run history is not available on this server yet. These are the bundles it holds for the workspace you are in; a check proves the checksum only.</p>
+        <p className="text-xs text-muted-foreground">The list of runs is not available on this server yet. These are the bundles it holds for the workspace you are in; a check proves the checksum only.</p>
       )}
-      <SettingsSummary>
-        <SummaryItem n={inScope.length}>run{inScope.length === 1 ? "" : "s"}</SummaryItem>
-        <SummaryItem n={nFailed} tone={nFailed ? "danger" : undefined}>failed</SummaryItem>
-        <SummaryItem n={nIncomplete} tone={nIncomplete ? "warn" : undefined}>incomplete</SummaryItem>
-        <SummaryItem n={nPinned}>pinned</SummaryItem>
-        {ctx.inDrill && filter !== "all" && (
-          <span data-slot="run-filter" className="inline-flex h-6 items-center rounded-full bg-primary/10 px-2.5 text-micro text-primary-hover">
-            Showing {filterLabel}
-          </span>
-        )}
-      </SettingsSummary>
-      {(!ctx.inDrill || plans.length > 1) && (
+      {!ctx.inDrill && (
         <div className="flex flex-wrap items-center gap-2">
-          {!ctx.inDrill && <SettingsSegmented label="Filter runs" options={FILTERS} value={localFilter} onChange={setLocalFilter} />}
+          <SettingsSegmented label="Filter runs" options={FILTERS} value={localFilter} onChange={setLocalFilter} />
           {plans.length > 1 && (
-            <select aria-label="Plan" value={plan} onChange={(e) => setPlan(e.target.value)}
-              className={nativeSelect}>
+            <select aria-label="Plan" value={plan} onChange={(e) => setPlan(e.target.value)} className={nativeSelect}>
               <option value="">All plans</option>
               {plans.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -151,53 +172,18 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
             <History className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold">{filter === "all" ? "Every run" : `${filterLabel} runs`}</h3>
-            <p className="mt-0.5 text-label text-muted-foreground">Newest first · open a run for its phases and proof</p>
+            <h3 className="text-sm font-semibold" data-slot="runs-count">{list.length === 1 ? "1 run" : `${list.length} runs`}</h3>
+            <p className="mt-0.5 text-label text-muted-foreground">
+              Newest first · open a run for its phases and proof
+              {cap && <> · <span data-slot="runs-cap">this is {cap}; older ones are not listed</span></>}
+            </p>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className={settingsTable}>
-            <thead>
-              <tr>
-                {selectable && (
-                  <th className={cn(TH, "w-9")}>
-                    <input type="checkbox" aria-label="Select every run shown" checked={allOn} disabled={list.length === 0}
-                      onChange={(e) => tick(list.map((r) => r.id), e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
-                  </th>
-                )}
-                {["Started", "Scope", "Plan", "Size", "Result", "Checked to"].map((h) => <th key={h} className={cn(TH, h === "Size" && "text-right")}>{h}</th>)}
-                <th className={TH}><span className="sr-only">Pinned</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.length === 0 && <tr><td colSpan={selectable ? 8 : 7} className="px-3 py-8 text-center text-label text-muted-foreground">No runs {filter === "all" && !plan ? "in this scope yet" : "match this filter"}.</td></tr>}
-              {list.map((r) => {
-                const res = runResult(r)
-                const proof = checked[r.bundle_path ?? ""]?.level ?? r.proof_level
-                return (
-                  <tr key={r.id} tabIndex={0} aria-selected={open === r.id} data-run={r.id}
-                    onClick={() => setOpen(r.id)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(r.id) } }}
-                    className={cn(settingsTableRowLink, "aria-selected:bg-accent", picked.has(r.id) && "bg-accent/40")}>
-                    {selectable && (
-                      <td className={TD} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                        <input type="checkbox" aria-label={`Select the run of ${formatWhen(r.started_at, now)}`} checked={picked.has(r.id)} disabled={!r.bundle_path}
-                          onChange={(e) => tick([r.id], e.target.checked)} className="size-3.5 accent-[var(--primary)] disabled:opacity-30" />
-                      </td>
-                    )}
-                    <td className={cn(TD, "whitespace-nowrap")}>{formatWhen(r.started_at, now)}</td>
-                    <td className={cn(TD, "whitespace-nowrap")}>{r.scope === "instance" ? <WsName name="Whole instance" instance /> : <WsName name={r.workspace_name ?? "—"} />}</td>
-                    <td className={cn(TD, "min-w-[10rem]")}>{runPlanLabel(r)}</td>
-                    <td className={cn(TD, "whitespace-nowrap text-right font-mono")}>{formatSize(r.size_bytes)}</td>
-                    <td className={TD}><Chip tone={res.tone}>{res.text}</Chip></td>
-                    <td className={cn(TD, "text-muted-foreground")}>{proofLabel(Math.max(proof, r.proof_level) as BackupRun["proof_level"], r.drill_result)}</td>
-                    <td className={TD}>{r.pinned && <Pin className="h-3.5 w-3.5 text-muted-foreground" aria-label="Pinned" />}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <BackupsTable rows={paged.shown} rowKey={(r) => r.id} columns={columns} lead={lead} label="Runs"
+          onOpen={(r) => setOpen(r.id)} isOpen={(r) => open === r.id} rowProps={(r) => ({ "data-run": r.id })}
+          stack={(r) => ({ title: formatWhen(r.started_at, now), sub: stackSub(r), end: <Chip tone={runResult(r).tone}>{runResult(r).text}</Chip> })}
+          empty={`No runs ${filter === "all" && !plan ? "in this scope yet" : "match this filter"}.`} />
+        <ShowMore shown={paged.shown.length} total={paged.total} nextCount={paged.nextCount} onMore={paged.showMore} noun="runs" paged={paged.paged} />
       </section>
       {selectable && pickedRuns.length > 0 && (
         <div role="toolbar" aria-label="Change the selected runs" data-slot="runs-bulk"
@@ -215,13 +201,14 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
       <Sheet open={!!current} onOpenChange={(o) => { if (!o) setOpen(null) }}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
           {current && (
-            <RunDrawer run={current} now={now} ctx={ctx} check={checked[current.bundle_path ?? ""]}
+            <RunDrawer run={current} runs={runs} now={now} ctx={ctx} check={checked[current.bundle_path ?? ""]}
+              onOpenRun={setOpen}
               onPin={async () => {
                 if (!current.bundle_path) return
                 const ok = await perform(ctx.demo, () => pinBundle(current.bundle_path!, !current.pinned), current.pinned ? "Unpinned" : "Pinned · rotation never deletes it", current.pinned ? "Could not unpin" : "Could not pin")
                 if (ok) reload?.()
               }}
-              onCheck={() => setChecking(current)} />
+              onCheck={() => setChecking(current)} onInside={() => setInside(current)} />
           )}
         </SheetContent>
       </Sheet>
@@ -232,84 +219,101 @@ export function HistoryBody({ runs, ctx, legacy, reload, now = new Date() }: { r
           if (out) setChecked((c) => ({ ...c, [checking.bundle_path!]: out }))
           setChecking(null)
         }} />
+      <ManifestDialog run={inside} demo={ctx.demo} onClose={() => setInside(null)} />
     </>
   )
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-label text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5">{children}</dd>
-    </div>
-  )
+/** The proof column: the three steps and the word for the highest reached. */
+function proofCell(r: BackupRun, checkedLevel?: 1 | 2) {
+  const level = Math.max(r.proof_level, checkedLevel ?? 0) as BackupRun["proof_level"]
+  if (r.status === "failed" || r.status === "skipped" || (level === 0 && !r.bundle_path)) return <span className="text-muted-foreground">—</span>
+  const partial = r.status === "incomplete" || r.incomplete.length > 0 || (level === 3 && !!r.drill_result && r.drill_result !== "ok")
+  return <ProofSteps level={level} partial={partial} />
 }
 
-/** One rung of the proof ladder: its number, what it proves, and where this run stands. */
-function Rung({ n, label, children }: { n: 1 | 2 | 3; label: string; children: React.ReactNode }) {
-  return (
-    <li className="flex items-start gap-3 border-b border-border py-2.5 last:border-b-0">
-      <span aria-hidden className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-micro tabular-nums text-muted-foreground">{n}</span>
-      <div className="min-w-0 flex-1">
-        <div>{label}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-label text-muted-foreground">{children}</div>
-      </div>
-    </li>
-  )
+const PROOF_STEPS: { n: 1 | 2 | 3; label: string; about: string }[] = [
+  { n: 1, label: "Checksum", about: "The file is what was written" },
+  { n: 2, label: "Contents checked", about: "Every section was read and counted" },
+  { n: 3, label: "Test restore", about: "It was restored into an isolated instance" },
+]
+
+function phaseValue(p: RunPhase): string {
+  if (p.status === "skipped") return p.detail ? `skipped · ${p.detail}` : "skipped"
+  if (p.status === "pending") return "—"
+  if (p.status === "failed") return p.detail ?? "failed"
+  return runDuration(p.started_at, p.ended_at) || p.detail || "done"
 }
 
-function RunDrawer({ run, now, ctx, check, onPin, onCheck }: {
-  run: BackupRun; now: Date; ctx: SectionCtx; check?: { level: 1 | 2; ok: boolean; detail: string }
-  onPin: () => void; onCheck: () => void
+function RunDrawer({ run, runs, now, ctx, check, onPin, onCheck, onInside, onOpenRun }: {
+  run: BackupRun; runs: BackupRun[]; now: Date; ctx: SectionCtx; check?: { level: 1 | 2; ok: boolean; detail: string }
+  onPin: () => void; onCheck: () => void; onInside: () => void; onOpenRun: (id: string) => void
 }) {
   const href = run.bundle_path ? downloadHref(run.bundle_path, workspaceFor(ctx, run.workspace_id), run.legacy ? undefined : run.scope) : null
   const proof = Math.max(run.proof_level, check?.ok ? check.level : 0)
   const missing = run.incomplete.reduce((a, i) => a + i.count, 0)
   const res = runResult(run)
-  const btn = "h-7 text-xs"
+  const took = runDuration(run.started_at, run.ended_at)
+  const earlier = run.retry_of ? runs.find((r) => r.id === run.retry_of) : null
+  const btn = "h-7 text-xs coarse:h-[44px]"
+  const step = (n: 1 | 2 | 3): React.ReactNode => {
+    if (n === 1) return proof >= 1 ? <StatusPill tone="success" label="Done" /> : check && !check.ok ? <StatusPill tone="danger" label="Does not match" /> : <StatusPill tone="muted" label="Not yet" />
+    if (n === 2) return proof >= 2 ? <StatusPill tone="success" label="Done" /> : <StatusPill tone="muted" label="Not yet" />
+    if (run.proof_level >= 3) return <StatusPill tone={run.drill_result === "ok" ? "success" : run.drill_result === "failed" ? "danger" : "warn"} label={run.drill_result === "ok" ? "Done" : run.drill_result ?? "partial"} />
+    return <StatusPill tone="muted" label="Not yet" />
+  }
+  const stepNote = (n: 1 | 2 | 3, about: string): React.ReactNode => (
+    <>
+      {about}
+      {n === 2 && missing > 0 && <span className="block text-warn">{run.incomplete.map((i) => i.detail).join(" · ")} absent</span>}
+      {n === 2 && check && check.level === 2 && <span className="block">{check.detail}</span>}
+      {n === 3 && run.drill_note && <span className="block">{run.drill_note}</span>}
+    </>
+  )
   return (
     <div data-slot="run-drawer" className="flex min-h-full flex-col">
       <SheetHeader>
-        <SheetTitle className="text-sm">{runPlanLabel(run)} · {formatWhen(run.started_at, now)}</SheetTitle>
-        <SheetDescription className="sr-only">Phases, encryption and how far this backup is proven</SheetDescription>
+        <SheetTitle className="text-sm">{formatWhen(run.started_at, now)}</SheetTitle>
+        <SheetDescription>{run.scope === "instance" ? "Whole instance" : run.workspace_name ?? "—"} · {runPlanLabel(run)}</SheetDescription>
       </SheetHeader>
-      <div className="grid flex-1 gap-5 px-4 pb-4 text-label">
-        <dl className="grid grid-cols-2 gap-3">
-          <Fact label="Result"><Chip tone={res.tone}>{res.text}</Chip></Fact>
-          <Fact label="Scope">{run.scope === "instance" ? "Whole instance" : run.workspace_name ?? "—"}</Fact>
-          <Fact label="Size"><span className="font-mono">{formatSize(run.size_bytes)}</span></Fact>
-          <Fact label="Format">{run.format_version ? `v${run.format_version}` : "—"}{run.restorable === "direct" ? " · restorable here directly" : run.restorable === "converter" ? " · restorable through a converter; the original stays untouched" : run.restorable === "unsupported" ? " · not restorable by this server" : ""}</Fact>
-        </dl>
-        <section aria-label="Proof">
-          <h4 className="eyebrow mb-1">Proof</h4>
-          <ol>
-            <Rung n={1} label="Checksum">
-              {proof >= 1 ? <Chip tone="ok">✓ matches</Chip> : check && !check.ok ? <Chip tone="bad">does not match</Chip> : "not checked"}
-            </Rung>
-            <Rung n={2} label="Contents checked">
-              {proof >= 2 ? <Chip tone="ok">✓ every section read</Chip> : "not yet"}
-              {missing > 0 && <span className="text-warn">{run.incomplete.map((i) => i.detail).join(" · ")} absent</span>}
-              {check && <span>{check.detail}</span>}
-            </Rung>
-            <Rung n={3} label="Test restore">
-              {run.proof_level >= 3
-                ? (run.drill_result === "ok" ? <Chip tone="ok">passed</Chip> : <><Chip tone={run.drill_result === "failed" ? "bad" : "warn"}>{run.drill_result ?? "partial"}</Chip>{run.drill_note && <span>{run.drill_note}</span>}</>)
-                : "never"}
-            </Rung>
-          </ol>
-        </section>
-        <section aria-label="Phases">
-          <h4 className="eyebrow mb-1">Phases</h4>
-          <p>{run.phases.length ? formatPhases(run.phases) : "not recorded"}{run.error && <span className="text-destructive"> · {run.error}</span>}</p>
-        </section>
-        <section aria-label="Encryption">
-          <h4 className="eyebrow mb-1">Encryption</h4>
-          <p>{run.recipients.length ? `AGE · ${run.recipients.length === 1 ? "recipient" : "recipients"} ${run.recipients.map((r) => `“${r}”`).join(", ")} (always encrypted)` : "AGE (always encrypted)"}</p>
-        </section>
+      <div className="grid flex-1 content-start gap-4 px-4 pb-4">
+        <SettingsCard title="Result">
+          <SettingsRow label="Result"><Chip tone={res.tone}>{res.text}</Chip></SettingsRow>
+          {run.error && <SettingsRow label="Why"><span className="text-destructive">{run.error}</span></SettingsRow>}
+          <SettingsRow label="Scope">{run.scope === "instance" ? "Whole instance" : run.workspace_name ?? "—"}</SettingsRow>
+          <SettingsRow label="Size"><span className="font-mono">{formatSize(run.size_bytes)}</span></SettingsRow>
+          <SettingsRow label="Format">
+            {run.format_version ? `v${run.format_version}` : "—"}{run.restorable === "direct" ? " · restorable here directly" : run.restorable === "converter" ? " · through a converter; the original stays untouched" : run.restorable === "unsupported" ? " · not restorable by this server" : ""}
+          </SettingsRow>
+          {took && <SettingsRow label="Took">{took}</SettingsRow>}
+          {run.hold_ms != null && <SettingsRow label="Held new work for" description="How long writes waited for a consistent copy"><span className="font-mono" data-slot="hold">{formatHold(run.hold_ms)}</span></SettingsRow>}
+          <SettingsRow label="Started by">{TRIGGER_LABEL[run.trigger] ?? run.trigger}</SettingsRow>
+          {run.note && <SettingsRow label="Note">{run.note}</SettingsRow>}
+          {run.retry_of && (
+            <SettingsRow label="Retry of">
+              {earlier
+                ? <Button type="button" variant="link" className="h-auto p-0 text-control" onClick={() => onOpenRun(earlier.id)}>{formatWhen(earlier.started_at, now)} · {runResult(earlier).text}</Button>
+                : <span className="text-muted-foreground">an earlier run</span>}
+            </SettingsRow>
+          )}
+        </SettingsCard>
+        <SettingsCard title="Proof" description="How far this backup was checked">
+          {PROOF_STEPS.map((p) => (
+            <SettingsRow key={p.n} label={`${p.n} · ${p.label}`} description={stepNote(p.n, p.about)}>{step(p.n)}</SettingsRow>
+          ))}
+        </SettingsCard>
+        <SettingsCard title="Phases">
+          {run.phases.length === 0 && <p className="px-4 py-3 text-label text-muted-foreground">not recorded</p>}
+          {run.phases.map((p) => <SettingsRow key={p.name} label={p.name}><span className="font-mono text-label">{phaseValue(p)}</span></SettingsRow>)}
+        </SettingsCard>
+        <SettingsCard title="Encryption">
+          <SettingsRow label="Encrypted to">{run.recipients.length ? run.recipients.map((r) => `“${r}”`).join(", ") : "AGE (always encrypted)"}</SettingsRow>
+        </SettingsCard>
       </div>
       <SheetFooter className="flex-row flex-wrap gap-1.5 border-t border-border">
         {!run.legacy && <Button type="button" size="sm" variant="outline" className={btn} onClick={onPin}>{run.pinned ? "Unpin" : "Pin"}</Button>}
         <Button type="button" size="sm" variant="outline" className={btn} onClick={onCheck} disabled={!run.bundle_path}>Check contents…</Button>
+        {!run.legacy && <Button type="button" size="sm" variant="outline" className={btn} onClick={onInside} disabled={!run.bundle_path}>What is inside</Button>}
         {href
           ? <Button size="sm" variant="outline" className={btn} asChild><a href={href} download>Download</a></Button>
           : <Button type="button" size="sm" variant="outline" className={btn} disabled>Download</Button>}

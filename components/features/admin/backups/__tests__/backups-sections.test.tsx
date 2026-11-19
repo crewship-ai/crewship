@@ -18,10 +18,12 @@ vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string
 
 import { BackupsConsole } from "../backups-console"
 import { RetentionPage } from "../data-retention"
+import { heartbeatLine } from "../backups-keys"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
-import { SpaceCard, attentionItems } from "../backups-overview"
-import { overviewFixture } from "../__fixtures__/backups"
+import { SpaceCard, attentionItems, overviewSentence } from "../backups-overview"
+import { overviewFixture, settingsFixture } from "../__fixtures__/backups"
 import { HistoryBody } from "../backups-history"
+import { OverviewBody } from "../backups-overview"
 import { runsFixture } from "../__fixtures__/backups"
 import type { SectionCtx } from "../backups-scope"
 import type { BackupsSection } from "@/app/(dashboard)/admin/navigation"
@@ -58,14 +60,22 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe("Overview", () => {
-  it("answers the five questions, with a partial restore in the warn tone on the summary line", async () => {
+  it("answers the five questions in a What is protected card, and says the verdict once, in the head sentence", async () => {
     const { container } = show("overview")
-    const verdict = await screen.findByText("Partial restore verified")
-    expect(verdict).toHaveAttribute("data-tone", "warn")
-    expect(container.querySelector("[data-slot=backups-summary]")).toContainElement(verdict)
+    await screen.findByText("What is protected")
     for (const label of ["Protects", "How often", "Where", "How long", "Really restored?"]) expect(screen.getByText(label)).toBeInTheDocument()
-    expect(screen.getByText("Complete recovery")).toBeInTheDocument()
     expect(screen.getByText(/the whole Crewship: 5 workspaces/)).toBeInTheDocument()
+    // No strip of its own: the verdict is the page head's sentence (BackupsPage), not repeated here.
+    expect(container.querySelector("[data-slot=backups-summary]")).toBeNull()
+    expect(overviewSentence(overviewFixture(new Date(), "instance"))).toBe("Partial restore verified · data daily at 03:00 · environments weekly on Sunday · this server only")
+  })
+
+  it("says a local-only copy once: as a Needs attention item, not as a detail of the Where row", async () => {
+    const { container } = show("overview")
+    await screen.findByText("Local copy only. Losing this server is not covered.")
+    const where = container.querySelector("[data-testid=question-Where]") as HTMLElement
+    expect(where).not.toHaveTextContent("no off-site copy")
+    expect(screen.getAllByText(/Local copy only/)).toHaveLength(1)
   })
 
   it("lists a local-only copy as a problem in Needs attention, with Storage", async () => {
@@ -114,26 +124,31 @@ describe("Overview", () => {
     expect(screen.getByText("48 GB")).toBeInTheDocument()
   })
 
-  it("in workspaces scope shows a row per ticked workspace and offers a backup where none is recent", async () => {
+  it("in workspaces scope counts the ticked workspaces' coverage and offers a backup where none is recent", async () => {
     show("overview", "?demo=1&scope=workspaces&ws=dess,pages-demo")
-    const table = (await screen.findByText("The newest backup of each selected workspace")).closest("section")!
-    expect(within(table).getByText("Dess")).toBeInTheDocument()
-    expect(within(table).getByText("Pages demo")).toBeInTheDocument()
-    expect(within(table).queryByText("Coolify")).toBeNull()
-    expect(screen.getByText("Pages demo: last backup 9 days ago")).toBeInTheDocument()
-    expect(within(table).getAllByRole("button", { name: "Back up now" }).length).toBeGreaterThan(0)
-    expect(screen.getByText(/of 2 workspaces covered/)).toBeInTheDocument()
+    expect(await screen.findByText("Pages demo: last backup 9 days ago")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /1 covered/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /1 stale/ })).toBeInTheDocument()
+    expect(screen.getByText("2 workspaces")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Back up now" }).length).toBeGreaterThan(0)
   })
 
   // A workspace that holds no crew (every signup gets one) has no row of its
   // own: the server sums those up in one attention item.
-  it("folds workspaces without crews into one attention item and a summary count", async () => {
+  it("folds workspaces without crews into one attention item and one count", async () => {
     show("overview", "?demo=1&scope=workspaces&ws=dess,sandbox")
     expect(await screen.findByText("1 workspace without crews has no backup")).toBeInTheDocument()
-    const table = screen.getByText("The newest backup of each selected workspace").closest("section")!
-    expect(within(table).queryByText("Sandbox")).toBeNull()
-    expect(screen.getByText(/workspace without crews$/)).toBeInTheDocument()
-    expect(screen.getByText(/of 1 workspaces covered/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /1 with nothing to back up/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /1 covered/ })).toBeInTheDocument()
+  })
+
+  it("pages a long list of findings ten at a time", async () => {
+    const data = overviewFixture(new Date(), "instance")
+    const many = Array.from({ length: 25 }, (_, i) => ({ id: `n${i}`, severity: "warn" as const, title: `Finding ${i}`, detail: "d" }))
+    const { container } = render(<OverviewBody data={{ ...data, needs_attention: many }} ctx={{ scope: "instance", selected: new Set(), workspaces: [], currentWorkspaceId: null, demo: true, go: vi.fn(), focusRun: null, focusPath: null, backUpNow: vi.fn(), newPlanSignal: 0 }} />)
+    expect(container.querySelectorAll("[data-attention]")).toHaveLength(10)
+    fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }))
+    expect(container.querySelectorAll("[data-attention]")).toHaveLength(20)
   })
 })
 
@@ -194,7 +209,7 @@ describe("scope strip", () => {
   })
 })
 
-describe("Backup history", () => {
+describe("Runs", () => {
   const sheet = () => screen.getByRole("dialog") as HTMLElement
 
   it("lists the runs in scope with result and how far each is proven", async () => {
@@ -202,19 +217,20 @@ describe("Backup history", () => {
     expect(await screen.findByText("Started")).toBeInTheDocument()
     expect(screen.getAllByText("done · incomplete").length).toBeGreaterThan(0)
     expect(screen.getByText("interrupted · retried")).toBeInTheDocument()
-    expect(screen.getByText("test restore · partial")).toBeInTheDocument()
     expect(screen.getByText("manual · before upgrade")).toBeInTheDocument()
+    // The three steps and the word for the highest reached; a partial test restore reads as partial.
+    const partial = document.querySelector("tr[data-run=run-4] [data-proof]") as HTMLElement
+    expect(partial).toHaveTextContent("Test restore")
+    expect(partial.querySelector("[role=img]")).toHaveAttribute("aria-label", "Test restore · partial")
     // Workspace runs are not the instance's.
     expect(screen.queryByText("Memory every 6 h", { selector: "td" })).toBeNull()
   })
 
-  it("says where things stand in one summary line, not KPI tiles", async () => {
+  it("counts the runs once, in the table head, not in a summary line", async () => {
     const { container } = show("history")
     await screen.findByText("Started")
-    const summary = container.querySelector("[data-slot=settings-summary]") as HTMLElement
-    expect(summary).toHaveTextContent("5 runs")
-    expect(summary).toHaveTextContent("2 incomplete")
-    expect(summary).toHaveTextContent("1 pinned")
+    expect(container.querySelector("[data-slot=settings-summary]")).toBeNull()
+    expect(container.querySelector("[data-slot=runs-count]")).toHaveTextContent("6 runs")
   })
 
   it("shows each result as a status pill, never a bare colour", async () => {
@@ -231,20 +247,58 @@ describe("Backup history", () => {
     expect(container.querySelectorAll("tr[data-run]")).toHaveLength(1)
   })
 
-  it("opens a run in a side sheet with its phases, encryption, the three proofs and its actions", async () => {
+  it("opens a run in a side sheet: Result facts, the three proof steps, phases, encryption and its actions", async () => {
     const { container, onNavigate } = show("history")
     await screen.findByText("Started")
     fireEvent.click(container.querySelector("tr[data-run=run-4]")!)
     const drawer = sheet()
     expect(drawer.querySelector("[data-slot=run-drawer]")).not.toBeNull()
-    expect(within(drawer).getByText(/copy 6m12s/)).toBeInTheDocument()
-    expect(within(drawer).getByText(/AGE · recipients “ops-2026”, “ops-backup”/)).toBeInTheDocument()
-    expect(within(drawer).getByText("✓ matches")).toBeInTheDocument()
-    expect(within(drawer).getByText("✓ every section read")).toBeInTheDocument()
+    for (const t of ["Result", "Proof", "Phases", "Encryption"]) expect(within(drawer).getByRole("heading", { name: t })).toBeInTheDocument()
+    expect(within(drawer).getByText("copy")).toBeInTheDocument()
+    expect(within(drawer).getByText("6m12s")).toBeInTheDocument()
+    expect(within(drawer).getByText(/“ops-2026”, “ops-backup”/)).toBeInTheDocument()
+    const steps = within(drawer).getAllByText(/^[123] · /).map((e) => e.textContent)
+    expect(steps).toEqual(["1 · Checksum", "2 · Contents checked", "3 · Test restore"])
     expect(within(drawer).getByText("partial")).toBeInTheDocument()
-    for (const b of ["Pin", "Check contents…", "Download", "Restore…"]) expect(within(drawer).getByRole(b === "Download" ? "link" : "button", { name: b })).toBeInTheDocument()
+    expect(within(drawer).getByText("12 attachments did not open")).toBeInTheDocument()
+    for (const b of ["Pin", "Check contents…", "What is inside", "Download", "Restore…"]) expect(within(drawer).getByRole(b === "Download" ? "link" : "button", { name: b })).toBeInTheDocument()
     fireEvent.click(within(drawer).getByRole("button", { name: "Restore…" }))
     expect(onNavigate).toHaveBeenCalledWith("recovery")
+  })
+
+  it("says how long new work was held, and links a retry to the run it retried", async () => {
+    const { container } = show("history")
+    await screen.findByText("Started")
+    fireEvent.click(container.querySelector("tr[data-run=run-8]")!)
+    const drawer = sheet()
+    expect(drawer.querySelector("[data-slot=hold]")).toHaveTextContent("3.1 s")
+    expect(within(drawer).getByText("Retry of")).toBeInTheDocument()
+    fireEvent.click(within(drawer).getByRole("button", { name: /interrupted · retried/ }))
+    expect(within(sheet()).queryByText("Retry of")).toBeNull()
+  })
+
+  it("What is inside reads the manifest of the bundle (demo: the fixture)", async () => {
+    const { container } = show("history")
+    await screen.findByText("Started")
+    fireEvent.click(container.querySelector("tr[data-run=run-1]")!)
+    fireEvent.click(within(sheet()).getByRole("button", { name: "What is inside" }))
+    const manifest = await waitFor(() => { const el = document.querySelector("[data-slot=manifest]"); if (!el) throw new Error("no manifest"); return el as HTMLElement })
+    expect(manifest).toHaveTextContent("The whole instance")
+    expect(manifest).toHaveTextContent("12 missing")
+  })
+
+  it("What is inside asks the server by path when it is not a demo", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      const u = String(url)
+      if (u.includes("/backups/runs?")) return new Response(JSON.stringify({ data: runsFixture(new Date()) }), { status: 200 })
+      if (u.includes("/bundles/inspect?path=")) return new Response(JSON.stringify({ format_version: 3, scope: "instance", created_at: "2026-10-08T03:00:00Z", contents: {}, encryption: { enabled: true } }), { status: 200 })
+      return new Response("{}", { status: 404 })
+    })
+    const { container } = show("history", "?period=all")
+    await waitFor(() => expect(container.querySelector("tr[data-run=run-1]")).not.toBeNull())
+    fireEvent.click(container.querySelector("tr[data-run=run-1]")!)
+    fireEvent.click(within(sheet()).getByRole("button", { name: "What is inside" }))
+    await waitFor(() => expect(h.apiFetch.mock.calls.some(([u]) => String(u).endsWith("/bundles/inspect?path=%2Fb%2Finstance-1.cship"))).toBe(true))
   })
 
   it("demo mode never sends a pin", async () => {
@@ -257,25 +311,35 @@ describe("Backup history", () => {
   })
 })
 
-// On the nested page the side panel owns the Runs facets: the section reads
-// them from ctx, draws no facet buttons of its own, and names the active one.
-describe("Backup history on the nested page", () => {
+// On the nested page the page owns the result chips: the section reads the
+// facet from ctx and draws no facet buttons of its own.
+describe("Runs on the nested page", () => {
   const ctx = (over: Partial<SectionCtx> = {}): SectionCtx => ({
     scope: "instance", selected: new Set(), workspaces: [], currentWorkspaceId: "ws-dess", demo: true,
     go: vi.fn(), focusRun: null, focusPath: null, backUpNow: vi.fn(), newPlanSignal: 0, inDrill: true, runFilter: "all", ...over,
   })
   const now = new Date("2026-10-08T12:00:00Z")
 
-  it("filters by the panel's facet and names it, without facet buttons of its own", () => {
+  it("filters by the page's chip, without facet buttons of its own", () => {
     const { container } = render(<HistoryBody runs={runsFixture(now)} now={now} ctx={ctx({ runFilter: "incomplete" })} />)
     expect([...container.querySelectorAll("tr[data-run]")].map((r) => r.getAttribute("data-run"))).toEqual(["run-1", "run-4"])
     expect(screen.queryByRole("button", { name: "Pinned" })).toBeNull()
-    expect(container.querySelector("[data-slot=run-filter]")).toHaveTextContent("Incomplete")
   })
 
   it("opens the run a link points at (?run=)", () => {
     render(<HistoryBody runs={runsFixture(now)} now={now} ctx={ctx({ focusRun: "run-7" })} />)
-    expect(within(screen.getByRole("dialog")).getByText(/before upgrade/)).toBeInTheDocument()
+    expect(within(screen.getByRole("dialog")).getAllByText(/before upgrade/).length).toBeGreaterThan(0)
+  })
+
+  it("pages 25 at a time and resets when the filter changes", () => {
+    const base = runsFixture(now)[0]
+    const many = Array.from({ length: 60 }, (_, i) => ({ ...base, id: `x${i}`, status: i % 2 ? ("failed" as const) : ("done" as const), incomplete: [], bundle_path: `/b/${i}` }))
+    const { container, rerender } = render(<HistoryBody runs={many} now={now} ctx={ctx()} />)
+    expect(container.querySelectorAll("tr[data-run]")).toHaveLength(25)
+    fireEvent.click(screen.getByRole("button", { name: "Show 25 more" }))
+    expect(container.querySelectorAll("tr[data-run]")).toHaveLength(50)
+    rerender(<HistoryBody runs={many} now={now} ctx={ctx({ runFilter: "failed" })} />)
+    expect(container.querySelectorAll("tr[data-run]")).toHaveLength(25)
   })
 })
 
@@ -603,8 +667,32 @@ describe("Keys & alerts", () => {
     show("keys")
     expect(await screen.findByText("Backup needs attention")).toBeInTheDocument()
     expect(screen.getByText(/instance admins \(3\)/)).toBeInTheDocument()
-    expect(screen.getByLabelText("newest backup older than 36 h")).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: /the newest backup is older than/ })).toBeChecked()
+    expect(screen.getByLabelText("Alert when the newest backup is older than (hours)")).toHaveValue(36)
     expect(screen.getByLabelText("Heartbeat URL")).toHaveValue("https://hc.example.com/ping/…")
+    expect(document.querySelector("[data-slot=heartbeat-last]")).toHaveTextContent(/Last ping .* answered OK/)
+  })
+
+  it("saves the stale alert hours with the other alert settings", async () => {
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/backups/settings")) {
+        return init?.method === "PUT" ? new Response(JSON.stringify(settingsFixture()), { status: 200 }) : new Response(JSON.stringify(settingsFixture()), { status: 200 })
+      }
+      return new Response("{}", { status: 404 })
+    })
+    show("keys", "")
+    const hours = await screen.findByLabelText("Alert when the newest backup is older than (hours)")
+    fireEvent.change(hours, { target: { value: "48" } })
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }))
+    await waitFor(() => expect(h.apiFetch.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === "PUT")).toBe(true))
+    const put = h.apiFetch.mock.calls.find(([, i]) => (i as RequestInit | undefined)?.method === "PUT")!
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toMatchObject({ stale_alert_hours: 48 })
+  })
+
+  it("says when the heartbeat was last pinged and how it answered", () => {
+    expect(heartbeatLine({ heartbeat_url: "https://hc", heartbeat_last_at: null, heartbeat_last_ok: null, heartbeat_last_error: null })).toBe("Not pinged yet")
+    expect(heartbeatLine({ heartbeat_url: null, heartbeat_last_at: null })).toBe("No URL set: nothing is pinged")
+    expect(heartbeatLine({ heartbeat_url: "https://hc", heartbeat_last_at: "2026-10-08T03:07:00Z", heartbeat_last_ok: false, heartbeat_last_error: "HTTP 502" })).toMatch(/not answered: HTTP 502$/)
   })
 
   it("tells the inbox always, and each configured channel with its last alert", async () => {
@@ -787,7 +875,7 @@ describe("a server without the new endpoints", () => {
       return new Response("{}", { status: 404 })
     })
     show("history", "")
-    expect(await screen.findByText(/Run history is not available on this server yet/)).toBeInTheDocument()
+    expect(await screen.findByText(/The list of runs is not available on this server yet/)).toBeInTheDocument()
     expect(screen.getByText("400 MB")).toBeInTheDocument()
   })
 })
