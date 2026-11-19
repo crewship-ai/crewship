@@ -100,6 +100,7 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
   return (
     <div>
       <div className="overflow-x-auto">
+        <p className="sticky left-0 px-4 py-1.5 text-label text-muted-foreground md:hidden">Swipe sideways for more columns.</p>
         <table className={settingsTable}>
           <thead>
             <tr>

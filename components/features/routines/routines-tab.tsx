@@ -156,7 +156,7 @@ function RoutineRow({ routine, onOpen }: { routine: Pipeline; onOpen: () => void
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="h-7 px-2 opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity"
           onClick={(e) => {
             e.stopPropagation()
             onOpen()

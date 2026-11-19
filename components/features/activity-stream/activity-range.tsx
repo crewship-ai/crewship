@@ -216,7 +216,7 @@ export function RangePicker({
             }}
             className="mx-auto p-0"
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="grid gap-1 text-label text-muted-foreground">
               From
               <input

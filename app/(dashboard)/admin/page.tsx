@@ -398,7 +398,7 @@ function AdminConsole() {
         {!phoneList && (
         <div className="relative flex-1 min-w-0">
         <div
-          className="h-full overflow-y-auto pb-20"
+          className="relative h-full overflow-y-auto pb-20"
           tabIndex={0}
           role="region"
           aria-label={sectionLabel ? `Admin ${sectionLabel}` : "Admin content"}

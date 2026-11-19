@@ -52,6 +52,13 @@
     --control-md: 44px;
   }
 }
+/* A short viewport — a phone in landscape is 390px tall — leaves the rail's
+ * link list a 24px strip between its fixed header and footer, so no section
+ * could be reached (#5621). There the whole rail scrolls as one column. */
+@media (max-height: 560px) {
+  [data-slot="sidebar-inner"] { overflow-y: auto; }
+  [data-slot="sidebar-inner"] [data-slot="sidebar-content"] { flex: none; overflow-y: visible; }
+}
 :root { --mobile-tab-bar-h: 0px; }
 @media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(62px + env(safe-area-inset-bottom)); } }
 /* Phone pilot (MOBIL-DOPORUCENI 2a §5): while a text field has focus on a
@@ -2065,7 +2072,13 @@ body {
      Links count too: min-height has no effect on an inline text link, so only
      links laid out as boxes — card links, list rows — grow. A <summary>
      toggles its <details>, and Radix checkbox/radio menu items carry
-     menuitemcheckbox/menuitemradio, which [role="menuitem"] does not match. */
+     menuitemcheckbox/menuitemradio, which [role="menuitem"] does not match.
+
+     These rules are outside every @layer, so they also win over Tailwind's
+     layered utilities whatever the specificity: `min-w-[112px]` on a button
+     computes to 44px here. A control that needs a LARGER floor than 44px
+     writes it as important (`min-w-[112px]!`), which
+     lib/__tests__/coarse-floor-important.test.ts enforces. */
   :where(
     a[href],
     button,
@@ -2084,6 +2097,14 @@ body {
   }
   :where(button, [role="button"], [role="tab"]):not([role="checkbox"], [role="radio"], [role="switch"]) {
     min-width: 44px;
+  }
+  /* A text link that is a flex item ("2 skills · runs" in a meta row, a
+     breadcrumb step) is blockified, so the floor above makes it a 44px box
+     with its text at the top while the words beside it stay centred. Centre
+     the text in the box; links that lay out their own children (flex, grid)
+     are left alone. */
+  :where(a[href]):not([class*="flex"], [class*="grid"]) {
+    align-content: center;
   }
   :where([role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"]) {
     position: relative;

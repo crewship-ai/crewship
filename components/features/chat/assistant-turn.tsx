@@ -143,7 +143,7 @@ function ResultCard({ part }: { part: TurnPart }) {
       // at this reply; `focus-within` keeps it reachable without a pointer.
       className={cn(
         "max-w-lg group",
-        "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 open:opacity-100",
+        "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 coarse:opacity-100 open:opacity-100",
       )}
     >
       <summary className="flex items-center gap-2 text-micro text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">

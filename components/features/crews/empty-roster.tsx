@@ -203,7 +203,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }:
                             }),
                           )
                         }
-                        className="absolute right-3 top-1/2 -translate-y-1/2 h-6 gap-1 px-2 text-[10px] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 h-6 gap-1 px-2 text-[10px] opacity-0 group-hover:opacity-100 coarse:opacity-100 focus-visible:opacity-100 transition-opacity"
                       >
                         <RotateCcw className="h-3 w-3" />
                         Rehire

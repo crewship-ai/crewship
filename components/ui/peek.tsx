@@ -121,7 +121,7 @@ export function Peek({
               <SheetDescription className="sr-only">Details</SheetDescription>
             )}
           </div>
-          <div className="mr-8 flex shrink-0 items-center gap-1">
+          <div className="mr-8 flex shrink-0 items-center gap-1 coarse:mr-[44px]">
             {onPrev && (
               <Button variant="ghost" size="icon-sm" onClick={onPrev} aria-label="Previous (K)" aria-keyshortcuts="k">
                 <ChevronUp className="size-4" />

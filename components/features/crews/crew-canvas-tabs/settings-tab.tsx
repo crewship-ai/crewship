@@ -104,14 +104,14 @@ export function SettingsTab({
                   <button
                     type="button"
                     onClick={() => applyAvatarStyle(false)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
+                    className="text-micro px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
                   >
                     Apply to all
                   </button>
                   <button
                     type="button"
                     onClick={() => applyAvatarStyle(true)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
+                    className="text-micro px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
                     title="Apply this style and clear per-agent overrides"
                   >
                     Reset overrides

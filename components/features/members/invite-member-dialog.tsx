@@ -307,7 +307,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                   const on = role === r
                   return (
                     <button key={r} type="button" role="radio" aria-checked={on} disabled={guest && r === "ADMIN"} onClick={() => setRole(r)} title={ROLE_SUMMARY_BY_ROLE[r]}
-                      className={cn("flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors coarse:min-h-[52px]",
+                      className={cn("flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors coarse:min-h-[52px]!",
                         on ? "border-primary bg-primary/[0.08] ring-1 ring-primary" : "border-border hover:bg-accent")}>
                       <Icon className={cn("h-3.5 w-3.5", on ? "text-primary-hover" : "text-muted-foreground")} aria-hidden />
                       <span className="text-xs font-medium">{ROLE_LABEL[r]}</span>

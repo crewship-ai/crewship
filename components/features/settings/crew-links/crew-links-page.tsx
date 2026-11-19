@@ -240,13 +240,13 @@ export function CrewLinksPage() {
       note="Managers and up change links"
       actions={
         <>
-          <Button variant="ghost" size="icon-sm" aria-label="Command line" title="crewship crew connect <A> <B> · crewship crew connections"
+          <Button variant="ghost" size="icon-sm" className="max-md:hidden" aria-label="Command line" title="crewship crew connect <A> <B> · crewship crew connections"
             onClick={() => toast.info("crewship crew connect <A> <B> · crewship crew connections")}>
             <Terminal className="h-3.5 w-3.5" />
           </Button>
           {canManage && (
-            <Button size="sm" onClick={() => setNewLink(true)}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />New link
+            <Button size="sm" aria-label="New link" onClick={() => setNewLink(true)}>
+              <Plus className="h-3.5 w-3.5 md:mr-1.5" /><span className="max-md:sr-only">New link</span>
             </Button>
           )}
         </>

@@ -61,7 +61,7 @@ export function LaneAxis({
       <span />
       <span className="flex justify-between">
         {labels.map((l, i) => (
-          <span key={i} data-testid="axis-label">
+          <span key={i} data-testid="axis-label" className={i % 2 === 1 && i !== labels.length - 1 ? "max-md:hidden" : undefined}>
             {l}
           </span>
         ))}

@@ -152,7 +152,7 @@ function InboxSection({
               </div>
               {showApprove && onApprove && (
                 <button
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warn/10 text-warn hover:bg-warn/20 transition-colors opacity-0 group-hover:opacity-100"
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warn/10 text-warn hover:bg-warn/20 transition-colors opacity-0 group-hover:opacity-100 coarse:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation()
                     onApprove(task.id, mission.id)
