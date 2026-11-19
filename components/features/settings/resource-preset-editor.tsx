@@ -10,6 +10,7 @@ import { resourcePolicySchema, type ResourcePolicy } from "@/lib/resource-sharin
 import { presetCatalogSchema, presetPreviewSchema, type PresetPreview } from "@/lib/resource-presets"
 import { Button } from "@/components/ui/button"
 import { nativeSelect } from "./shared"
+import { operationName } from "./members/resource-labels"
 
 const levelLabel = (level: string) => level === "edit_publish" ? "Edit + Publish" : level
 /** A 422 is a definite refusal before any write; its reason is shown as is. */
@@ -91,17 +92,17 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
   return <section className="space-y-2 rounded-md border p-3" aria-label="Ordered resource preset">
     {saved.length?saved.map(item=><p key={item.id}>{`Saved ${levelLabel(item.level)} v${item.version} · ${item.state} — intent, not effective authority`}</p>):<p>Custom — no preset was explicitly selected</p>}
     <label>Ordered preset<select aria-label="Ordered preset" className={nativeSelect} value={selected} disabled={blocked||!catalog.data} onChange={event=>{setSelected(event.target.value);setReissue([]);clearPreview()}}>
-      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{levelLabel(item.level.level)} v{item.entry.definition.version} · {item.level.operations.length?item.level.operations.join(" + "):`removes ${item.entry.definition.managed_operations.join(" + ")}`}</option>)}
+      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{levelLabel(item.level.level)} v{item.entry.definition.version} · {item.level.operations.length?item.level.operations.map(op=>operationName(resource.kind,op)).join(" + "):`removes ${item.entry.definition.managed_operations.map(op=>operationName(resource.kind,op)).join(" + ")}`}</option>)}
     </select></label>
     {catalog.isPending&&<p role="status">Loading preset definitions…</p>}
     {catalog.isError&&<div role="alert"><p>Preset catalog unavailable.</p><Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={busy||disabled} onClick={()=>{clearPreview();setSelected("");setReissue([]);void catalog.refetch()}}>Retry catalog</Button></div>}
     {disabled&&<p>Save or discard manual changes before previewing a saved policy.</p>}
-    {retained.map(right=><label key={right.operation} className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={blocked} checked={reissue.includes(right.operation)} onChange={event=>{setReissue(event.target.checked?[...reissue,right.operation]:reissue.filter(op=>op!==right.operation));clearPreview()}}/>Reissue {right.operation} as me · {right.live?"active":"inactive"} · original issuer {right.issuer_name||right.issuer_id}</label>)}
+    {retained.map(right=><label key={right.operation} className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={blocked} checked={reissue.includes(right.operation)} onChange={event=>{setReissue(event.target.checked?[...reissue,right.operation]:reissue.filter(op=>op!==right.operation));clearPreview()}}/>Share {operationName(resource.kind,right.operation)} as me · {right.live?"active":"inactive"} · original issuer {right.issuer_name||right.issuer_id}</label>)}
     <Button variant="outline" size="sm" className="coarse:h-[44px]" disabled={blocked||!choice} onClick={()=>void requestPreview()}>Preview preset</Button>
     {preview&&<div className="space-y-2" aria-label="Preset consequences">
       <p>Review exact changes. Retained inactive grants remain inactive unless explicitly reissued. Other authority and privacy gates still apply.</p>
-      <ul>{preview.changes.map(change=><li key={`${change.right.kind}:${change.right.id}:${change.right.operation}`}>{change.action} {change.right.operation} · issuer {change.issuer_id} · {change.created_at||"created only on successful apply"} · {change.live?"active":"inactive"}</li>)}</ul>
-      <p>Other rights preserved unchanged:</p><ul>{preview.orthogonal_rights.map(right=><li key={`${right.kind}:${right.id}:${right.operation}`}>{right.kind} {right.id} · {right.operation} · issuer {right.issuer_id} · {right.created_at} · {right.live?"active":"inactive"}</li>)}</ul>
+      <ul>{preview.changes.map(change=><li key={`${change.right.kind}:${change.right.id}:${change.right.operation}`}>{change.action} {operationName(change.right.kind,change.right.operation)} · issuer {change.issuer_id} · {change.created_at||"created only on successful apply"} · {change.live?"active":"inactive"}</li>)}</ul>
+      <p>Other rights preserved unchanged:</p><ul>{preview.orthogonal_rights.map(right=><li key={`${right.kind}:${right.id}:${right.operation}`}>{right.kind} {right.id} · {operationName(right.kind,right.operation)} · issuer {right.issuer_id} · {right.created_at} · {right.live?"active":"inactive"}</li>)}</ul>
       {preview.warnings.map(warning=><p key={warning.code}>{warning.message}{warning.before_eligible!==undefined&&warning.after_eligible!==undefined?` Eligibility ${warning.before_eligible} → ${warning.after_eligible}.`:""}</p>)}
       <label className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" disabled={blocked} checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>I reviewed these exact changes and consequences</label>
       <Button size="sm" className="coarse:h-[44px]" disabled={blocked||!confirmed} onClick={()=>void apply()}>Apply confirmed preset</Button>

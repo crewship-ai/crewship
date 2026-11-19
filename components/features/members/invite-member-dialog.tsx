@@ -16,10 +16,10 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
-import { cn } from "@/lib/utils"
 import { CAPABILITY_BUNDLES, Capability, type CapabilityBundle } from "@/lib/capabilities"
 import { ACCESS_PROFILES, ASSIGNABLE_ROLES, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE } from "@/components/features/settings/members/members-model"
-import { AreaChips, ROLE_ICON } from "@/components/features/settings/members/member-bits"
+import { RadioOption } from "@/components/features/settings/members/member-bits"
+import { Segmented } from "@/components/ui/segmented"
 
 /**
  * Add someone to the workspace.
@@ -244,7 +244,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             {result.access_applied === false && (
               <p role="status" className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/[0.07] px-3 py-2 text-label">
                 <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" aria-hidden />
-                They were added with the role&apos;s default access — the preset could not be applied. Set it from their panel in Members.
+                They were added with the role&apos;s default abilities — the preset could not be applied. Set it from their panel in Members.
               </p>
             )}
             {result.setup_url ? (
@@ -301,51 +301,35 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             </div>
             <fieldset className="space-y-2">
               <legend className="mb-2 text-sm font-medium">Role <span className="font-normal text-muted-foreground">· what they manage</span></legend>
-              <div role="radiogroup" aria-label="Role" className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                {ASSIGNABLE_ROLES.slice().reverse().map((r) => {
-                  const Icon = ROLE_ICON[r]
-                  const on = role === r
-                  return (
-                    <button key={r} type="button" role="radio" aria-checked={on} disabled={guest && r === "ADMIN"} onClick={() => setRole(r)} title={ROLE_SUMMARY_BY_ROLE[r]}
-                      className={cn("flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors coarse:min-h-[52px]",
-                        on ? "border-primary bg-primary/[0.08] ring-1 ring-primary" : "border-border hover:bg-accent")}>
-                      <Icon className={cn("h-3.5 w-3.5", on ? "text-primary-hover" : "text-muted-foreground")} aria-hidden />
-                      <span className="text-xs font-medium">{ROLE_LABEL[r]}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="text-label text-muted-foreground">{ROLE_SUMMARY_BY_ROLE[role]}.</p>
-            </fieldset>
-
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" aria-label="Guest access" checked={guest} onChange={event=>{setGuest(event.target.checked); if(event.target.checked && role==="ADMIN")setRole("MEMBER")}} />
-              <span>Guest — only shared resources<span className="block text-xs text-muted-foreground">Restricts their entire account across all workspaces. Administrators cannot be guests.</span></span>
-            </label>
-            {guest && <InitialResourceGrants workspaceId={workspaceId} rights={rights} onChange={setRights} />}
-            {!guest && <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm font-medium">What they can do</legend>
-              <div role="radiogroup" aria-label="What they can do" className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
-                {([{ key: "" as Access, label: "Role default" }, ...ACCESS_PROFILES.map((p) => ({ key: p.key as Access, label: p.label }))]).map((o) => (
-                  <button key={o.key || "default"} type="button" role="radio" aria-checked={access === o.key} onClick={() => setAccess(o.key)}
-                    className={cn("h-7 rounded-md px-2.5 text-xs transition-colors coarse:h-9",
-                      access === o.key ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
-                    {o.label}
-                  </button>
+              <div role="radiogroup" aria-label="Role" className="space-y-1.5">
+                {[...ASSIGNABLE_ROLES].reverse().map((r) => (
+                  <RadioOption key={r} checked={role === r} title={ROLE_LABEL[r]} description={ROLE_SUMMARY_BY_ROLE[r]}
+                    disabled={guest && r === "ADMIN"} why={guest && r === "ADMIN" ? "Administrators cannot be guests" : undefined}
+                    onSelect={() => setRole(r)} />
                 ))}
               </div>
+              <p className="text-label text-muted-foreground">Only an Owner can add an Admin.</p>
+            </fieldset>
+
+            {!guest && <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium">Abilities <span className="font-normal text-muted-foreground">· what they may do themselves</span></legend>
+              <Segmented ariaLabel="Abilities" value={access || "default"} onChange={(v) => setAccess(v === "default" ? "" : (v as CapabilityBundle))}
+                options={[{ value: "default", label: "Role default" }, ...ACCESS_PROFILES.map((p) => ({ value: p.key, label: p.label }))]} />
               {access ? (
-                <div className="space-y-1.5" data-slot="invite-access-preview">
-                  <AreaChips granted={CAPABILITY_BUNDLES[access]} />
-                  <p className="text-label text-muted-foreground">
-                    {ACCESS_PROFILES.find((p) => p.key === access)?.summary}
-                    {(CAPABILITY_BUNDLES[access] as readonly string[]).includes(Capability.CredentialReveal) && <span className="text-destructive"> Includes reading secrets in plaintext.</span>}
-                  </p>
-                </div>
+                <p className="text-label text-muted-foreground" data-slot="invite-access-preview">
+                  {ACCESS_PROFILES.find((p) => p.key === access)?.summary}
+                  {(CAPABILITY_BUNDLES[access] as readonly string[]).includes(Capability.CredentialReveal) && <span className="text-destructive"> Includes revealing secrets.</span>}
+                </p>
               ) : (
                 <p className="text-label text-muted-foreground">What a new {ROLE_LABEL[role]} gets on this server. Change single abilities later in their panel.</p>
               )}
             </fieldset>}
+
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" aria-label="Guest access" checked={guest} onChange={event=>{setGuest(event.target.checked); if(event.target.checked && role==="ADMIN")setRole("MEMBER")}} />
+              <span>Guest: reaches only what you share with them<span className="block text-xs text-muted-foreground">Restricts their entire account across all workspaces. Administrators cannot be guests.</span></span>
+            </label>
+            {guest && <InitialResourceGrants workspaceId={workspaceId} rights={rights} onChange={setRights} />}
 
             {status === "error" && error && (
               <p className="text-body text-destructive">{error}</p>

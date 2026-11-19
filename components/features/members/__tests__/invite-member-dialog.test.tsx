@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { InviteMemberDialog } from "../invite-member-dialog"
@@ -243,7 +243,7 @@ describe("InviteMemberDialog — existing account", () => {
 // sent as one `{"set"}` PATCH once the account exists. "Role default" sends
 // nothing, and a preset that could not be applied is said next to the link —
 // the person is added either way.
-describe("InviteMemberDialog — what they can do", () => {
+describe("InviteMemberDialog — abilities", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   async function addWith(access: string, patchStatus = 200) {
@@ -290,12 +290,39 @@ it("creates a Guest with selected initial grants in one request", async () => {
   fireEvent.change(await screen.findByLabelText(/Email address/),{target:{value:"guest@example.test"}})
   fireEvent.click(screen.getByLabelText("Guest access"))
   await screen.findByRole("option",{name:"Shared routine"})
-  fireEvent.change(screen.getByLabelText("Initial resource"),{target:{value:"routine-1"}})
-  fireEvent.click(screen.getByRole("button",{name:"Share resource"}))
+  fireEvent.change(screen.getByLabelText("Which one"),{target:{value:"routine-1"}})
+  fireEvent.click(screen.getByRole("button",{name:"Share"}))
+  // What was shared is named for people: "Run it", never the id "run".
+  expect(screen.getByText("Routine · Shared routine · Run it")).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button",{name:/^(add|create|send)/i}))
   await waitFor(()=>expect(apiFetch.mock.calls.some(([,init])=>init?.method==="POST")).toBe(true))
   const writes=apiFetch.mock.calls.filter(([,init])=>init?.method==="POST"||init?.method==="PATCH")
   expect(writes).toHaveLength(1)
   expect(writes[0][0]).toContain("/invitations?")
   expect(JSON.parse(writes[0][1].body)).toMatchObject({access_mode:"restricted",rights:[{kind:"routine",id:"routine-1",operation:"run"}]})
+})
+
+describe("InviteMemberDialog — the page's words", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  it("lists the roles with one line each, and names abilities and the Guest choice in the page's words", async () => {
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    const roles = await screen.findByRole("radiogroup", { name: "Role" })
+    expect(within(roles).getAllByRole("radio").map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"])
+    expect(within(roles).getByRole("radio", { name: "Manager" })).toHaveAccessibleDescription("Crews, agents and credentials")
+    expect(within(roles).getByRole("radio", { name: "Viewer" })).toHaveAccessibleDescription("Reads, changes nothing")
+    expect(screen.getByText("Abilities")).toBeInTheDocument()
+    expect(screen.queryByText("What they can do")).toBeNull()
+    expect(screen.getByText(/Guest: reaches only what you share with them/)).toBeInTheDocument()
+  })
+
+  it("keeps Admin out of a Guest invitation, and says why", async () => {
+    apiFetch.mockResolvedValue(jsonResponse([]))
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    fireEvent.click(await screen.findByLabelText("Guest access"))
+    expect(screen.getByRole("radio", { name: "Admin" })).toBeDisabled()
+    expect(screen.getByRole("radio", { name: "Admin" })).toHaveAttribute("title", "Administrators cannot be guests")
+  })
 })

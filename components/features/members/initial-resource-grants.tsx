@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { nativeSelect } from "@/components/features/settings/shared"
+import { kindName, operationName } from "@/components/features/settings/members/resource-labels"
 
 export type InitialRight = {kind: "agent" | "routine" | "project"; id: string; operation: string}
 const operations = {agent: ["discover", "chat", "run", "delegate"], routine: ["run"], project: ["list", "read", "write", "delete"]}
@@ -19,6 +20,9 @@ export function InitialResourceGrants({workspaceId, rights, onChange}: {
   const [kind,setKind]=useState<InitialRight["kind"]>("routine")
   const [id,setId]=useState("")
   const [operation,setOperation]=useState("run")
+  // The grant itself carries ids only (that is what the server takes); the
+  // names the person chose are kept here to say what was shared.
+  const [names,setNames]=useState<Record<string,string>>({})
   const directory=useQuery({
     queryKey:["initial-resource-grants",workspaceId,kind], retry:false,
     queryFn:async({signal})=>{
@@ -29,25 +33,26 @@ export function InitialResourceGrants({workspaceId, rights, onChange}: {
     },
   })
   return <fieldset className="space-y-2 text-sm">
-    <legend>Share now</legend>
-    <p className="text-xs text-muted-foreground">Guests see only shared resources. A routine also needs run access to every agent it uses. Runs use those agents’ configured provider credentials and budget. Add discover and chat separately to offer agent conversations.</p>
+    <legend className="font-medium">Share now</legend>
+    <p className="text-xs text-muted-foreground">Guests see only shared resources. A routine also needs run access to every agent it uses. Runs use those agents’ configured provider credentials and budget. Give “Find it” and “Chat with it” separately to offer agent conversations.</p>
     <div className="flex flex-wrap gap-2">
-      <select aria-label="Initial resource kind" className={nativeSelect} value={kind} onChange={event=>{
+      <select aria-label="What" className={nativeSelect} value={kind} onChange={event=>{
         const next=event.target.value as InitialRight["kind"];setKind(next);setId("");setOperation(operations[next][0])
       }}><option value="routine">Routine</option><option value="agent">Agent</option><option value="project">Project</option></select>
-      <select aria-label="Initial resource" className={nativeSelect} value={id} onChange={event=>setId(event.target.value)}>
-        <option value="">Choose a resource</option>{directory.data?.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
+      <select aria-label="Which one" className={nativeSelect} value={id} onChange={event=>setId(event.target.value)}>
+        <option value="">Choose one</option>{directory.data?.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
       </select>
-      <select aria-label="Initial operation" className={nativeSelect} value={operation} onChange={event=>setOperation(event.target.value)}>{operations[kind].map(op=><option key={op}>{op}</option>)}</select>
+      <select aria-label="They may" className={nativeSelect} value={operation} onChange={event=>setOperation(event.target.value)}>{operations[kind].map(op=><option key={op} value={op}>{operationName(kind,op)}</option>)}</select>
       <Button type="button" variant="outline" disabled={!id || rights.length>=256} onClick={()=>{
         if(!directory.data?.some(row=>row.id===id))return
+        setNames(current=>({...current,[`${kind}:${id}`]:directory.data.find(row=>row.id===id)?.name??id}))
         if(!rights.some(row=>row.kind===kind&&row.id===id&&row.operation===operation))onChange([...rights,{kind,id,operation}])
-      }}>Share resource</Button>
+      }}>Share</Button>
     </div>
     {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={()=>void directory.refetch()}>Retry</button></p>}
     {rights.length===0?<p className="text-xs text-muted-foreground">Nothing shared yet. They can open account settings.</p>:<ul>{rights.map((right,index)=><li key={`${right.kind}:${right.id}:${right.operation}`} className="flex items-center gap-2">
-      <span>{right.kind} · {right.id} · {right.operation}</span>
-      <Button type="button" size="sm" variant="ghost" onClick={()=>onChange(rights.filter((_,i)=>i!==index))} aria-label={`Remove initial ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
+      <span>{kindName(right.kind)} · {names[`${right.kind}:${right.id}`]??right.id} · {operationName(right.kind,right.operation)}</span>
+      <Button type="button" size="sm" variant="ghost" onClick={()=>onChange(rights.filter((_,i)=>i!==index))} aria-label={`Stop sharing ${names[`${right.kind}:${right.id}`]??right.id}: ${operationName(right.kind,right.operation)}`}>Stop sharing</Button>
     </li>)}</ul>}
   </fieldset>
 }
