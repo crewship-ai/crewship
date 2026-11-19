@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { KeeperJudgeCard } from "../keeper-judge-card"
 
 // The card exists because this page could previously only DIAGNOSE a dead
@@ -129,8 +129,8 @@ describe("KeeperJudgeCard", () => {
     expect(screen.getByTestId("keeper-judge-enabled")).toHaveAttribute("aria-checked", "true")
     // Provenance, not decoration: two "from server config" (engine, endpoint)
     // and one "instance override" (model).
-    expect(screen.getAllByText(/from server config/i)).toHaveLength(2)
-    expect(screen.getByText(/instance override/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/from the server's settings/i)).toHaveLength(2)
+    expect(screen.getByText("Set here")).toBeInTheDocument()
     // Nothing edited → no Save on offer.
     expect(screen.queryByTestId("keeper-judge-save")).not.toBeInTheDocument()
   })
@@ -151,7 +151,7 @@ describe("KeeperJudgeCard", () => {
     // The constraint the server enforces in keepercfg.validate().
     expect(scope).toHaveTextContent(/ollama/i)
     // The pointer at the other card, named as it is titled.
-    expect(scope).toHaveTextContent(/judge for this workspace/i)
+    expect(scope).toHaveTextContent(/its own judge/i)
     // And why the split exists, not just that it does.
     expect(scope).toHaveTextContent(/api key/i)
   })
@@ -230,11 +230,23 @@ describe("KeeperJudgeCard", () => {
     render(<KeeperJudgeCard workspaceId="ws1" />)
 
     fireEvent.click(await screen.findByTestId("keeper-judge-reset"))
+    // Destructive: it asks first, naming what comes back.
+    expect(apiFetch.mock.calls.some(([, init]) => (init as RequestInit)?.method === "DELETE")).toBe(false)
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Reset everything" }))
 
     await waitFor(() =>
       expect(apiFetch.mock.calls.some(([, init]) => (init as RequestInit)?.method === "DELETE")).toBe(true),
     )
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it("shows the three steps as a stepper, marking what is done", async () => {
+    mockRoutes(config({ enabled: [false, "env"], endpoint: ["http://127.0.0.1:11434", "env"], model: ["qwen2.5:7b", "env"] }))
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+    const steps = await screen.findByTestId("keeper-judge-steps")
+    const items = within(steps).getAllByRole("listitem")
+    expect(items.map((i) => i.textContent?.replace(/^\d/, ""))).toEqual(["Model server (done)", "Model (done)", "Turn it on"])
+    expect(items[2]).toHaveAttribute("aria-current", "step")
   })
 
   it("hides Reset when nothing is overridden", async () => {

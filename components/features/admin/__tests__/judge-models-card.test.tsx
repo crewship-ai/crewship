@@ -136,7 +136,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
    * has to ask for the detail first — which is the flow a real operator follows.
    */
   async function openDetail() {
-    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+    await screen.findAllByTestId(/keeper-aux-probe-/)
   }
 
   it("offers the provider and model as controls, not as text", async () => {
@@ -186,7 +186,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
   it("offers the one-press cost decision only when a judge exists", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
-    const btn = await screen.findByRole("button", { name: /use local judge for all/i })
+    const btn = await screen.findByRole("button", { name: /use the judge for all/i })
     fireEvent.click(btn)
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(
@@ -203,7 +203,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     // has the same text and only appears once the detail is open.
     await screen.findAllByText(/skill review/i)
     // A button that can only 400 is worse than no button.
-    expect(screen.queryByRole("button", { name: /use local judge for all/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /use the judge for all/i })).toBeNull()
   })
 
   it("stays a working status card when the edit surface is unavailable", async () => {
@@ -231,7 +231,7 @@ describe("JudgeModelsCard — probing an evaluator", () => {
 
   /** The per-slot controls sit behind "Change" — see the editing suite. */
   async function openDetail() {
-    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+    await screen.findAllByTestId(/keeper-aux-probe-/)
   }
 
   const AUX_ONE = {
@@ -304,7 +304,7 @@ describe("JudgeModelsCard — running an evaluator now", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   async function openDetail() {
-    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+    await screen.findAllByTestId(/keeper-aux-probe-/)
   }
 
   function auxSlot(slot: string, label: string) {
@@ -441,21 +441,18 @@ describe("JudgeModelsCard — how much detail it shows by default", () => {
     })
   }
 
-  it("collapses identical evaluators into one line", async () => {
+  it("lists one row per check, identical or not, with no summary standing in for them", async () => {
     route(SAME)
     render(<JudgeModelsCard workspaceId="ws1" />)
 
-    // Five identical models are summarised, not listed.
-    expect(await screen.findByText(/all 5 on anthropic \/ claude-haiku-4-5/i)).toBeTruthy()
-    expect(screen.queryAllByTestId(/keeper-aux-probe-/)).toHaveLength(0)
+    expect((await screen.findAllByTestId(/keeper-aux-probe-/)).length).toBeGreaterThanOrEqual(5)
+    expect(screen.queryByText(/all 5 on/i)).toBeNull()
+    expect(screen.queryByTestId("keeper-aux-toggle")).toBeNull()
   })
 
-  it("expands on its own when the evaluators are NOT all the same", async () => {
+  it("shows what differs when the checks are not all the same", async () => {
     route(MIXED)
     render(<JudgeModelsCard workspaceId="ws1" />)
-
-    // Here the difference IS the information, so hiding it would be the wrong
-    // default — an operator who pinned one slot to Opus needs to see which.
     expect(await screen.findByTestId("keeper-aux-probe-curator")).toBeTruthy()
     expect(screen.queryByText(/all 5 on/i)).toBeNull()
   })
@@ -502,7 +499,7 @@ describe("JudgeModelsCard — which key an evaluator spends", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   async function openDetail() {
-    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+    await screen.findAllByTestId(/keeper-aux-probe-/)
   }
 
   const CREDS = [
@@ -612,5 +609,53 @@ describe("JudgeModelsCard — which key an evaluator spends", () => {
     await openDetail()
     expect(await screen.findByTestId("keeper-aux-model-curator")).toBeTruthy()
     expect(screen.queryByTestId("keeper-aux-credential-curator")).toBeNull()
+  })
+})
+
+// One row per check, each with its provider, model, time limit and key.
+describe("JudgeModelsCard — the rows of the background checks", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  const slot = (name: string, label: string) => ({
+    slot: name, label,
+    provider: { value: "ollama", source: "default", editable: true },
+    model: { value: "qwen2.5:7b", source: "default", editable: true },
+    timeout_ms: { value: 30000, source: "default", editable: true },
+    overridden: false,
+  })
+  const SLOTS = [slot("curator", "Skill review"), slot("run_summary", "Run summaries"), slot("fallback", "Fallback")]
+
+  function route() {
+    apiFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes("aux-status")) return Promise.resolve(ok({ subsystems: [] }))
+      if (String(url).includes("/admin/keeper/aux/curator") && init?.method === "PUT") return Promise.resolve(ok({ slots: SLOTS, providers: ["anthropic", "openai", "ollama"], judge_provider: "ollama", judge_model: "qwen2.5:7b", any_overridden: true }))
+      if (String(url).includes("/admin/keeper/aux")) return Promise.resolve(ok({ slots: SLOTS, providers: ["anthropic", "openai", "ollama"], judge_provider: "ollama", judge_model: "qwen2.5:7b", any_overridden: false }))
+      return Promise.resolve(ok({ models: [] }))
+    })
+  }
+
+  it("has a row for Run summaries and Fallback, and Run now only where a review runs", async () => {
+    route()
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await screen.findByTestId("keeper-aux-probe-curator")
+    expect(screen.getByTestId("keeper-aux-probe-run_summary")).toBeTruthy()
+    expect(screen.getByTestId("keeper-aux-probe-fallback")).toBeTruthy()
+    expect(screen.getByTestId("keeper-review-run-curator")).toHaveTextContent("Run now")
+    expect(screen.queryByTestId("keeper-review-run-run_summary")).toBeNull()
+    expect(screen.queryByTestId("keeper-review-run-fallback")).toBeNull()
+  })
+
+  it("saves a time limit in seconds when the field is left", async () => {
+    route()
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    const field = await screen.findByTestId("keeper-aux-timeout-curator")
+    expect(field).toHaveValue(30)
+    fireEvent.change(field, { target: { value: "45" } })
+    fireEvent.blur(field)
+    await waitFor(() => {
+      const put = apiFetch.mock.calls.find(([u, init]) => String(u).includes("/aux/curator") && (init as RequestInit)?.method === "PUT")
+      expect(put).toBeTruthy()
+      expect(JSON.parse(String((put![1] as RequestInit).body))).toEqual({ timeout_ms: 45000 })
+    })
   })
 })

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types"
-import { filterActivity, findings, isSection, judgeState, setupRows, streamCounts, streamOf, type Posture } from "../security-model"
+import { accessLabel, filterActivity, findings, healthToReport, isSection, judgeState, secondApprover, setupRows, streamCounts, streamOf, watchdogFinding, CREDENTIAL_LEVELS, type Posture } from "../security-model"
+import type { InstanceGovRow, InstanceHealthRow } from "../use-instance-keeper"
 
 const base: Posture = {
   environment: "prod", encryption_key_configured: true, plaintext_secrets_allowed: false,
@@ -72,5 +73,35 @@ describe("judge state and sections", () => {
   it("knows its sections", () => {
     expect(isSection("watchdog")).toBe(true)
     expect(isSection("posture")).toBe(false)
+  })
+})
+
+describe("how a workspace reads", () => {
+  it("names the second approver as enforced, not as the switch", () => {
+    expect(secondApprover({ require_second_approver: true })).toMatchObject({ text: "Required", required: true })
+    expect(secondApprover({ require_second_approver: false, effective_second_approver: { min_security_level: 4, source: "tier" } })).toMatchObject({ text: "From level 4", required: false })
+    expect(secondApprover({ require_second_approver: false })).toMatchObject({ text: "No", fromLevel: null })
+  })
+  it("says how long access lasts in the word the page uses", () => {
+    expect([0, 900, 3600, 28800, 86400, 172800].map(accessLabel)).toEqual(["Until revoked", "15 min", "1 h", "8 h", "1 d", "2 d"])
+  })
+  it("reads the four levels from the tier table: reasons of 10, 15, 25 and 35 characters", () => {
+    expect(CREDENTIAL_LEVELS.map((l) => l.minReason)).toEqual([10, 15, 25, 35])
+  })
+  it("turns the workspaces with the watchdog off into one finding", () => {
+    expect(watchdogFinding([{ enabled: true }])).toBeNull()
+    expect(watchdogFinding([{ enabled: false }, { enabled: false }, { enabled: true }])).toMatchObject({ title: "2 workspaces have the watchdog off", action: { href: "/admin/security?view=workspaces&watch=off" } })
+  })
+})
+
+describe("judge health keeps only what has something to report", () => {
+  const h = (id: string, over: Partial<InstanceHealthRow> = {}): InstanceHealthRow => ({ workspace_id: id, workspace_name: id, workspace_slug: id, samples: 40, min_samples: 20, progressed_rate: 1, judge_failure_rate: 0, p95_latency_ms: 100, alarm_judge_failure_rate: 0.3, ...over })
+  const r = (id: string, own = false) => ({ workspace_id: id, gov_model_provider: own ? "anthropic" : "" }) as InstanceGovRow
+  it("keeps an alarm, and an own judge that fails past the alarm line, and nothing else", () => {
+    const out = healthToReport(
+      [h("quiet"), h("alarm", { alarm: { kind: "x", summary: "y" } }), h("own-bad", { judge_failure_rate: 0.5 }), h("inst-bad", { judge_failure_rate: 0.5 }), h("own-thin", { samples: 3, judge_failure_rate: 0.5 })],
+      [r("quiet"), r("alarm"), r("own-bad", true), r("inst-bad"), r("own-thin", true)],
+    )
+    expect(out.map((x) => x.workspace_id)).toEqual(["alarm", "own-bad"])
   })
 })
