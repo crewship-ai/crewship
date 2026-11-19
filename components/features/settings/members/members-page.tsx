@@ -207,7 +207,6 @@ export function MembersPage() {
   const order = React.useMemo(() => (groupBy === "name"
     ? [...shown].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
     : ROLES.flatMap((r) => shown.filter((m) => m.role === r))),
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   [groupBy, shown])
   // 25 at a time, from the top again whenever the filters or the grouping change.
   const paged = useShowMore(order, { resetKey: JSON.stringify([filters, groupBy]) })

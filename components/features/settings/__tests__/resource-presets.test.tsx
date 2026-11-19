@@ -60,11 +60,11 @@ function show(options: Options = {}) {
   return Object.assign(client, { rerenderMember: (memberId: string) => view.rerender(layout(memberId)) })
 }
 async function choose(kind = "project", level = "manage") {
-  const open = screen.queryByRole("button", { name: "Edit resource access" })
-  if (open) fireEvent.click(open)
-  fireEvent.change(await screen.findByLabelText("Resource kind"), { target: { value: kind } })
-  await within(screen.getByLabelText("Resource")).findByRole("option", { name: kind === "crew" ? "Crew" : kind === "project" ? "Project" : "Routine" })
-  fireEvent.change(screen.getByLabelText("Resource"), { target: { value: kind } })
+  const toggle = await screen.findByRole("button", { name: /Share something|Close sharing/ })
+  if (toggle.textContent === "Share something") fireEvent.click(toggle)
+  fireEvent.change(await screen.findByLabelText("What"), { target: { value: kind } })
+  await within(screen.getByLabelText("Which one")).findByRole("option", { name: kind === "crew" ? "Crew" : kind === "project" ? "Project" : "Routine" })
+  fireEvent.change(screen.getByLabelText("Which one"), { target: { value: kind } })
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Ordered preset" })).toBeEnabled())
   fireEvent.change(screen.getByRole("combobox", { name: "Ordered preset" }), { target: { value: JSON.stringify([`${kind}-levels`, 1, level]) } })
 }
@@ -72,7 +72,7 @@ const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "
 it("offers explicit ordered presets without deriving a choice or making a write", async () => {
   show(); await choose()
   expect(screen.getByText("Custom — no preset was explicitly selected")).toBeVisible()
-  expect(screen.getByRole("option", { name: "manage v1 · list + read + contribute + manage" })).toBeVisible()
+  expect(screen.getByRole("option", { name: "manage v1 · See it in lists + Read it + Contribute to it + Manage it" })).toBeVisible()
   expect(posts()).toHaveLength(0)
 })
 it("requires review and confirmation, sends exactly the preview consent and keeps unrelated metadata", async () => {
@@ -92,7 +92,7 @@ it("requires review and confirmation, sends exactly the preview consent and keep
 })
 it("shows Results history in immutable Routine View and excludes future publication", async () => {
   show(); await choose("routine", "view")
-  expect(screen.getByRole("option", { name: "view v1 · view + results" })).toBeVisible()
+  expect(screen.getByRole("option", { name: "view v1 · See it + View runs and outputs" })).toBeVisible()
   expect(screen.queryByRole("option", { name: /publish/ })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Preview preset" }))
   expect(await screen.findByText(/Past and future regular outputs/)).toBeVisible()
@@ -118,17 +118,17 @@ it("rejects a preview bound to another membership", async () => {
 it("preserves inactive issuers unless one retained managed grant is explicitly reissued", async () => {
   const right = { kind: "project" as const, id: "project", operation: "read" }
   show({ policy: { ...policy, rights: [right], grant_details: [{ ...right, issuer_id: "former-owner", created_at: "2026-10-14T00:00:00Z", live: false }] } }); await choose()
-  const renewal = screen.getByRole("checkbox", { name: /Reissue read as me.*inactive.*former-owner/ })
+  const renewal = screen.getByRole("checkbox", { name: /Share Read it as me.*inactive.*former-owner/ })
   expect(renewal).not.toBeChecked()
   fireEvent.click(renewal); fireEvent.click(screen.getByRole("button", { name: "Preview preset" }))
   await screen.findByLabelText("Preset consequences")
   expect(JSON.parse(String(posts()[0][1].body)).reissue).toEqual([right])
-  expect(screen.queryByRole("checkbox", { name: /Reissue delete_issues/ })).toBeNull()
+  expect(screen.queryByRole("checkbox", { name: /Share Delete its issues as me/ })).toBeNull()
 })
 it("keeps manual drafts intact and blocks preset consent until save or discard", async () => {
   const right = { kind: "project" as const, id: "project", operation: "read" }
   show({ policy: { ...policy, rights: [right] } }); await choose()
-  fireEvent.click(screen.getByRole("button", { name: "Remove project project read" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Stop sharing .*: Read it$/ }))
   expect(screen.getByRole("combobox", { name: "Ordered preset" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "Preview preset" })).toBeDisabled()
   expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeVisible()
@@ -143,8 +143,8 @@ it("requires reload after an unknown apply outcome without exposing native error
   expect(screen.queryByText(/private response/)).toBeNull(); expect(success).not.toHaveBeenCalled()
 })
 it("does not convert trusted members to use a preset", async () => {
-  show({ policy: { ...policy, mode: "trusted" } }); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
-  await screen.findByLabelText("Access mode")
+  show({ policy: { ...policy, mode: "trusted" } })
+  await screen.findByRole("radiogroup", { name: "Reach" })
   expect(screen.queryByRole("combobox", { name: "Ordered preset" })).toBeNull()
   expect(fetchMock.mock.calls.some(([url]) => url.includes("/access/presets"))).toBe(false)
 })
@@ -155,7 +155,7 @@ it("permits a fresh reviewed preview after explicit reload even when member revi
   await screen.findByRole("alert")
   fireEvent.click(screen.getByRole("button", { name: "Reload current policy" }))
   await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/access?workspace_id=workspace"))).toHaveLength(2))
-  await waitFor(() => expect(screen.getByLabelText("Resource")).toHaveValue(""))
+  await waitFor(() => expect(screen.queryByLabelText("Which one")).toBeNull())
   await choose()
   expect(screen.getByRole("button", { name: "Preview preset" })).toBeEnabled()
   expect(posts()).toHaveLength(1)
@@ -205,12 +205,12 @@ it("preserves a manual draft when policy reload has a temporary failure", async 
   const right = { kind: "project" as const, id: "project", operation: "read" }
   const options: Options = { policy: { ...policy, rights: [right] } }
   show(options); await choose()
-  fireEvent.click(screen.getByRole("button", { name: "Remove project project read" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Stop sharing .*: Read it$/ }))
   options.policyReadStatus = 500
   fireEvent.click(screen.getByRole("button", { name: "Reload current policy" }))
   await screen.findByText("Resource policy unavailable.")
   expect(screen.getByRole("region", { name: "Unsaved changes" })).toBeVisible()
-  expect(screen.queryByRole("button", { name: "Remove project project read" })).toBeNull()
+  expect(screen.queryByRole("button", { name: /^Stop sharing .*: Read it$/ })).toBeNull()
   expect(screen.getByRole("combobox", { name: "Ordered preset" })).toBeDisabled()
 })
 
@@ -229,7 +229,7 @@ it.each([[401, 500], [403, 429], [404, 500]])("keeps consent revoked after polic
   options.policyReadStatus = transient
   fireEvent.click(screen.getByRole("button", { name: "Reload policy" }))
   await waitFor(() => expect(client.getQueryState(key)?.error).not.toBe(deniedError))
-  expect(screen.queryByLabelText("Access mode")).toBeNull()
+  expect(screen.queryByRole("radiogroup", { name: "Reach" })).toBeNull()
   expect(screen.queryByLabelText("Preset consequences")).toBeNull()
   expect(screen.queryByRole("button", { name: "Apply confirmed preset" })).toBeNull()
   expect(posts()).toHaveLength(1)
@@ -251,13 +251,13 @@ it.each([false, true])("ignores a late successful apply after audience loss (fre
   options.policyReadStatus = 403
   await act(async () => { await client.refetchQueries({ queryKey: key }) })
   await screen.findByText("Resource policy unavailable.")
-  expect(screen.queryByLabelText("Access mode")).toBeNull()
+  expect(screen.queryByRole("radiogroup", { name: "Reach" })).toBeNull()
   if (recovered) {
     options.policyReadStatus = undefined
     options.policyReadResponse = { ...policy, revision: 11, rights: [{ kind: "routine", id: "newer-routine", operation: "view" }] }
     fireEvent.click(screen.getByRole("button", { name: "Reload policy" }))
     await waitFor(() => expect(client.getQueryData<ResourcePolicy>(key)?.revision).toBe(11))
-    await screen.findByLabelText("Access mode")
+    await screen.findByRole("radiogroup", { name: "Reach" })
   }
   await act(async () => { await finishApply!() })
   expect(success).not.toHaveBeenCalled()
@@ -267,7 +267,7 @@ it.each([false, true])("ignores a late successful apply after audience loss (fre
   if (recovered) {
     expect(client.getQueryData<ResourcePolicy>(key)?.revision).toBe(11)
     expect(client.getQueryData<ResourcePolicy>(key)?.rights).toEqual(options.policyReadResponse!.rights)
-  } else expect(screen.queryByLabelText("Access mode")).toBeNull()
+  } else expect(screen.queryByRole("radiogroup", { name: "Reach" })).toBeNull()
 })
 
 
@@ -304,7 +304,7 @@ it.each(["pending", "temporary-error"])("requires a fresh member read after A→
   expect(success).not.toHaveBeenCalled()
   const key = ["member-resource-access", "workspace", "member"]
   expect(client.getQueryData<ResourcePolicy>(key)?.revision).not.toBe(9)
-  expect(screen.queryByLabelText("Access mode")).toBeNull()
+  expect(screen.queryByRole("radiogroup", { name: "Reach" })).toBeNull()
   expect(screen.queryByLabelText("Preset consequences")).toBeNull()
   expect(screen.queryByRole("button", { name: "Apply confirmed preset" })).toBeNull()
   let recovery: Promise<void> | undefined
@@ -318,7 +318,7 @@ it.each(["pending", "temporary-error"])("requires a fresh member read after A→
     reads.find(read => read.memberId === "member-b")!.resolve(response({ ...policy, membership_id: "member-b", revision: 13 }))
     await recovery
   })
-  await screen.findByLabelText("Access mode")
+  await screen.findByRole("radiogroup", { name: "Reach" })
   expect(client.getQueryData<ResourcePolicy>(key)?.revision).toBe(15)
   expect(screen.queryByLabelText("Preset consequences")).toBeNull()
   expect(posts()).toHaveLength(2)
@@ -346,9 +346,9 @@ it("shows each preset version's saved record and offers the v2 removal levels", 
     show({ policy: { ...policy, preset_selections: [record(1, "edit"), record(2, "edit_publish")] } }); await choose("routine", "view")
     expect(screen.getByText("Saved edit v1 · selected — intent, not effective authority")).toBeVisible()
     expect(screen.getByText("Saved Edit + Publish v2 · selected — intent, not effective authority")).toBeVisible()
-    expect(screen.getByRole("option", { name: "none v2 · removes edit + publish" })).toBeVisible()
-    expect(screen.getByRole("option", { name: "edit v2 · edit" })).toBeVisible()
-    expect(screen.getByRole("option", { name: "Edit + Publish v2 · edit + publish" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "none v2 · removes Edit its draft + Publish it" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "edit v2 · Edit its draft" })).toBeVisible()
+    expect(screen.getByRole("option", { name: "Edit + Publish v2 · Edit its draft + Publish it" })).toBeVisible()
   } finally { catalog.presets.pop() }
 })
 
@@ -365,6 +365,6 @@ it("shows each preset version's saved record and offers the v2 removal levels", 
  fireEvent.click(screen.getByRole("button",{name:"Apply confirmed preset"}))
  await waitFor(()=>expect(success).toHaveBeenCalledWith("Preset applied"))
  expect(client.getQueryData<ResourcePolicy>(["member-resource-access","workspace","member"])?.preset_selections?.[0]).toMatchObject({kind:"crew",preset_id:"crew-levels",level:"use",state:"selected"})
- expect(screen.getByRole("button",{name:"Remove crew crew view"})).toBeVisible()
- expect(screen.getByRole("button",{name:"Remove crew crew use"})).toBeVisible()
+ expect(screen.getByRole("button",{name:/^Stop sharing .*: See it$/})).toBeVisible()
+ expect(screen.getByRole("button",{name:/^Stop sharing .*: Use it$/})).toBeVisible()
  })
