@@ -1,5 +1,3 @@
-import { Ban, Clock, Lock, ShieldCheck, TriangleAlert, UserX, Users, type LucideIcon } from "lucide-react"
-
 import type { AdminMembership, AdminOrg, AdminUser } from "@/app/(dashboard)/admin/types"
 
 /**
@@ -36,16 +34,23 @@ export const STATUS_LABEL: Record<PersonStatus, string> = {
   active: "Active",
 }
 
-export type Facet = "all" | "attention" | "setup" | "locked" | "suspended" | "noaccess" | "admins"
+/**
+ * The panel's views. "people" is Everyone; "accounts" is the personal
+ * accounts. Before this redesign a view was one of people / accounts /
+ * workspaces / access and the people groups were a `facet`; both old URLs
+ * still open (see normalizeUrl in people-url.ts).
+ */
+export type View = "people" | "hand" | "admins" | "suspended" | "accounts" | "workspaces" | "access"
 
-export const FACETS: { key: Facet; label: string; icon: LucideIcon; tone?: string; hint?: string }[] = [
-  { key: "all", label: "Everyone", icon: Users },
-  { key: "attention", label: "Needs attention", icon: TriangleAlert, tone: "text-warn" },
-  { key: "setup", label: "Setup pending", icon: Clock, tone: "text-primary-hover", hint: "Has not chosen a password" },
-  { key: "locked", label: "Locked", icon: Lock, tone: "text-destructive", hint: "Too many failed sign-ins" },
-  { key: "suspended", label: "Suspended", icon: Ban },
-  { key: "noaccess", label: "No workspace", icon: UserX, hint: "Signs in to nothing" },
-  { key: "admins", label: "Instance admins", icon: ShieldCheck, tone: "text-[var(--purple)]" },
+/** What narrows a list of people: a status, or having no workspace. */
+export type Facet = "all" | "active" | "setup" | "locked" | "suspended" | "noaccess"
+
+export const STATUS_FACETS: { key: Exclude<Facet, "all">; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "setup", label: "Setup pending" },
+  { key: "locked", label: "Locked" },
+  { key: "suspended", label: "Suspended" },
+  { key: "noaccess", label: "No workspace" },
 ]
 
 // ── Workspaces and personal accounts ──────────────────────────────────────
@@ -73,20 +78,13 @@ export function personalOwnerName(w: Workspace, people: Person[]): string {
 }
 
 export function facetMatches(p: Person, facet: Facet, now = Date.now()): boolean {
-  const s = personStatus(p, now)
   switch (facet) {
-    case "attention":
-      return s !== "active"
-    case "setup":
-    case "locked":
-    case "suspended":
-      return s === facet
+    case "all":
+      return true
     case "noaccess":
       return p.memberships.length === 0
-    case "admins":
-      return !!p.instance_admin
     default:
-      return true
+      return personStatus(p, now) === facet
   }
 }
 
@@ -142,8 +140,100 @@ export function adminSourceLabel(source: string | null | undefined): string {
   }
 }
 
-/** Sort people: those needing attention first, then by name. */
-export function byAttentionThenName(a: Person, b: Person, now = Date.now()): number {
-  const rank = (p: Person) => (personStatus(p, now) === "active" ? 1 : 0)
-  return rank(a) - rank(b) || displayName(a).localeCompare(displayName(b))
+// ── Needs a hand ──────────────────────────────────────────────────────────
+
+/**
+ * Who cannot get in, and who gets in to nothing, most pressing first. The
+ * groups do not overlap (a locked person with no workspace is "locked"), so
+ * their counts add up to the number the banner and the panel show.
+ */
+export interface HandGroups {
+  locked: Person[]
+  setup: Person[]
+  nowhere: Person[]
+  /** Personal accounts with no crews, agents or runs. */
+  emptyAccounts: Workspace[]
+}
+
+export function handGroups(people: Person[], workspaces: Workspace[], now = Date.now()): HandGroups {
+  const locked: Person[] = []
+  const setup: Person[] = []
+  const nowhere: Person[] = []
+  for (const p of people) {
+    const s = personStatus(p, now)
+    if (s === "locked") locked.push(p)
+    else if (s === "setup") setup.push(p)
+    else if (s === "active" && p.memberships.length === 0) nowhere.push(p)
+  }
+  return { locked, setup, nowhere, emptyAccounts: workspaces.filter((w) => isPersonal(w) && isEmptyWorkspace(w)) }
+}
+
+/** The people who need a hand (not the accounts): the banner's number. */
+export const handPeopleCount = (g: HandGroups) => g.locked.length + g.setup.length + g.nowhere.length
+
+export type PeopleOrder = "hand" | "az" | "recent"
+
+const needRank = (p: Person, now: number) => {
+  const s = personStatus(p, now)
+  return s === "locked" ? 0 : s === "setup" ? 1 : s === "active" && p.memberships.length === 0 ? 2 : 3
+}
+
+const timeOf = (iso: string | null | undefined) => {
+  const t = parse(iso)
+  return Number.isNaN(t) ? 0 : t
+}
+
+/** A new array: the order the toolbar asks for. */
+export function sortPeople(list: readonly Person[], order: PeopleOrder, now = Date.now()): Person[] {
+  const byName = (a: Person, b: Person) => displayName(a).localeCompare(displayName(b))
+  const out = [...list]
+  if (order === "az") return out.sort(byName)
+  if (order === "recent") return out.sort((a, b) => timeOf(b.last_active_at) - timeOf(a.last_active_at) || byName(a, b))
+  return out.sort((a, b) => needRank(a, now) - needRank(b, now) || byName(a, b))
+}
+
+export type WorkspaceOrder = "busy" | "az" | "new"
+
+export function sortWorkspaces(list: readonly Workspace[], order: WorkspaceOrder): Workspace[] {
+  const byName = (a: Workspace, b: Workspace) => a.name.localeCompare(b.name)
+  const out = [...list]
+  if (order === "az") return out.sort(byName)
+  if (order === "new") return out.sort((a, b) => timeOf(b.created_at) - timeOf(a.created_at) || byName(a, b))
+  return out.sort((a, b) => (b.runs_7d ?? 0) - (a.runs_7d ?? 0) || byName(a, b))
+}
+
+/** The panel's "Busiest this week": team workspaces by runs in 7 days. */
+export function busiestWorkspaces(workspaces: readonly Workspace[], n = 6): Workspace[] {
+  return sortWorkspaces(workspaces.filter((w) => !isPersonal(w)), "busy").slice(0, n)
+}
+
+// ── Export ────────────────────────────────────────────────────────────────
+
+const csvCell = (v: unknown) => {
+  const s = v == null ? "" : String(v)
+  // A cell that starts like a formula is neutralised for spreadsheet apps.
+  const safe = /^[=+\-@]/.test(s) ? `'${s}` : s
+  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
+}
+const csv = (rows: unknown[][]) => rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n"
+
+/** The rows shown, one line each. */
+export function peopleCsv(people: readonly Person[], now = Date.now()): string {
+  return csv([
+    ["Name", "Email", "Workspaces", "Last active", "Status", "Instance admin", "Sessions"],
+    ...people.map((p) => [
+      p.full_name ?? "", p.email, p.memberships.map((m) => `${m.name} (${m.role.toLowerCase()})`).join("; "),
+      p.last_active_at ?? "", STATUS_LABEL[personStatus(p, now)], p.instance_admin ? "yes" : "no", p.active_sessions ?? 0,
+    ]),
+  ])
+}
+
+export function workspacesCsv(workspaces: readonly Workspace[], people: readonly Person[]): string {
+  return csv([
+    ["Name", "Address", "Owner", "People", "Crews", "Agents", "Runs (7 days)", "Last activity", "Created"],
+    ...workspaces.map((w) => {
+      const owner = people.find((p) => roleIn(p, w.id) === "OWNER")
+      return [w.name, w.slug, owner ? owner.email : "", w._count_members, w._count_crews, w._count_agents, w.runs_7d ?? 0, w.last_activity_at ?? "", w.created_at]
+    }),
+  ])
 }

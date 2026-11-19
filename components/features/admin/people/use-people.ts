@@ -4,7 +4,7 @@ import * as React from "react"
 import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
-import { readApiError } from "@/lib/api-error"
+import { readApiError, readApiErrorDetail } from "@/lib/api-error"
 import type { AdminScope } from "@/app/(dashboard)/admin/types"
 import type { Person, Role, Workspace } from "./people-model"
 
@@ -17,6 +17,13 @@ import type { Person, Role, Workspace } from "./people-model"
  */
 
 export interface SetupLink { url: string; expires_at: string; email: string }
+
+/**
+ * A removal the server refused because the person still owns pages nobody
+ * else can take over (409, code page_ownership_transfer_required). The
+ * explanation is the server's own; the page says what to do instead.
+ */
+export interface OwnershipConflict { message: string; pages: number; userId: string; workspaceId: string }
 
 const INSTANCE = "/api/v1/admin/instance"
 const enc = encodeURIComponent
@@ -42,6 +49,7 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
+  const [conflict, setConflict] = React.useState<OwnershipConflict | null>(null)
 
   const reload = React.useCallback(async () => {
     if (!workspaceId && workspaceLoading) return
@@ -68,11 +76,21 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
   React.useEffect(() => { void reload() }, [reload])
 
   /** Run one write: say what happened, reload, and hand back the body. */
-  const act = React.useCallback(async <T,>(key: string, path: string, method: string, body: unknown, done: string, fallback: string): Promise<T | null> => {
+  const act = React.useCallback(async <T,>(key: string, path: string, method: string, body: unknown, done: string, fallback: string, onConflict?: (c: { message: string; pages: number }) => void): Promise<T | null> => {
     setBusy(key)
     try {
       const res = await send(path, method, body)
       if (!res.ok) {
+        if (onConflict && res.status === 409) {
+          const d = await readApiErrorDetail(res, fallback)
+          if (d.code === "page_ownership_transfer_required") {
+            const pages = (d.body as { pages?: unknown } | null)?.pages
+            onConflict({ message: d.message, pages: Array.isArray(pages) ? pages.length : 0 })
+          } else {
+            toast.error(d.message)
+          }
+          return null
+        }
         toast.error(await readApiError(res, fallback))
         return null
       }
@@ -92,15 +110,16 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
     setRole: (userId: string, wsId: string, role: Role, done: string) =>
       act(`m:${userId}:${wsId}`, `${INSTANCE}/workspaces/${enc(wsId)}/members/${enc(userId)}`, "PUT", { role }, done, "That access change was refused"),
     removeAccess: (userId: string, wsId: string, done: string) =>
-      act(`m:${userId}:${wsId}`, `${INSTANCE}/workspaces/${enc(wsId)}/members/${enc(userId)}`, "DELETE", undefined, done, "That person could not be removed"),
+      act(`m:${userId}:${wsId}`, `${INSTANCE}/workspaces/${enc(wsId)}/members/${enc(userId)}`, "DELETE", undefined, done, "That person could not be removed",
+        (c) => setConflict({ ...c, userId, workspaceId: wsId })),
     createPerson: async (email: string, fullName: string, memberships: { workspace_id: string; role: Role }[]) => {
       const out = await act<{ user_id: string; setup_url: string; expires_at: string; email: string }>("create-person", `${INSTANCE}/people`, "POST",
         { email, full_name: fullName, memberships }, "", "The account could not be created")
       return out ? { userId: out.user_id, link: { url: out.setup_url, expires_at: out.expires_at, email: out.email } as SetupLink } : null
     },
-    createWorkspace: async (name: string, slug: string, ownerUserId: string) => {
+    createWorkspace: async (name: string, slug: string, ownerUserId: string, language?: string | null) => {
       const out = await act<{ id: string }>("create-ws", `${INSTANCE}/workspaces`, "POST",
-        { name, slug, owner_user_id: ownerUserId }, `${name} created`, "The workspace could not be created")
+        { name, slug, owner_user_id: ownerUserId, ...(language ? { preferred_language: language } : {}) }, `${name} created`, "The workspace could not be created")
       return out?.id ?? null
     },
     updateWorkspace: (wsId: string, change: { name?: string; kind?: "team" | "personal" }, done: string) =>
@@ -127,5 +146,5 @@ export function usePeople(workspaceId: string | null, workspaceLoading = false) 
       act(`u:${userId}`, `/api/v1/admin/users/${enc(userId)}/unlock${workspaceId ? `?workspace_id=${enc(workspaceId)}` : ""}`, "POST", {}, done, "The account could not be unlocked"),
   }), [act, workspaceId])
 
-  return { people, workspaces, scope, loading, error, busy, reload, actions }
+  return { people, workspaces, scope, loading, error, busy, reload, actions, conflict, clearConflict: () => setConflict(null) }
 }

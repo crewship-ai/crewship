@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
+
+globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver
+Element.prototype.scrollIntoView ??= vi.fn()
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { AddPersonDialog, NewWorkspaceDialog } from "../people-dialogs"
@@ -45,7 +48,7 @@ describe("AddPersonDialog", () => {
 })
 
 describe("NewWorkspaceDialog", () => {
-  it("keeps Create disabled until name, address and owner are set", () => {
+  it("keeps Create disabled until name, address and owner are set", async () => {
     const people = [{ id: "u1", email: "o@x.example", full_name: "Olga Owner", memberships: [] }] as never
     render(<NewWorkspaceDialog open onOpenChange={() => {}} people={people} actions={actions()} busy={null} onCreated={() => {}} />)
     const dialog = screen.getByRole("dialog")
@@ -53,7 +56,8 @@ describe("NewWorkspaceDialog", () => {
     const create = within(dialog).getByRole("button", { name: "Create workspace" })
     expect(create).toBeDisabled()
     fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Marketing" } })
-    fireEvent.change(within(dialog).getByLabelText("Owner"), { target: { value: "u1" } })
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Owner" }))
+    fireEvent.click(within(await screen.findByRole("listbox")).getByRole("option", { name: /Olga/ }))
     expect(create).toBeEnabled()
   })
 })

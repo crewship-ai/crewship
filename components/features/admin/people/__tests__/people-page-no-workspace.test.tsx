@@ -56,7 +56,7 @@ describe("People with no workspace", () => {
   it("opens a person's profile, and their sessions load without a workspace", async () => {
     render(<PeoplePage />)
     fireEvent.click(await screen.findByRole("row", { name: /Jana/ }))
-    expect(await screen.findByRole("region", { name: "Workspace access" })).toBeInTheDocument()
+    expect(await screen.findByRole("region", { name: "Workspaces" })).toBeInTheDocument()
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith("/api/v1/admin/users/u-jana/sessions"))
   })
 })
