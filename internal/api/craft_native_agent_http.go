@@ -43,7 +43,7 @@ func (m *craftNativeAgentManager) task(w http.ResponseWriter, r *http.Request) {
 	}
 	accepted, err := m.produceTask(r.Context(), r.PathValue("slug"), input)
 	if err != nil {
-		craftNativeDocumentError(w, err)
+		craftNativeAgentTaskError(w, err)
 		return
 	}
 	m.hint(accepted.WorkID)

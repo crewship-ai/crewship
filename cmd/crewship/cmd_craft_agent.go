@@ -167,7 +167,7 @@ func craftAgentStart(cmd *cobra.Command, args []string) error {
 		Mode          string `json:"mode,omitempty" yaml:"mode,omitempty"`
 	}{chat, message, consent, mode}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/tasks", body)
-	return craftAgentResponse(cmd, response, err)
+	return craftAgentStartResponse(cmd, response, err)
 }
 func craftAgentStatus(cmd *cobra.Command, args []string) error {
 	if !craftAgentIdentifier(args[0]) || !craftAgentIdentifier(args[1]) {

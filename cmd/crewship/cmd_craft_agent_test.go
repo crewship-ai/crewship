@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 func runCraftAgentCLI(t *testing.T, args ...string) (string, error) {
@@ -178,5 +180,38 @@ func TestCraftAgentCLIStatusPrintsProposalOutcome(t *testing.T) {
 	out, err := runCraftAgentCLI(t, "task", "status", "health", "work")
 	if err != nil || !strings.Contains(out, "succeeded") || !strings.Contains(out, `"outcome"`) || !strings.Contains(out, "proposal") || !strings.Contains(out, "ncp_05ce1f638d32a97955d06534") {
 		t.Fatal("status did not print the proposal outcome", out, err)
+	}
+}
+
+// #5596: a refused start names the server's reason, only from the known set,
+// and still reflects no other body text.
+func TestCraftAgentCLIStartNamesRefusalReason(t *testing.T) {
+	path := "/api/v1/pages/health/craft/tasks"
+	for _, tc := range []struct {
+		body, want string
+	}{
+		{`{"error":"native Craft agent task denied","reason":"chat_not_private"}`, "native HTTP 403 (chat_not_private: "},
+		{`{"error":"native Craft agent task denied","reason":"workspace_policy_disabled"}`, "native HTTP 403 (workspace_policy_disabled: "},
+		{`{"error":"native Craft access denied"}`, "native HTTP 403"},
+		{`{"error":"private-runtime-token","reason":"private-runtime-token"}`, "native HTTP 403"},
+		{`not json private-runtime-token`, "native HTTP 403"},
+	} {
+		stub := pageStub(t)
+		stub.OnPost(path, func(*http.Request, []byte) (int, []byte, string) {
+			return 403, []byte(tc.body), "application/json"
+		})
+		out, err := runCraftAgentCLI(t, "task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("body %s: want %q, got %v", tc.body, tc.want, err)
+		}
+		if strings.Contains(out+err.Error(), "private-runtime-token") {
+			t.Fatalf("refusal body text was reflected: %v", err)
+		}
+		if code := cli.ExitCodeFor(err); code != cli.ExitAuth {
+			t.Fatalf("refusal exit code %d", code)
+		}
+		if len(stub.CallsFor("POST", path)) != 1 {
+			t.Fatal("refused start was retried")
+		}
 	}
 }

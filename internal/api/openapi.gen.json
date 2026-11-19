@@ -16203,6 +16203,27 @@
         ],
         "type": "object"
       },
+      "NativeCraftAgentTaskError": {
+        "properties": {
+          "application": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "403 (Page editor only): workspace_policy_disabled, crew_not_allowed, chat_unavailable, chat_not_private, instruction_not_recorded, instruction_unusable, agent_unavailable, not_owner_or_delegated, duplicate_task, capacity, credential_expiring, clock_unavailable, task_too_large. 503: the application gate's reason. Absent on every other refusal.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "NativeCraftAgentTaskReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -150695,15 +150716,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
@@ -150713,15 +150726,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
@@ -150731,15 +150736,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
@@ -150749,15 +150746,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
@@ -150767,15 +150756,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
@@ -150785,15 +150766,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskError"
                 }
               }
             },
