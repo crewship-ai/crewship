@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // ErrAgentDetachedBusy is the admission refusal for an agent whose previous
@@ -253,7 +255,7 @@ func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
 		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}}, "info",
 			fmt.Sprintf("%s: detached exec confirmed gone (%s)", h.agentSlug, time.Since(h.startedAt).Round(time.Second)),
 			h.startedAt, map[string]any{"detached": true, "confirmed_gone": true})
-		o.updateRunStatusForRun(ctx, h.req, h.runID, "error") // no trustworthy exit result survived detachment
+		o.recordDetachedConfirmedGone(ctx, h.req, h.runID) // no trustworthy exit result survived detachment
 		o.detachedMu.Lock()
 		other := false
 		for _, hold := range o.detached {
@@ -312,4 +314,58 @@ func (o *Orchestrator) closeProtectedHostHold(h *detachedHold) {
 			close(h.done)
 		}
 	})
+}
+
+// DetachedConfirmedGoneOrigin is the StopOrigin of a run whose detached exec
+// its hold confirmed gone. The server projects the pending journal entry as
+// run.failed, because no trustworthy exit result survived detachment (#5511).
+const DetachedConfirmedGoneOrigin = "detached_confirmed_gone"
+
+// recordDetachedConfirmedGone settles a confirmed-gone detached run exactly
+// like other terminal transitions: the runtime record becomes "error", the
+// agent.run.failed audit row is written, and the journal terminal goes
+// through the durable stop outbox. Nobody else writes it: callers that saw
+// ErrDetachedStillRunning deliberately left the run open for this owner.
+//
+// Only a still-running record changes. A concurrent terminal writer (a
+// confirmed agent stop, a caller that recorded its own outcome) keeps its
+// outcome, and no second audit row is written for it.
+func (o *Orchestrator) recordDetachedConfirmedGone(ctx context.Context, req AgentRunRequest, runID string) {
+	atomic, ok := o.state.(provider.AtomicStateProvider)
+	if !ok {
+		// Without an atomic store there is no durable outbox; keep the
+		// previous record update and still audit the transition.
+		o.failRun(ctx, req, runID, "error")
+		return
+	}
+	if raw, err := o.state.Get(ctx, "agent_runs", runID); err == nil && raw == nil {
+		return // no runtime record to settle; never create one here
+	}
+	changed := false
+	o.runRecoveryMu.Lock()
+	err := atomic.Update(ctx, "agent_runs", runID, func(raw []byte) ([]byte, error) {
+		if raw == nil {
+			return nil, nil
+		}
+		var current RunState
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		if current.Status != "running" {
+			return raw, nil
+		}
+		current.Status, current.LastActivity = "error", time.Now()
+		current.StopJournalPending, current.StopOrigin = true, DetachedConfirmedGoneOrigin
+		data, err := json.Marshal(current)
+		changed = err == nil
+		return data, err
+	})
+	o.runRecoveryMu.Unlock()
+	if err != nil {
+		o.loggerForRun(req).Error("detached hold: could not persist the confirmed-gone run", "run_id", runID, "error", err)
+		return
+	}
+	if changed {
+		o.recordRunAudit(ctx, req, runID, "error")
+	}
 }

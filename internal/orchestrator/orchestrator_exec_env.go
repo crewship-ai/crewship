@@ -381,7 +381,19 @@ func tmuxExecDir(agentSlug, runID string) string {
 // must confirm that this exact session is missing; otherwise retain UNKNOWN.
 // Callers supply only names built from validated agent slugs and run IDs.
 // The leading = disables tmux target prefix matching against neighboring runs.
+//
+// One failure is answerable (#5510): tmux exits its server with the last
+// session, so after a run's own session ends the client reports that no
+// server exists. That alone is still not absence — a removed socket file
+// gives the same message while the server lives — so ABSENT additionally
+// requires the container's complete process table to hold no tmux process
+// at all. No server process means no session can exist on any socket.
 func tmuxSessionProbe(session string) string {
+	return tmuxSessionProbeAt(session, "/proc")
+}
+
+// tmuxSessionProbeAt takes the process-table root so tests can supply one.
+func tmuxSessionProbeAt(session, procRoot string) string {
 	return fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
 elif tmux has-session -t '=%[1]s' 2>/dev/null; then echo PRESENT;
 elif crewship_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); then
@@ -390,5 +402,31 @@ $crewship_sessions
 " in *'
 %[1]s
 '*) echo PRESENT;; *) echo ABSENT;; esac
-else echo UNKNOWN; fi`, session)
+else %[2]s
+fi`, session, tmuxNoServerProbe(procRoot))
+}
+
+// tmuxNoServerProbe prints ABSENT only when the client found no server AND
+// no tmux process is visible in a process table that hides nothing.
+func tmuxNoServerProbe(procRoot string) string {
+	return fmt.Sprintf(`crewship_tmux_err=$(LC_ALL=C tmux list-sessions 2>&1 >/dev/null) && crewship_tmux_err=''
+ case "$crewship_tmux_err" in
+ 'no server running on '*|'error connecting to '*' (No such file or directory)'|'error connecting to '*' (Connection refused)')
+  crewship_tmux_state=ABSENT
+  if ! [ -r '%[1]s/self/mountinfo' ] || ! [ -r '%[1]s/1/comm' ]; then crewship_tmux_state=UNKNOWN; else
+   while IFS= read -r crewship_line; do
+    case "$crewship_line" in *' - proc '*hidepid=[!0]*|*' - proc '*subset=*) crewship_tmux_state=UNKNOWN;; esac
+   done < '%[1]s/self/mountinfo'
+  fi
+  if [ "$crewship_tmux_state" = ABSENT ]; then
+   for crewship_comm in '%[1]s'/[0-9]*/comm; do
+    [ -e "$crewship_comm" ] || continue
+    if IFS= read -r crewship_name < "$crewship_comm"; then
+     case "$crewship_name" in tmux*) crewship_tmux_state=UNKNOWN; break;; esac
+    elif [ -e "$crewship_comm" ]; then crewship_tmux_state=UNKNOWN; break; fi
+   done 2>/dev/null
+  fi
+  echo "$crewship_tmux_state";;
+ *) echo UNKNOWN;;
+ esac`, procRoot)
 }

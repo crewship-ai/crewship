@@ -272,6 +272,24 @@ row.
 
 Use `--format json` for piping (`crewship run list --format json | jq '.[] | select(.status=="FAILED")'`).
 
+#### When a `RUNNING` row ends without a result
+
+A run stays `RUNNING` while its process may still be alive. The server ends it
+on its own, with the reason in the terminal entry's `reason`, once nothing can
+be executing it any more:
+
+| Reason | Status | When |
+|---|---|---|
+| `detached_exec_confirmed_gone` | `FAILED` | The agent outlived its step or run timeout, ignored the stop, and the server later confirmed its runtime gone. No exit result survived, so the run is failed rather than completed. The agent is admitted again at the same moment. |
+| `agent_deleted` | `CANCELLED` | The run's agent was deleted, the run started more than 10 minutes ago, and no runtime record of that agent is still open. Checked every 5 minutes. |
+| `confirmed_runtime_stop` / `recovered_runtime_absent` / `server_restart` | `CANCELLED` | An agent stop, a recovered run whose runtime vanished, or a server restart (unchanged). |
+
+A run owned by durable work (an assignment, webhook or schedule attempt) keeps
+its own outcome; these passes never overwrite it. When the server cannot tell
+whether a runtime is gone — for example a tmux client fails for another reason,
+or `/proc` hides other users' processes — the run stays `RUNNING` and the agent
+stays busy rather than reporting an outcome nobody confirmed.
+
 ### Fleet-ops insights
 
 ```bash

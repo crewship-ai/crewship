@@ -75,7 +75,7 @@ func (s *Server) flushRecoveredStopsBatch(ctx context.Context) error {
 			failures = append(failures, err)
 			continue
 		}
-		if !run.StopJournalPending || run.Status != "cancelled" {
+		if !pendingStopProjection(run) {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -137,8 +137,15 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		return fmt.Errorf("recovered run %s workspace disagrees with journal", run.ID)
 	}
 	origin, reason, summary, idleStatus := "agent_stop", "confirmed_runtime_stop", "run cancelled after confirmed runtime stop", "STOPPED"
-	if run.StopOrigin == "recovered_absence" {
+	kind := journal.EntryRunCancelled
+	switch run.StopOrigin {
+	case "recovered_absence":
 		origin, reason, summary, idleStatus = "recovered_absence", "recovered_runtime_absent", "recovered run ended without a verified outcome", "IDLE"
+	case orchestrator.DetachedConfirmedGoneOrigin:
+		// The exec outlived its monitoring budget and nobody holds its exit
+		// result; the hold only confirmed the runtime gone (#5510, #5511).
+		origin, reason, summary, idleStatus = orchestrator.DetachedConfirmedGoneOrigin, "detached_exec_confirmed_gone", "run failed: its detached exec ended without a verified result", "IDLE"
+		kind = journal.EntryRunFailed
 	}
 	if !terminal {
 		if workOwned && startRecorded {
@@ -146,7 +153,6 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 			// does not settle or overwrite its fenced attempt.
 			return s.ackRecoveredStop(ctx, run.ID)
 		}
-		kind := journal.EntryRunCancelled
 		payload := map[string]any{"reason": reason, "metadata": map[string]any{"stop_origin": origin}}
 		if !startRecorded {
 			kind = journal.EntryRunRecoveredStop
@@ -244,4 +250,14 @@ func (s *Server) recoveredStopWorkspace(ctx context.Context, run orchestrator.Ru
 		return "", fmt.Errorf("recovered run %s workspace disagrees with agent", run.ID)
 	}
 	return run.WorkspaceID, nil
+}
+
+// pendingStopProjection reports a durable outbox entry this drain owns: a
+// confirmed stop (cancelled) or a detached exec its hold confirmed gone
+// (error). Both have confirmed runtime absence; only the history is pending.
+func pendingStopProjection(run orchestrator.RunState) bool {
+	if !run.StopJournalPending {
+		return false
+	}
+	return run.Status == "cancelled" || (run.Status == "error" && run.StopOrigin == orchestrator.DetachedConfirmedGoneOrigin)
 }

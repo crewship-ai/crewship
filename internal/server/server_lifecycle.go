@@ -275,7 +275,7 @@ func (s *Server) Start(ctx context.Context) error {
 			lookup := deletedAgentLookup(s.db)
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
-			for {
+			for tick := 0; ; tick++ {
 				if res := s.orchestrator.StopDeletedAgentRuns(ctx, "", lookup); res.Stopped > 0 || res.Pending > 0 {
 					s.logger.Info("deleted agent runs", "stopped", res.Stopped, "pending", res.Pending, "error", errors.Join(res.Errors...))
 				}
@@ -285,6 +285,12 @@ func (s *Server) Start(ctx context.Context) error {
 				}
 				if err := s.flushRecoveredStops(ctx); err != nil {
 					s.logger.Warn("confirmed stop history pending retry", "error", err)
+				}
+				// History-only and scan-heavy: every tenth tick (5 min).
+				if tick%10 == 0 {
+					if n, err := s.reapDeletedAgentOrphanRuns(ctx); n > 0 || err != nil {
+						s.logger.Info("deleted agent orphan runs ended", "count", n, "error", err)
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -1143,7 +1149,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			}
 			// A confirmed stop protects only its trace from generic recovery,
 			// never unrelated runs or the entire agent's status.
-			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
+			if pendingStopProjection(run) && run.ID != "" {
 				protectedRuns[run.ID] = true
 			}
 			// A retained run settled without projection decided exactly which
@@ -1180,7 +1186,7 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				}
 				return
 			}
-			if run.Status == "cancelled" && run.StopJournalPending && run.AgentID != "" {
+			if pendingStopProjection(run) && run.AgentID != "" {
 				protectedAgents[run.AgentID] = true
 			}
 		}
