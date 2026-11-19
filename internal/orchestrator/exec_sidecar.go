@@ -314,8 +314,8 @@ func (o *Orchestrator) sidecarInboxGrantScript(req AgentRunRequest, env []string
 	}
 	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/inbox-grant " +
 		"-K /dev/fd/3 3<<'INBOXGRANT_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
-		"header = \"Authorization: Bearer " + token + "\"\n" +
-		"header = \"" + internaltoken.AgentInboxGrantHeader + ": " + grant + "\"\n" +
+		"header = " + strconv.Quote("Authorization: Bearer "+token) + "\n" +
+		"header = " + strconv.Quote(internaltoken.AgentInboxGrantHeader+": "+grant) + "\n" +
 		"INBOXGRANT_AUTH_HEREDOC\n"
 }
 
