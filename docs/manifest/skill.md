@@ -20,6 +20,15 @@ import handler, which is a genuine upsert keyed on slug — so Create
 and Update both POST the same body; the manifest only distinguishes
 the two for readable dry-run output.
 
+An existing skill plans as **unchanged** (`=`), with no import, when the
+stored skill already holds everything importing the body would write
+(#5334). The CLI derives those values with the importer's own parse,
+licence detection and scan, and compares them with `GET /skills/{id}`.
+The decoration fields (`display_name`, `category`, `icon`) are not part of
+the comparison, because the import does not send them. A `source:` URL
+always plans an update: the server fetches the body, so the CLI cannot
+compare it.
+
 ### One body source — pick exactly one
 
 A Skill carries its `SKILL.md` body via **exactly one** of three
@@ -212,11 +221,13 @@ For each declared Skill, Plan compares against the matched-by-slug
 remote row:
 
 - Remote missing → `ActionCreate` (POST import).
-- Remote present and **a body source is declared** → `ActionUpdate`
-  (POST import). Because the list endpoint exposes no body hash, the
-  manifest cannot tell whether the body actually changed, so any
-  apply that declares a body re-posts it. This is deliberate: it is
-  preferable to silently losing an edit.
+- Remote present, **inline or `path:` body**, and the stored skill
+  (`GET /skills/{id}`) already holds what importing the body would
+  write → `ActionUnchanged` (no import).
+- Remote present and any other body (a changed byte, a `source:` URL,
+  a stored skill the server cannot hand over) → `ActionUpdate` (POST
+  import). Anything short of a confirmed match re-posts the body: that
+  is preferable to silently losing an edit.
 - Remote present, **no** body source, decoration matches →
   `ActionUnchanged` (no REST call).
 - Remote row is `source: BUNDLED` → **error**. Bundled skills are

@@ -45,7 +45,7 @@ crewship apply --file team.yaml --from-env
 
 The most common shape. Reads credential values from env vars matching each `env:` entry in the manifest. Re-running converges drift.
 
-A crew file (`files:`) whose bytes already match the crew's copy plans as unchanged (`=`) and is not written again; a changed, missing or unreadable file (for example on a stopped crew) is written. Skills are still re-imported on every apply.
+A crew file (`files:`) whose bytes already match the crew's copy plans as unchanged (`=`) and is not written again; a changed, missing or unreadable file (for example on a stopped crew) is written. A skill with an inline or `path:` body plans as unchanged when the stored skill already holds what importing that body would write. The CLI checks this with the importer's own parse, licence detection and scan, and reads the stored skill through `GET /skills/{id}`. A changed byte, a `source:` URL (the server fetches it, so the CLI cannot compare it), or a server that cannot confirm the stored skill keeps the import.
 
 ### Dry-run as a CI check
 

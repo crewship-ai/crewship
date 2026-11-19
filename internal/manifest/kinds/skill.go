@@ -373,7 +373,7 @@ func (d *SkillDocument) Validate(_ internalapi.WorkspaceContext) error {
 // alias the wrong body when Apply later runs the closure. This is the
 // same pattern the rest of the kinds package uses; see crew_template's
 // Exec for the rationale comment.
-func (d *SkillDocument) Plan(_ context.Context, c internalapi.Client, remote *SkillRemote) ([]internalapi.PlanItem, error) {
+func (d *SkillDocument) Plan(ctx context.Context, c internalapi.Client, remote *SkillRemote) ([]internalapi.PlanItem, error) {
 	wsID := c.WorkspaceID()
 	if wsID == "" {
 		return nil, fmt.Errorf("skill %q: workspace_id not set on client", d.Metadata.Slug)
@@ -406,24 +406,26 @@ func (d *SkillDocument) Plan(_ context.Context, c internalapi.Client, remote *Sk
 		}}, nil
 	}
 
-	// `skillDocumentDiffers` only compares the four decoration fields
-	// (display_name, description, category, icon) — the server's
-	// SkillRemote shape doesn't carry the body content or a body
-	// hash, so the manifest layer can't tell whether a local
-	// inline/path/source change matches what's on the server. Pre-
-	// fix, a body-only edit returned Unchanged and never upserted,
-	// so the operator's `crewship apply` ran clean but the server
-	// kept the old body forever.
+	// The body decides (#5334). The import sends only the body, so it is
+	// the only thing an apply can change: for an inline or path body the
+	// plan derives the row values an import of it would write — through the
+	// importer's own parse, licence detection and scan
+	// (skills.ContentImportFields) — and compares them with the stored row
+	// from GET /skills/{id}. A confirmed match is unchanged, whatever the
+	// spec's display_name / category / icon say: those are not sent (see
+	// docs/manifest/skill.md), so planning an update for them could never
+	// converge.
 	//
-	// Fix: when the user declared a body source at all (Inline,
-	// Path, or Source — Validate guarantees exactly one is set on a
-	// well-formed doc), emit Update so the /skills/import upsert
-	// runs. Cost: every apply with an unchanged body still POSTs.
-	// That's preferable to silently losing edits. A future
-	// optimisation can add a `body_hash` to SkillRemote and short-
-	// circuit here when the hashes match.
+	// Everything else keeps the Update, so an edit is never lost: a `source:`
+	// URL (its body is fetched by the server, not the CLI), a body the
+	// parser rejects, an older server that does not return the stored
+	// fields, or any read error.
 	hasBodySource := d.Spec.Inline != "" || d.Spec.Path != "" || d.Spec.Source != ""
-	if !hasBodySource && !skillDocumentDiffers(d, remote) {
+	unchanged := !hasBodySource && !skillDocumentDiffers(d, remote)
+	if hasBodySource && d.Spec.Source == "" && d.resolved != "" {
+		unchanged = skillContentUnchanged(ctx, c, remote.ID, d.resolved)
+	}
+	if unchanged {
 		return []internalapi.PlanItem{{
 			Kind:        skillKindName,
 			Slug:        d.Metadata.Slug,
@@ -492,29 +494,15 @@ func (d *SkillDocument) buildImportBody() (map[string]any, error) {
 	}
 }
 
-// skillDocumentDiffers reports whether the declared document is
-// equivalent to the server's row. Only fields the manifest is the
-// source of truth for are compared:
+// skillDocumentDiffers reports whether the declared document's decoration
+// differs from the server's list row. Only fields the manifest is the source
+// of truth for are compared:
 //
 //   - DisplayName / Description / Category / Icon — manifest-owned
 //     decoration
 //
-// Body content (the SKILL.md markdown itself) is NOT compared field-by-
-// field. The server doesn't expose the full content on the list
-// endpoint and round-tripping the markdown through diff would be both
-// expensive (extra round-trip per skill) and fragile (line-ending
-// normalisation, front-matter ordering, …). Operators who want to
-// force-push a new body should use the AllowUnsafeLicense flag or bump
-// metadata.name; both are signal that "I'm changing this on purpose"
-// and currently always produce an Update plan.
-//
-// As a result, "no metadata change, body change only" reports as
-// Unchanged. This matches the pragmatic upsert semantics of the
-// import handler — every Apply re-posts the body anyway, so a re-apply
-// after editing the markdown will refresh the row server-side even if
-// Plan called it Unchanged. The dry-run report just won't flag it. A
-// future enhancement could hash the rendered body and store the hash
-// in the description_quality column to enable content diffs.
+// The SKILL.md body is not compared here: the list endpoint does not carry
+// it. Plan compares it through skillContentUnchanged (#5334).
 func skillDocumentDiffers(d *SkillDocument, remote *SkillRemote) bool {
 	desiredName := d.Spec.DisplayName
 	if desiredName == "" {
@@ -544,6 +532,34 @@ func equalNonEmpty(declared, remote string) bool {
 		return true
 	}
 	return declared == remote
+}
+
+// skillContentUnchanged reports whether importing content would leave the
+// stored skill id exactly as it is. False whenever that cannot be confirmed.
+func skillContentUnchanged(ctx context.Context, c internalapi.Client, id, content string) bool {
+	if strings.TrimSpace(id) == "" {
+		return false
+	}
+	want, err := skillspkg.ContentImportFields(content)
+	if err != nil {
+		return false
+	}
+	resp, err := c.Get(ctx, "/api/v1/skills/"+url.PathEscape(id))
+	if err != nil {
+		return false
+	}
+	if err := checkStatus(resp, "get skill"); err != nil {
+		return false
+	}
+	data, err := readAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	var stored skillspkg.StoredSkill
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return false
+	}
+	return want.Matches(stored)
 }
 
 // ── Remote lookup ────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/serviceconfig"
+	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 // Action enumerates the per-resource operations a plan can describe.
@@ -399,6 +400,9 @@ type planBuilder struct {
 	// server cannot hand them over). nil means pb.client.CrewFileContent; a
 	// seam so plan tests need no file-download fake.
 	crewFileContentFn func(crewID, path string) (data []byte, ok bool)
+	// storedSkillFn finds a skill's stored row by slug; nil means
+	// pb.client.StoredSkill. Test seam, like crewFileContentFn.
+	storedSkillFn func(slug string) (stored *skills.StoredSkill, found bool)
 }
 
 func (pb *planBuilder) appendItem(action Action, kind, desc string, exec func(ctx context.Context, c *Client, opts Options) error) {
@@ -475,8 +479,23 @@ func (pb *planBuilder) planCredential(ctx context.Context, cred *Credential, cre
 func (pb *planBuilder) planSkill(ctx context.Context, s *Skill, scope string) error {
 	skill := *s
 	skill.SetResolved(s.Resolved())
-	pb.appendItem(ActionCreate, "skill",
-		fmt.Sprintf("%s (%s)", skill.Slug, scope),
+	desc := fmt.Sprintf("%s (%s)", skill.Slug, scope)
+	// #5334: an existing skill whose stored row already holds what importing
+	// this body would write is unchanged, with no write. The row values are
+	// derived by the importer's own function (skills.ContentImportFields).
+	// Anything short of a confirmed match keeps the import: a `source:` URL
+	// (the server fetches it), an unreadable row, an older server.
+	action := ActionCreate
+	if stored, found := pb.storedSkill(ctx, skill.Slug); found {
+		action = ActionUpdate
+		if body := skill.Resolved(); stored != nil && skill.Source == "" && body != "" {
+			if want, err := skills.ContentImportFields(body); err == nil && want.Matches(*stored) {
+				pb.appendItem(ActionUnchanged, "skill", desc, nil)
+				return nil
+			}
+		}
+	}
+	pb.appendItem(action, "skill", desc,
 		func(ctx context.Context, client *Client, opts Options) error {
 			body := map[string]any{}
 			switch {
@@ -498,6 +517,16 @@ func (pb *planBuilder) planSkill(ctx context.Context, s *Skill, scope string) er
 			return err
 		})
 	return nil
+}
+
+// storedSkill finds the workspace's skill by slug. found is false when there
+// is none or the list cannot be read (the plan then keeps its create);
+// stored is nil when the skill exists but its row could not be read.
+func (pb *planBuilder) storedSkill(ctx context.Context, slug string) (*skills.StoredSkill, bool) {
+	if pb.storedSkillFn != nil {
+		return pb.storedSkillFn(slug)
+	}
+	return pb.client.StoredSkill(ctx, slug)
 }
 
 func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSpec, wsCreds map[string]Credential, wsSkills map[string]Skill) error {
