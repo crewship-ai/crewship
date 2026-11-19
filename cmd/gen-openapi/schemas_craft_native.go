@@ -16,7 +16,7 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		return map[string]any{"type": "string", "pattern": "^[1-9][0-9]{0,18}$", "maxLength": 19, "nullable": nullable, "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number."}
 	}
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
-	holder := obj(map[string]any{"agent_id": str(), "run_id": str(), "actor_id": str(), "display_name": str(), "kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}}, "actor_id", "display_name", "kind")
+	holder := obj(map[string]any{"agent_id": str(), "run_id": str(), "actor_id": str(), "display_name": str(), "kind": map[string]any{"type": "string", "enum": []string{"human", "agent", "system"}, "description": "system only on a proposal's decided_by when a newer version superseded it."}}, "actor_id", "display_name", "kind")
 	nullableHolder := map[string]any{"allOf": []any{ref("NativeCraftHolder")}, "nullable": true}
 	request := obj(map[string]any{"request_id": str(), "actor_id": str(), "display_name": str(), "kind": map[string]any{"type": "string", "enum": []string{"human"}}}, "request_id", "actor_id", "display_name", "kind")
 	empty := obj(map[string]any{})

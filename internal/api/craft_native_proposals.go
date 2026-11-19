@@ -22,6 +22,10 @@ type craftNativeProposalResponse struct {
 	CreatedAt     string                    `json:"created_at"`
 	State         string                    `json:"state"`
 	ResultVersion int64                     `json:"result_version,omitempty"`
+	// DecidedBy names who accepted or rejected the proposal, or the system
+	// when a newer version superseded it. Absent while the proposal is open.
+	DecidedBy *craftNativeHolderResponse `json:"decided_by,omitempty"`
+	DecidedAt string                     `json:"decided_at,omitempty"`
 }
 
 type craftNativeProposalListResponse struct {
@@ -51,7 +55,16 @@ func (d *craftNativeDocumentsHTTP) proposalView(r *http.Request, workspaceID str
 			d.human.pages.logger.Warn("craft native: proposal author name lookup failed", "proposal", p.ID, "error", err)
 		}
 	}
-	return craftNativeProposalResponse{ID: p.ID, Author: craftNativeHolderResponse{ActorID: p.AuthorActorID, DisplayName: name, Kind: "agent", AgentID: agent}, BaseVersion: p.BaseVersion, Summary: p.Summary, CreatedAt: p.CreatedAt, State: p.State, ResultVersion: p.ResultVersion}
+	out := craftNativeProposalResponse{ID: p.ID, Author: craftNativeHolderResponse{ActorID: p.AuthorActorID, DisplayName: name, Kind: "agent", AgentID: agent}, BaseVersion: p.BaseVersion, Summary: p.Summary, CreatedAt: p.CreatedAt, State: p.State, ResultVersion: p.ResultVersion}
+	if p.State != "open" && p.DecidedBy != "" {
+		// Named exactly the way the version history names a writer: only the
+		// recorded actor and its display name, nothing else about the person.
+		decider := d.versionAuthor(r, workspaceID, p.DecidedBy)
+		// Only a person (user:) or the system (system:superseded) decides.
+		out.DecidedBy = &craftNativeHolderResponse{ActorID: decider.ActorID, DisplayName: decider.DisplayName, Kind: decider.Kind}
+		out.DecidedAt = p.DecidedAt
+	}
+	return out
 }
 
 func craftNativeProposalError(w http.ResponseWriter, err error) {

@@ -16562,9 +16562,11 @@
             "type": "string"
           },
           "kind": {
+            "description": "system only on a proposal's decided_by when a newer version superseded it.",
             "enum": [
               "human",
-              "agent"
+              "agent",
+              "system"
             ],
             "type": "string"
           },
@@ -16770,6 +16772,19 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "decided_at": {
+            "description": "When the proposal was decided. Absent while open.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftHolder"
+              }
+            ],
+            "description": "Who decided a non-open proposal: the person who accepted or rejected it (kind human), or the system when a newer version superseded it (kind system). Absent while open."
           },
           "id": {
             "pattern": "^ncp_[a-f0-9]{24}$",
@@ -17408,6 +17423,14 @@
             "description": "True only for the newest version, the one the editor opens.",
             "type": "boolean"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17498,6 +17521,14 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17551,6 +17582,23 @@
           "currentVersion",
           "versions",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "NativeCraftVersionProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/NativeCraftVersionAuthor"
+          },
+          "id": {
+            "pattern": "^ncp_[a-f0-9]{24}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author"
         ],
         "type": "object"
       },
