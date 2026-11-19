@@ -1,16 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, CloudOff } from "lucide-react"
+import { AlertTriangle, ChevronRight, CloudOff } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { StatusTone } from "@/lib/format-status"
 import type { Tone } from "./backups-model"
 import type { Resource } from "./use-backups-data"
-import { settingsTh, settingsTd } from "@/components/features/settings/shared"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 
 /**
  * The few pieces every Backups section draws the same way, on top of the
@@ -180,3 +181,103 @@ export function Eyebrow({ children }: { children: React.ReactNode }) {
 /** Backups tables are Settings tables; cells do not wrap unless a column asks. */
 export const TH = settingsTh
 export const TD = cn(settingsTd, "whitespace-nowrap")
+
+export interface TableColumn<T> {
+  key: string
+  header: React.ReactNode
+  cell: (row: T) => React.ReactNode
+  /** Right-aligned figure. */
+  right?: boolean
+  className?: string
+}
+
+/**
+ * A table that becomes stacked rows at phone width (no horizontal scroll, 44 px
+ * targets): `stack` says what the stacked row shows — a title, one quiet line
+ * and what sits at its end. Exactly one of the two is rendered. A row that
+ * opens something takes `onOpen` (Enter and click) and keeps its own controls
+ * (a tick, a button) out of that click.
+ */
+export function BackupsTable<T>({ rows, rowKey, columns, label, stack, onOpen, isOpen, lead, rowProps, empty }: {
+  rows: T[]
+  rowKey: (row: T) => string
+  columns: TableColumn<T>[]
+  label: string
+  stack: (row: T) => { title: React.ReactNode; sub?: React.ReactNode; end?: React.ReactNode }
+  onOpen?: (row: T) => void
+  isOpen?: (row: T) => boolean
+  /** A leading column (a tick) that stays out of the row's own click. */
+  lead?: { header: React.ReactNode; cell: (row: T) => React.ReactNode }
+  rowProps?: (row: T) => Record<string, string | undefined>
+  empty?: React.ReactNode
+}) {
+  const mobile = useIsMobile()
+  if (rows.length === 0) return <p className="px-4 py-8 text-center text-label text-muted-foreground">{empty ?? "Nothing to show."}</p>
+  const stop = { onClick: (e: React.SyntheticEvent) => e.stopPropagation(), onKeyDown: (e: React.SyntheticEvent) => e.stopPropagation() }
+  if (mobile) {
+    return (
+      <ul aria-label={label} className="divide-y divide-border">
+        {rows.map((r) => {
+          const s = stack(r)
+          return (
+            <li key={rowKey(r)} {...rowProps?.(r)} className="flex min-h-[44px] items-center gap-2 px-3 py-2.5">
+              {lead && <span className="shrink-0" {...stop}>{lead.cell(r)}</span>}
+              <div role={onOpen ? "button" : undefined} tabIndex={onOpen ? 0 : undefined}
+                onClick={onOpen ? () => onOpen(r) : undefined}
+                onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(r) } } : undefined}
+                className={cn("flex min-w-0 flex-1 items-center gap-2 outline-none", onOpen && "cursor-pointer")}>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-control font-medium text-foreground">{s.title}</div>
+                  {s.sub && <div className="truncate text-label text-muted-foreground">{s.sub}</div>}
+                </div>
+                {s.end && <div className="shrink-0">{s.end}</div>}
+                {onOpen && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className={settingsTable} aria-label={label}>
+        <thead>
+          <tr>
+            {lead && <th className={cn(settingsTh, "w-9")}>{lead.header}</th>}
+            {columns.map((c) => <th key={c.key} className={cn(settingsTh, c.right && "text-right")}>{c.header}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={rowKey(r)} {...rowProps?.(r)} tabIndex={onOpen ? 0 : undefined} aria-selected={onOpen && isOpen ? isOpen(r) : undefined}
+              onClick={onOpen ? () => onOpen(r) : undefined}
+              onKeyDown={onOpen ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(r) } } : undefined}
+              className={cn(onOpen && settingsTableRowLink, "aria-selected:bg-accent")}>
+              {lead && <td className={settingsTd} {...stop}>{lead.cell(r)}</td>}
+              {columns.map((c) => <td key={c.key} className={cn(settingsTd, "whitespace-nowrap", c.right && "text-right", c.className)}>{c.cell(r)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/**
+ * How far a backup was checked, as the three steps (Checksum, Contents checked,
+ * Test restore): three bars and the word for the highest one reached.
+ */
+export function ProofSteps({ level, partial, word = true }: { level: 0 | 1 | 2 | 3; partial?: boolean; word?: boolean }) {
+  const names = ["Not checked", "Checksum", "Contents checked", "Test restore"]
+  return (
+    <span className="inline-flex items-center gap-2" data-proof={level}>
+      <span role="img" aria-label={`${names[level]}${partial ? " · partial" : ""}`} className="inline-flex gap-0.5">
+        {[1, 2, 3].map((n) => (
+          <i key={n} className={cn("block h-1 w-3.5 rounded-full", level >= n ? (partial ? "bg-warn" : "bg-success") : "bg-control-border")} />
+        ))}
+      </span>
+      {word && <span className="text-muted-foreground">{level === 0 ? "—" : names[level]}</span>}
+    </span>
+  )
+}

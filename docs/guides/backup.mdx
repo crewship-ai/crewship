@@ -311,7 +311,7 @@ An **instance bundle** belongs to no workspace, so the per-workspace routes
 answer 404 for it; `inspect`, `verify` and `download` then read it through the
 instance routes (`GET /api/v1/admin/instance/backups/bundles/inspect`,
 `…/verify`, `…/download`), which serve any catalogued bundle to an instance
-administrator. Backup history's **Download** uses the same route for an
+administrator. Runs' **Download** uses the same route for an
 instance bundle, and each download is recorded in the instance audit log.
 
 ## Restore
@@ -1030,7 +1030,7 @@ the threat model and crypto chain.
 
 ### Upload an encrypted archive
 
-In **Recovery → Upload a backup**, choose a `.tar.zst` archive from another
+In **Restore → New restore → Upload a backup…**, choose a `.tar.zst` archive from another
 machine. The upload shows progress, can be cancelled, and accepts up to 64 GiB
 when sufficient disk space is available. The server validates the encrypted
 AGE envelope and payload checksum without receiving a private key. Uploading
@@ -1069,7 +1069,7 @@ staged images until the destination's services and data have been checked.
 
 A backup plan tells the server what to back up, when, for how long and who
 can open the bundles. Plans are instance-level and belong to instance
-administrators (Admin › Backups › Schedules, or
+administrators (Admin › Backups › Plans, or
 `crewship admin instance backups plans`). Every run happens in the server's
 own backup service — never through an agent or a model.
 
@@ -1176,7 +1176,7 @@ start a future retry early. Stored timestamp formats remain unchanged.
 
 ### Runs and their phases
 
-Every run is a row with its phases, shown in Backup history and by
+Every run is a row with its phases, shown in Runs and by
 `crewship admin instance backups runs`:
 
 | Phase | What happens |
@@ -1257,7 +1257,7 @@ folders only: `/workspace`, the crew memory tree, `/output`, the home and
 tools volumes, and with Full `/var/lib`. Restoring them needs the crew's
 image to still exist — and Crewship builds crew images locally
 (`crewship-cache:*`), so a lost host loses them. A plan or run set to
-**Complete environment** (Admin › Backups › Schedules › Container
+**Complete environment** (Admin › Backups › Plans › Container
 environments, `env_mode: complete`, `--env-mode complete`) also captures each
 crew container's complete environment.
 
@@ -1493,7 +1493,7 @@ instance. One incident per plan and kind:
 
 A single skipped run pages nobody: one night the server stayed busy, or the
 writes in progress did not drain in time, is shown as `skipped` with its reason
-in Backup history, as a skipped night in the Overview's nights strip and as a
+in Runs, as a skipped night in the Overview's nights strip and as a
 Needs attention item — and the next night usually runs. The second skipped run
 in a row raises the incident (set `CREWSHIP_BACKUP_SKIP_ALERT_AFTER` on the
 server, 1–30, to change how many; `1` pages on every skip), and a plan that
@@ -1598,21 +1598,24 @@ no secret.
 
 Admin › Data › **Backups** is for instance administrators. It is a page of
 its own, `/admin/backups`, built like Admin › People & workspaces and
-Security: its side panel switches between **Overview**, **Runs** and
-**Restore**, and lists the plans, every workspace with its newest backup, and
-the two instance settings (Storage, Keys & alerts). Each page is
+Security. Its side panel holds one **Showing** control (the scope: *Whole
+instance*, or the workspaces you tick, found by a search that copes with
+hundreds), the **Views** (Overview, Runs, Restore, Coverage), the **Plans**
+(at most eight, then *All N plans…*) and the two **Instance settings**
+(Storage, Keys & alerts). It never lists workspaces. Each view is
 deep-linkable as `/admin/backups?section=<page>` (an old
 `/admin?tab=backups&section=<page>` link still lands there):
 
 | Page | What it answers |
 |---|---|
-| Overview | The whole instance: what needs attention, then the five questions — what is protected, how often, where, for how long, and whether a restore really worked — with three separate proofs (checksum, contents checked, test restore), never one "restorable" flag. A table of workspaces says when each was last kept, by which plan and how far it is proven; a row opens that workspace. |
-| Runs (`?section=history`) | Every run, its phases, and how far each backup is proven, built like the Audit log: the time range in the sub-bar, a chart of runs by result (a click picks a bar, a drag a span, and that narrows the table), and filters for scope, result, kind and proof above it. Tick runs to pin, unpin or download them together; open one to check its contents or start a restore. |
+| Overview | The head says the server's verdict in one sentence. Then what needs attention (a local-only copy is one of those items, said once), and the five questions — what is protected, how often, where, for how long, and whether a restore really worked — with three separate proofs (checksum, contents checked, test restore), never one "restorable" flag. Beside them: four coverage counts (covered, stale, never backed up, nothing to back up), each opening Coverage narrowed to it; the last fourteen nights; and the room on the disk. |
+| Runs (`?section=history`) | Every run, its phases, and how far each backup is proven, built like the Audit log: the time range in the sub-bar, result chips with counts (All, Failed, Incomplete, Manual, Pinned), Kind, Proof and Plan pickers, a chart of runs by result (a click picks a bar, a drag a span, and that narrows the table) and the table, 25 rows at a time. The server returns the newest 500 runs; when 500 came back the table says "the newest 500 runs". Tick runs to pin, unpin or download them together; open one for its result (how long it took, how long new work was held, its note, the run it retried), the three proof steps, its phases and encryption, and to check its contents, read **What is inside** (its manifest) or start a restore. |
+| Coverage (`?section=coverage&status=`) | Every workspace, least protected first: when it was last backed up, by which plan, how far that backup was checked and whether it is covered, stale, never backed up or has nothing to back up. Paged; a row opens that workspace. |
 | A workspace (`?workspace=<slug>`) | That workspace alone: its newest backup and proof, the plan that covers it, its Needs attention and nights, its last runs, with Back up now and Restore. |
-| Schedules (a plan in the panel) | Backup plans: a preset (Complete recovery, Workspace backup) or a custom choice that keeps its dependencies, when it runs, a calendar of done and planned runs, and how many copies are kept. |
-| Storage | Where copies live, the room a run and a restore need, and the limits a backup runs under. |
-| Restore (`?section=recovery`) | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. History and Drills sit beside New restore. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
-| Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
+| A plan (`?section=schedules&plan=`) | What goes in (a preset, or a custom choice that keeps its dependencies; a plan of only some kinds says it does not count as protection), when it runs (a calendar of done and planned runs; the day of the month up to 31, a month without that day has no run), how long the server waits and holds, how often it retries while it waits, when to alert that the newest backup is too old, how many copies are kept, and where copies go. |
+| Storage | Where copies live, the room a run and a restore need, and the limits a backup runs under. A destination a plan uses cannot be removed. |
+| Restore (`?section=recovery`) | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. In the checks you can also bring back the data of crew services, and, when replacing a workspace, discard its open workbooks. Restore history and Drills sit beside New restore. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
+| Keys & alerts | The AGE public keys backups are encrypted to (a key a plan uses cannot be removed), the vault key versions restored secrets need, who hears when a backup goes wrong, when the newest backup counts as too old, and when the heartbeat URL was last pinged and how it answered. |
 
 Until a backup key and an enabled plan exist, the Overview opens with **Set
 up backups**, and **Back up now** opens it too instead of failing. Three
@@ -1624,13 +1627,20 @@ server keeps the public `age1…` half), or a public key pasted from
 backup, run at once. The downloaded key file is age-keygen's format, so
 `age -d -i` and `crewship recover --identity` read it.
 
-The **ticks** beside the workspaces in the panel pick what Overview, Runs, a
-new restore and **Back up now** cover: none ticked is the whole instance, or
-any number of workspaces (*All workspaces* ticks every one). The **Scope**
-filter above Runs and New restore sets the same thing; it is kept in the URL
-(`?scope=&ws=`). A workspace's name opens its own backups. Admin › Data ›
-**Data retention** sets how long each kind of live data is kept per
-workspace, and shows a dry run of what a change overwrites before it is saved.
+**Back up now** opens a dialog: what is backed up (the scope in **Showing**),
+*Like plan* (its contents, keys and destinations), the contents (as the plan,
+a full backup, or only some kinds), the environments, whether to encrypt to
+the plan's keys or to a passphrase used once and never stored, and a note.
+With several workspaces the server queues one run per workspace, and the
+dialog says how many runs will start before you confirm. The same request is
+`crewship admin instance backups run`.
+
+The **Showing** control picks what Overview, Runs, a new restore and **Back up
+now** cover: none ticked is the whole instance, or any number of workspaces.
+It is kept in the URL (`?scope=&ws=`). Coverage always lists every workspace.
+Admin › Data › **Data retention** sets how long each kind of live data is
+kept per workspace, and shows a dry run of what a change overwrites before it
+is saved.
 
 ### Recovery in the console
 
@@ -1653,8 +1663,8 @@ workspace, and shows a dry run of what a change overwrites before it is saved.
   the wizard carries on with it, and **Use** takes a copy already here.
 
 Pages whose server endpoints have not shipped yet say "Not available on this
-server yet" rather than showing figures. Overview, Backup history and
-Schedules read the plans, runs and overview endpoints described in
+server yet" rather than showing figures. Overview, Runs and
+Plans read the plans, runs and overview endpoints described in
 [Backup plans and scheduled runs](#backup-plans-and-scheduled-runs); checks,
 downloads and workspace restores go through the existing backup endpoints.
 
@@ -1706,7 +1716,7 @@ How a copy is made:
   bundle — workspace or instance — its off-site copies are deleted with it.
 
 Add a destination under Admin › Backups › Storage (**Add S3-compatible
-storage**) or with the CLI, then name it in a plan's destinations (Schedules ›
+storage**) or with the CLI, then name it in a plan's destinations (Plans ›
 Where):
 
 ```bash

@@ -2,14 +2,15 @@ import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge,
 import type { TabKey } from "./types"
 
 /** The pages of Admin › Backups (/admin/backups?section=). */
-export type BackupsSection = "overview" | "history" | "schedules" | "storage" | "recovery" | "keys"
+export type BackupsSection = "overview" | "history" | "coverage" | "schedules" | "storage" | "recovery" | "keys"
 
 export const BACKUP_SECTIONS: { key: BackupsSection; label: string }[] = [
   { key: "overview", label: "Overview" },
-  { key: "history", label: "Backup history" },
-  { key: "schedules", label: "Schedules" },
+  { key: "history", label: "Runs" },
+  { key: "coverage", label: "Coverage" },
+  { key: "schedules", label: "Plans" },
   { key: "storage", label: "Storage" },
-  { key: "recovery", label: "Recovery" },
+  { key: "recovery", label: "Restore" },
   { key: "keys", label: "Keys & alerts" },
 ]
 

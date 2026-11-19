@@ -22,11 +22,11 @@ export function useScopeWorkspaces() {
 }
 
 /** GET /admin/instance/backups/overview for the scope on screen. */
-export function useBackupsOverview(scope: BackupScope, selected: Set<string>, all: ScopeWorkspace[]) {
+export function useBackupsOverview(scope: BackupScope, selected: Set<string>, all: ScopeWorkspace[], enabled = true) {
   const q = scopeQuery(scope, selected, all)
   const ids = React.useMemo(() => [...selected].sort().join(","), [selected])
   return useResource<OverviewResponse>(
-    `${INSTANCE_BACKUPS}/overview?${q}`,
+    enabled ? `${INSTANCE_BACKUPS}/overview?${q}` : null,
     () => overviewFixture(new Date(), scope, ids ? ids.split(",") : []),
   )
 }

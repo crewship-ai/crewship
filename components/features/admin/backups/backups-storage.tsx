@@ -183,7 +183,7 @@ function destinationDetail(d: OffsiteDestination): string {
   parts.push(d.copies > 0 ? `${d.copies} checked cop${d.copies === 1 ? "y" : "ies"} · ${formatSize(d.copy_bytes)}` : "not yet counted: no checked upload")
   if (d.last_test_error) parts.push(`last test failed: ${d.last_test_error}`)
   else if (d.last_verified_at) parts.push(`last checked ${formatWhen(d.last_verified_at)} · ${verifiedByText(d.last_verified_by)}`)
-  parts.push(d.used_by.length ? `used by ${d.used_by.join(", ")}` : "no plan copies here yet · choose it under Schedules › Where")
+  parts.push(d.used_by.length ? `used by ${d.used_by.join(", ")}` : "no plan copies here yet · choose it under Plans › Where")
   return parts.join(" · ")
 }
 

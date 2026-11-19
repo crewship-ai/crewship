@@ -6,7 +6,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { buildDownloadUrl, type BackupListEntry, type VerifyBackupResponse } from "@/hooks/use-backups"
 import { runsFixture } from "./__fixtures__/backups"
-import { scopeQuery, type BackupRun, type BackupScope, type ScopeWorkspace } from "./backups-model"
+import { RUNS_LIMIT, scopeQuery, type BackupRun, type BackupScope, type BundleManifest, type ManualRunBody, type ScopeWorkspace } from "./backups-model"
 import { INSTANCE_BACKUPS, isUnavailableStatus, listOf, readError, send, useResource, type Resource, type SendResult } from "./use-backups-data"
 
 /** A bundle from the legacy per-workspace list, as a history row. */
@@ -42,7 +42,7 @@ export function workspaceFor(ctx: { selected: Set<string>; currentWorkspaceId: s
  */
 export function useBackupRuns(scope: BackupScope, selected: Set<string>, all: ScopeWorkspace[]): Resource<BackupRun[]> & { source: "runs" | "legacy" } {
   const { workspaceId } = useWorkspace()
-  const runs = useResource<BackupRun[]>(`${INSTANCE_BACKUPS}/runs?${scopeQuery(scope, selected, all)}&limit=100`, () => runsFixture(new Date()), listOf)
+  const runs = useResource<BackupRun[]>(`${INSTANCE_BACKUPS}/runs?${scopeQuery(scope, selected, all)}&limit=${RUNS_LIMIT}`, () => runsFixture(new Date()), listOf)
   const [legacy, setLegacy] = React.useState<Resource<BackupRun[]> | null>(null)
   const [tick, setTick] = React.useState(0)
   const targets = React.useMemo(() => {
@@ -126,7 +126,11 @@ export function downloadHref(path: string, workspaceId: string | null, scope?: B
  * server queues it in the backup service and answers at once: `id` is the
  * first run, `run_ids` every run (one per workspace for scope=workspaces).
  */
-export function runNow(body: { plan_id?: string; scope: BackupScope; workspace_ids?: string[]; preset?: string }): Promise<SendResult<{ id: string; run_id: string; run_ids: string[]; status: string }>> {
+export function runNow(body: ManualRunBody): Promise<SendResult<{ id: string; run_id: string; run_ids: string[]; status: string }>> {
   return send(`${INSTANCE_BACKUPS}/run`, "POST", body)
 }
 
+/** GET …/bundles/inspect?path= — what a backup holds, read from its plaintext manifest. */
+export function inspectBundle(path: string): Promise<SendResult<BundleManifest>> {
+  return send(`${INSTANCE_BACKUPS}/bundles/inspect?path=${encodeURIComponent(path)}`, "GET")
+}

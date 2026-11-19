@@ -51,6 +51,8 @@ export interface RunQuery {
   kind: "" | "full" | "custom" | "environments"
   proof: "" | "1" | "2" | "3"
   period: "" | "1" | "7" | "30" | "90"
+  /** One plan's runs by name; kept out of the URL, where ?plan= is the plan editor. */
+  plan?: string
 }
 
 /** The Runs facets of the side panel. */
@@ -77,7 +79,7 @@ export function useBackupsScope(forceWorkspaces = false) {
   const backUpNow = React.useCallback((ids?: string[]) => {
     const inst = scope === "instance" && !ids
     void perform(demo, () => runNow({ scope: inst ? "instance" : "workspaces", workspace_ids: inst ? undefined : ids ?? [...selected], preset: inst ? "complete" : "workspace" }),
-      "Backup started · it appears in Backup history", "The backup could not start")
+      "Backup started · it appears in Runs", "The backup could not start")
   }, [demo, scope, selected])
   return { workspaceId: workspaceId ?? null, demo, workspaces, urlState, selected, scope, commit, backUpNow }
 }
