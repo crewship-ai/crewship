@@ -714,6 +714,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			chainProv.Actor = opts.Actor
 			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
 			chainProv.CheckpointSourceIDs = checkpointSourceIDs
+			chainProv.CrewExtract = manifest.Scope == ScopeCrew
 			auditKeys, keyErr := journal.SigningKeysForContext(ctx)
 			if keyErr != nil {
 				return nil, keyErr

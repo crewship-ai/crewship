@@ -432,6 +432,8 @@ What that means in practice:
 
 A restore that cannot re-sign the chain **fails** rather than landing a fork whose journal would report as tampered. The failure happens before any row is written, so nothing is half-applied.
 
+A **crew** bundle carries only that crew's journal entries, but their sequence numbers come from the whole workspace's chain, so the extract has a gap wherever another crew wrote an entry. A crew-scope fork therefore renumbers the extract into a contiguous chain before re-signing it. The `backup.chain_resigned` entry records `crew_extract_renumbered: true` and the source range (`source_seq_first`, `source_seq_last`). Before #5578 the gaps were kept, and `crewship journal verify` on an `--as-crew` copy reported a sequence gap straight after the restore. A workspace fork never renumbers: a gap there is a real missing row, and the fork keeps reporting it exactly as the source does.
+
 Rows that predate the hash chain (schema v152) were never signed; a fork carries them across exactly as they are, no better and no worse than the source.
 
 `crewship backup restore` reports the counts:
