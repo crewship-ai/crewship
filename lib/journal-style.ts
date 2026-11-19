@@ -357,6 +357,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "craft.native_preview_shared": "page",
   "artifact.orphaned_workbook_deleted": "page",
   "artifact.private_output_published": "page",
+  "artifact.returned_to_private": "page",
   "page.published": "page",
   "page.link_revoked": "page",
   "page.public_view": "page",

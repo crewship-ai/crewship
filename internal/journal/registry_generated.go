@@ -36,6 +36,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:24:2
 	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:25:2
 	EntryType("artifact.project_shared"),           // journalArtifactProjectShared, internal/api/pages_artifact_project.go:24:7
+	EntryType("artifact.returned_to_private"),      // journalArtifactReturnedToPrivate, internal/api/pages_return_private.go:20:7
 	EntryType("artifact.run_capability_lost"),      // journalArtifactRunCapabilityLost, internal/api/pages_artifact_unattended_run.go:73:7
 	EntryType("artifact.run_capability_withheld"),  // EntryArtifactRunCapabilityWithheld, internal/pipeline/routine_artifact_run.go:18:7
 	EntryAssignmentCancel,
