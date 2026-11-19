@@ -8,19 +8,22 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsEmpty, SettingsRow, SettingsSegmented, settingsControl, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsEmpty, SettingsRow, SettingsSegmented, settingsControl } from "@/components/features/settings/shared"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { StatusPill } from "@/components/ui/status-pill"
+import { Switch } from "@/components/ui/switch"
+import { useShowMore } from "@/hooks/use-show-more"
+import { ShowMore } from "@/components/ui/show-more"
 
 type StatusTone = NonNullable<React.ComponentProps<typeof StatusPill>["tone"]>
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Gate, Unavailable } from "./backups-kit"
+import { BackupsTable, Gate, ProofSteps, Unavailable, type TableColumn } from "./backups-kit"
 import { ImageAgeCheck } from "./backups-image-age"
 import {
-  formatSize, formatSourceDate, formatWhen, proofLabel, runPlanLabel, shortDate,
-  type BackupRun, type RestoreChecks, type RestoreRecord, type RestoreTarget,
+  formatSize, formatSourceDate, formatWhen, runPlanLabel, shortDate,
+  type BackupRun, type OffsiteCopy, type RestoreChecks, type RestoreRecord, type RestoreTarget,
 } from "./backups-model"
 import { checksFixture, dryRunFixture, restorePhasesFixture } from "./__fixtures__/backups"
 import { useBackupRuns, workspaceFor } from "./use-backup-runs"
@@ -117,7 +120,7 @@ export function BackupsRecovery({ ctx }: { ctx: SectionCtx }) {
   return (
     <>
       {!ctx.inDrill && (
-        <SettingsSegmented<Sub> label="Recovery" value={sub} onChange={setOwn}
+        <SettingsSegmented<Sub> label="Restore" value={sub} onChange={setOwn}
           options={[{ value: "new", label: "New restore" }, { value: "history", label: "History" }, { value: "drills", label: "Drills" }]} />
       )}
       {sub === "new" && <RestoreWizard ctx={ctx} />}
@@ -129,11 +132,23 @@ export function BackupsRecovery({ ctx }: { ctx: SectionCtx }) {
 
 interface Source { path: string; kind: ArchiveKind }
 
+/** Step 1's table: the backups of the scope, newest first. */
+function pickColumns(now: Date): TableColumn<BackupRun>[] {
+  return [
+    { key: "started", header: "Started", cell: (r) => formatWhen(r.started_at, now) },
+    { key: "scope", header: "Scope", cell: (r) => (r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—") },
+    { key: "plan", header: "Plan", cell: (r) => runPlanLabel(r) },
+    { key: "size", header: "Size", cell: (r) => formatSize(r.size_bytes) },
+    { key: "proof", header: "Checked to", cell: (r) => <ProofSteps level={r.proof_level} partial={!!r.drill_result && r.drill_result !== "ok"} /> },
+  ]
+}
+
 export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?: Date }) {
   const runs = useBackupRuns(ctx.scope, ctx.selected, ctx.workspaces)
   const vault = useVaultKeys()
   const instance = ctx.scope === "instance"
   const pool = (runs.data ?? []).filter((r) => r.bundle_path && (runs.source === "legacy" || (instance ? r.scope === "instance" : r.scope === "workspaces")))
+  const pickPage = useShowMore(pool, { step: 25, resetKey: `${ctx.scope}|${[...ctx.selected].length}` })
   const kindOfPath = (p: string): ArchiveKind => {
     const r = pool.find((x) => x.bundle_path === p)
     return r ? archiveKind(r) : instance ? "instance" : "unknown"
@@ -157,6 +172,10 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const [offsite, setOffsite] = React.useState(false)
   const [uploaded, setUploaded] = React.useState<UploadReceipt | null>(null)
   const [held, setHeld] = React.useState(false)
+  // What the server accepts on an online restore beside the target; never
+  // sent to the checks, and discarding workbooks only goes with Replace.
+  const [recoverServices, setRecoverServices] = React.useState(false)
+  const [discardWorkbooks, setDiscardWorkbooks] = React.useState(false)
   const path = source?.path ?? null
   const cliOnly = target === "empty_server" || target === "isolated"
   const key = { identity: identity.trim() || undefined, passphrase: passphrase || undefined }
@@ -165,6 +184,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
     as_workspace: option.named === "workspace" ? asName : undefined,
     as_crew: option.named === "crew" ? asName : undefined,
   }
+  const switches = { recover_services: recoverServices || undefined, discard_workbooks: target === "replace" && discardWorkbooks ? true : undefined }
   const picked = pool.find((r) => r.bundle_path === path) ?? null
   // The workspace a workspace/crew restore acts on, named explicitly.
   const restoreWs = workspaceFor(ctx, picked?.workspace_id)
@@ -195,17 +215,17 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   }
   const dryRun = async () => {
     setBusy(true)
-    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true }, restoreWs), "", "The dry run failed")
+    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true, ...switches }, restoreWs), "", "The dry run failed")
     setBusy(false)
     if (out) setReport(out)
   }
   const doRestore = async () => {
-    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false }, restoreWs), "", "The restore failed")
+    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false, ...switches }, restoreWs), "", "The restore failed")
     if (!out) throw new Error("restore failed")
     setOutcome(out)
     setStep(5)
   }
-  const reset = () => { setStep(1); setSource(null); setChecks(null); setReport(null); setOutcome(null); setHeld(false); setChosen(null) }
+  const reset = () => { setStep(1); setSource(null); setChecks(null); setReport(null); setOutcome(null); setHeld(false); setChosen(null); setRecoverServices(false); setDiscardWorkbooks(false) }
 
   return (
     <>
@@ -240,26 +260,12 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
           )}
           <Gate resource={runs} what="Backups">
             {() => pool.length === 0 ? <SettingsEmpty>No backup in this scope yet.</SettingsEmpty> : (
-              <div className="overflow-x-auto">
-                <table className={settingsTable}>
-                  <thead><tr>
-                    {["Started", "Scope", "Plan", "Size", "Checked to"].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {pool.slice(0, 8).map((r) => (
-                      <tr key={r.id} tabIndex={0} className={settingsTableRowLink}
-                        onClick={() => pick({ path: r.bundle_path!, kind: archiveKind(r) })}
-                        onKeyDown={(e) => { if (e.key === "Enter") pick({ path: r.bundle_path!, kind: archiveKind(r) }) }}>
-                        <td className={settingsTd}>{formatWhen(r.started_at, now)}</td>
-                        <td className={settingsTd}>{r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—"}</td>
-                        <td className={settingsTd}>{runPlanLabel(r)}</td>
-                        <td className={settingsTd}>{formatSize(r.size_bytes)}</td>
-                        <td className={cn(settingsTd, "text-muted-foreground")}>{proofLabel(r.proof_level, r.drill_result)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <BackupsTable rows={pickPage.shown} rowKey={(r) => r.id} label="Backups" columns={pickColumns(now)}
+                  onOpen={(r) => pick({ path: r.bundle_path!, kind: archiveKind(r) })}
+                  stack={(r) => ({ title: formatWhen(r.started_at, now), sub: `${r.scope === "instance" ? "Whole instance" : r.workspace_name ?? "—"} · ${formatSize(r.size_bytes)}`, end: <ProofSteps level={r.proof_level} word={false} partial={!!r.drill_result && r.drill_result !== "ok"} /> })} />
+                <ShowMore shown={pickPage.shown.length} total={pickPage.total} nextCount={pickPage.nextCount} onMore={pickPage.showMore} noun="backups" paged={pickPage.paged} />
+              </>
             )}
           </Gate>
         </SettingsCard>
@@ -324,6 +330,16 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
       {step === 4 && !cliOnly && (
         <>
           <ChecksCard checks={checks} workspaceId={ctx.demo ? null : (restoreWs ?? ctx.currentWorkspaceId)} />
+          <SettingsCard icon={ListTodo} title="Also" description="Asked of the server with the restore, and with its dry run">
+            <SettingsRow label="Also bring back service data" description="Databases and caches of crew services">
+              <Switch checked={recoverServices} onCheckedChange={setRecoverServices} aria-label="Also bring back service data" />
+            </SettingsRow>
+            {target === "replace" && (
+              <SettingsRow label="Discard open workbooks" description="Replacing a workspace deletes its workbooks, which no backup holds. Without this the restore is refused when it has some.">
+                <Switch checked={discardWorkbooks} onCheckedChange={setDiscardWorkbooks} aria-label="Discard open workbooks" />
+              </SettingsRow>
+            )}
+          </SettingsCard>
           {!report && <div><Button size="sm" className="h-7 text-xs" onClick={dryRun} disabled={busy}>{busy ? "Running…" : "Run the dry run"}</Button></div>}
           {report && (
             <>
@@ -490,34 +506,36 @@ function OffsitePicker({ demo, onPicked, onClose }: { demo: boolean; onPicked: (
               {(data) => data.copies.length === 0 ? (
                 <SettingsEmpty>No bundle at {data.destination_name}.</SettingsEmpty>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className={settingsTable}>
-                    <thead><tr>
-                      {["Bundle", "Scope", "Size", "Copied", ""].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {data.copies.map((c) => (
-                        <tr key={c.key}>
-                          <td className={cn(settingsTd, "font-mono")}>{c.key}</td>
-                          <td className={settingsTd}>{c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`}</td>
-                          <td className={settingsTd}>{formatSize(c.size)}</td>
-                          <td className={settingsTd}>{shortDate(new Date(c.modified))}</td>
-                          <td className={cn(settingsTd, "text-right")}>
-                            {c.local && c.local_path
-                              ? <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onPicked(c.local_path!, c.scope)} title={`Already on this server: ${c.local_path}`}>Use</Button>
-                              : <Button size="sm" className="h-7 text-xs" disabled={fetching !== null} onClick={() => void fetchOne(c.key, c.scope)}>{fetching === c.key ? "Fetching…" : "Fetch"}</Button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <CopiesTable copies={data.copies} fetching={fetching}
+                  onUse={(c) => onPicked(c.local_path!, c.scope)} onFetch={(c) => void fetchOne(c.key, c.scope)} />
               )}
             </Gate>
           </>
         )}
       </Gate>
     </SettingsCard>
+  )
+}
+
+/** The bundles a destination holds, a page at a time; a copy already here is Used, else Fetched. */
+function CopiesTable({ copies, fetching, onUse, onFetch }: { copies: OffsiteCopy[]; fetching: string | null; onUse: (c: OffsiteCopy) => void; onFetch: (c: OffsiteCopy) => void }) {
+  const page = useShowMore(copies, { step: 25 })
+  const action = (c: OffsiteCopy) => (c.local && c.local_path
+    ? <Button size="sm" variant="outline" className="h-7 text-xs coarse:h-[44px]" onClick={() => onUse(c)} title={`Already on this server: ${c.local_path}`}>Use</Button>
+    : <Button size="sm" className="h-7 text-xs coarse:h-[44px]" disabled={fetching !== null} onClick={() => onFetch(c)}>{fetching === c.key ? "Fetching…" : "Fetch"}</Button>)
+  return (
+    <>
+      <BackupsTable rows={page.shown} rowKey={(c) => c.key} label="Off-site bundles"
+        columns={[
+          { key: "key", header: "Bundle", cell: (c) => <span className="font-mono">{c.key}</span> },
+          { key: "scope", header: "Scope", cell: (c) => (c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`) },
+          { key: "size", header: "Size", cell: (c) => formatSize(c.size) },
+          { key: "copied", header: "Copied", cell: (c) => shortDate(new Date(c.modified)) },
+          { key: "act", header: "", right: true, cell: action },
+        ]}
+        stack={(c) => ({ title: <span className="font-mono text-label">{c.key}</span>, sub: `${c.scope === "instance" ? "Whole instance" : "Workspace"} · ${formatSize(c.size)} · ${shortDate(new Date(c.modified))}`, end: action(c) })} />
+      <ShowMore shown={page.shown.length} total={page.total} nextCount={page.nextCount} onMore={page.showMore} noun="bundles" paged={page.paged} />
+    </>
   )
 }
 
@@ -610,32 +628,30 @@ export function RestoreHistory({ now = new Date() }: { now?: Date }) {
 }
 
 function RestoreTable({ rows, now }: { rows: RestoreRecord[]; now: Date }) {
+  const page = useShowMore(rows, { step: 25 })
+  const result = (r: RestoreRecord) => (
+    <span className="inline-flex items-center gap-2">
+      <StatusPill tone={RESULT_TONE[r.result] ?? "muted"} label={r.result === "ok" ? "done" : r.result} />
+      <span className="text-muted-foreground">{r.result === "partial" ? "report kept" : r.warnings ? `${r.warnings} warning${r.warnings === 1 ? "" : "s"}` : ""}</span>
+    </span>
+  )
+  const from = (r: RestoreRecord) => `${r.source_scope === "instance" ? "Whole instance" : r.source_name} · ${formatSourceDate(r.source_date)}`
+  const into = (r: RestoreRecord) => `${r.target}${r.kind === "dry_run" ? " · dry run" : ""}`
+  const columns: TableColumn<RestoreRecord>[] = [
+    { key: "when", header: "When", cell: (r) => formatWhen(r.created_at, now) },
+    { key: "who", header: "Who", cell: (r) => r.actor },
+    { key: "from", header: "From", cell: from },
+    { key: "into", header: "Into", cell: into },
+    { key: "result", header: "Result", cell: result },
+  ]
   return (
     <SettingsCard icon={History} title="Restore history" description="Every restore and dry run on this server">
       {rows.length === 0 ? <SettingsEmpty>No restore yet.</SettingsEmpty> : (
-        <div className="overflow-x-auto">
-          <table className={settingsTable}>
-            <thead><tr>
-              {["When", "Who", "From", "Into", "Result"].map((h) => <th key={h} className={settingsTh}>{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className={settingsTd}>{formatWhen(r.created_at, now)}</td>
-                  <td className={settingsTd}>{r.actor}</td>
-                  <td className={settingsTd}>{r.source_scope === "instance" ? "Whole instance" : r.source_name} · {formatSourceDate(r.source_date)}</td>
-                  <td className={settingsTd}>{r.target}{r.kind === "dry_run" ? " · dry run" : ""}</td>
-                  <td className={settingsTd}>
-                    <span className="inline-flex items-center gap-2">
-                      <StatusPill tone={RESULT_TONE[r.result] ?? "muted"} label={r.result === "ok" ? "done" : r.result} />
-                      <span className="text-muted-foreground">{r.result === "partial" ? "report kept" : r.warnings ? `${r.warnings} warning${r.warnings === 1 ? "" : "s"}` : ""}</span>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <BackupsTable rows={page.shown} rowKey={(r) => r.id} columns={columns} label="Restore history"
+            stack={(r) => ({ title: into(r), sub: `${formatWhen(r.created_at, now)} · ${r.actor}`, end: result(r) })} />
+          <ShowMore shown={page.shown.length} total={page.total} nextCount={page.nextCount} onMore={page.showMore} noun="restores" paged={page.paged} />
+        </>
       )}
     </SettingsCard>
   )

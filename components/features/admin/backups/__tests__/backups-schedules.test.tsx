@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import { SchedulesBody } from "../backups-schedules"
 import { plansFixture } from "../__fixtures__/backups"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
+import type { BackupPlan } from "../backups-model"
 import type { SectionCtx } from "../backups-scope"
 
 // Admin › Backups › a plan, on the nested page: the side panel lists the
@@ -24,10 +25,10 @@ function ctxOf(over: Partial<SectionCtx> = {}): SectionCtx {
   }
 }
 
-function show(ctx: SectionCtx, reload = vi.fn()) {
+function show(ctx: SectionCtx, reload = vi.fn(), plans: BackupPlan[] = plansFixture()) {
   const utils = render(
     <PageSaveProvider>
-      <SchedulesBody plans={plansFixture()} ctx={ctx} reload={reload} now={new Date("2026-10-08T10:00:00Z")} />
+      <SchedulesBody plans={plans} ctx={ctx} reload={reload} now={new Date("2026-10-08T10:00:00Z")} />
       <PageSaveBar />
     </PageSaveProvider>,
   )
@@ -139,5 +140,51 @@ describe("Schedules on the nested page", () => {
   it("marks each calendar entry with an icon and a word", () => {
     show(ctxOf())
     for (const l of ["✓ done", "✕ failed", "↻ catch-up / skipped", "○ planned", "◇ environments"]) expect(screen.getByText(l)).toBeInTheDocument()
+  })
+})
+
+describe("what the server already stores for a plan", () => {
+  it("Try again every N min and the stale alert hours are edited and saved with the plan", async () => {
+    h.apiFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+      init?.method === "PUT" ? new Response(JSON.stringify(plansFixture()[0]), { status: 200 }) : new Response("{}", { status: 404 }))
+    show(ctxOf())
+    expect(screen.getByLabelText("Try again every (minutes)")).toHaveValue(15)
+    expect(screen.getByLabelText("Alert when its newest backup is older than (hours)")).toHaveValue(36)
+    fireEvent.change(screen.getByLabelText("Try again every (minutes)"), { target: { value: "7" } })
+    fireEvent.change(screen.getByLabelText("Alert when its newest backup is older than (hours)"), { target: { value: "48" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(calls("PUT", "/backups/plans/plan-complete")).toHaveLength(1))
+    expect(JSON.parse(String((calls("PUT", "/backups/plans/plan-complete")[0][1] as RequestInit).body))).toMatchObject({ busy_retry_minutes: 7, stale_alert_hours: 48 })
+  })
+
+  it("a monthly plan takes a day up to 31 and says a short month has no run", () => {
+    const monthly: BackupPlan = { ...plansFixture()[0], cadence: "monthly", monthday: 15 }
+    show(ctxOf(), vi.fn(), [monthly])
+    const day = screen.getByRole("spinbutton", { name: "Day of month" })
+    fireEvent.change(day, { target: { value: "40" } })
+    expect(day).toHaveValue(31)
+    expect(screen.getByText(/a month without that day has no run/)).toBeInTheDocument()
+  })
+
+  it("a plan with only some kinds says in its head that it does not count as protection", () => {
+    const partial: BackupPlan = { ...plansFixture()[1], counts_as_protection: false }
+    show(ctxOf({ focusPlan: partial.id }), vi.fn(), [plansFixture()[0], partial])
+    expect(document.querySelector("[data-slot=plan-name]")).toHaveTextContent("Memory every 6 h")
+    expect(screen.getByText("does not count as protection")).toBeInTheDocument()
+  })
+
+  it("a full plan says nothing of the kind", () => {
+    show(ctxOf())
+    expect(screen.queryByText("does not count as protection")).toBeNull()
+  })
+
+  it("picks a workspace plan's workspaces in a searchable list, none meaning every workspace", () => {
+    const ws: BackupPlan = { ...plansFixture()[1], workspace_ids: [] }
+    show(ctxOf({ focusPlan: ws.id }), vi.fn(), [ws])
+    expect(screen.queryByRole("checkbox", { name: "Dess" })).toBeNull()
+    const field = screen.getByRole("button", { name: "Workspaces: Every workspace" })
+    fireEvent.click(field)
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show Dess" }))
+    expect(screen.getByRole("button", { name: "Workspaces: Dess", hidden: true })).toBeInTheDocument()
   })
 })

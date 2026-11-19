@@ -121,7 +121,7 @@ describe("on the nested page", () => {
   it("the side panel picks the tab; the page draws no tabs of its own", async () => {
     h.api.mockImplementation((url: string) => String(url).includes("/restores") ? json([]) : Promise.resolve(new Response("{}", { status: 404 })))
     render(<BackupsRecovery ctx={ctx({ inDrill: true, recoveryView: "history" })} />)
-    expect(screen.queryByRole("group", { name: "Recovery" })).toBeNull()
+    expect(screen.queryByRole("group", { name: "Restore" })).toBeNull()
     expect(await screen.findByText("No restore yet.")).toBeInTheDocument()
   })
 })
