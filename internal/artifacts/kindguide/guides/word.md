@@ -1,7 +1,7 @@
 ---
 kind: word
 title: Word (native Craft)
-version: 1.0.0
+version: 1.1.0
 modes: [ask, propose, edit]
 capabilities:
   supported: [read.text, apply.caretDocStart, apply.caretDocEnd, apply.textInsert, proposal]
@@ -15,13 +15,16 @@ a Docs artifact. In `crewship page list` it is `--kind word`
 (`artifact_kind: word`); a structured Docs document is `--kind docs` and
 follows the Docs guide.
 
-You cannot create a Word document. A person creates an empty Page and
-initializes it as Word (`crewship craft initialize <page>`); no agent tool
+You cannot create a Word document. Only the Page's owner initializes an
+empty Page they own as Word (`crewship craft initialize <page>`); no agent tool
 does that. You work on an existing document only inside a native Craft task
 that a person confirmed for it. The task's tool server `crewship-craft`
 offers `craft_read`, `craft_acquire`, `craft_renew`, `craft_apply`,
 `craft_propose` and `craft_release`; the `crewship-craft` playbook has the
 whole procedure and error table.
+
+A task needs the Page's owner, or an owner grant for that agent, and an
+instance administrator must turn on Word and its agents.
 
 ## Data shape
 
@@ -59,22 +62,28 @@ the lease.
 
 ## Conflicts
 
-`craft_acquire` answers `409` with `holder_kind` when someone else holds the
-document. Do not loop: use `craft_propose` if the person wants a proposal,
-or tell them it is being edited. A `409` on apply means the version or lease
-changed: read again and plan the edit against the new text; never copy the
-newer version into `base_version` and resend. A `503` with an uncertain
-outcome is retried only with the exact same arguments.
+If `craft_acquire` or `craft_apply` answers `409` with `reason`
+`proposal_required`, call `craft_propose` with the same commands over the
+`base_version` you read; do not read again or retry the apply. Any other
+`409` from `craft_acquire` names a `holder_kind`: someone else holds the
+document. Do not loop: propose the change, or tell the person it is being
+edited. Any other `409` on apply means the version or lease changed: read
+again and plan the edit against the new text; never copy the newer version
+into `base_version` and resend. A `503` with an uncertain outcome is
+retried only with the exact same arguments.
 
 ## Agent modes
+
+The mode comes from the task. In the author's personal space the default is
+apply (Edit). On a shared document the default is Propose, unless the person
+started the task with `--mode apply`.
 
 Ask: `craft_read` only. Propose: `craft_propose` with the same commands over
 the exact `base_version` you read and a short `summary`; the document does
 not change, a person accepts or rejects the proposal, and you report its
 `proposal_id`. Edit: `craft_apply` while you hold the lease, inside the
 confirmed task. There is no comment tool: answer in the chat where the task
-came from. Without a confirmed native Craft task none of these tools work;
-an instance administrator must also turn on Word and its agents.
+came from. Without a confirmed native Craft task none of these tools work.
 
 ## Verification
 

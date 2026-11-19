@@ -922,10 +922,12 @@ aliases), print that guide.
 
 Word (application `wordcraft`) and Sheet (application `gridcraft`) are
 native Craft files with one editor at a time, not Docs or Artifacts. An agent
-cannot create one: a person initializes an empty Page with
+cannot create one: only the Page's owner initializes an empty Page with
 [`crewship craft initialize`](/cli/craft). An agent reads, proposes or edits
-one only inside a native Craft task a person confirmed, with the
-`crewship-craft` tools; their guides declare `ask`, `propose` and `edit`, and
+one only inside a native Craft task a person confirmed (it needs the owner,
+or an owner grant for that agent), with the `crewship-craft` tools. The task
+sets the mode: Edit by default in the author's personal space, Propose on a
+shared document unless the task was started with `--mode apply`; their guides declare `ask`, `propose` and `edit`, and
 `create` and `comment` as unsupported.
 
 ```bash
