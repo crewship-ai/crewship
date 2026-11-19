@@ -12,15 +12,17 @@ func TestEnsureAgentToolPath(t *testing.T) {
 		want string
 	}{
 		{"nil env refers to the image's own PATH behind the tool dirs", nil,
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
+			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
 		{"empty PATH same as absent", map[string]string{"PATH": "  "},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
+			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
 		{"operator PATH is kept, tool dirs go first", map[string]string{"PATH": "/opt/x/bin:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/x/bin:/usr/bin"},
-		{"complete native entries retain their order", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
-			"/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
+			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/x/bin:/usr/bin"},
+		{"Crewship's pre-#5459 generated order is migrated to declared pins first", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
+			"/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/crew-tools/bin:/usr/bin"},
+		{"operator's own home-first order is kept", map[string]string{"PATH": "/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims"},
+			"/opt/crewship/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims"},
 		{"partially present entries retain precedence", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/mise/data/shims:/usr/bin"},
+			"/opt/crewship/bin:/home/agent/.local/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/mise/data/shims:/usr/bin"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,7 +60,7 @@ func TestGenerateDockerfile_CarriesAgentToolEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"ENV PATH=/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:",
+		"ENV PATH=/opt/crewship/bin:/opt/mise/data/shims:/home/agent/.local/bin:/opt/crew-tools/bin:",
 		"ENV MISE_DATA_DIR=/opt/mise/data",
 		"ENV MISE_GLOBAL_CONFIG_FILE=/opt/mise/config/config.toml",
 		"ENV TZ=UTC",

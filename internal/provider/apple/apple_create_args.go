@@ -268,7 +268,7 @@ func buildCreateArgs(in createArgsInput) ([]string, error) {
 	for _, k := range envKeys {
 		value := in.containerEnv[k]
 		if k == "PATH" {
-			value = devcontainer.NativeToolPath(value)
+			value = devcontainer.CreationToolPath(value)
 		}
 		args = append(args, "--env", k+"="+value)
 	}
