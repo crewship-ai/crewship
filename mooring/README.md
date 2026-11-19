@@ -3,7 +3,8 @@
 Application-independent collaboration code. Crewship runs it only behind the
 default-off `CREWSHIP_MOORING_ENABLED` session profile: a release build embeds the
 `mooring-collab` runtime (`scripts/build-mooring-runtime.py`,
-`internal/mooringassets`) and the server starts it from `internal/server/mooring.go`.
+`internal/mooringassets`) which `internal/server/mooring.go` verifies and unpacks; the API starts one
+process per collaboration session.
 Ordinary Go builds embed only an unavailable marker, and with the flag off no Rust
 service starts. Native Word/Sheet (`crewship craft`, `internal/api/craft_native_*`)
 and the GridCraft workbook have their own contracts and do not start this runtime.

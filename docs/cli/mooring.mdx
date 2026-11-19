@@ -8,8 +8,9 @@ tag: Experimental
 See the [pilot contract](/specs/mooring-pilot) for the supported JSON profile and
 native GridCraft adapter. All of these commands are off by default:
 `apps`, `create`, `read`, `command`, `admit`, `revoke` and `agent` need
-`CREWSHIP_GRIDCRAFT_ENABLED=true`; `session`, `command-session`, `connect`,
-`task` and `provenance` need `CREWSHIP_MOORING_ENABLED=true` (see the
+`CREWSHIP_GRIDCRAFT_ENABLED=true` and an operator-qualified GridCraft engine; `session`, `command-session`, `connect`,
+`task` and `provenance` need `CREWSHIP_MOORING_ENABLED=true`, and `command-session` also
+`CREWSHIP_MOORING_COMMANDS_ENABLED=true` (see the
 [session transport](/specs/mooring-session-transport)). Native Word and Sheet
 Pages are not Mooring application documents; use [`crewship craft`](/cli/craft).
 
