@@ -16,15 +16,17 @@ import (
 // than exited. Confirmation must retain the exact execution's stop proof.
 func TestConfirmProtectedStopAcceptsExactCancelledCaptureReceipt(t *testing.T) {
 	for _, tc := range []struct {
-		name, receipt string
-		confirmed     bool
+		name, reason, receipt string
+		confirmed             bool
 	}{
-		{"exact", "exec", true},
-		{"missing", "", false},
-		{"foreign", "other-exec", false},
+		{"exact", "execution_cancelled", "exec", true},
+		{"missing", "execution_cancelled", "", false},
+		{"foreign", "execution_cancelled", "other-exec", false},
+		{"output-limit-is-not-explicit-cancellation", "output_limit", "exec", false},
+		{"output-error-is-not-explicit-cancellation", "output_error", "exec", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 137, "execution_cancelled")
+			o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 137, tc.reason)
 			o.container = &retainedContainerStatus{state: "running"}
 			run.AgentSlug = "agent"
 			raw, err := json.Marshal(run)
