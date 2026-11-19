@@ -110,6 +110,7 @@ import type { ChatKind } from "./chat-kind"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { StreamingIndicator } from "./streaming-indicator"
+import { turnRenderKeys } from "./turn-keys"
 import { markAgentChatOpen } from "@/lib/chat-viewing"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
@@ -598,6 +599,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   // While this agent's chat is open, its run-completed toast is redundant:
   // the reply is on screen (components/layout/realtime-toasts.tsx).
   useEffect(() => markAgentChatOpen(agentId), [agentId])
+  const turnKeys = useMemo(() => turnRenderKeys(turns), [turns])
 
   useEffect(() => {
     // workspaceId is REQUIRED by GET /chats/{id}/messages — without it the
@@ -1518,7 +1520,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         <AnimatePresence key={sessionId} initial={false} mode="popLayout">
           {turns.map((turn, idx) => (
             <TurnRenderer
-              key={turn.id}
+              key={turnKeys[idx]}
               turn={turn}
               entityCards={renderEntityCards(turn)}
               onCopy={handleCopy}

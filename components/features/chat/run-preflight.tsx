@@ -44,9 +44,11 @@ export function useChatRunPreflight({ chatId, workspaceId, userId, enabled }: {
  * Chat — models and budgets are managed in Crews.
  */
 export function runHold(data: ChatRunPreflight): string | null {
+  // A run without a payer cannot start at all; say so before the send, not after.
+  if (data.payer.state === "missing") return "This agent has no model credential, so it cannot run. Add one in the agent's settings in Crews."
   if (data.gate.blocking) return "Runs in this chat wait for approval before they start."
   if (data.budgets.some((budget) => budget.mode === "hard" && budget.state === "exceeded")) {
-    return "The budget for this agent is used up. New runs are blocked until it resets."
+    return "A budget this agent runs under is used up. New runs are blocked until it resets."
   }
   return null
 }

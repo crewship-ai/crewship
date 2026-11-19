@@ -31,7 +31,12 @@ it("says plainly when the run will wait for approval", async () => {
 it("says plainly when a hard budget is used up", async () => {
  fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, budgets: [{ ...base.budgets[0], remaining_usd: 0, state: "exceeded" }] })))
  setup()
- expect(await screen.findByRole("status")).toHaveTextContent("The budget for this agent is used up. New runs are blocked until it resets.")
+ expect(await screen.findByRole("status")).toHaveTextContent("A budget this agent runs under is used up. New runs are blocked until it resets.")
+})
+it("says plainly when the agent has no model credential", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, payer: { ...base.payer, state: "missing", label: "" } })))
+ setup()
+ expect(await screen.findByRole("status")).toHaveTextContent("This agent has no model credential, so it cannot run.")
 })
 it("does not warn about a soft budget that is over", async () => {
  fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, budgets: [{ ...base.budgets[0], mode: "soft", state: "exceeded" }] })))

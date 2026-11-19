@@ -69,4 +69,7 @@ describe("withRunStatus", () => {
     expect(withRunStatus(agent, false)).toBe(agent)
     expect(withRunStatus({ ...agent, status: "PAUSED" }, false).status).toBe("PAUSED")
   })
+  it("keeps a more specific live status while streaming", () => {
+    expect(withRunStatus({ ...agent, status: "PENDING_REVIEW" }, true).status).toBe("PENDING_REVIEW")
+  })
 })

@@ -339,8 +339,8 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
         const text = describeMetaValue(value)
         if (text) details.push([label, text])
       }
-      addDetail("Model", meta.model)
-      addDetail("CLI version", meta.claude_code_version)
+      if (model) details.push(["Model", model])
+      if (version) details.push(["CLI version", version])
       if (toolCount > 0) details.push(["Tools", String(toolCount)])
       addDetail("Auth", meta.apiKeySource)
       addDetail("Permissions", meta.permissionMode)

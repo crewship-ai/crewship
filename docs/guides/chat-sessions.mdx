@@ -782,8 +782,9 @@ or chat requires a new successful profile check before protected reads begin.
 ## Budget and gate before work
 
 In Chat, the composer shows this snapshot only when it would hold the next run:
-a predicted blocking approval ("Runs in this chat wait for approval before they
-start.") or a hard budget that is used up. Otherwise it stays silent, including
+a missing model credential (payer state `missing`), a predicted blocking
+approval ("Runs in this chat wait for approval before they start.") or a hard
+budget that is used up. Otherwise it stays silent, including
 when the snapshot is denied or unavailable; payer, model and price stay in the
 CLI and API below.
 

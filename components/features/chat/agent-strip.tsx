@@ -55,7 +55,10 @@ export function agentStatusPill(status: string | null | undefined): { label: str
  * the most direct evidence there is.
  */
 export function withRunStatus<T extends { status?: string | null }>(agent: T, streaming: boolean): T {
-  return streaming && (agent.status ?? "").toUpperCase() !== "RUNNING" ? { ...agent, status: "RUNNING" } : agent
+  // Only a stale idle row is corrected; a pause, review or error the live
+  // status reports is more specific than "running" and stays.
+  const current = (agent.status ?? "").trim().toUpperCase()
+  return streaming && (current === "" || current === "IDLE") ? { ...agent, status: "RUNNING" } : agent
 }
 
 export function AgentStrip({
