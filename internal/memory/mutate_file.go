@@ -23,7 +23,7 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 	if storageRoot == "" {
 		// Trusted in-process/legacy callers retain their existing path contract.
 		if create {
-			if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+			if err := MkdirAllShared(filepath.Dir(path)); err != nil {
 				return nil, fmt.Errorf("mkdir parent: %w", err)
 			}
 		}
@@ -75,6 +75,9 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 					_ = root.Close()
 					return nil, syncErr
 				}
+			}
+			if err == nil {
+				err = shareRootedChild(root, part)
 			}
 			if err == nil || errors.Is(err, os.ErrExist) {
 				info, err = root.Lstat(part)
@@ -158,4 +161,21 @@ func (f *mutationFile) lock() interface {
 		return NewFileLock(f.path + ".lock")
 	}
 	return NewRootFileLock(f.root, f.name+".lock")
+}
+
+// shareRootedChild sets MemoryDirPerm on part, a directory just created
+// beneath root, when root is in the shared memory tree (#4777). The chmod
+// goes through a root opened on part, so it stays confined to that
+// directory.
+func shareRootedChild(root *os.Root, part string) error {
+	parent, err := root.Stat(".")
+	if err != nil || !isSharedDir(parent) {
+		return err
+	}
+	child, err := root.OpenRoot(part)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = child.Close() }()
+	return child.Chmod(".", MemoryDirPerm)
 }

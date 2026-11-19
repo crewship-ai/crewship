@@ -183,7 +183,7 @@ func writeLessonToDir(ctx context.Context, lessonsDir string, entry LessonEntry)
 		return fmt.Errorf("lesson: lessons dir %q escapes via ..", lessonsDir)
 	}
 
-	if err := os.MkdirAll(cleaned, 0o755); err != nil {
+	if err := memory.MkdirAllShared(cleaned); err != nil {
 		return fmt.Errorf("lesson: mkdir %s: %w", cleaned, err)
 	}
 	if err := ctx.Err(); err != nil {

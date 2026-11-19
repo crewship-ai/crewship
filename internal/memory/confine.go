@@ -132,6 +132,7 @@ func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 		if _, err := safepath.ValidateComponent(seg); err != nil {
 			return fmt.Errorf("memory directory component: %w", err)
 		}
+		created := false
 		exists, symlink, isDir, err := cur.kind(seg)
 		switch {
 		case err == nil && exists && symlink:
@@ -147,6 +148,8 @@ func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 				if !os.IsExist(mkErr) {
 					return fmt.Errorf("create memory directory %s: %w", seg, mkErr)
 				}
+			} else {
+				created = true
 			}
 		default:
 			return fmt.Errorf("stat memory directory %s: %w", seg, err)
@@ -165,6 +168,14 @@ func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 				}
 			}
 			return fmt.Errorf("open memory directory %s: %w", seg, err)
+		}
+		if created {
+			// In the shared tree the next writer may be another uid; give
+			// the new directory 02775 through its own descriptor (#4777).
+			if err := shareConfinedChild(cur, next); err != nil {
+				_ = next.close()
+				return fmt.Errorf("share memory directory %s: %w", seg, err)
+			}
 		}
 		_ = cur.close()
 		cur = next

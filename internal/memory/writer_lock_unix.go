@@ -5,6 +5,7 @@ package memory
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
@@ -20,10 +21,14 @@ func (l *writeLock) Lock() error {
 	// arbitrary file (review #926). We deliberately do NOT add O_EXCL: the
 	// sentinel is a persistent on-disk file that legitimate repeated locks
 	// reuse, and O_EXCL would fail every lock after the first.
+	shared := inSharedTree(filepath.Dir(l.path))
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("open lockfile: %w", err)
 	}
+	// In the shared memory tree the next locker may be another uid
+	// (agent, sidecar, host); a 0600 sentinel would refuse it (#4777).
+	shareLockFile(f, shared)
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("flock: %w", err)
@@ -37,10 +42,13 @@ func (l *RootFileLock) Lock() error {
 	if l.root == nil {
 		return fmt.Errorf("open lockfile: root is nil")
 	}
+	parent, statErr := l.root.Stat(filepath.Dir(l.name))
+	shared := statErr == nil && isSharedDir(parent)
 	f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("open lockfile: %w", err)
 	}
+	shareLockFile(f, shared)
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("flock: %w", err)

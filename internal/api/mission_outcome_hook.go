@@ -3,10 +3,14 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
@@ -29,7 +33,7 @@ var safeIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 // mission_handler_mutate.go and issue_handler_workflow.go. It runs
 // AFTER the SQL transaction has committed — a write failure here must
 // not roll back the operator's intentional status transition, so the
-// hook returns nothing and logs at WARN on failure.
+// hook returns nothing; a failure is logged at ERROR and counted.
 //
 // The function fires its work in a fresh goroutine with a detached
 // context (a copy of the request context's values minus its deadline
@@ -47,7 +51,10 @@ var safeIDPattern = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 //     itself returns nil on non-terminal, this just avoids the trip
 //
 // On a successful write, no log line is emitted — the YAML row on disk
-// IS the audit trail. Operators chasing "did this hook fire" can grep
+// IS the audit trail. A failed write is an ERROR with
+// event=mission_outcome_lesson_write_failed and increments
+// crewshipd_mission_outcome_lesson_write_failed_total, so "no lessons"
+// and "lessons failing" are distinguishable without reading the disk. Operators chasing "did this hook fire" can grep
 // /crew/shared/.memory/lessons.md for the mission_outcome_<id> row.
 func emitMissionOutcomeLessonAsync(
 	ctx context.Context,
@@ -143,13 +150,47 @@ func emitMissionOutcomeLessonAsync(
 			CompletedAt: completedTime,
 		}
 		if err := consolidate.EmitMissionOutcomeLesson(workCtx, crewSharedDir, mo); err != nil {
-			logger.Warn("mission outcome hook: lesson write failed (status transition unaffected)",
-				"mission_id", missionID,
-				"crew_id", crewID.String,
-				"status", newStatus,
-				"error", err)
+			reportMissionOutcomeLessonFailure(logger, missionID, crewID.String, newStatus, crewSharedDir, err)
 		}
 	}()
+}
+
+// missionOutcomeLessonWriteFailed counts mission-outcome lessons the hook
+// could not write (#1623). The status transition already committed, so the
+// lesson is lost; a WARN alone left every dev slot without a single
+// lessons.md for months and nobody saw it. Exposed on /metrics as
+// crewshipd_mission_outcome_lesson_write_failed_total.
+var missionOutcomeLessonWriteFailed atomic.Int64
+
+// MissionOutcomeLessonWriteFailedTotal returns the number of mission-outcome
+// lesson writes that failed since process start. Read by /metrics.
+func MissionOutcomeLessonWriteFailedTotal() int64 {
+	return missionOutcomeLessonWriteFailed.Load()
+}
+
+// memoryPermissionHint explains the usual cause of a permission failure: the
+// hook writes from crewshipd on the host, but the crew's `.memory` tree is
+// created by the agent container as 1001:1002 mode 2775
+// (internal/memory/ownership.go). Only a crewshipd that is a member of the
+// memory group can write it; that membership is host configuration.
+const memoryPermissionHint = "crewshipd cannot write the crew memory tree; it is owned by the agent " +
+	"(uid 1001) with memory group 1002 and mode 2775, so the crewshipd service user " +
+	"must have group 1002 as a supplementary group (host configuration)"
+
+func reportMissionOutcomeLessonFailure(logger *slog.Logger, missionID, crewID, status, dir string, err error) {
+	missionOutcomeLessonWriteFailed.Add(1)
+	attrs := []any{
+		"event", "mission_outcome_lesson_write_failed",
+		"mission_id", missionID,
+		"crew_id", crewID,
+		"status", status,
+		"dir", dir,
+		"error", err,
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		attrs = append(attrs, "uid", os.Geteuid(), "hint", memoryPermissionHint)
+	}
+	logger.Error("mission outcome hook: lesson write failed (status transition unaffected)", attrs...)
 }
 
 // parseStoredTimestamp accepts both RFC3339 (modern writes via

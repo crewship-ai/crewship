@@ -382,3 +382,84 @@ func TestParseStoredTimestamp_HandlesLegacyAndModernShapes(t *testing.T) {
 // Ensure the test file actually uses the sql.DB import via setupTestDB
 // in case the lint-cleanup pass removes "database/sql".
 var _ = (*sql.DB)(nil)
+
+// TestEmitMissionOutcomeLessonAsync_WriteFailureIsCountedAndExplained is the
+// observability half of #1623. The hook writes host-side as crewshipd; when
+// that uid cannot write the crew's 1001:1002 `.memory` directory the write
+// used to fail with one WARN and nothing else, so on every dev slot the
+// feature had never written a lesson and nobody noticed. A failed write now
+// increments crewshipd_mission_outcome_lesson_write_failed_total and, for a
+// permission failure, names the boundary that refused it.
+func TestEmitMissionOutcomeLessonAsync_WriteFailureIsCountedAndExplained(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	cases := []struct {
+		name     string
+		prepare  func(t *testing.T, memDir string)
+		wantHint bool
+	}{
+		{
+			name: "memory dir not writable by crewshipd",
+			prepare: func(t *testing.T, memDir string) {
+				if err := os.MkdirAll(memDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(memDir, 0o555); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(memDir, 0o755) })
+			},
+			wantHint: true,
+		},
+		{
+			name: "memory path is not a directory",
+			prepare: func(t *testing.T, memDir string) {
+				if err := os.MkdirAll(filepath.Dir(memDir), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(memDir, []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantHint: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			storagePath := storageDir(t)
+
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			crewID := seedMissionCrew(t, db, wsID)
+			leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
+			if _, err := db.Exec(`INSERT INTO missions
+				(id, workspace_id, crew_id, lead_agent_id, trace_id, title, identifier, status, created_at, updated_at)
+				VALUES ('m_outcome_denied', ?, ?, ?, 'trace_denied', 'T', 'ENG-7', 'FAILED', datetime('now'), datetime('now'))`,
+				wsID, crewID, leadID); err != nil {
+				t.Fatalf("insert mission: %v", err)
+			}
+			tc.prepare(t, filepath.Join(storagePath, "crews", crewID, "shared", ".memory"))
+
+			before := MissionOutcomeLessonWriteFailedTotal()
+			emitMissionOutcomeLessonAsync(context.Background(), db, storagePath, "m_outcome_denied", "FAILED", logger)
+			if !waitForBackgroundWork(5 * time.Second) {
+				t.Fatal("hook goroutine did not finish")
+			}
+
+			if got := MissionOutcomeLessonWriteFailedTotal() - before; got != 1 {
+				t.Errorf("failure counter delta = %d, want 1", got)
+			}
+			logs := logBuf.String()
+			if !strings.Contains(logs, "level=ERROR") || !strings.Contains(logs, "mission_outcome_lesson_write_failed") {
+				t.Errorf("want an ERROR with the stable event name; logs:\n%s", logs)
+			}
+			if hint := strings.Contains(logs, "group 1002"); hint != tc.wantHint {
+				t.Errorf("permission hint present = %v, want %v; logs:\n%s", hint, tc.wantHint, logs)
+			}
+		})
+	}
+}
