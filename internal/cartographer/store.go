@@ -124,8 +124,13 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Checkpoint, 
 	return cp, nil
 }
 
+// MaxListLimit is the most checkpoints one List call returns. The HTTP
+// handler already clamps ?limit= to this through parsePagination; List
+// enforces it again so no caller can size the result allocation.
+const MaxListLimit = 200
+
 // List returns checkpoints for a mission, newest first. limit <= 0 picks
-// a sane default (50); the handler caps it before this runs.
+// a sane default (50); a limit above MaxListLimit is clamped to it.
 // workspaceID is enforced at the query layer so a caller who knows
 // another workspace's mission ID can't read its checkpoints —
 // cross-tenant risk closed at the store, not just at the handler
@@ -139,6 +144,9 @@ func List(ctx context.Context, db *sql.DB, workspaceID, missionID string, limit 
 	}
 	if limit <= 0 {
 		limit = 50
+	}
+	if limit > MaxListLimit {
+		limit = MaxListLimit
 	}
 	rows, err := db.QueryContext(ctx, `SELECT
 		id, workspace_id, crew_id, mission_id, label, journal_cursor, state_snapshot, fork_of, created_by, created_at
