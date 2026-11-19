@@ -236,11 +236,16 @@ var clientMethodShapes = map[string]callShape{
 // wrapperShapes are the plain-function wrappers in api_helpers.go. They are
 // not methods, and the path is their SECOND argument.
 var wrapperShapes = map[string]callShape{
-	"getJSON":    {Method: "GET", Templates: []string{hole(1)}, MinArgs: 2},
-	"postJSON":   {Method: "POST", Templates: []string{hole(1)}, MinArgs: 2},
-	"patchJSON":  {Method: "PATCH", Templates: []string{hole(1)}, MinArgs: 2},
-	"putJSON":    {Method: "PUT", Templates: []string{hole(1)}, MinArgs: 2},
-	"deleteJSON": {Method: "DELETE", Templates: []string{hole(1)}, MinArgs: 2},
+	// These wrappers forward the caller-selected HTTP method and endpoint.
+	// Tracking their call sites covers room and Page project commands as well
+	// as preventing the fixed-method forwarder discovery from dropping them.
+	"chatRoomRequest":   {MethodArg: 0, Templates: []string{hole(1)}, MinArgs: 3},
+	"projectCLIRequest": {MethodArg: 1, Templates: []string{hole(2)}, MinArgs: 4},
+	"getJSON":           {Method: "GET", Templates: []string{hole(1)}, MinArgs: 2},
+	"postJSON":          {Method: "POST", Templates: []string{hole(1)}, MinArgs: 2},
+	"patchJSON":         {Method: "PATCH", Templates: []string{hole(1)}, MinArgs: 2},
+	"putJSON":           {Method: "PUT", Templates: []string{hole(1)}, MinArgs: 2},
+	"deleteJSON":        {Method: "DELETE", Templates: []string{hole(1)}, MinArgs: 2},
 }
 
 // ─── path resolution ─────────────────────────────────────────────────────
@@ -642,6 +647,9 @@ func newPathResolver(files []*ast.File) *pathResolver {
 		helpers: map[string][]string{},
 		shapes:  map[string]callShape{},
 	}
+	// backupRoute only adds a workspace query parameter; the path passed by
+	// its caller remains the route. Preserve that path for route comparison.
+	r.helpers["backupRoute"] = []string{hole(0)}
 	for name, s := range wrapperShapes {
 		r.shapes[name] = s
 	}
