@@ -1,0 +1,1 @@
+- **Mise-installed agent CLIs could fail image verification.** The probe now receives the managed Mise configuration and data paths, including crew overrides, so it can resolve the installed OpenCode version before accepting the image.
