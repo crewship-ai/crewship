@@ -19,7 +19,7 @@ func createTestApproval(t *testing.T, store *SQLWaitpointStore, ws, run, step, f
 	t.Helper()
 	req := WaitpointApprovalRequest{WorkspaceID: ws, PipelineRunID: run, StepID: step, Prompt: "Ship?", TimeoutSec: 3600}
 	if form != "" {
-		req.DecisionForm = &DecisionForm{Fields: []InputSpec{}, Actions: []DecisionAction{{ID: "go", Label: "Go", Approved: true}}}
+		req.DecisionForm = &DecisionForm{Fields: []InputSpec{}, Actions: []DecisionAction{{ID: "go", Label: "Go", Approved: true}, {ID: "stop", Label: "Stop", Approved: false}}}
 	}
 	id, err := store.CreateApproval(context.Background(), req)
 	if err != nil {
