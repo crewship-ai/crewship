@@ -236,18 +236,23 @@ ID** (PRD PX-11). It calls `POST /api/v1/pages/{slug}/return-private`. Run
 `crewship page unshare <page> --dry-run --pages-version N` first: the preview
 lists every subject that loses access (with its rights before and after), the
 folder the Page leaves, every page grant that is deleted, every public link
-that is revoked and the number of live agent mandates that are revoked. Then
-confirm with `crewship page unshare <page> --yes --pages-version N
+that is revoked, the number of live agent mandates that are revoked, the edit
+leases of other people that are released, and in `reshare` how this type is
+shared again. Then confirm with `crewship page unshare <page> --yes --pages-version N
 --review-token TOKEN`.
 
 Confirming is one transaction. It sets the private audience, takes the Page out
-of its folder, deletes every page grant, revokes every public link and every
-live agent mandate on the Page, and writes the audit row
+of its folder, deletes every page grant (and records each as a retired
+issuance, so a restored backup cannot revive it), revokes every public link and
+every live agent mandate on the Page (the owner's own included), releases the
+edit lease and lease requests of anyone but the owner, and writes the audit row
 `artifact.returned_to_private` (actor, time, audience change, counts; no page
-name or content) plus the journal entries for each removed grant and link. The
-authority epoch advances, so a running agent's mandate stops at its next
-check. Former readers get 404 on their next read, export or write. The owner
-keeps full access. Workspace OWNER and ADMIN keep the audited read of private
+name or content) plus a journal entry for each removed grant and link. Those
+journal entries carry identifiers only, never the page name, slug, people's
+names or emails. The authority epoch advances, so a running agent's mandate
+stops at its next check. Former readers get 404 on their next read, export or
+write; right after the commit their live subscriptions to the Page's channel
+end and they are told to recheck access. The owner keeps full access. Workspace OWNER and ADMIN keep the audited read of private
 output (decision of 30 October, #4825); they cannot return or share it.
 
 Grants are deleted, not paused: sharing the Page again starts with no grants,
@@ -256,14 +261,19 @@ read cannot be recalled; the response says so in `notice`.
 
 Only the Page's human owner may run it. Statuses: 400 invalid review request,
 401 unauthenticated, 403 not the owner (including workspace OWNER and ADMIN),
-404 hidden or missing Page, 409 stale `pages_version`, stale review, crew-owned
-Page (`crew_owned`), already private (`already_private`) or a type without a
-private audience (`unsupported_type`), 500 storage failure.
+404 hidden or missing Page, 409 with a `reason`: `stale_version`,
+`stale_review`, `changed` (a concurrent change during the confirmation),
+`crew_owned`, `already_private`, `no_reshare_path` or `unsupported_type`; 500
+storage failure.
 
-Supported types (`kind` in the response): `document` (Docs), `workbook`,
-`word` and `sheet` (native Word and Sheet), `artifact_project` (HTML artifact
-project). Design, Slides, Mooring JSON documents, dashboards with panels and
-plain Pages are refused.
+Supported types (`kind` in the response): `workbook` and `artifact_project`
+(HTML artifact project). Only these can be shared again: a workbook with
+`crewship workbook share --publish`, an HTML artifact project with
+`crewship page artifact share`. Docs documents and native Word and Sheet
+documents have a private audience but no way to be shared again yet (#5617), so
+returning one would be one-way; they are refused with `no_reshare_path`.
+Design, Slides, Mooring JSON documents, dashboards with panels and plain Pages
+have no private audience and are refused with `unsupported_type`.
 
 | Flag | Description |
 |---|---|

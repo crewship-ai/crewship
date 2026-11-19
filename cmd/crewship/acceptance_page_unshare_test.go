@@ -19,7 +19,7 @@ import (
 // SQLite (PX-11). The owner previews the accesses that end, confirms with the
 // review token, and the same Page ID is private again: the grant holder's next
 // read through the CLI is refused and the public link is revoked.
-func TestAcceptance_PageUnshareReturnsSharedDocumentToPrivate(t *testing.T) {
+func TestAcceptance_PageUnshareReturnsSharedArtifactProjectToPrivate(t *testing.T) {
 	db := testutil.MigratedDB(t).DB
 	const ws = "cunsharefixture000000001"
 	exec1 := func(query string, args ...any) {
@@ -34,10 +34,13 @@ func TestAcceptance_PageUnshareReturnsSharedDocumentToPrivate(t *testing.T) {
 		exec1(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, "member-"+user, ws, "unshare-"+user)
 		exec1(`INSERT INTO cli_tokens(id,user_id,name,token_hash,tier) VALUES(?,?,'fixture',?,'STANDARD')`, "token-"+user, "unshare-"+user, sha256HexToken("crewship_cli_unshare_fixture_"+user))
 	}
+	exec1(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES('shared-project-id',?,'shared-project','Shared project','unshare-owner','{}',0)`, ws)
+	exec1(`INSERT INTO artifact_version_heads(workspace_id,page_id,content_type,latest_version,shared_version) VALUES(?,'shared-project-id','artifact_project',1,1)`, ws)
+	exec1(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('shared-project-id','user','unshare-reader','read','unshare-owner','2026-11-01T00:00:00Z')`)
+	exec1(`INSERT INTO page_public_tokens(id,page_id,token_hash,expires_at,created_by_user_id) VALUES('shared-project-link','shared-project-id','unshare-link-hash','2999-01-01T00:00:00Z','unshare-owner')`)
+	// A shared Docs document has no path to be shared again yet (#5617).
 	exec1(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES('shared-doc-id',?,'shared-doc','Shared doc','unshare-owner','{}',0)`, ws)
 	exec1(`INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,'shared-doc-id',3,x'',x'')`, ws)
-	exec1(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('shared-doc-id','user','unshare-reader','read','unshare-owner','2026-11-01T00:00:00Z')`)
-	exec1(`INSERT INTO page_public_tokens(id,page_id,token_hash,expires_at,created_by_user_id) VALUES('shared-doc-link','shared-doc-id','unshare-link-hash','2999-01-01T00:00:00Z','unshare-owner')`)
 
 	router, err := api.NewRouter(db, "unshare-acceptance-secret-32-chars", slog.Default())
 	if err != nil {
@@ -63,23 +66,26 @@ func TestAcceptance_PageUnshareReturnsSharedDocumentToPrivate(t *testing.T) {
 		return command.CombinedOutput()
 	}
 
-	if out, err := run("reader", "page", "get", "shared-doc", "--format", "json"); err != nil {
+	if out, err := run("reader", "page", "get", "shared-project", "--format", "json"); err != nil {
 		t.Fatalf("grant holder read before unshare: %v %s", err, out)
 	}
-	if out, err := run("reader", "page", "unshare", "shared-doc", "--dry-run", "--pages-version", "0"); err == nil {
+	if out, err := run("reader", "page", "unshare", "shared-project", "--dry-run", "--pages-version", "0"); err == nil {
 		t.Fatalf("a grant holder previewed the owner's return: %s", out)
 	}
+	if out, err := run("owner", "page", "unshare", "shared-doc", "--dry-run", "--pages-version", "0"); err == nil || !strings.Contains(string(out), "no_reshare_path") || !strings.Contains(string(out), "#5617") {
+		t.Fatalf("a Docs document without a share path back was offered: %v %s", err, out)
+	}
 
-	human, err := run("owner", "page", "unshare", "shared-doc", "--dry-run", "--pages-version", "0")
+	human, err := run("owner", "page", "unshare", "shared-project", "--dry-run", "--pages-version", "0")
 	if err != nil {
 		t.Fatalf("human preview: %v %s", err, human)
 	}
-	for _, want := range []string{"Dry run", "reader@example.invalid", "grant: user reader@example.invalid read", "public link: shared-doc-link", "cannot be recalled", "--review-token"} {
+	for _, want := range []string{"Dry run", "reader@example.invalid", "grant: user reader@example.invalid read", "public link: shared-project-link", "cannot be recalled", "--review-token"} {
 		if !strings.Contains(string(human), want) {
 			t.Fatalf("human preview lacks %q:\n%s", want, human)
 		}
 	}
-	raw, err := run("owner", "page", "unshare", "shared-doc", "--dry-run", "--pages-version", "0", "--format", "json")
+	raw, err := run("owner", "page", "unshare", "shared-project", "--dry-run", "--pages-version", "0", "--format", "json")
 	if err != nil {
 		t.Fatalf("json preview: %v %s", err, raw)
 	}
@@ -95,18 +101,18 @@ func TestAcceptance_PageUnshareReturnsSharedDocumentToPrivate(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"revoked_public_links"`
 	}
-	if err := json.Unmarshal(raw, &preview); err != nil || !preview.DryRun || preview.Kind != "document" || preview.ReviewToken == "" || len(preview.RemovedGrants) != 1 || len(preview.RevokedPublicLinks) != 1 {
+	if err := json.Unmarshal(raw, &preview); err != nil || !preview.DryRun || preview.Kind != "artifact_project" || preview.ReviewToken == "" || len(preview.RemovedGrants) != 1 || len(preview.RevokedPublicLinks) != 1 {
 		t.Fatalf("json preview %s %v", raw, err)
 	}
 	var private int
-	if err := db.QueryRow(`SELECT private_audience FROM pages WHERE id='shared-doc-id'`).Scan(&private); err != nil || private != 0 {
+	if err := db.QueryRow(`SELECT private_audience FROM pages WHERE id='shared-project-id'`).Scan(&private); err != nil || private != 0 {
 		t.Fatalf("dry run changed the audience: %d %v", private, err)
 	}
 
-	if out, err := run("owner", "page", "unshare", "shared-doc", "--yes", "--pages-version", "0", "--review-token", strings.Repeat("0", 64)); err == nil {
+	if out, err := run("owner", "page", "unshare", "shared-project", "--yes", "--pages-version", "0", "--review-token", strings.Repeat("0", 64)); err == nil {
 		t.Fatalf("forged review accepted: %s", out)
 	}
-	confirmed, err := run("owner", "page", "unshare", "shared-doc", "--yes", "--pages-version", "0", "--review-token", preview.ReviewToken, "--format", "json")
+	confirmed, err := run("owner", "page", "unshare", "shared-project", "--yes", "--pages-version", "0", "--review-token", preview.ReviewToken, "--format", "json")
 	if err != nil {
 		t.Fatalf("confirm: %v %s", err, confirmed)
 	}
@@ -114,17 +120,17 @@ func TestAcceptance_PageUnshareReturnsSharedDocumentToPrivate(t *testing.T) {
 		Changed bool   `json:"changed"`
 		PageID  string `json:"page_id"`
 	}
-	if err := json.Unmarshal(confirmed, &done); err != nil || !done.Changed || done.PageID != "shared-doc-id" {
+	if err := json.Unmarshal(confirmed, &done); err != nil || !done.Changed || done.PageID != "shared-project-id" {
 		t.Fatalf("confirmation %s %v", confirmed, err)
 	}
 	var grants, links int
-	if err := db.QueryRow(`SELECT private_audience,(SELECT count(*) FROM page_grants WHERE page_id='shared-doc-id'),(SELECT count(*) FROM page_public_tokens WHERE page_id='shared-doc-id' AND revoked_at IS NULL) FROM pages WHERE id='shared-doc-id' AND owner_user_id='unshare-owner' AND folder_id IS NULL`).Scan(&private, &grants, &links); err != nil || private != 1 || grants != 0 || links != 0 {
+	if err := db.QueryRow(`SELECT private_audience,(SELECT count(*) FROM page_grants WHERE page_id='shared-project-id'),(SELECT count(*) FROM page_public_tokens WHERE page_id='shared-project-id' AND revoked_at IS NULL) FROM pages WHERE id='shared-project-id' AND owner_user_id='unshare-owner' AND folder_id IS NULL`).Scan(&private, &grants, &links); err != nil || private != 1 || grants != 0 || links != 0 {
 		t.Fatalf("after unshare: private=%d grants=%d links=%d err=%v", private, grants, links, err)
 	}
-	if out, err := run("reader", "page", "get", "shared-doc", "--format", "json"); err == nil {
+	if out, err := run("reader", "page", "get", "shared-project", "--format", "json"); err == nil {
 		t.Fatalf("former grant holder still reads: %s", out)
 	}
-	if out, err := run("owner", "page", "get", "shared-doc", "--format", "json"); err != nil {
+	if out, err := run("owner", "page", "get", "shared-project", "--format", "json"); err != nil {
 		t.Fatalf("owner read after unshare: %v %s", err, out)
 	}
 }

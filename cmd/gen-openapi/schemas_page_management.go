@@ -56,16 +56,16 @@ func pageReturnPrivateSchema(subject map[string]any) map[string]any {
 	folder := object(map[string]any{"id": text, "slug": text, "acl_version": map[string]any{"type": "integer", "minimum": 0}}, "id", "slug", "acl_version")
 	snapshot := object(map[string]any{"subjects": array(subject), "withheld": boolean}, "subjects", "withheld")
 	change := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "before": pageManagementPermissionsSchema(), "after": pageManagementPermissionsSchema()}, "subject_type", "subject_id", "before", "after")
-	grant := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "level": text}, "subject_type", "subject_id", "level")
+	grant := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "level": text, "retired": boolean}, "subject_type", "subject_id", "level", "retired")
 	link := object(map[string]any{"id": text, "expires_at": text}, "id", "expires_at")
-	kind := map[string]any{"type": "string", "enum": []string{"document", "workbook", "word", "sheet", "artifact_project"}}
+	kind := map[string]any{"type": "string", "enum": []string{"workbook", "artifact_project"}}
 	out := object(map[string]any{
 		"dry_run": boolean, "page_id": text, "page": text, "kind": kind, "pages_version": responseVersion,
 		"from_folder": map[string]any{"oneOf": []any{folder, nullOnlySchema()}},
 		"before":      snapshot, "after": snapshot, "changes": array(change),
 		"removed_grants": array(grant), "revoked_public_links": array(link), "revoked_mandates": count,
-		"notice": text, "changed": boolean, "review_token": text,
-	}, "dry_run", "page_id", "page", "kind", "pages_version", "from_folder", "before", "after", "changes", "removed_grants", "revoked_public_links", "revoked_mandates", "notice", "changed")
-	out["description"] = "Same Page ID afterwards. Grants are deleted and public links revoked, so a later share starts from nothing. Workspace OWNER and ADMIN keep the audited read."
+		"released_edit_leases": count, "reshare": text, "notice": text, "changed": boolean, "review_token": text,
+	}, "dry_run", "page_id", "page", "kind", "pages_version", "from_folder", "before", "after", "changes", "removed_grants", "revoked_public_links", "revoked_mandates", "released_edit_leases", "reshare", "notice", "changed")
+	out["description"] = "Same Page ID afterwards. Grants are deleted (recorded as retired issuances) and public links revoked, so a later share starts from nothing. Only workbooks and HTML artifact projects can be returned, because only they can be shared again (reshare names how); Docs, native Word and Sheet are refused with 409 reason no_reshare_path (#5617). Workspace OWNER and ADMIN keep the audited read."
 	return out
 }

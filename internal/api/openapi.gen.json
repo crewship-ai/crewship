@@ -168523,7 +168523,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": false,
-                  "description": "Same Page ID afterwards. Grants are deleted and public links revoked, so a later share starts from nothing. Workspace OWNER and ADMIN keep the audited read.",
+                  "description": "Same Page ID afterwards. Grants are deleted (recorded as retired issuances) and public links revoked, so a later share starts from nothing. Only workbooks and HTML artifact projects can be returned, because only they can be shared again (reshare names how); Docs, native Word and Sheet are refused with 409 reason no_reshare_path (#5617). Workspace OWNER and ADMIN keep the audited read.",
                   "properties": {
                     "after": {
                       "additionalProperties": false,
@@ -168889,10 +168889,7 @@
                     },
                     "kind": {
                       "enum": [
-                        "document",
                         "workbook",
-                        "word",
-                        "sheet",
                         "artifact_project"
                       ],
                       "type": "string"
@@ -168911,6 +168908,10 @@
                       "minimum": 0,
                       "type": "integer"
                     },
+                    "released_edit_leases": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
                     "removed_grants": {
                       "items": {
                         "additionalProperties": false,
@@ -168920,6 +168921,9 @@
                           },
                           "level": {
                             "type": "string"
+                          },
+                          "retired": {
+                            "type": "boolean"
                           },
                           "subject_id": {
                             "type": "string"
@@ -168931,11 +168935,15 @@
                         "required": [
                           "subject_type",
                           "subject_id",
-                          "level"
+                          "level",
+                          "retired"
                         ],
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "reshare": {
+                      "type": "string"
                     },
                     "review_token": {
                       "type": "string"
@@ -168977,6 +168985,8 @@
                     "removed_grants",
                     "revoked_public_links",
                     "revoked_mandates",
+                    "released_edit_leases",
+                    "reshare",
                     "notice",
                     "changed"
                   ],

@@ -16,16 +16,21 @@ var pageUnshareCmd = &cobra.Command{
 	Long: `Return a shared artifact to your personal space after a reviewed dry run.
 
 The Page keeps its ID. Confirming sets its private audience, takes it out of
-its folder, deletes every page grant, revokes every public link and every live
-agent mandate on it, and records the change in the audit log. Former readers
-are refused at once; workspace OWNER and ADMIN keep the audited read. Grants
-are deleted, so sharing again starts from nothing. Copies someone already
-downloaded, exported or read cannot be recalled.
+its folder, deletes every page grant (each recorded as retired), revokes every
+public link and every live agent mandate on it (the owner's included), releases
+other people's edit leases, and records the change in the audit log. Former
+readers are refused at once and their live Page subscriptions end; workspace
+OWNER and ADMIN keep the audited read. Grants are deleted, so sharing again
+starts from nothing. Copies someone already downloaded, exported or read cannot
+be recalled.
 
-Only the page's owner may do this. Crew-owned pages and types without a
-private audience (Design, Slides, dashboards) are refused with 409. Supported:
-Docs documents, workbooks, native Word and Sheet documents, HTML artifact
-projects.
+Only the page's owner may do this. Supported: workbooks and HTML artifact
+projects, the types that can be shared again (workbook: crewship workbook share
+--publish; HTML artifact project: crewship page artifact share). Docs documents and
+native Word and Sheet documents are refused with 409 no_reshare_path: they
+cannot be shared again yet (#5617), so returning them would be one-way.
+Crew-owned pages (crew_owned) and types without a private audience (Design,
+Slides, dashboards; unsupported_type) are refused with 409 too.
 
 Run --dry-run with the exact pages_version first; it lists the accesses that
 end and returns a review_token. Then confirm with --yes, the same
@@ -117,10 +122,12 @@ func pageUnshareHuman(raw []byte) (string, error) {
 		RevokedPublicLinks []struct {
 			ID string `json:"id"`
 		} `json:"revoked_public_links"`
-		RevokedMandates int64  `json:"revoked_mandates"`
-		Notice          string `json:"notice"`
-		Changed         bool   `json:"changed"`
-		ReviewToken     string `json:"review_token"`
+		RevokedMandates    int64  `json:"revoked_mandates"`
+		ReleasedEditLeases int64  `json:"released_edit_leases"`
+		Reshare            string `json:"reshare"`
+		Notice             string `json:"notice"`
+		Changed            bool   `json:"changed"`
+		ReviewToken        string `json:"review_token"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
@@ -157,6 +164,12 @@ func pageUnshareHuman(raw []byte) (string, error) {
 		fmt.Fprintf(&b, "  public link: %s\n", l.ID)
 	}
 	fmt.Fprintf(&b, "  agent mandates: %d\n", r.RevokedMandates)
+	if r.ReleasedEditLeases > 0 {
+		fmt.Fprintf(&b, "  edit leases of others: %d\n", r.ReleasedEditLeases)
+	}
+	if r.Reshare != "" {
+		fmt.Fprintf(&b, "To share again: %s.\n", r.Reshare)
+	}
 	if r.Notice != "" {
 		fmt.Fprintf(&b, "Note: %s.\n", r.Notice)
 	}

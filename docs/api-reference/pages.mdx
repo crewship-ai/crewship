@@ -694,25 +694,49 @@ output, not the right to change its audience.
 |---|---|
 | `dry_run`, `changed` | Preview, or a confirmed change. |
 | `page_id`, `page` | The Page; the ID does not change. |
-| `kind` | `document`, `workbook`, `word`, `sheet` or `artifact_project`. |
+| `kind` | `workbook` or `artifact_project`. |
 | `pages_version` | The version after the change (unchanged on a preview). |
 | `from_folder` | The folder the Page leaves, or `null`. |
 | `before`, `after`, `changes` | Effective access before and after, and each subject whose rights change, in the shape of the [reviewed folder move](#file-a-page-in-a-folder). |
-| `removed_grants` | Every page grant that is deleted (`subject_type`, `subject_id`, `label`, `level`). |
+| `removed_grants` | Every page grant that is deleted (`subject_type`, `subject_id`, `label`, `level`, `retired`). A `retired` grant already gave no access; it is deleted all the same. |
 | `revoked_public_links` | Every public link that is revoked (`id`, `expires_at`). |
-| `revoked_mandates` | Live agent mandates on the Page that are revoked. |
+| `revoked_mandates` | Live agent mandates on the Page that are revoked, the owner's included. |
+| `released_edit_leases` | Edit leases and lease requests of anyone but the owner that are released. |
+| `reshare` | How this type is shared again; the earlier grants, folder and links are not restored. |
 | `notice` | Copies already downloaded, exported or read cannot be recalled. |
 | `review_token` | Preview only; binds the confirmation to exactly this review. |
 
 Confirming is one transaction: `private_audience` becomes 1, `folder_id`
 is cleared, `pages_version` increases, every page grant is deleted, every
-public link is revoked and every live mandate (workbook, Mooring, artifact
-project and document iteration) is revoked. The canonical Page triggers advance
-the workspace and Page authority epochs. The audit row
-`artifact.returned_to_private` and the journal entry of the same type record
-the actor, the time and the audience change, with identifiers and counts only;
-each removed grant and link also gets its usual journal entry. Former readers
-get 404 on their next request. A later share starts with no grants.
+public link is revoked, every live mandate (workbook, Mooring, artifact project
+and document iteration) is revoked, and the edit lease and lease requests of
+anyone but the owner are released (the lease keeps its generation as the
+fence). Each deleted grant is also written to `page_grant_retired_issuances`
+with reason `returned_to_private`, so a restored backup cannot revive it. The
+canonical Page triggers advance the workspace and Page authority epochs. The
+audit row `artifact.returned_to_private` and the journal entry of the same type
+record the actor, the time and the audience change, with identifiers and counts
+only. Each removed grant (`page.grant_removed`) and link (`page.link_revoked`)
+gets a journal entry with identifiers only and `reason: "returned_to_private"`:
+no page name, slug, label or email, because the Page is private from that
+transaction on. The receipts are re-read before commit.
+
+Former readers get 404 on their next request. Right after the commit, the
+server re-checks every live WebSocket subscription to the Page channel and ends
+each one that is no longer allowed (an `error` frame with `access revoked`;
+the socket and other channels stay; a failed re-check disconnects the client).
+An open workbook editor session also gets `session_closed`. Each subject whose
+access ended is then sent `page.access_recheck` on its user channel, directly
+rather than through the bounded fan-out queue. The 30-second channel sweep
+remains as the backstop. A later share starts with no grants.
+
+Only workbooks and HTML artifact projects can be returned, because only they
+can be shared again: a workbook through
+`POST /api/v1/pages/{slug}/workbook/editors` with `publish: true`, an HTML
+artifact project through `POST /api/v1/pages/{slug}/artifact/share`. Docs
+documents and native Word and Sheet documents have a private audience but no
+share path yet (#5617); returning one would be one-way, so it is refused with
+`no_reshare_path`. Every 409 body carries a stable `reason` next to `error`.
 
 **Statuses:**
 
@@ -723,7 +747,7 @@ get 404 on their next request. A later share starts with no grants.
 | 401 | No session or token. |
 | 403 | Not the Page's human owner, or not a current human `pages:write` credential. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
-| 409 | Stale `pages_version` or review; `crew_owned`; `already_private`; `unsupported_type` (Design, Slides, Mooring JSON, dashboards with panels, plain Pages). |
+| 409 | `reason`: `stale_version`; `stale_review`; `changed` (a concurrent change during the confirmation); `crew_owned`; `already_private`; `no_reshare_path` (Docs, native Word and Sheet, #5617); `unsupported_type` (Design, Slides, Mooring JSON, dashboards with panels, plain Pages). |
 | 500 | Storage failure; nothing changed. |
 
 ---

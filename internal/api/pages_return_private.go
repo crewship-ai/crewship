@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -20,6 +20,11 @@ import (
 const journalArtifactReturnedToPrivate journal.EntryType = "artifact.returned_to_private"
 
 const auditActionReturnedToPrivate = "artifact.returned_to_private"
+
+// returnPrivateReason marks every row this operation writes elsewhere
+// (journal, retired grant issuances), so a reader can tell them from an
+// ordinary revoke.
+const returnPrivateReason = "returned_to_private"
 
 // returnPrivateNotice is shown with every preview and confirmation: the server
 // can stop future reads, never recall a copy someone already has.
@@ -37,6 +42,9 @@ type pageReturnPrivateGrant struct {
 	SubjectID   string `json:"subject_id"`
 	Label       string `json:"label,omitempty"`
 	Level       string `json:"level"`
+	// Retired grants carry no access today; they are deleted all the same so
+	// nothing can revive them.
+	Retired bool `json:"retired"`
 }
 
 type pageReturnPrivateLink struct {
@@ -57,9 +65,13 @@ type pageReturnPrivateWire struct {
 	RemovedGrants      []pageReturnPrivateGrant `json:"removed_grants"`
 	RevokedPublicLinks []pageReturnPrivateLink  `json:"revoked_public_links"`
 	RevokedMandates    int64                    `json:"revoked_mandates"`
-	Notice             string                   `json:"notice"`
-	Changed            bool                     `json:"changed"`
-	ReviewToken        string                   `json:"review_token,omitempty"`
+	ReleasedEditLeases int64                    `json:"released_edit_leases"`
+	// Reshare names the one route that shares this type again. Returning is
+	// offered only for types that have one (see returnPrivateReshare).
+	Reshare     string `json:"reshare"`
+	Notice      string `json:"notice"`
+	Changed     bool   `json:"changed"`
+	ReviewToken string `json:"review_token,omitempty"`
 }
 
 // returnPrivateKindSQL classifies the Page by the content that carries a
@@ -76,20 +88,40 @@ const returnPrivateKindSQL = `SELECT CASE
  WHEN EXISTS(SELECT 1 FROM artifact_version_heads WHERE page_id=p.id AND workspace_id=p.workspace_id AND content_type='artifact_project') THEN 'artifact_project'
  ELSE '' END FROM pages p WHERE p.id=? AND p.workspace_id=?`
 
+// returnPrivateReshare is the share path that ends a private audience again,
+// per supported kind. A kind with a private audience but no such path (Docs,
+// native Word and Sheet: PX-10, #5617) is refused, because returning it would
+// be one-way: the owner could never share it again.
+var returnPrivateReshare = map[string]string{
+	"workbook":         "POST /api/v1/pages/{slug}/workbook/editors with publish=true names an editor again; earlier grants, folder and links are not restored",
+	"artifact_project": "POST /api/v1/pages/{slug}/artifact/share shares a version again; earlier grants, folder and links are not restored",
+}
+
 // returnPrivateMandateTables are the agent mandates bound to one Page. Every
 // live one is revoked by the return, the owner's included: a mandate was
 // admitted under the shared audience and is not re-evaluated here.
 var returnPrivateMandateTables = []string{"gridcraft_intents", "mooring_intents", "artifact_project_message_intents", "document_iteration_intents"}
 
-const returnPrivateTypesRefusal = "unsupported_type: only Docs documents, workbooks, native Word and Sheet documents and HTML artifact projects have a private audience to return to"
+// returnPrivateLeaseFilter selects the edit lease state of anyone but the
+// owner (a human as "user:<id>" or bare, an agent under its own actor).
+const returnPrivateLeaseFilter = `page_id=? AND actor_id<>'' AND actor_id NOT IN (?, 'user:'||?)`
+
+var errReturnPrivateChanged = errors.New("page changed during return to private")
+
+// returnPrivateRefuse is every refusal of this endpoint: a stable machine
+// reason next to the sentence.
+func returnPrivateRefuse(w http.ResponseWriter, status int, reason, message string) {
+	writeJSON(w, status, map[string]string{"error": reason + ": " + message, "reason": reason})
+}
 
 // ReturnPageToPrivate is PX-11: the human owner returns a shared artifact to
 // their personal space with the same Page ID. A dry run shows the accesses
 // that end; the confirmation, bound to that review, atomically sets the
-// private audience, leaves the folder, deletes every page grant, revokes every
-// public link and every live agent mandate, and audits the change. The
-// authority epoch advances through the canonical Page triggers. Grants are
-// deleted, not retired, so a later share starts from nothing.
+// private audience, leaves the folder, deletes every page grant (recorded as
+// a retired issuance so no restore revives it), revokes every public link and
+// every live agent mandate, releases other actors' edit leases, and audits the
+// change. The authority epoch advances through the canonical Page triggers.
+// After commit, the Page channel subscriptions of former readers end at once.
 func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.catalogReviewViewer(w, r); !ok {
 		return
@@ -121,7 +153,7 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if rec.OwnerCrewID != "" || rec.OwnerUserID == "" {
-		replyError(w, 409, "crew_owned: a crew-owned page names no person whose personal space it could return to")
+		returnPrivateRefuse(w, 409, "crew_owned", "a crew-owned page names no person whose personal space it could return to")
 		return
 	}
 	if rec.OwnerUserID != viewer.UserID {
@@ -129,11 +161,11 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if rec.PrivateAudience {
-		replyError(w, 409, "already_private: this page already has a private audience")
+		returnPrivateRefuse(w, 409, "already_private", "this page already has a private audience")
 		return
 	}
 	if rec.PagesVersion != *req.PagesVersion {
-		replyError(w, 409, "pages_version changed; preview again")
+		returnPrivateRefuse(w, 409, "stale_version", "pages_version changed; preview again")
 		return
 	}
 	var kind string
@@ -141,13 +173,21 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "classify page for return to private", err)
 		return
 	}
-	if kind == "" {
-		replyError(w, 409, returnPrivateTypesRefusal)
+	switch kind {
+	case "document", "word", "sheet":
+		returnPrivateRefuse(w, 409, "no_reshare_path", "a "+kind+" page has no path to be shared again yet (PX-10, #5617), so returning it would be one-way; only workbooks and HTML artifact projects can be returned today")
+		return
+	case "":
+		returnPrivateRefuse(w, 409, "unsupported_type", "only workbooks and HTML artifact projects can be returned to private; Design, Slides, Mooring JSON documents, dashboards and plain pages have no private audience")
 		return
 	}
 	epoch, err := h.catalogReviewEpoch(r, rec.ID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, 404, "page not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read authority epoch for return", err)
 		return
 	}
 	before, err := h.catalogAccessSnapshot(ctx, wsID, rec, viewer)
@@ -178,11 +218,17 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "read mandates for return", err)
 		return
 	}
+	leases, err := returnPrivateForeignLeases(ctx, tx, rec.ID, rec.OwnerUserID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read edit leases for return", err)
+		return
+	}
 	out := pageReturnPrivateWire{DryRun: req.DryRun, PageID: rec.ID, Page: rec.Slug, Kind: kind, PagesVersion: rec.PagesVersion,
 		Before: before, After: after, Changes: pageAccessChanges(before, after),
-		RemovedGrants: make([]pageReturnPrivateGrant, 0, len(grants)), RevokedPublicLinks: links, RevokedMandates: mandates, Notice: returnPrivateNotice}
+		RemovedGrants: make([]pageReturnPrivateGrant, 0, len(grants)), RevokedPublicLinks: links, RevokedMandates: mandates,
+		ReleasedEditLeases: leases, Reshare: returnPrivateReshare[kind], Notice: returnPrivateNotice}
 	for _, g := range grants {
-		out.RemovedGrants = append(out.RemovedGrants, pageReturnPrivateGrant{g.SubjectType, g.SubjectID, h.grantSubjectLabel(ctx, wsID, g.SubjectType, g.SubjectID), g.Level})
+		out.RemovedGrants = append(out.RemovedGrants, pageReturnPrivateGrant{g.SubjectType, g.SubjectID, h.grantSubjectLabel(ctx, wsID, g.SubjectType, g.SubjectID), g.Level, g.RetiredAt.Valid})
 	}
 	if rec.FolderID != "" {
 		previous, err := h.loadFolderByID(ctx, rec.FolderID)
@@ -213,15 +259,15 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 		out.ReviewToken = token
 	} else {
 		if !validPageReviewToken(req.ReviewToken, token) {
-			replyError(w, 409, "review is stale; preview again")
+			returnPrivateRefuse(w, 409, "stale_review", "review is stale; preview again")
 			return
 		}
 		notify, closed, err = h.commitReturnToPrivate(ctx, tx, wsID, UserFromContext(ctx), rec, kind, out, grants)
+		if errors.Is(err, errReturnPrivateChanged) {
+			returnPrivateRefuse(w, 409, "changed", "page changed during return; preview again")
+			return
+		}
 		if err != nil {
-			if errors.Is(err, errReturnPrivateChanged) {
-				replyError(w, 409, "page changed during return; preview again")
-				return
-			}
 			replyInternalError(w, h.logger, "return page to private", err)
 			return
 		}
@@ -239,8 +285,6 @@ func (h *PageHandler) ReturnPageToPrivate(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, 200, out)
 }
-
-var errReturnPrivateChanged = errors.New("page changed during return to private")
 
 func returnPrivateLiveLinks(ctx context.Context, tx *sql.Tx, page string) ([]pageReturnPrivateLink, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id,expires_at FROM page_public_tokens WHERE page_id=? AND revoked_at IS NULL ORDER BY id`, page)
@@ -271,6 +315,31 @@ func returnPrivateLiveMandates(ctx context.Context, tx *sql.Tx, page string) (in
 	return total, nil
 }
 
+// returnPrivateForeignLeases counts the edit lease and lease requests held by
+// anyone but the owner.
+func returnPrivateForeignLeases(ctx context.Context, tx *sql.Tx, page, owner string) (int64, error) {
+	var n int64
+	err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM mooring_edit_leases WHERE `+returnPrivateLeaseFilter+`)+(SELECT count(*) FROM mooring_edit_lease_requests WHERE `+returnPrivateLeaseFilter+`)`, page, owner, owner, page, owner, owner).Scan(&n)
+	return n, err
+}
+
+// returnPrivateExecOne runs a statement that must change exactly one row. A
+// different count is a concurrent change (409); a database error stays one.
+func returnPrivateExecOne(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errReturnPrivateChanged
+	}
+	return nil
+}
+
 // commitReturnToPrivate performs the confirmed mutation inside the caller's
 // writer transaction and checks its final state before the caller commits.
 func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsID string, actor *AuthUser, rec *pageRecord, kind string, out pageReturnPrivateWire, grants []pageGrantSnapshot) ([]func(), ws.WorkbookSessionClosures, error) {
@@ -283,47 +352,67 @@ func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsI
 	stamp := tsformat.Format(time.Now())
 	// One statement changes audience and placement; the canonical Page
 	// triggers advance the workspace and Page authority epochs.
-	res, err := tx.ExecContext(ctx, `UPDATE pages SET private_audience=1, folder_id=NULL, pages_version=pages_version+1, updated_at=?
- WHERE id=? AND workspace_id=? AND pages_version=? AND private_audience=0 AND owner_user_id=? AND owner_crew_id IS NULL`, stamp, rec.ID, wsID, rec.PagesVersion, actor.ID)
-	if err != nil {
+	if err := returnPrivateExecOne(ctx, tx, `UPDATE pages SET private_audience=1, folder_id=NULL, pages_version=pages_version+1, updated_at=?
+ WHERE id=? AND workspace_id=? AND pages_version=? AND private_audience=0 AND owner_user_id=? AND owner_crew_id IS NULL`, stamp, rec.ID, wsID, rec.PagesVersion, actor.ID); err != nil {
 		return nil, nil, err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return nil, nil, errReturnPrivateChanged
-	}
 	var notify []func()
-	for _, g := range grants {
-		if err := execOneRow(ctx, tx, `DELETE FROM page_grants WHERE page_id=? AND subject_type=? AND subject_id=? AND level=?`, rec.ID, g.SubjectType, g.SubjectID, g.Level); err != nil {
-			return nil, nil, errReturnPrivateChanged
+	type receipt struct {
+		id     string
+		native []any
+	}
+	var receipts []receipt
+	// Journal entries written here describe a Page that is private from this
+	// transaction on: no slug, name, email or subject label, only identifiers.
+	appendEntry := func(e journal.Entry) error {
+		e.ID = generateCUID()
+		publish, err := appendAuthorizationAudit(ctx, tx, h.journal, e)
+		if err != nil {
+			return err
 		}
-		var panels []string
-		if g.PanelIDs.Valid {
-			_ = json.Unmarshal([]byte(g.PanelIDs.String), &panels)
+		native, err := pageGrantEventFrame(ctx, tx, e.ID)
+		if err != nil {
+			return err
+		}
+		notify = append(notify, publish)
+		receipts = append(receipts, receipt{e.ID, native})
+		return nil
+	}
+	for _, g := range grants {
+		retiredAt := stamp
+		if g.RetiredAt.Valid {
+			retiredAt = g.RetiredAt.String
+		}
+		// Remember the issuance as retired, so a restored backup that still
+		// carries the row meets the tombstone instead of reviving it.
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO page_grant_retired_issuances(workspace_id,page_id,subject_type,subject_id,level,granted_by_user_id,granted_at,retired_at,reason) VALUES(?,?,?,?,?,?,?,?,?)`,
+			wsID, rec.ID, g.SubjectType, g.SubjectID, g.Level, g.GrantedBy, g.GrantedAt, retiredAt, returnPrivateReason); err != nil {
+			return nil, nil, err
+		}
+		if err := returnPrivateExecOne(ctx, tx, `DELETE FROM page_grants WHERE page_id=? AND subject_type=? AND subject_id=? AND level=?`, rec.ID, g.SubjectType, g.SubjectID, g.Level); err != nil {
+			return nil, nil, err
 		}
 		previous := g
-		entry := pageGrantChangeEntry(journal.EntryPageGrantRemoved, wsID, actor, rec, g.SubjectType, g.SubjectID, h.grantSubjectLabel(ctx, wsID, g.SubjectType, g.SubjectID), g.Level, panels)
-		entry.ID = generateCUID()
-		entry.Payload["previous_grant"], entry.Payload["grant"] = &previous, nil
-		entry.Payload["reason"] = "returned_to_private"
-		publish, err := appendAuthorizationAudit(ctx, tx, h.journal, entry)
-		if err != nil {
+		if err := appendEntry(journal.Entry{
+			WorkspaceID: wsID, Type: journal.EntryPageGrantRemoved, Severity: journal.SeverityInfo, ActorType: journal.ActorUser, ActorID: actor.ID,
+			Summary: "Page grant removed: the page returned to its owner's private audience",
+			Payload: map[string]any{"page_id": rec.ID, "subject_type": g.SubjectType, "subject_id": g.SubjectID, "level": g.Level,
+				"actor_user_id": actor.ID, "reason": returnPrivateReason, "previous_grant": &previous, "grant": nil},
+		}); err != nil {
 			return nil, nil, err
 		}
-		notify = append(notify, publish)
 	}
 	for _, link := range out.RevokedPublicLinks {
-		if err := execOneRow(ctx, tx, `UPDATE page_public_tokens SET revoked_at=? WHERE id=? AND page_id=? AND revoked_at IS NULL`, stamp, link.ID, rec.ID); err != nil {
-			return nil, nil, errReturnPrivateChanged
-		}
-		publish, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
-			WorkspaceID: wsID, Type: journalPageLinkRevoked, Severity: journal.SeverityNotice, ActorType: journal.ActorUser, ActorID: actor.ID,
-			Summary: fmt.Sprintf("%s revoked a public link on page %s", actor.Email, rec.Slug),
-			Payload: map[string]any{"page": rec.Slug, "page_id": rec.ID, "token_id": link.ID, "actor_user_id": actor.ID, "reason": "returned_to_private"},
-		})
-		if err != nil {
+		if err := returnPrivateExecOne(ctx, tx, `UPDATE page_public_tokens SET revoked_at=? WHERE id=? AND page_id=? AND revoked_at IS NULL`, stamp, link.ID, rec.ID); err != nil {
 			return nil, nil, err
 		}
-		notify = append(notify, publish)
+		if err := appendEntry(journal.Entry{
+			WorkspaceID: wsID, Type: journalPageLinkRevoked, Severity: journal.SeverityNotice, ActorType: journal.ActorUser, ActorID: actor.ID,
+			Summary: "Public link revoked: the page returned to its owner's private audience",
+			Payload: map[string]any{"page_id": rec.ID, "token_id": link.ID, "actor_user_id": actor.ID, "reason": returnPrivateReason},
+		}); err != nil {
+			return nil, nil, err
+		}
 	}
 	var revoked int64
 	for _, table := range returnPrivateMandateTables {
@@ -340,6 +429,26 @@ func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsI
 	if revoked != out.RevokedMandates {
 		return nil, nil, errReturnPrivateChanged
 	}
+	// Other actors' edit lease state ends; the lease row keeps its generation
+	// as the fence, exactly as an ordinary release does.
+	res, err := tx.ExecContext(ctx, `DELETE FROM mooring_edit_lease_requests WHERE `+returnPrivateLeaseFilter, rec.ID, rec.OwnerUserID, rec.OwnerUserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	released, err := res.RowsAffected()
+	if err != nil {
+		return nil, nil, err
+	}
+	if res, err = tx.ExecContext(ctx, `UPDATE mooring_edit_leases SET actor_id='',session_id='',expires_ns=0 WHERE `+returnPrivateLeaseFilter, rec.ID, rec.OwnerUserID, rec.OwnerUserID); err != nil {
+		return nil, nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, nil, err
+	}
+	if released+n != out.ReleasedEditLeases {
+		return nil, nil, errReturnPrivateChanged
+	}
 	fromFolder := ""
 	if out.FromFolder != nil {
 		fromFolder = out.FromFolder.ID
@@ -348,24 +457,51 @@ func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsI
 	metadata, _ := json.Marshal(map[string]any{
 		"owner_user_id": rec.OwnerUserID, "kind": kind, "audience_before": "shared", "audience_after": "private",
 		"from_folder_id": fromFolder, "pages_version": rec.PagesVersion + 1, "removed_grants": len(grants),
-		"revoked_public_links": len(out.RevokedPublicLinks), "revoked_mandates": revoked, "lost_access_subjects": len(out.Changes),
+		"revoked_public_links": len(out.RevokedPublicLinks), "revoked_mandates": revoked, "released_edit_leases": out.ReleasedEditLeases,
+		"lost_access_subjects": len(out.Changes),
 	})
-	if err := execOneRow(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), wsID, actor.ID, auditActionReturnedToPrivate, "page", rec.ID, string(metadata), stamp); err != nil {
+	audit := [8]string{generateCUID(), wsID, actor.ID, auditActionReturnedToPrivate, "page", rec.ID, string(metadata), stamp}
+	if err := returnPrivateExecOne(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, audit[0], audit[1], audit[2], audit[3], audit[4], audit[5], audit[6], audit[7]); err != nil {
 		return nil, nil, err
 	}
-	publish, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+	if err := appendEntry(journal.Entry{
 		WorkspaceID: wsID, Type: journalArtifactReturnedToPrivate, Severity: journal.SeverityNotice, ActorType: journal.ActorUser, ActorID: actor.ID,
 		Summary: "Artifact returned to its owner's personal space",
 		Payload: map[string]any{"page_id": rec.ID, "owner_user_id": rec.OwnerUserID, "kind": kind, "audience_before": "shared", "audience_after": "private",
 			"from_folder_id": fromFolder, "removed_grants": len(grants), "revoked_public_links": len(out.RevokedPublicLinks), "revoked_mandates": revoked},
-	})
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	// Close open workbook sessions of everyone the private audience excludes.
+	current, err := h.loadPage(ctx, wsID, "@"+rec.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	notify = append(notify, publish)
-
-	current, err := h.loadPage(ctx, wsID, "@"+rec.ID)
+	closedSessions, err := h.closeRevokedWorkbookSessions(ctx, tx, wsID, current)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	// Postconditions, after every write: a later trigger must not have
+	// changed an earlier audit receipt or undone the mutation.
+	for _, receipt := range receipts {
+		native, err := pageGrantEventFrame(ctx, tx, receipt.id)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !reflect.DeepEqual(native, receipt.native) {
+			return nil, nil, errors.New("return to private audit did not survive unchanged")
+		}
+	}
+	var stored [8]any
+	if err := tx.QueryRowContext(ctx, `SELECT id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at FROM audit_logs WHERE id=?`, audit[0]).Scan(&stored[0], &stored[1], &stored[2], &stored[3], &stored[4], &stored[5], &stored[6], &stored[7]); err != nil {
+		return nil, nil, err
+	}
+	if !privateAuditRowMatches(stored, audit) {
+		return nil, nil, errors.New("return to private audit row did not survive unchanged")
+	}
+	if current, err = h.loadPage(ctx, wsID, "@"+rec.ID); err != nil {
 		return nil, nil, err
 	}
 	if !current.PrivateAudience || current.FolderID != "" || current.OwnerUserID != rec.OwnerUserID || current.OwnerCrewID != "" || current.PagesVersion != rec.PagesVersion+1 || current.Slug != rec.Slug {
@@ -378,37 +514,69 @@ func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsI
 	if left != 0 {
 		return nil, nil, errReturnPrivateChanged
 	}
-	if mandates, err := returnPrivateLiveMandates(ctx, tx, rec.ID); err != nil || mandates != 0 {
-		return nil, nil, errors.Join(err, errReturnPrivateChanged)
-	}
-	// Close open workbook sessions of everyone the private audience excludes.
-	closedSessions, err := h.closeRevokedWorkbookSessions(ctx, tx, wsID, current)
+	mandates, err := returnPrivateLiveMandates(ctx, tx, rec.ID)
 	if err != nil {
 		return nil, nil, err
+	}
+	leases, err := returnPrivateForeignLeases(ctx, tx, rec.ID, rec.OwnerUserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if mandates != 0 || leases != 0 {
+		return nil, nil, errReturnPrivateChanged
 	}
 	return notify, closedSessions, nil
 }
 
-// publishReturnToPrivate tells live clients after commit. Every former
-// subject gets an access recheck; open workbook sessions were closed in the
-// transaction. The workspace event carries nothing about a private Page.
-func (h *PageHandler) publishReturnToPrivate(ctx context.Context, wsID string, rec, after *pageRecord, out pageReturnPrivateWire, closed ws.WorkbookSessionClosures) {
+// returnPrivateLostUsers are the people whose effective access the review
+// showed changing: every member a grant, folder or crew reached appears as
+// its own user row in the access snapshot. Users named by a removed grant are
+// added in case the snapshot withheld them.
+func returnPrivateLostUsers(out pageReturnPrivateWire, owner string) []string {
 	users := []string{}
-	seen := map[string]bool{rec.OwnerUserID: true}
-	rows, err := h.db.QueryContext(ctx, `SELECT user_id FROM workspace_members WHERE workspace_id=?`, wsID)
-	if err == nil {
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil && !seen[id] {
-				seen[id] = true
-				users = append(users, id)
+	seen := map[string]bool{owner: true, pageAccessWithheld: true, "": true}
+	add := func(id string) {
+		if !seen[id] {
+			seen[id] = true
+			users = append(users, id)
+		}
+	}
+	for _, c := range out.Changes {
+		if c.SubjectType == pageSubjectUser {
+			add(c.SubjectID)
+		}
+	}
+	for _, g := range out.RemovedGrants {
+		if g.SubjectType == pageSubjectUser {
+			add(g.SubjectID)
+		}
+	}
+	return users
+}
+
+// publishReturnToPrivate ends live access right after commit. Former
+// readers' Page channel subscriptions (and HTTP run-stream observers) are
+// re-checked and ended now, not on the 30 s sweep; a workbook also gets its
+// editor-session closure frames. Each former reader then gets
+// page.access_recheck on their own channel, sent directly rather than through
+// the bounded fan-out queue that may drop it. The workspace event carries
+// nothing about a private Page.
+func (h *PageHandler) publishReturnToPrivate(ctx context.Context, wsID string, rec, after *pageRecord, out pageReturnPrivateWire, closed ws.WorkbookSessionClosures) {
+	if h.hub != nil {
+		if rec.HasWorkbook {
+			h.hub.RecheckWorkbookAccess(ctx, rec.ID, closed)
+		}
+		h.hub.RevokePageSubscribers(ctx, rec.ID)
+		sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		for _, user := range returnPrivateLostUsers(out, rec.OwnerUserID) {
+			if err := h.hub.BroadcastChannelContext(sendCtx, "user", user, pageAccessRecheckEvent, map[string]any{"page_id": rec.ID}); err != nil {
+				if h.logger != nil {
+					h.logger.Warn("return to private: access recheck not delivered", "page_id", rec.ID, "error", err)
+				}
+				break
 			}
 		}
-		rows.Close()
-	}
-	publishUserAccessRecheck(h.hub, h.logger, users, map[string]any{"page_id": rec.ID})
-	if rec.HasWorkbook && h.hub != nil {
-		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closed)
+		cancel()
 	}
 	if out.FromFolder != nil {
 		h.publishFolderMembership(ctx, wsID, UserFromContext(ctx), after, "removed", out.FromFolder.Slug, "")
