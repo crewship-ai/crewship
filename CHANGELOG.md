@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Chat works on phones (#3869, #3871, #3874, #3883).** The empty chat no longer points at a list that is not on screen; it offers **Show conversations**. On a phone the top bar names the agent instead of squeezing the Crews path and the title. Reply actions and Edit & resend always show on touch screens, and Edit & resend shows on keyboard focus. Copy link is a centred icon that turns into a check when copied, and the run preflight box keeps the composer's gutter.
+
 - **Credential tests cannot send file/login material to API-token probes (#5466).** Probe dispatch now checks the credential type, preserves metered provider-login and dedicated Claude OAuth checks, refuses unknown types, and reports unsupported checks without an authentication-success audit claim. Native CLI create/update apply the same policy.
 - **Tmux runs use their own native credential environment (#5467).** Existing server-only token/path variables are excluded from the target CLI, image PATH/mise settings are preserved, and setup payloads move from process arguments to stdin. Run-private files are created with restricted permissions and removed after the run settles.
 

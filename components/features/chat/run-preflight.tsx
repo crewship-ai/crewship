@@ -45,8 +45,10 @@ export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
   if (!query.data || query.isError) return <p role="status" className="text-xs text-muted-foreground">Current budget and gate are unavailable. Price is unknown.</p>
   const data = query.data
   const money = (value: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value)
-  return <details className="shrink-0 rounded-md border px-3 py-2 text-xs" aria-label="Before work starts">
-    <summary className="cursor-pointer coarse:min-h-[44px]">Configured model · price unknown · {data.gate.blocking ? "approval predicted" : data.gate.predicted_mode === "async" && data.gate.rule_matches ? "nonblocking review predicted" : "no blocking gate predicted"}</summary>
+  return <details className="mx-2 shrink-0 rounded-md border px-3 py-2 text-xs" aria-label="Before work starts" data-testid="run-preflight">
+    {/* The same gutter as the model picker under it, and the summary
+        centred in its 44 px touch row (#3883). */}
+    <summary className="flex cursor-pointer items-center coarse:min-h-[44px]">Configured model · price unknown · {data.gate.blocking ? "approval predicted" : data.gate.predicted_mode === "async" && data.gate.rule_matches ? "nonblocking review predicted" : "no blocking gate predicted"}</summary>
     <div className="max-h-40 space-y-2 overflow-y-auto overscroll-contain pt-2 md:max-h-56" tabIndex={0} aria-label="Configured model budget details">
       <p>Payer: {data.payer.label || "Payer unknown"} ({data.payer.state}). Configured model: {data.model || "unknown"}.</p>
       {data.budgets.length ? <ul className="list-disc pl-4">{data.budgets.map(budget => <li key={budget.id}>{budget.scope} · {isCostShown(budget.remaining_usd) && isCostShown(budget.limit_usd) ? `${money(budget.remaining_usd)} remaining / ${money(budget.limit_usd)} per ${budget.window}` : `budget per ${budget.window}`} · {budget.mode} · {budget.state}</li>)}</ul> : <p>No configured budget cap was found.</p>}

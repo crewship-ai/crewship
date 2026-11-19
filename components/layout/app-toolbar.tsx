@@ -149,8 +149,10 @@ export function AppToolbar() {
       const path = breadcrumbs.length > 0
         ? breadcrumbs
         : [{ label: "Crews", href: "/crews" }, ...(chatAgentSlug.startsWith("_") ? [] : [{ label: chatAgentSlug, href: `/crews?agent=${encodeURIComponent(chatAgentSlug)}` }])]
+      // Marked as the area crumb, so on a phone it gives way to the page's
+      // own back control and title like every other area's does (#3871).
       return (
-        <>
+        <div className="flex min-w-0 items-center gap-1.5" data-slot="area-crumb">
           {path.map((item, i) => (
             <span key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
               {item.href ? (
@@ -164,7 +166,7 @@ export function AppToolbar() {
             </span>
           ))}
           <span className="text-sm font-semibold">Chat</span>
-        </>
+        </div>
       )
     }
 
