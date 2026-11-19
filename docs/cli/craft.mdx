@@ -331,8 +331,9 @@ change:
 The server checks the mode on every agent write, even when nobody else holds
 the editor. A task without `apply` answers `409` with `reason:
 proposal_required` to `craft_apply` and to lease acquisition. An implicit
-`apply` lasts only while the document stays in your personal space: once it is
-moved to a shared folder, the rest of the run can only propose.
+`apply` lasts only while the document stays in your personal space. Moving the
+document, or changing who it is shared with, stops the running task; start a
+new one from the new location.
 
 ### crewship craft task status
 

@@ -57,6 +57,11 @@ func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, 
 		return result, err
 	}
 	ctx = context.WithValue(context.WithValue(ctx, pageAuthReaderKey{}, tx), ctxRole, "")
+	// The page is loaded as the original human whose authority this is. An
+	// agent's tool call carries no session user, so without this a private
+	// document in the author's personal space was unreachable for the very
+	// task Q16 lets change it directly (#5579). Docs iteration does the same.
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: source.UserID})
 	rec, err := m.pages.loadPageForRead(ctx, scope.WorkspaceID, "@"+scope.ArtifactID)
 	if err != nil {
 		return result, err

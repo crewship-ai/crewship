@@ -16231,6 +16231,14 @@
           "message_id": {
             "type": "string"
           },
+          "mode": {
+            "description": "Q16: omitted means apply in the author's personal space and propose anywhere shared; apply on a shared document is the explicit direct mandate.",
+            "enum": [
+              "propose",
+              "apply"
+            ],
+            "type": "string"
+          },
           "whole_document": {
             "enum": [
               true

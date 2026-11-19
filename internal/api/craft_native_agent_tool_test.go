@@ -33,11 +33,21 @@ func TestCraftNativeAgentToolClosedGrammar(t *testing.T) {
 // is not evidence of a genuine dispatched agent or browser acceptance.
 func nativeAgentToolFixture(t *testing.T) (*artifactPrincipalFixture, *craftNativeAgentManager, context.Context, func(string) *httptest.ResponseRecorder, *int) {
 	t.Helper()
+	return nativeAgentToolFixtureFor(t, craftNativeAgentModeApply, nil)
+}
+
+// nativeAgentToolFixtureFor admits the task with the given mode ("" = the
+// default for the document's location) after prepare has shaped the page.
+func nativeAgentToolFixtureFor(t *testing.T, mode string, prepare func(*artifactPrincipalFixture)) (*artifactPrincipalFixture, *craftNativeAgentManager, context.Context, func(string) *httptest.ResponseRecorder, *int) {
+	t.Helper()
 	f, m, human := nativeAgentAdmissionFixture(t)
 	mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
 	m.human.agents = m
 	f.pages.artifactMasterToken = "synthetic-native-agent-master"
-	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
+	if prepare != nil {
+		prepare(f)
+	}
+	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, mode})
 	if err != nil {
 		t.Fatal(err)
 	}

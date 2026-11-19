@@ -270,6 +270,16 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		e.tool.lease = lease
 		writeJSON(w, 200, nativeAgentLeaseResult(lease))
 	case "renew", "release", "apply":
+		// Q16 before the lease check, so a proposing task learns why rather
+		// than seeing a stale lease. Reconciling an apply that was already
+		// attempted (and renewing to do so) is exempt: it writes nothing, and
+		// refusing it would leave an uncertain outcome unresolvable (#5579).
+		if input.Operation != "release" && !nativeAgentReconciling(e, input) {
+			if err = m.directMandate(bound.Context(), e); err != nil {
+				craftNativeAgentMandateError(w, err)
+				return
+			}
+		}
 		generation, _ := craftNativeGeneration(input.Generation)
 		lease := e.tool.lease
 		if lease.Generation != generation || lease.Holder != craftNativeAgentPrincipal(e) || lease.Scope != e.grant.Scope {
@@ -295,12 +305,7 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, 200, nativeAgentLeaseResult(renewed))
 			return
 		}
-		if err = m.directMandate(bound.Context(), e); err != nil {
-			craftNativeAgentMandateError(w, err)
-			return
-		}
-		direct := context.WithValue(bound.Context(), craftNativeAgentDirectWriteKey{}, true)
-		receipt, err := m.applyTool(direct, e, store, profile, input)
+		receipt, err := m.applyTool(bound.Context(), e, store, profile, input)
 		if err != nil {
 			if errors.Is(err, errCraftNativeAgentProposalRequired) {
 				craftNativeAgentMandateError(w, err)
@@ -370,6 +375,23 @@ func (m *craftNativeAgentManager) directMandate(ctx context.Context, e *craftNat
 	}
 	defer tx.Rollback()
 	return m.checkDirectMandate(ctx, tx, e)
+}
+
+// nativeAgentReconciling reports a call that only resolves an earlier,
+// already attempted apply: the retry of that exact request, or a renew while
+// its outcome is still uncertain.
+func nativeAgentReconciling(e *craftNativeAgentEntry, input craftNativeAgentToolRequest) bool {
+	if e.tool == nil {
+		return false
+	}
+	switch input.Operation {
+	case "apply":
+		prior := e.tool.requests[input.RequestID]
+		return prior != nil && prior.attempted
+	case "renew":
+		return e.tool.uncertain
+	}
+	return false
 }
 
 // craftNativeAgentMandateError gives the authorized agent a machine-readable
@@ -443,6 +465,10 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if len(e.tool.requests) >= maxNativeAgentChangeRequests {
 		return zero, errNativeAgentChangeRequestLimit
 	}
+	// Only a fresh publication is a direct write: the publishing transaction
+	// re-checks the Q16 mandate (authorize). Reconciliation above writes
+	// nothing and runs without the marker.
+	ctx = context.WithValue(ctx, craftNativeAgentDirectWriteKey{}, true)
 	state, err := store.Read(ctx, e.grant.Scope)
 	if err != nil {
 		return zero, err

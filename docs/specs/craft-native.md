@@ -616,8 +616,9 @@ directly, and any other document gets a proposal. `mode: "apply"` on a shared
 document is the explicit direct mandate. The work input records the resolved
 mode and whether the human chose it. A proposing task is refused `craft_apply`
 and lease acquisition with `409 {reason: "proposal_required"}`, even when the
-lease is free. The publishing transaction checks the same rule again. An
-implicit apply ends as soon as the document leaves the personal space.
+lease is free. The publishing transaction checks the same rule again. Moving
+the document out of the personal space advances its authority epoch, which
+stops the task before any further write.
 
 The normal human CLI uses the same explicit consent, Page authority and
 instruction send:
