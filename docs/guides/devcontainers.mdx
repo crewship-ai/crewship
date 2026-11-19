@@ -948,9 +948,12 @@ The managed build can consume a complete native mise lock bundle. Generate
 crewship crew provision lock-pack /path/to/mise-config-directory > lock-bundle.json
 ```
 
-This local command reads only `mise.lock` and `.mise/locks/`, rejects symlinks,
-limits file sizes, and does not contact Crewship or change the environment. Keep
-auxiliary files: npm-backed tools may use an aube lock beside `mise.lock`.
+This local command reads only `mise.lock` and its auxiliary files, rejects
+symlinks, limits file sizes, and does not contact Crewship or change the
+environment. Keep auxiliary files: npm-backed tools use an aube lock beside
+`mise.lock`. Lockfile v3 keeps them under `.mise/locks/`; lockfile v4 writes
+them under `locks/` and names that path in `mise.lock`, so from `locks/` only
+the directories `mise.lock` references are packed.
 The bundle supports up to 128 UTF-8 files, 128 KiB per file and 512 KiB total.
 
 Put the resulting JSON object in `spec.mise.lock` in a `kind: Crew` manifest,

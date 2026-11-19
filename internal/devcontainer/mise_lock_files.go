@@ -6,9 +6,16 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
+	"regexp"
 )
 
-// ReadMiseLockBundle packages only mise.lock and .mise/locks from a local
+// miseLockAuxReference finds the auxiliary directories a v4 mise.lock names,
+// e.g. `aube = { path = "locks/opencode/2.3.0~009061c2", … }`.
+var miseLockAuxReference = regexp.MustCompile(`path\s*=\s*"(locks/[A-Za-z0-9_.~+/-]+)"`)
+
+// ReadMiseLockBundle packages only mise.lock and its auxiliary roots
+// (.mise/locks for lockfile v3, locks for v4, #5545) from a local
 // directory. OpenRoot confines reads even if the directory changes while
 // packing. Symlinks and special files are rejected; unrelated config files,
 // including environment values, are never included.
@@ -53,7 +60,7 @@ func ReadMiseLockBundle(dir string) (*MiseLockBundle, error) {
 	if err := read("mise.lock"); err != nil {
 		return nil, err
 	}
-	for _, parent := range []string{".mise", ".mise/locks"} {
+	for _, parent := range []string{".mise", miseLockAuxV3, miseLockAuxV4} {
 		stat, err := root.Lstat(parent)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -65,23 +72,35 @@ func ReadMiseLockBundle(dir string) (*MiseLockBundle, error) {
 			return nil, fmt.Errorf("mise lock: auxiliary directory must not be a symlink or file")
 		}
 	}
-	err = fs.WalkDir(root.FS(), ".mise/locks", func(name string, d fs.DirEntry, err error) error {
-		if errors.Is(err, fs.ErrNotExist) && name == ".mise/locks" {
-			return nil
-		}
+	// `.mise/locks` is mise's own directory. `locks` is a generic name a
+	// project may use for something else, so only directories mise.lock
+	// itself references are packed from it.
+	referenced := map[string]bool{}
+	for _, m := range miseLockAuxReference.FindAllStringSubmatch(b.Files["mise.lock"], -1) {
+		referenced[m[1]] = true
+	}
+	for _, aux := range []string{miseLockAuxV3, miseLockAuxV4} {
+		err = fs.WalkDir(root.FS(), aux, func(name string, d fs.DirEntry, err error) error {
+			if errors.Is(err, fs.ErrNotExist) && name == aux {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if len(name) > 256 {
+				return fmt.Errorf("mise lock: path too long")
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if aux == miseLockAuxV4 && !referenced[path.Dir(name)] {
+				return nil
+			}
+			return read(name)
+		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if len(name) > 256 {
-			return fmt.Errorf("mise lock: path too long")
-		}
-		if d.IsDir() {
-			return nil
-		}
-		return read(name)
-	})
-	if err != nil {
-		return nil, err
 	}
 	if err := b.Validate(); err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ func crewMiseLockSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	versions := map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}}
 	lock := object(map[string]any{
 		"schema_version": map[string]any{"type": "integer", "enum": []int{1}},
-		"files":          map[string]any{"type": "object", "minProperties": 1, "maxProperties": 128, "additionalProperties": map[string]any{"type": "string", "maxLength": 131072}, "description": "Complete UTF-8 native bundle. mise.lock is required; auxiliary paths are bounded relative .mise/locks paths. Server enforces 128 KiB per file and 512 KiB aggregate bytes, no NUL, traversal or parent/file conflicts."},
+		"files":          map[string]any{"type": "object", "minProperties": 1, "maxProperties": 128, "additionalProperties": map[string]any{"type": "string", "maxLength": 131072}, "description": "Complete UTF-8 native bundle. mise.lock is required; auxiliary paths are bounded relative .mise/locks (lockfile v3) or locks (lockfile v4) paths. Server enforces 128 KiB per file and 512 KiB aggregate bytes, no NUL, traversal or parent/file conflicts."},
 	}, "schema_version", "files")
 	config := object(map[string]any{
 		"tools": map[string]any{"type": "object", "minProperties": 1, "maxProperties": 20, "additionalProperties": text, "description": "Validated native mise tool selectors. No config environment, tasks or caller-selected resolver image."},

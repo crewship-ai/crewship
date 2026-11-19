@@ -8273,7 +8273,7 @@
               "maxLength": 131072,
               "type": "string"
             },
-            "description": "Complete UTF-8 native bundle. mise.lock is required; auxiliary paths are bounded relative .mise/locks paths. Server enforces 128 KiB per file and 512 KiB aggregate bytes, no NUL, traversal or parent/file conflicts.",
+            "description": "Complete UTF-8 native bundle. mise.lock is required; auxiliary paths are bounded relative .mise/locks (lockfile v3) or locks (lockfile v4) paths. Server enforces 128 KiB per file and 512 KiB aggregate bytes, no NUL, traversal or parent/file conflicts.",
             "maxProperties": 128,
             "minProperties": 1,
             "type": "object"

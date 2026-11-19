@@ -57,7 +57,8 @@ also verifies installation ownership and crew-image provenance labels.
 Only `config.tools`, optional `config.lock`, and optional `bump` are accepted.
 `tools` contains 1–20 validated selectors. A lock is the complete native bundle
 `{"schema_version":1,"files":{"mise.lock":"..."}}`, optionally including
-validated relative `.mise/locks/` auxiliary paths. Limits are 128 files, 128 KiB
+validated relative auxiliary paths under `.mise/locks/` (lockfile v3) or
+`locks/` (lockfile v4). Limits are 128 files, 128 KiB
 per UTF-8 file and 512 KiB total. Environment values, tasks and caller-selected
 image IDs are rejected, never forwarded. The ordinary CLI command is
 `crewship crew provision lock-resolve mise.json --crew <slug>`.
