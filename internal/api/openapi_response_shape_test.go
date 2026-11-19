@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/artifacts/kindguide"
 	"github.com/crewship-ai/crewship/internal/costvis"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
@@ -53,6 +54,9 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "CrewMiseLockProposal", pointer: "/components/schemas/CrewMiseLockProposal", value: devcontainer.MiseResolution{}},
+	{name: "CrewMiseNativeLockBundle", pointer: "/components/schemas/CrewMiseNativeLockBundle", value: devcontainer.MiseLockBundle{}},
+	{name: "CrewMiseResolvedTool", pointer: "/components/schemas/CrewMiseLockProposal/properties/tools/items", value: devcontainer.MiseResolvedTool{}},
 
 	{name: "BedrockAssignmentResponse", pointer: "/components/schemas/BedrockAssignmentResponse", value: bedrockAssignmentResponse{}},
 	{name: "DesignCreateResponse", pointer: "/components/schemas/DesignCreateResponse", value: designCreateResponse{}},
