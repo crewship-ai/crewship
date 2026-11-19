@@ -106,7 +106,14 @@ func (r *Router) handleSidecarCostAdmit(w http.ResponseWriter, req *http.Request
 						break
 					}
 				}
-				if !collision && ep.CredentialID == body.Credential && body.SourceRevision != "" && body.SourceRevision == ep.SourceRevision && ep.BaseURL != "" && (ep.APIKey != "" || len(ep.Headers) > 0) {
+				// The current revision, or the previous one while its
+				// rotation grace window is open: API_KEY admission is ID-only
+				// and keeps working through grace, and a running sidecar has
+				// no hot reload, so refusing it would cut the endpoint off at
+				// the moment of rotation instead of at the end of grace.
+				revisionOK := body.SourceRevision != "" && (body.SourceRevision == ep.SourceRevision ||
+					endpointGraceRevision(req.Context(), tx, ep.CredentialID, body.SourceRevision))
+				if !collision && ep.CredentialID == body.Credential && revisionOK && ep.BaseURL != "" && (ep.APIKey != "" || len(ep.Headers) > 0) {
 					kind, err = CredTypeEndpointURL, nil
 				}
 			}

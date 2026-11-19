@@ -164,6 +164,32 @@ func endpointSourceRevision(encrypted string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(encrypted)))
 }
 
+// endpointGraceRevision reports whether revision is the previous value of
+// credID inside an open rotation grace window (#1882). Rotation keeps the old
+// ciphertext verbatim in credential_rotations.old_value, so a sidecar booted
+// before the rotation presents sha256 of exactly that ciphertext. The window
+// gate matches attachDeliveredCredentialGrace: ACTIVE, not expired, value
+// still present. Ending grace early or expiry refuses the old revision.
+func endpointGraceRevision(ctx context.Context, db endpointQuerier, credID, revision string) bool {
+	if credID == "" || revision == "" {
+		return false
+	}
+	rows, err := db.QueryContext(ctx, `SELECT old_value FROM credential_rotations
+		WHERE credential_id = ? AND status = 'ACTIVE' AND expires_at > ? AND old_value != ''`,
+		credID, leaseComparisonNow())
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var old string
+		if rows.Scan(&old) == nil && endpointSourceRevision(old) == revision {
+			return true
+		}
+	}
+	return false
+}
+
 // endpointFromValue parses a validated stored ENDPOINT_URL value into a
 // localModelEndpoint. Returns ok=false only when the base URL is empty after
 // parsing (callers have already run validateEndpointURL).
