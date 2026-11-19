@@ -304,13 +304,13 @@ created by the updated server; a running container keeps its environment, and
 its terminal keeps matching its agent exec until the container is recreated.
 
 This covers every environment Crewship assembles: non-login agent exec,
-routines, the terminal, child processes, zsh (which does not reset PATH) and
-the PATH the login hook restores. A **bash login shell** (`bash -l`, `bash
--lc`, and postStart hooks, which run that way) finally runs `~/.profile` from
-the persistent home. The container entrypoint copies the image's
+routines, the terminal, child processes, non-login zsh and the PATH the login
+hook restores. A **login shell** (`bash -l`, `bash -lc`, postStart hooks, which
+run that way, and `zsh -l`, whose `~/.zprofile` from common-utils sources
+`~/.profile`) finally runs `~/.profile` from the persistent home. The container entrypoint copies the image's
 `/etc/skel/.profile` there on first boot; from then on it is the user's file.
 The Debian default prepends `~/.local/bin` whenever the directory exists (the
-entrypoint creates it), so in a bash login shell a binary there still wins over the
+entrypoint creates it), so in a login shell a binary there still wins over the
 declared pin. Crewship does not rewrite files in the user's home; remove the
 stale binary, or that `~/.profile` line, when a login shell must select the
 declared version.

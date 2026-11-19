@@ -26,7 +26,7 @@ import (
 // CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES=1 checks feature/sbin tools on a
 // dedicated fixture whose oversized metadata must leave PATH inherited.
 // CREWSHIP_NATIVE_TOOLS_GLAB_PATH asserts the glab path selected by the
-// terminal, a child sh and zsh -l (declared pin precedence, #5459).
+// terminal, a child sh and non-login zsh (declared pin precedence, #5459).
 // CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
 // (terminal, child, login and zsh) against the declared version after an update.
 func TestNativeToolsLiveTerminal(t *testing.T) {
@@ -110,7 +110,7 @@ code=$?; printf 'TOOL_STATUS:claude:%s\n' "$code"; test "$code" -eq 0 || fail=1
 printf 'MODE_PATH:terminal:glab:%s\n' "$(command -v glab)"
 printf 'MODE_PATH:child:glab:%s\n' "$(sh -c 'command -v glab')"
 printf 'MODE_PATH:bash-login:glab:%s\n' "$(bash -lc 'command -v glab' 2>/dev/null)"
-if command -v zsh >/dev/null; then printf 'MODE_PATH:zsh-login:glab:%s\n' "$(zsh -l -c 'command -v glab' 2>/dev/null)"; fi
+if command -v zsh >/dev/null; then printf 'MODE_PATH:zsh:glab:%s\n' "$(zsh -c 'command -v glab' 2>/dev/null)"; printf 'MODE_PATH:zsh-login:glab:%s\n' "$(zsh -l -c 'command -v glab' 2>/dev/null)"; fi
 sh -c 'glab --version && codex --version && claude --version'
 code=$?; printf 'CHILD_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 bash -lc 'glab --version && codex --version && claude --version'
@@ -181,12 +181,12 @@ done
 				}
 			}
 			// Pin precedence (#5459): every Crewship-assembled mode must select
-			// the declared path. A bash login shell runs the user's ~/.profile
-			// and is recorded (MODE_PATH:bash-login) but not asserted.
+			// the declared path. Login shells run the user's ~/.profile (zsh
+			// through ~/.zprofile) and are recorded (MODE_PATH:*-login) only.
 			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_PATH"); expected != "" {
-				for _, mode := range []string{"terminal", "child", "zsh-login"} {
+				for _, mode := range []string{"terminal", "child", "zsh"} {
 					match := regexp.MustCompile(`(?m)^MODE_PATH:` + mode + `:glab:([^\r\n]*)\r?$`).FindStringSubmatch(output.String())
-					if mode == "zsh-login" && match == nil {
+					if mode == "zsh" && match == nil {
 						continue
 					}
 					if len(match) != 2 || match[1] != expected {
