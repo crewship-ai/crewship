@@ -15,15 +15,17 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-type crewMiseLockHandler struct {
+// CrewMiseLockHandler proposes locks without changing the crew environment.
+type CrewMiseLockHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	resolver provider.CrewMiseLockResolver
 	slots    chan struct{}
 }
 
-func newCrewMiseLockHandler(db *sql.DB, logger *slog.Logger, container provider.ContainerProvider) *crewMiseLockHandler {
-	h := &crewMiseLockHandler{db: db, logger: logger, slots: make(chan struct{}, 2)}
+// NewCrewMiseLockHandler discovers the running provider's optional resolver.
+func NewCrewMiseLockHandler(db *sql.DB, logger *slog.Logger, container provider.ContainerProvider) *CrewMiseLockHandler {
+	h := &CrewMiseLockHandler{db: db, logger: logger, slots: make(chan struct{}, 2)}
 	h.resolver, _ = container.(provider.CrewMiseLockResolver)
 	return h
 }
@@ -32,7 +34,7 @@ func newCrewMiseLockHandler(db *sql.DB, logger *slog.Logger, container provider.
 // revision or replace a crew runtime. Registry access happens in the existing
 // bounded disposable builder, never inside the live crew container.
 // openapi: responses 200,400,401,403,404,409,429,500,502,503
-func (h *crewMiseLockHandler) Resolve(w http.ResponseWriter, r *http.Request) {
+func (h *CrewMiseLockHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	source := auth.OriginalCredentialFromContext(ctx)

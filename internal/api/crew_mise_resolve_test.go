@@ -32,7 +32,7 @@ func (f *miseResolveFake) ResolveCrewMiseLock(_ context.Context, image string, c
 }
 
 func TestCrewMiseResolveAuthorityAndProposalOnly(t *testing.T) {
-	for _, mode := range []string{"owner", "admin", "viewer", "manager", "agent", "no-source", "other-workspace", "deleted", "no-revision", "mutable", "unsafe-env", "unknown-image", "trailing", "oversized", "resolver-error", "unavailable"} {
+	for _, mode := range []string{"owner", "admin", "session", "viewer", "manager", "agent", "internal-crew", "no-source", "other-workspace", "deleted", "no-revision", "mutable", "unsafe-env", "unknown-image", "trailing", "oversized", "resolver-error", "unavailable", "busy"} {
 		t.Run(mode, func(t *testing.T) {
 			db := setupTestDB(t)
 			user := seedTestUser(t, db)
@@ -46,7 +46,7 @@ func TestCrewMiseResolveAuthorityAndProposalOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			fake := &miseResolveFake{}
-			h := newCrewMiseLockHandler(db, newTestLogger(), fake)
+			h := NewCrewMiseLockHandler(db, newTestLogger(), fake)
 			role := "OWNER"
 			kind := AuthKindCLIToken
 			requestWS := ws
@@ -55,6 +55,8 @@ func TestCrewMiseResolveAuthorityAndProposalOnly(t *testing.T) {
 			switch mode {
 			case "admin":
 				role = "ADMIN"
+			case "session":
+				kind = AuthKindSession
 			case "viewer":
 				role = "VIEWER"
 				want = 403
@@ -63,6 +65,8 @@ func TestCrewMiseResolveAuthorityAndProposalOnly(t *testing.T) {
 				want = 403
 			case "agent":
 				kind = ""
+				want = 403
+			case "internal-crew":
 				want = 403
 			case "no-source":
 				want = 403
@@ -96,13 +100,27 @@ func TestCrewMiseResolveAuthorityAndProposalOnly(t *testing.T) {
 			case "unavailable":
 				h.resolver = nil
 				want = 503
+			case "busy":
+				h.slots <- struct{}{}
+				h.slots <- struct{}{}
+				want = 429
 			}
 			req := httptest.NewRequest("POST", "/resolve", strings.NewReader(body))
 			req.SetPathValue("crewId", crew)
 			source := auth.OriginalCredential{Kind: AuthKindCLIToken, ID: "token", UserID: user, Binding: "sha256:" + strings.Repeat("b", 64), UserAuthorityRevision: "1"}
-			ctx := withUser(req.Context(), &AuthUser{ID: user, TokenID: "token", OriginalCredential: &source})
+			authUser := &AuthUser{ID: user, TokenID: "token", OriginalCredential: &source}
+			if mode == "session" {
+				source.Kind = AuthKindSession
+				source.ExpiresAt = "2099-01-01T00:00:00Z"
+				authUser.TokenID = ""
+				authUser.SessionID = "token"
+			}
+			ctx := withUser(req.Context(), authUser)
 			ctx = withWorkspace(ctx, requestWS, role)
 			ctx = context.WithValue(ctx, ctxAuthKind, kind)
+			if mode == "internal-crew" {
+				ctx = context.WithValue(ctx, ctxInternalTokenCrew, crew)
+			}
 			if mode != "no-source" {
 				ctx = auth.WithOriginalCredential(ctx, source)
 			}
