@@ -1072,6 +1072,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	if opts.DryRun {
 		if !opts.FilesOnly && extracted.DBDump != nil {
+			// The same target refusals the real restore applies before its
+			// first write (#5593: a fork dry run
+			// passed, the real fork then hit the Mooring delivery guard).
+			if err := dryRunRestorePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions); err != nil {
+				return nil, err
+			}
 			tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 			if err != nil {
 				return nil, err
