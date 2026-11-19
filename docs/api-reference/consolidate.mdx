@@ -6,7 +6,7 @@ stability: experimental
 tag: Experimental
 ---
 
-Memory consolidation distills recent journal entries into durable `learned-*.md` rules. One endpoint forces an immediate run of the consolidation worker; the rest drive the human-in-the-loop review of proposed rule merges — preview a diff, then approve, reject, or explain each proposal. See the [Consolidate guide](/guides/consolidate).
+Memory consolidation distills recent journal entries into durable `learned-*.md` rules for operators to review (they are not delivered to agents -- see [Who reads learned rules](/guides/consolidate#who-reads-learned-rules)). One endpoint forces an immediate run of the consolidation worker; the rest drive the human-in-the-loop review of proposed rule merges — preview a diff, then approve, reject, or explain each proposal. See the [Consolidate guide](/guides/consolidate).
 
 The scheduled runner ticks every 6h regardless; the trigger endpoint exists so operators can force an immediate pass after curating a crew or auditing new rules.
 

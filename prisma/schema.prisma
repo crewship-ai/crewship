@@ -468,6 +468,10 @@ model Agent {
   updated_at      DateTime    @default(now()) @updatedAt
   deleted_at      DateTime?
 
+  // UNUSED: nothing reads or writes these three columns (#1781). Delegation is
+  // bounded per instance by the delegation.max_depth / delegation.max_fanout
+  // settings (internal/api/delegation_limits.go); one agent's run time is
+  // timeout_seconds. Kept to avoid a migration before 1.0.
   delegation_timeout_s   Int?
   max_delegation_depth   Int? @default(3)
   max_parallel_delegates Int? @default(5)

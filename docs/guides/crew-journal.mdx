@@ -255,7 +255,7 @@ remember it and how prominently should it surface at recall time?"*.
 | `normal` (default) | No special treatment. |
 | `high` | Recall importance floors at 0.85; subject to normal compaction. |
 | `pin` | Snapshot to `/crew/shared/.memory/<crew-slug>/topics/pins.md` at next consolidate run, and force-injected into every agent's boot prompt as a `[PINS]` block; recall importance floors at 0.80. |
-| `permanent` | Never compacted. Extracted to `<crew-slug>/topics/learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). Recall importance floors at 0.95. |
+| `permanent` | Never compacted. Extracted to `<crew-slug>/topics/learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). The learned files are for operator review; no agent reads them back ([details](/guides/consolidate#who-reads-learned-rules)). Recall importance floors at 0.95. |
 
 <Note>
 Both files live under the crew-slug-qualified `topics/` directory, not
