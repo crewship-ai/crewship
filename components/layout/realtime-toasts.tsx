@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
+import { isViewingAgentChat } from "@/lib/chat-viewing"
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined
@@ -13,9 +14,19 @@ function asString(v: unknown): string | undefined {
 
 /** "@scout" → "Scout": a toast names the agent the way a person would. */
 function agentName(slug: string | undefined): string {
-  if (!slug) return "An agent"
-  const s = slug.replace(/^@/, "")
+  const s = (slug ?? "").trim().replace(/^@/, "")
+  if (!s) return "An agent"
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/**
+ * The agent's display name from a run event. The server sends `agent_id` and
+ * `agent_name` (internal/api/internal_runs.go); the ID is never shown — a run
+ * without a name is "An agent", not "Cmwmhev…".
+ */
+function runAgent(payload: Record<string, unknown>): string {
+  const name = asString(payload.agent_name)?.trim() || asString(payload.agent_slug)
+  return agentName(name)
 }
 
 /** "overdue-invoice-reminders" → "Overdue invoice reminders", until the name arrives. */
@@ -93,7 +104,8 @@ export function RealtimeToasts() {
     useCallback((event) => {
       // Already on screen in the Inbox; the bell's dot carries it elsewhere too.
       if (onInboxRef.current) return
-      const agent = agentName(asString(event.payload.agent_slug))
+      // The server names the asking agent `from_slug` (escalation_handler.go).
+      const agent = agentName(asString(event.payload.from_slug) ?? asString(event.payload.agent_slug))
       toast.info(`${agent} needs your decision`, {
         description: "It is waiting in your Inbox.",
         action: { label: "Open", onClick: () => router.push("/inbox") },
@@ -109,12 +121,15 @@ export function RealtimeToasts() {
       // mid-stream (the WS drops, the orchestrator stops the agent) —
       // that's an expected user action, not a failure to surface.
       if (asString(event.payload.status) === "CANCELLED") return
-      const slug = asString(event.payload.agent_slug) ?? asString(event.payload.agent_id)
-      const id = `run-failed:${slug ?? "agent"}`
-      // No duration: a failure stays until it is closed (lib/toast).
-      toast.error(counted(id, `${agentName(slug)} couldn’t finish the run`), {
+      const agent = runAgent(event.payload)
+      const id = `run-failed:${asString(event.payload.agent_id) ?? agent}`
+      const timedOut = asString(event.payload.status) === "TIMEOUT"
+      // No duration: a failure stays until it is closed (lib/toast). The
+      // reason is not repeated here: raw errors belong to the run's own
+      // diagnostics, which only the people allowed to read them can open.
+      toast.error(counted(id, timedOut ? `${agent} ran out of time` : `${agent} couldn’t finish the run`), {
         id,
-        description: asString(event.payload.error) ?? "The run stopped with an error.",
+        description: "Details are in Activity.",
         onDismiss: onDismiss(id),
       })
     }, []),
@@ -123,8 +138,9 @@ export function RealtimeToasts() {
   useRealtimeEvent(
     "run.completed",
     useCallback((event) => {
-      const agent = asString(event.payload.agent_slug) ?? "Agent"
-      toast.success(`Run completed: @${agent}`, {
+      // The reply is already on screen in the open conversation.
+      if (isViewingAgentChat(asString(event.payload.agent_id))) return
+      toast.success(`${runAgent(event.payload)} finished a run`, {
         duration: 4000,
       })
     }, []),

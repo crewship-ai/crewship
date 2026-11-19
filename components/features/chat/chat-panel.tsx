@@ -41,8 +41,6 @@ import { WsUnavailableError } from "@/hooks/use-websocket"
 import { messagesSignature, useRestrictedChatPoll } from "@/hooks/use-restricted-chat-poll"
 import { useDrawerStore } from "@/stores/drawer-store"
 
-import { Shimmer } from "@/components/ai-elements/shimmer"
-import { TypingDots } from "@/components/features/chat/messages/typing-indicator"
 import { TurnRenderer } from "./turn-renderer"
 import { QueryClient, QueryClientContext, QueryClientProvider } from "@tanstack/react-query"
 import { useContext } from "react"
@@ -69,7 +67,6 @@ import { SlashActionModal } from "./composer/slash-action-modal"
 import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
-import { ModelPicker } from "./composer/model-picker"
 import { RunPreflight } from "./run-preflight"
 import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
@@ -107,12 +104,13 @@ import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
-import { AgentStrip, type AgentStripAgent } from "./agent-strip"
+import { AgentStrip, withRunStatus, type AgentStripAgent } from "./agent-strip"
 import { ChatEmptyState } from "./chat-empty-state"
 import type { ChatKind } from "./chat-kind"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
-import { visibleAgentText } from "@/lib/chat-text"
+import { StreamingIndicator } from "./streaming-indicator"
+import { markAgentChatOpen } from "@/lib/chat-viewing"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
@@ -596,6 +594,10 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       onReplySettled?.(sessionId)
     }
   }, [isStreaming, sessionId, onReplySettled])
+
+  // While this agent's chat is open, its run-completed toast is redundant:
+  // the reply is on screen (components/layout/realtime-toasts.tsx).
+  useEffect(() => markAgentChatOpen(agentId), [agentId])
 
   useEffect(() => {
     // workspaceId is REQUIRED by GET /chats/{id}/messages — without it the
@@ -1648,7 +1650,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         {proposalChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
-        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1720,7 +1721,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
           {agentMeta && canChat ? (
             <AgentStrip
-              agent={agentMeta}
+              agent={withRunStatus(agentMeta, isStreaming)}
               className="min-w-0 flex-1"
               trailing={
                 <>
@@ -1790,7 +1791,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         {proposalChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
-        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1976,29 +1976,3 @@ function OriginChip({ origin, kind }: { origin?: string | null; kind?: ChatKind 
   return <StatusPill tone={tag.tone} label={tag.label} data-testid="origin-chip" />
 }
 
-interface StreamingIndicatorProps {
-  isStreaming: boolean
-  /** The stopped turn says "Stopping…" itself; a second, animated "working" line would contradict it. */
-  stopping?: boolean
-  turns: Pick<ChatTurn, "role" | "parts">[]
-  agentName?: string
-}
-
-/** Show progress until the first actual assistant reply, including after
- *  session-start metadata arrives. CLI startup text is not a reply. */
-function StreamingIndicator({ isStreaming, stopping, turns, agentName }: StreamingIndicatorProps) {
-  if (!isStreaming || stopping || turns.length === 0) return null
-  const lastUserIndex = turns.findLastIndex((turn) => turn.role === "user")
-  const hasReply = turns.slice(lastUserIndex + 1).some((turn) =>
-    turn.role === "assistant" && turn.parts.some((part) =>
-      part.type === "text" && visibleAgentText(part.content).trim() !== ""
-    )
-  )
-  if (hasReply) return null
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 text-sm animate-in fade-in" data-slot="streaming-indicator">
-      <TypingDots name={agentName} />
-      <Shimmer duration={1.6} className="text-label">{`${agentName ?? "Agent"} is working…`}</Shimmer>
-    </div>
-  )
-}

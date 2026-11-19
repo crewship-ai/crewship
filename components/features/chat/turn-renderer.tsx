@@ -8,8 +8,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ClipboardList,
-  Settings2,
-  Wrench,
   RefreshCw,
 } from "lucide-react"
 import {
@@ -226,7 +224,6 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
         {authorName && (
           <div className="ml-auto mb-0.5 text-micro text-muted-foreground">{authorName}</div>
         )}
-        {workspaceId && chatId && turn.originalMessageId && turn.originalAuthorUserId && <RunInDocument workspaceId={workspaceId} chatId={chatId} messageId={turn.originalMessageId} authorId={turn.originalAuthorUserId} />}
         {onEditUserMessage && !authorName && !isNativeCraftInstruction(turn) ? (
           <EditableUserMessage
             text={textContent}
@@ -252,6 +249,9 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
             </div>
           </Message>
         )}
+        {/* A message action, below the bubble: quiet until hover, revealed by
+            keyboard focus and always shown on touch. */}
+        {workspaceId && chatId && turn.originalMessageId && turn.originalAuthorUserId && <RunInDocument workspaceId={workspaceId} chatId={chatId} messageId={turn.originalMessageId} authorId={turn.originalAuthorUserId} />}
       </>
     )
 
@@ -339,6 +339,9 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
         const text = describeMetaValue(value)
         if (text) details.push([label, text])
       }
+      addDetail("Model", meta.model)
+      addDetail("CLI version", meta.claude_code_version)
+      if (toolCount > 0) details.push(["Tools", String(toolCount)])
       addDetail("Auth", meta.apiKeySource)
       addDetail("Permissions", meta.permissionMode)
       addDetail("Session", meta.session_id)
@@ -347,36 +350,20 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
       addDetail("Skills", meta.skills)
       const hasDetails = details.length > 0 || mcpServers.length > 0 || mcpErrors.length > 0
 
-      const pillClass = "flex items-center gap-3 px-4 py-2 bg-muted/40 border rounded-full text-label text-muted-foreground"
+      // A healthy start says nothing: the header already names the model, and
+      // this turn exists only live (history does not carry it), so a pill here
+      // jumped around the transcript when the run settled. What stays is the
+      // one fact a person can act on — a skipped MCP server costs the agent a
+      // capability while the run still exits 0 — with the start details
+      // behind it.
+      const skipped = skipCountKnown ? mcpErrors.length > 0 : skipReport != null
+      if (!skipped) return null
+
+      const pillClass = "flex items-center gap-1.5 rounded-md px-1 py-0.5 text-label text-warn"
       const pillContent = (
         <>
-          <Settings2 className="h-3 w-3" />
-          <span>Session started</span>
-          {model && (
-            <span className="font-mono text-micro bg-background px-1.5 py-0.5 rounded border">{model}</span>
-          )}
-          {version && (
-            <span className="font-mono text-micro bg-background px-1.5 py-0.5 rounded border">v{version}</span>
-          )}
-          {toolCount > 0 && (
-            <span className="flex items-center gap-1">
-              <Wrench className="h-3 w-3" />
-              {toolCount} tools
-            </span>
-          )}
-          {mcpErrors.length > 0 && (
-            // A skipped MCP server costs the agent a capability while the run
-            // still exits 0, so this stays on the pill instead of behind the
-            // hover. The names go on the label too: they must not require a
-            // pointer to reach.
-            <span
-              className="flex items-center gap-1 rounded-full border border-warn/30 bg-warn/5 px-2 py-0.5 text-warn"
-              aria-label={`${skippedSummary}: ${skippedNames}`}
-            >
-              <AlertTriangle className="h-3 w-3" />
-              {skippedSummary}
-            </span>
-          )}
+          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+          <span aria-label={mcpErrors.length > 0 ? `${skippedSummary}: ${skippedNames}` : skippedSummary}>{skippedSummary}</span>
         </>
       )
 
@@ -386,7 +373,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
           animate={arrival.animate}
           transition={transition}
           data-turn-id={turn.id}
-          className="flex items-center justify-center py-2"
+          className="flex items-center py-1 pl-11"
         >
           {hasDetails ? (
             // HoverCard over Tooltip: the rest of the provenance is a labelled
@@ -400,7 +387,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
                   {pillContent}
                 </button>
               </HoverCardTrigger>
-              <HoverCardContent align="center" className="w-80 space-y-2 text-micro">
+              <HoverCardContent align="start" className="w-80 space-y-2 text-micro">
                 {details.length > 0 && (
                   <dl className="space-y-1">
                     {details.map(([label, value]) => (

@@ -123,71 +123,33 @@ describe("TurnRenderer", () => {
   })
 
   describe("system role — system_init", () => {
-    it("renders the Session started pill", () => {
-      render(<TurnRenderer turn={systemTurn("system_init")} onCopy={async () => true} onFileClick={noop} />)
-      expect(screen.getByText(/Session started/)).toBeTruthy()
+    // A healthy start is not news: the header already names the model, and a
+    // centred pill of model ID, CLI version and tool count only jumped around
+    // the transcript (it is live-only and moved on settle). It stays silent.
+    it.each([
+      ["no metadata", undefined],
+      ["model, version and tools", { model: "claude-opus-4-7", claude_code_version: "2.1.204", tools: ["a", "b", "c"] }],
+      ["adapters that emit only model and tools", { model: "gpt-o5", tools: ["a", "b"] }],
+      ["an empty skip report", { model: "m", mcp_server_errors: [] }],
+    ])("renders nothing for a healthy start (%s)", (_name, meta) => {
+      const { container } = render(<TurnRenderer turn={systemTurn("system_init", "", meta as Record<string, unknown> | undefined)} onCopy={async () => true} onFileClick={noop} />)
+      expect(container).toBeEmptyDOMElement()
+      expect(screen.queryByText(/Session started|tools|claude-opus|v2\.1/)).toBeNull()
     })
 
-    it("shows the model chip when metadata.model is present", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.getByText("claude-opus-4-7")).toBeTruthy()
-    })
-
-    it("shows tool count when tools list is non-empty", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { tools: ["a", "b", "c"] })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.getByText(/3 tools/)).toBeTruthy()
-    })
-
-    it("omits tool count when tools list is empty", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { tools: [] })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.queryByText(/tools/)).toBeNull()
-    })
-
-    it("carries data-turn-id like every other turn branch", () => {
+    it("keeps the start details behind the warning, reachable by keyboard", () => {
       const { container } = render(
-        <TurnRenderer turn={systemTurn("system_init")} onCopy={async () => true} onFileClick={noop} />,
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { model: "claude-opus-4-7", claude_code_version: "2.1.204", tools: ["a", "b"], mcp_server_errors: [{ name: "memory", type: "config" }] })}
+          onCopy={async () => true}
+          onFileClick={noop}
+        />,
       )
       expect(container.querySelector('[data-turn-id="s1"]')).toBeTruthy()
-    })
-
-    it("shows the CLI version chip when claude_code_version is present", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { claude_code_version: "2.1.204" })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.getByText("v2.1.204")).toBeTruthy()
-    })
-
-    it("omits the version chip when claude_code_version is absent", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.queryByText(/^v\d/)).toBeNull()
+      expect(screen.getByRole("button", { name: /MCP server skipped/ })).toBeTruthy()
+      // Details live in the card, not on the line.
+      expect(screen.getByText("claude-opus-4-7").closest("dl")).toBeTruthy()
+      expect(screen.getByText("2.1.204").closest("dl")).toBeTruthy()
     })
 
     it("warns on the pill when MCP servers were skipped", () => {
@@ -222,41 +184,6 @@ describe("TurnRenderer", () => {
       expect(screen.getByText(/1 MCP server skipped/)).toBeTruthy()
     })
 
-    it("shows no MCP warning when mcp_server_errors is absent", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.queryByText(/skipped/)).toBeNull()
-    })
-
-    it("shows no MCP warning when mcp_server_errors is an empty array", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { mcp_server_errors: [] })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.queryByText(/skipped/)).toBeNull()
-    })
-
-    it("renders the pill for adapters that emit only model and tools", () => {
-      render(
-        <TurnRenderer
-          turn={systemTurn("system_init", "", { model: "gpt-o5", tools: ["a", "b"] })}
-          onCopy={async () => true}
-          onFileClick={noop}
-        />,
-      )
-      expect(screen.getByText(/Session started/)).toBeTruthy()
-      expect(screen.getByText("gpt-o5")).toBeTruthy()
-      expect(screen.getByText(/2 tools/)).toBeTruthy()
-      expect(screen.queryByText(/skipped/)).toBeNull()
-    })
   })
 
   describe("system role — error/info", () => {

@@ -46,7 +46,9 @@ function RunScope({ workspaceId, chatId, messageId, authorId: propsAuthorId }: P
     }
   }
   return <>
-    <Button variant="ghost" size="sm" onClick={event => { setOpener(event.currentTarget); setOpen(true) }}>Run in this Doc</Button>
+    <div data-slot="message-action" className="ml-auto mt-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 coarse:opacity-100 motion-reduce:transition-none">
+      <Button variant="ghost" size="sm" className="h-6 px-2 text-micro font-normal text-muted-foreground hover:text-foreground coarse:min-h-[44px]" onClick={event => { setOpener(event.currentTarget); setOpen(true) }}>Run in this Doc</Button>
+    </div>
     <CreateSurface open={open} onOpenChange={setOpen} size="sm" ariaLabel="Run message in a document" restoreFocusTo={opener}>
       <CreateSurfaceHeader title="Run in this Doc" description="Use this original message in one document. This uses the agent’s existing access; it does not grant access." onClose={() => setOpen(false)} />
       <CreateSurfaceBody>

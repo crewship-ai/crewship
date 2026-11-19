@@ -115,7 +115,7 @@ user preserves it. Restricted accounts do not receive proposal cards.
 | **`chats.origin`** | A `NULL`-able enum stamped at create time: `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`. Anything else is stored as `NULL` so a rogue caller cannot inject arbitrary text into a UI chip. Migration v59. |
 | **Chat branch** | A divergence in the conversation tree produced by edit-and-resend. The truncated tail isn't deleted — it lives in `chat_branches` (migration v57) so the alternate timeline stays retrievable. The active branch is the one currently rendered. |
 | **Slash palette** | The conversation's own command palette: **`⌘/`** (`Ctrl+/`), or the **Commands** button in the chat header strip. Not `⌘K` — that is the workspace-wide palette in the top bar, and both used to answer to it, which opened two dialogs on one press. Typing `/` in the composer does *not* open it (there is no start-of-line trigger wired). |
-| **Model picker** | Per-turn override of the agent's `llm_model`. Lives next to the send button. The override applies only to the current send — the agent's default model is unchanged for subsequent turns. |
+| **Model** | Chosen per agent in Crews (`llm_model`), not in Chat. The chat header names the agent's model; the composer has no model control. |
 | **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Written to the server's storage provider as a blob; the agent's container sees it under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. That tree belongs to the crew runtime (uid 1001) once the crew is provisioned, so the server writes the blob *through the running crew container* — attaching to a stopped crew returns `409` telling you to start it (#922). Since #1768 the upload also records a row in `attachments` (`owner_type = 'chat'`) with the size, SHA-256, content type and uploader; the dead `chat_attachments` table it was meant to use is gone. The row is written *before* the bytes and promoted after they land, so a `201` always means both exist. Each upload gets its own `<attachmentId>` directory, so two files of the same name never overwrite each other, and both listing and deletion exist (`crewship chat attachments list|delete`). There is still no download endpoint — the agent reads the file from its own filesystem. |
 | **Reaction** | A workspace-shared emoji vote on a single assistant message. Persisted in `message_reactions` (migration v57) with `UNIQUE(chat, message, emoji, user)` so POST is idempotent. Aggregated counts (`{emoji, count, mine}`) returned by List. |
 | **Right drawer** | The rail on the right edge of the chat — **Artifacts** (`⌘1` / `Ctrl+1`, documents edited in this chat and the agent's output files, not the Artifacts library), **Work** (`⌘2` / `Ctrl+2`) and **Memory** (`⌘3` / `Ctrl+3`); click the active rail button to close the drawer. In push mode the drawer opens beside the conversation (it starts open) and drags or arrow-keys between 280 and 520 px. Which panel is open is remembered per browser, not carried in the URL. On phones, one row switches between **Chat**, **Artifacts**, **Work** and **Memory**, without another row inside the panel. Use arrow keys or Home/End to move between those views. |
@@ -571,10 +571,9 @@ Reopening a session now rehydrates the full structured turn — assistant text, 
 
 ## Composer
 
-The bottom-of-page composer is a single textarea with three superpowers:
+The bottom-of-page composer is a single textarea with two superpowers:
 
 - **Slash palette** — typing `/` at the start of a line opens a fuzzy-search palette over registered slash commands (e.g. `/eval`, `/checkpoint`, `/skill <name>`). Commands are registered server-side so a multi-line `/eval my-suite --baseline last-week` is parsed as a structured command rather than a chat message.
-- **Model picker** — dropdown next to the send button overrides the agent's default `llm_model` for this turn only. Useful when an operator wants to spend Opus on a hard reasoning step inside an agent that normally runs Sonnet.
 - **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and written to the server's storage provider as a blob. The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. 25 MB cap per upload.
 
   **The message names the file.** Uploading puts bytes in the container; it does not tell the agent they are there. So when the composer sends a message with attachments, it appends a block naming each one by the path relative to the agent's working directory (which *is* `/output/<agentSlug>/`, so the `path` the upload returned opens as-is):
@@ -781,6 +780,12 @@ a run; the actual launch and provider admission checks remain authoritative.
 Price is unknown unless Paymaster can supply an estimate. Changing viewer, workspace
 or chat requires a new successful profile check before protected reads begin.
 ## Budget and gate before work
+
+In Chat, the composer shows this snapshot only when it would hold the next run:
+a predicted blocking approval ("Runs in this chat wait for approval before they
+start.") or a hard budget that is used up. Otherwise it stays silent, including
+when the snapshot is denied or unavailable; payer, model and price stay in the
+CLI and API below.
 
 `crewship chat run-preflight <chat-id>` reads the current payer selected by the
 runtime for the chat agent's configured model, applicable Paymaster budget
