@@ -220,7 +220,7 @@ export function BackupsTable<T>({ rows, rowKey, columns, label, stack, onOpen, i
         {rows.map((r) => {
           const s = stack(r)
           return (
-            <li key={rowKey(r)} {...rowProps?.(r)} className="flex min-h-[44px] items-center gap-2 px-3 py-2.5">
+            <li key={rowKey(r)} {...rowProps?.(r)} className="flex coarse:min-h-[44px] items-center gap-2 px-3 py-2.5">
               {lead && <span className="shrink-0" {...stop}>{lead.cell(r)}</span>}
               <div role={onOpen ? "button" : undefined} tabIndex={onOpen ? 0 : undefined}
                 onClick={onOpen ? () => onOpen(r) : undefined}

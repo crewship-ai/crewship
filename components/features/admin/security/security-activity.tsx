@@ -109,7 +109,7 @@ export function SecurityActivity({ entries, stream, onStream, streamCount, strea
         <ul className="md:hidden" aria-label="Decisions" data-slot="activity-list">
           {rows.map((e) => (
             <li key={e.id} className="border-b border-border last:border-b-0">
-              <button type="button" onClick={() => setOpen(e)} className="flex min-h-[44px] w-full items-center gap-3 px-4 py-3 text-left">
+              <button type="button" onClick={() => setOpen(e)} className="flex coarse:min-h-[44px] w-full items-center gap-3 px-4 py-3 text-left">
                 <span className="min-w-0 flex-1">
                   <span className={cn("block truncate text-control font-medium", e.credential_name && "font-mono")}>{subject(e)}</span>
                   <span className="block truncate text-label text-muted-foreground">{e.agent_name}{e.workspace_name ? ` · ${e.workspace_name}` : ""} · {when(e.created_at)}</span>

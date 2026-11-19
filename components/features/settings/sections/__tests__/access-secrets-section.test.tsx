@@ -239,7 +239,7 @@ describe("acting on who may reveal", () => {
     route({ caps: { u1: ["credentials:reveal"], u2: ["credentials:reveal"] } })
     renderSection("OWNER")
     expect(await screen.findByText("2 people")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
+    expect(screen.getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?status=look")
     expect(screen.queryByRole("button", { name: /^Revoke reveal/ })).toBeNull()
     expect(screen.queryByLabelText("Person to grant reveal to")).toBeNull()
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)

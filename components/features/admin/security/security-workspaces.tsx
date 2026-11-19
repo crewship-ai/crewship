@@ -72,7 +72,7 @@ export function SecurityWorkspaces({ rows, all, total, off, filterKey, defaults,
             <li key={r.workspace_id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
               <input type="checkbox" aria-label={`Select ${r.workspace_name}`} checked={picked.has(r.workspace_id)} disabled={!canAct}
                 onChange={(e) => onPick([r.workspace_id], e.target.checked)} className="size-5 accent-[var(--primary)]" />
-              <button type="button" onClick={() => onOpen(r.workspace_id)} className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 text-left">
+              <button type="button" onClick={() => onOpen(r.workspace_id)} className="flex coarse:min-h-[44px] min-w-0 flex-1 items-center gap-2.5 text-left">
                 <WorkspaceTile id={r.workspace_id} name={r.workspace_name} logoUrl={r.workspace_logo_url} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-control font-medium">{r.workspace_name}</span>

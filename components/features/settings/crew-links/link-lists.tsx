@@ -103,7 +103,7 @@ export function LinksList({ rows, view, level, onLevel, onMode, onOpen, dups, is
           {rows.length > 0 && (isMobile ? (
             <div>
               {paged.shown.map((r) => (
-                <button key={r.conn.id} type="button" onClick={() => onOpen(r.a)} className="flex min-h-[44px] w-full items-center gap-2 border-b border-border px-4 py-3 text-left last:border-b-0">
+                <button key={r.conn.id} type="button" onClick={() => onOpen(r.a)} className="flex coarse:min-h-[44px] w-full items-center gap-2 border-b border-border px-4 py-3 text-left last:border-b-0">
                   <span className="min-w-0 flex-1">
                     <b className="block text-control font-medium">{r.a.name} {r.ba !== "off" ? "⇄" : "→"} {r.b.name}</b>
                     <small className="block text-label text-muted-foreground">
@@ -240,7 +240,7 @@ export function CrewsTable({ crews, connections, agentsOf, dups, isMobile, onOpe
             const f = figures(c)
             const n = agents(c)
             return (
-              <button key={c.id} type="button" onClick={() => onOpen(c)} className="flex min-h-[44px] w-full items-center gap-2.5 border-b border-border px-4 py-3 text-left last:border-b-0">
+              <button key={c.id} type="button" onClick={() => onOpen(c)} className="flex coarse:min-h-[44px] w-full items-center gap-2.5 border-b border-border px-4 py-3 text-left last:border-b-0">
                 <CrewTile crew={c} />
                 <span className="min-w-0 flex-1">
                   <b className="block truncate text-control font-medium">{c.name}</b>

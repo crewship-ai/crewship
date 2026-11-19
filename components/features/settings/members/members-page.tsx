@@ -411,7 +411,7 @@ export function MembersPage() {
     <div className="-mx-1 flex gap-1 overflow-x-auto px-1" role="tablist" aria-label="Show">
       {mobileTabs.map((t) => (
         <button key={t.key} type="button" role="tab" aria-selected={t.on} onClick={t.run}
-          className={cn("inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
+          className={cn("inline-flex h-9 coarse:h-[44px] shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium", t.on ? "bg-[var(--selection-bg)] text-foreground" : "text-muted-foreground")}>
           {t.label}{t.n != null && <span className="text-micro tabular-nums text-muted-foreground">{t.n}</span>}
         </button>
       ))}

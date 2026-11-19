@@ -176,7 +176,7 @@ describe("PAR-119 who may reveal", () => {
     expect(card).not.toHaveTextContent("credentials:reveal, ")
     expect(card).not.toHaveTextContent("can read secrets in plaintext")
     expect(within(card).getByText(/Owners and admins by default\. More than 2 shows a warning\./)).toBeInTheDocument()
-    expect(within(card).getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
+    expect(within(card).getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?status=look")
     await waitFor(() => expect(card.querySelectorAll("[data-slot=reveal-holders] > *").length).toBeGreaterThan(0))
   })
 })

@@ -160,7 +160,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted, onOpenP
                     <RoleSelect label={`Role of ${displayName(p)}`} value={role} disabled={busy === key}
                       onChange={(r) => r && void actions.setRole(p.id, ws.id, r, `${displayName(p)} is now ${roleLabel(r)} in ${ws.name}`)} />
                   )}
-                  <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-11" disabled={lastOwner || busy === key}
+                  <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-[44px]" disabled={lastOwner || busy === key}
                     aria-label={`Remove ${displayName(p)}`} title={lastOwner ? "The only owner stays; hand the workspace over first" : undefined} onClick={() => setRemoving(p.id)}>
                     <X className="size-3.5" />
                   </Button>

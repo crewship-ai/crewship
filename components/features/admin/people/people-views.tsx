@@ -285,7 +285,7 @@ export function AccessMatrix({ people, allPeople, columns, actions, busy, resetK
                       <button type="button" disabled={locked} onClick={() => setEditing(key)}
                         aria-label={`${displayName(p)} in ${w.name}: ${role ? roleLabel(role) : "no access"}`}
                         title={locked ? "The only owner; hand the workspace over first" : `Change ${displayName(p)} in ${w.name}`}
-                        className={cn("min-h-8 min-w-16 rounded-md border border-dashed border-transparent px-2 py-1 text-label hover:border-control-border disabled:cursor-default disabled:hover:border-transparent max-md:min-w-0 coarse:min-h-11",
+                        className={cn("min-h-8 min-w-16 rounded-md border border-dashed border-transparent px-2 py-1 text-label hover:border-control-border disabled:cursor-default disabled:hover:border-transparent max-md:min-w-0 coarse:min-h-[44px]",
                           role ? "text-foreground" : "text-muted-foreground-soft")}>
                         {locked && <Lock className="mr-1 inline size-3" aria-hidden />}
                         {role ? roleLabel(role) : "—"}

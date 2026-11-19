@@ -111,7 +111,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
                     <RoleSelect label={`Role in ${m.name}`} value={m.role as Role} disabled={busy === key}
                       onChange={(r) => r && void actions.setRole(person.id, m.workspace_id, r, `${name} is now ${roleLabel(r)} in ${m.name}`)} />
                   )}
-                  <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-11" disabled={lastOwner || busy === key}
+                  <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-[44px]" disabled={lastOwner || busy === key}
                     aria-label={`Remove from ${m.name}`} title={lastOwner ? "The only owner stays" : `Remove from ${m.name}`}
                     onClick={() => setRemoving(m.workspace_id)}>
                     <X className="size-3.5" />

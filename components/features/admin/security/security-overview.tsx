@@ -181,7 +181,7 @@ export function SecurityOverview({ status, posture, postureError, rows, entries,
           ) : recent.length === 0 ? (
             <p className="px-4 py-3 text-label text-muted-foreground">Nothing here yet. Decisions appear as agents ask.</p>
           ) : recent.map((e) => (
-            <button key={e.id} type="button" onClick={() => setOpen(e)} className="flex min-h-[44px] w-full items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-[var(--row-hover-bg)]">
+            <button key={e.id} type="button" onClick={() => setOpen(e)} className="flex coarse:min-h-[44px] w-full items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-[var(--row-hover-bg)]">
               <span className="min-w-0 flex-1">
                 <span className={cn("block truncate text-control", e.credential_name && "font-mono")}>{subject(e)}</span>
                 <span className="block truncate text-label text-muted-foreground-soft">{e.agent_name}{e.workspace_name ? ` · ${e.workspace_name}` : ""} · {when(e.created_at)}</span>
