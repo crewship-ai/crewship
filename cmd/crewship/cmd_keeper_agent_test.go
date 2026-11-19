@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -257,5 +258,53 @@ func TestKeeperAgentRedirectErrorsAndCancellationAreBounded(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || cli.ExitCodeFor(err) != cli.ExitGeneric || !strings.Contains(err.Error(), "outcome unavailable") || time.Since(start) > time.Second {
 		t.Fatal("cancelled Keeper command did not stop with an unknown outcome")
+	}
+}
+
+// #5548: 400/404/409 from execute are refused before any decision, approval
+// consumption or execution, so the CLI reports a definite refusal with fixed
+// text and the matching exit code. 5xx and other statuses stay ambiguous.
+func TestKeeperAgentExecuteReportsKnownPreExecutionRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		status    int
+		wantExit  int
+		want      []string
+		ambiguous bool
+	}{
+		{400, cli.ExitValidation, []string{"refused the command before execution", "no shell operators", "HTTP 400"}, false},
+		{404, cli.ExitNotFound, []string{"nothing executed", "grant expired", "HTTP 404"}, false},
+		{409, cli.ExitConflict, []string{"nothing executed by this call", "approval already used", "HTTP 409"}, false},
+		{403, cli.ExitAuth, nil, true},
+		{500, cli.ExitGeneric, nil, true},
+		{502, cli.ExitGeneric, nil, true},
+	} {
+		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
+			t.Setenv("CREWSHIP_AGENT_TOKEN", keeperAgentFixtureCapability())
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				io.WriteString(w, `{"error":"opaque-secret"}`)
+			}))
+			defer s.Close()
+			t.Setenv("CREWSHIP_SIDECAR_URL", s.URL)
+			out, err := executeKeeperAgentFixture(t, "execute", "glab api user", "SECRET", "--intent", "fixture", "--command-stdin")
+			if err == nil || out != "" || strings.Contains(err.Error(), "opaque-secret") {
+				t.Fatalf("want error without output or server body, got out=%q err=%v", out, err)
+			}
+			msg := err.Error()
+			if tc.ambiguous {
+				if !strings.Contains(msg, "outcome unavailable") {
+					t.Fatalf("ambiguous status must stay outcome unavailable: %v", err)
+				}
+				return
+			}
+			if strings.Contains(msg, "outcome unavailable") || cli.ExitCodeFor(err) != tc.wantExit {
+				t.Fatalf("known refusal misreported: exit=%d err=%v", cli.ExitCodeFor(err), err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(msg, w) {
+					t.Errorf("error %q missing %q", msg, w)
+				}
+			}
+		})
 	}
 }
