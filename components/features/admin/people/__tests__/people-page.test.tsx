@@ -1,8 +1,7 @@
-// Admin › People & workspaces as an instance admin uses it: one page for who
-// can sign in and where they work. Workspaces and Users were two tabs with a
-// drawer each, and the person drawer could not give access to a workspace the
-// admin was not standing in. Every write here goes to /admin/instance/… and is
-// asserted by the request it sends, not by the component's own state.
+// Admin › People & workspaces as an instance admin uses it: the panel (views,
+// a short list of places, filters), the people lists and the access grid.
+// Every write is asserted by the request it sends, not by the component's
+// own state. One person's page and one workspace's page have their own files.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
@@ -20,238 +19,315 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/admin/people" }))
 
 import { PeoplePage } from "../people-page"
+import { FUTURE, USERS, WORKSPACES, body, calls, m, serve, stubDom } from "./fixtures"
 
-const FUTURE = new Date(Date.now() + 3 * 86_400_000).toISOString()
-const m = (workspace_id: string, name: string, role: string) => ({ member_id: `m-${workspace_id}`, workspace_id, name, slug: name.toLowerCase(), role, joined_at: "2026-09-01T00:00:00Z" })
-const USERS = [
-  { id: "u-boss", email: "boss@ex.com", full_name: "Boss", created_at: "2026-09-01T00:00:00Z", workspace: null, role: "OWNER",
-    memberships: [m("ws-a", "Acme", "OWNER")], active_sessions: 2, instance_admin: true, instance_admin_source: "role" },
-  { id: "u-jana", email: "jana@ex.com", full_name: "Jana", created_at: "2026-09-02T00:00:00Z", workspace: null, role: "MEMBER",
-    memberships: [m("ws-a", "Acme", "MEMBER")], locked_until: FUTURE, failed_login_count: 50 },
-  { id: "u-perko", email: "perko@ex.com", full_name: "Perko", created_at: "2026-09-03T00:00:00Z", workspace: null, role: null,
-    memberships: [m("ws-b", "Lab", "OWNER")], setup_link_expires_at: FUTURE },
+const people = (n = 3) => [
+  ...USERS,
+  ...Array.from({ length: n }, (_, i) => ({ id: `u-x${i}`, email: `x${i}@ex.com`, full_name: `Extra ${String(i).padStart(2, "0")}`, created_at: "2026-09-04T00:00:00Z", workspace: null, role: "MEMBER",
+    memberships: [m("ws-a", "Acme", "MEMBER")], last_active_at: "2026-11-10T00:00:00Z" })),
 ]
-const WORKSPACES = [
-  { id: "ws-a", name: "Acme", slug: "acme", created_at: "2026-01-01T00:00:00Z", _count_members: 2, _count_agents: 3, _count_crews: 1, runs_7d: 4, runs_by_day: [1, 0, 0, 1, 0, 2, 0], current: true },
-  { id: "ws-b", name: "Lab", slug: "lab", created_at: "2026-06-01T00:00:00Z", _count_members: 1, _count_agents: 0, _count_crews: 0, runs_7d: 0, runs_by_day: [0, 0, 0, 0, 0, 0, 0] },
+const manyWorkspaces = (n: number) => [
+  ...WORKSPACES,
+  ...Array.from({ length: n }, (_, i) => ({ id: `ws-${i}`, name: `Team ${String(i).padStart(2, "0")}`, slug: `team-${i}`, created_at: "2026-02-01T00:00:00Z", _count_members: 1, _count_agents: 0, _count_crews: 0, runs_7d: i, runs_by_day: [], kind: "team" })),
 ]
 
-const res = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => "", headers: { get: (k: string) => (k === "X-Admin-Scope" ? "instance" : null) } })
-const calls = (method: string, part: string) =>
-  h.apiFetch.mock.calls.filter(([u, init]) => String(u).includes(part) && ((init as RequestInit | undefined)?.method ?? "GET") === method)
-const body = (method: string, part: string) => JSON.parse(String((calls(method, part)[0][1] as RequestInit).body))
+const pick = async (trigger: HTMLElement, option: RegExp | string) => {
+  fireEvent.click(trigger)
+  const list = await screen.findByRole("listbox")
+  fireEvent.click(within(list).getByRole("option", { name: option }))
+}
+const panel = () => screen.getByRole("navigation", { name: "People & workspaces sections" })
 
 beforeEach(() => {
   cleanup()
+  stubDom()
   window.history.replaceState(null, "", "/admin/people")
-  h.apiFetch.mockReset()
-  h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => {
-    const url = String(u)
-    const method = init?.method ?? "GET"
-    if (url.startsWith("/api/v1/admin/users?")) return res(USERS)
-    if (url.startsWith("/api/v1/admin/workspaces?")) return res(WORKSPACES)
-    if (url.includes("/sessions")) return res({ sessions: [], cli_tokens: [] })
-    if (url === "/api/v1/admin/instance/people" && method === "POST") return res({ user_id: "u-new", email: "new@ex.com", memberships: [], setup_url: "https://x/reset-password?token=abc", expires_at: FUTURE }, 201)
-    if (url === "/api/v1/admin/instance/workspaces" && method === "POST") return res({ id: "ws-new" }, 201)
-    if (url.includes("/admin/instance/")) return res({}, method === "DELETE" ? 204 : 200)
-    return res({})
-  })
+  serve(h.apiFetch)
 })
 
-const openPerson = async (name: string) => {
-  fireEvent.click(await screen.findByRole("row", { name: new RegExp(name) }))
-  return screen.findByRole("region", { name: "Workspace access" })
-}
-
-describe("the People list", () => {
-  it("lists everyone with their workspaces, the ones needing a hand first", async () => {
-    render(<PeoplePage />)
-    const table = await screen.findByRole("region", { name: "People" })
-    const rows = within(table).getAllByRole("row").slice(1).map((r) => r.textContent ?? "")
-    expect(rows[0]).toMatch(/Jana|Perko/)
-    expect(rows.at(-1)).toMatch(/Boss/)
-    expect(within(table).getByText("Setup pending")).toBeInTheDocument()
-    const attention = screen.getByRole("region", { name: "Needs attention" })
-    expect(attention).toHaveTextContent("Jana is locked out.")
-    expect(attention).toHaveTextContent("50 failed sign-ins in a row")
-    expect(attention).toHaveTextContent("Perko has not chosen a password yet.")
-  })
-
-  it("narrows to one group from the panel", async () => {
+describe("the panel", () => {
+  it("names views and at most six places, then All N workspaces", async () => {
+    serve(h.apiFetch, { users: people(), workspaces: manyWorkspaces(20) })
     render(<PeoplePage />)
     await screen.findByRole("region", { name: "People" })
-    fireEvent.click(screen.getByRole("button", { name: /^Locked/ }))
+    const nav = within(panel())
+    for (const label of ["Everyone", "Needs a hand", "Instance admins", "Suspended", "All workspaces", "Personal accounts", "Who is where"]) {
+      expect(nav.getByRole("button", { name: new RegExp(`^${label}`) })).toBeInTheDocument()
+    }
+    expect(nav.getByText("Busiest this week")).toBeInTheDocument()
+    // The busiest first; six of 22, never the full list.
+    const places = nav.getAllByTitle(/ · /)
+    expect(places).toHaveLength(6)
+    expect(places[0]).toHaveAttribute("title", "Team 19 · team-19")
+    expect(nav.getByRole("button", { name: "All 22 workspaces…" })).toBeInTheDocument()
+    // No three-way View control, and each action once.
+    expect(screen.queryByRole("group", { name: "View" })).toBeNull()
+    expect(screen.getAllByRole("button", { name: "New workspace" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "Add person" })).toHaveLength(1)
+  })
+
+  it("counts the people in each view", async () => {
+    render(<PeoplePage />)
+    await screen.findByRole("region", { name: "People" })
+    const nav = within(panel())
+    expect(nav.getByRole("button", { name: /^Everyone/ })).toHaveTextContent("3")
+    // Jana is locked, Perko has not chosen a password: two people need a hand.
+    expect(nav.getByRole("button", { name: /^Needs a hand/ })).toHaveTextContent("2")
+    expect(nav.getByRole("button", { name: /^Instance admins/ })).toHaveTextContent("1")
+  })
+
+  it("filters by status and by workspace from Filter, with All N… for the rest", async () => {
+    serve(h.apiFetch, { users: people(), workspaces: manyWorkspaces(10) })
+    render(<PeoplePage />)
+    await screen.findByRole("region", { name: "People" })
+    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
+    const filters = screen.getByRole("group", { name: "Filter people" })
+    fireEvent.click(within(filters).getByRole("button", { name: /^Locked/ }))
     const table = screen.getByRole("region", { name: "People" })
     expect(within(table).getAllByRole("row")).toHaveLength(2)
-    expect(within(table).getByText("Jana")).toBeInTheDocument()
-  })
-
-  it("unlocks someone straight from the attention card", async () => {
-    render(<PeoplePage />)
-    const strip = await screen.findByRole("region", { name: "Needs attention" })
-    fireEvent.click(within(strip).getByRole("button", { name: "Unlock" }))
-    await waitFor(() => expect(calls("POST", "/api/v1/admin/users/u-jana/unlock")).toHaveLength(1))
+    expect(window.location.search).toContain("facet=locked")
+    fireEvent.click(within(filters).getByRole("button", { name: /^All 12…/ }))
+    const dialog = await screen.findByRole("dialog", { name: "Workspace" })
+    expect(within(dialog).getByPlaceholderText("Search 12 workspaces")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: /Acme/ }))
+    expect(window.location.search).toContain("in=ws-a")
   })
 })
 
-describe("a person's workspace access", () => {
-  it("adds them to a workspace they are not in, even one the admin is not in", async () => {
+describe("Everyone", () => {
+  it("heads with the three counts and one banner for who needs a hand", async () => {
     render(<PeoplePage />)
-    const card = await openPerson("Jana")
-    fireEvent.click(within(card).getByRole("button", { name: /Add Jana to a workspace/ }))
-    fireEvent.change(within(card).getByRole("combobox", { name: "Role" }), { target: { value: "ADMIN" } })
-    fireEvent.click(within(card).getByRole("button", { name: "Add" }))
-    await waitFor(() => expect(calls("PUT", "/api/v1/admin/instance/workspaces/ws-b/members/u-jana")).toHaveLength(1))
-    expect(body("PUT", "/api/v1/admin/instance/workspaces/ws-b/members/u-jana")).toEqual({ role: "ADMIN" })
+    const table = await screen.findByRole("region", { name: "People" })
+    expect(screen.getByText("3 people · 2 workspaces · 0 personal accounts")).toBeInTheDocument()
+    const banner = screen.getByRole("status")
+    expect(banner).toHaveTextContent("2 people need a hand")
+    expect(banner).toHaveTextContent("1 locked out · 1 without a password · 0 in no workspace")
+    // The old findings card is gone.
+    expect(screen.queryByRole("region", { name: "Needs attention" })).toBeNull()
+    const rows = within(table).getAllByRole("row").slice(1).map((r) => r.textContent ?? "")
+    expect(rows[0]).toMatch(/Jana/)
+    expect(rows.at(-1)).toMatch(/Boss/)
+    expect(within(table).getByText("Setup pending")).toBeInTheDocument()
+    expect(within(table).getByText("Instance admin")).toBeInTheDocument()
+    fireEvent.click(within(banner).getByRole("button", { name: "Review" }))
+    expect(await screen.findByRole("region", { name: /Locked out/ })).toBeInTheDocument()
   })
 
-  it("changes a role in place and removes only after asking", async () => {
+  it("shows two membership chips and +N, and pages 25 at a time", async () => {
+    const wide = { ...USERS[0], id: "u-wide", full_name: "Aaa Wide", email: "wide@ex.com", memberships: [m("ws-a", "Acme", "MEMBER"), m("ws-b", "Lab", "MEMBER"), m("ws-c", "Third", "MEMBER")], instance_admin: false }
+    serve(h.apiFetch, { users: [wide, ...people(40)], workspaces: WORKSPACES })
     render(<PeoplePage />)
-    const card = await openPerson("Jana")
-    fireEvent.change(within(card).getByRole("combobox", { name: "Role in Acme" }), { target: { value: "MANAGER" } })
-    await waitFor(() => expect(body("PUT", "/api/v1/admin/instance/workspaces/ws-a/members/u-jana")).toEqual({ role: "MANAGER" }))
-
-    fireEvent.click(within(card).getByRole("button", { name: "Remove from Acme" }))
-    expect(calls("DELETE", "/members/u-jana")).toHaveLength(0)
-    const dialog = await screen.findByRole("alertdialog", { name: "Remove Jana from Acme?" })
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }))
-    await waitFor(() => expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-a/members/u-jana")).toHaveLength(1))
+    const table = await screen.findByRole("region", { name: "People" })
+    expect(within(table).getByRole("row", { name: /Aaa Wide/ })).toHaveTextContent("+1")
+    expect(within(table).getAllByRole("row")).toHaveLength(26)
+    fireEvent.click(within(table).getByRole("button", { name: "Show 19 more" }))
+    expect(within(table).getAllByRole("row")).toHaveLength(45)
   })
 
-  it("keeps a workspace's only owner where they are", async () => {
+  it("orders A–Z and by last active, and exports the rows as CSV", async () => {
+    const created = vi.fn(() => "blob:x")
+    URL.createObjectURL = created
+    URL.revokeObjectURL = vi.fn()
+    // jsdom would navigate to the blob address and break every later URL.
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
     render(<PeoplePage />)
-    const card = await openPerson("Perko")
-    expect(within(card).queryByRole("combobox", { name: "Role in Lab" })).toBeNull()
-    expect(within(card).getByRole("button", { name: "Remove from Lab" })).toBeDisabled()
+    const table = await screen.findByRole("region", { name: "People" })
+    fireEvent.click(screen.getByRole("radio", { name: "A–Z" }))
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Boss")
+    fireEvent.click(screen.getByRole("radio", { name: "Last active" }))
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Boss")
+    expect(window.location.search).toContain("sort=recent")
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }))
+    expect(created).toHaveBeenCalledTimes(1)
+    expect(click).toHaveBeenCalledTimes(1)
+    click.mockRestore()
+    const blob = (created.mock.calls[0] as unknown as [Blob])[0]
+    expect(await blob.text()).toContain("jana@ex.com")
   })
 
-  it("issues a new setup link for someone who has not signed in yet", async () => {
+  it("keeps the person list narrowed to a status from the URL", async () => {
+    window.history.replaceState(null, "", "/admin/people?facet=setup")
     render(<PeoplePage />)
-    await openPerson("Perko")
-    fireEvent.click(screen.getByRole("button", { name: "New setup link" }))
-    await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people/u-perko/setup-link")).toHaveLength(1))
-  })
-})
-
-describe("a person who never signed in", () => {
-  it("does not claim they chose a password, and offers a setup link", async () => {
-    const never = { ...USERS[2], id: "u-ghost", full_name: "Ghost", email: "ghost@ex.com", setup_link_expires_at: null, last_active_at: null, memberships: [m("ws-a", "Acme", "MEMBER")] }
-    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => {
-      const url = String(u)
-      if (url.startsWith("/api/v1/admin/users?")) return res([...USERS, never])
-      if (url.startsWith("/api/v1/admin/workspaces?")) return res(WORKSPACES)
-      if (url.includes("/sessions")) return res({ sessions: [], cli_tokens: [] })
-      return res({ setup_url: "https://x/reset-password?token=zz", expires_at: FUTURE }, init?.method === "POST" ? 200 : 200)
-    })
-    render(<PeoplePage />)
-    await openPerson("Ghost")
-    const signIn = screen.getByRole("region", { name: "Sign-in" })
-    expect(signIn).not.toHaveTextContent("Chosen by the person")
-    expect(signIn).toHaveTextContent("Never signed in")
-    fireEvent.click(within(signIn).getByRole("button", { name: "Issue setup link" }))
-    await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people/u-ghost/setup-link")).toHaveLength(1))
-  })
-})
-
-describe("suspending", () => {
-  it("asks through the shared confirmation, then suspends", async () => {
-    render(<PeoplePage />)
-    await openPerson("Jana")
-    const zone = screen.getByRole("region", { name: "Danger zone" })
-    fireEvent.click(within(zone).getByRole("button", { name: /Suspend/ }))
-    expect(calls("POST", "/suspend")).toHaveLength(0)
-    const dialog = await screen.findByRole("alertdialog", { name: "Suspend Jana?" })
-    expect(dialog).toHaveTextContent(/sessions end first/)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend Jana" }))
-    await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people/u-jana/suspend")).toHaveLength(1))
+    const table = await screen.findByRole("region", { name: "People" })
+    expect(within(table).getAllByRole("row")).toHaveLength(2)
+    expect(within(table).getByText("Perko")).toBeInTheDocument()
+    // Narrowed: no banner, and the toolbar says what narrows.
+    expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it("offers no way to suspend yourself", async () => {
+  it("opens the old ?view=people&facet=admins link on Instance admins", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=people&facet=admins")
     render(<PeoplePage />)
-    await openPerson("Boss")
-    expect(within(screen.getByRole("region", { name: "Danger zone" })).getByRole("button", { name: /Suspend/ })).toBeDisabled()
+    expect(await screen.findByText("People who run this server: other people, every workspace, limits and backups.")).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "People" })).getAllByRole("row")).toHaveLength(2)
   })
 })
 
-describe("adding", () => {
-  it("creates a person with access and shows the setup link once", async () => {
+describe("bulk actions", () => {
+  it("suspends the people ticked after one confirmation that says sessions and CLI tokens stay ended", async () => {
     render(<PeoplePage />)
-    await screen.findByRole("region", { name: "People" })
-    fireEvent.click(screen.getByRole("button", { name: /Add person/ }))
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@ex.com" } })
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Role in Lab" })).getByRole("radio", { name: "Member" }))
-    fireEvent.click(screen.getByRole("button", { name: "Create and get link" }))
-    await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people")).toHaveLength(1))
-    expect(body("POST", "/api/v1/admin/instance/people")).toEqual({ email: "new@ex.com", full_name: "", memberships: [{ workspace_id: "ws-b", role: "MEMBER" }] })
-    expect(await screen.findByLabelText("Setup link")).toHaveValue("https://x/reset-password?token=abc")
+    const table = await screen.findByRole("region", { name: "People" })
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Jana" }))
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Perko" }))
+    const bar = screen.getByRole("toolbar", { name: "Change the selected people" })
+    fireEvent.click(within(bar).getByRole("button", { name: "Suspend" }))
+    const dialog = await screen.findByTestId("confirm-dialog")
+    expect(within(dialog).getByText("Suspend 2 people?")).toBeInTheDocument()
+    expect(dialog).toHaveTextContent(/sessions and CLI tokens end first, and stay ended after a reactivation/)
+    expect(calls(h.apiFetch, "POST", "/suspend")).toHaveLength(0)
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: "left" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend 2" }))
+    await waitFor(() => expect(calls(h.apiFetch, "POST", "/suspend")).toHaveLength(2))
+    expect(body(h.apiFetch, "POST", "/people/u-jana/suspend")).toEqual({ reason: "left" })
   })
 
-  it("creates a workspace owned by the person chosen", async () => {
+  it("adds the people ticked to a workspace picked by search, never as Owner", async () => {
     render(<PeoplePage />)
-    await screen.findByRole("region", { name: "People" })
-    fireEvent.click(screen.getAllByRole("button", { name: /New workspace/ })[0])
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Marketing Team" } })
-    expect(screen.getByLabelText("Address")).toHaveValue("marketing-team")
-    fireEvent.change(screen.getByLabelText("Owner"), { target: { value: "u-jana" } })
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
-    await waitFor(() => expect(body("POST", "/api/v1/admin/instance/workspaces")).toEqual({ name: "Marketing Team", slug: "marketing-team", owner_user_id: "u-jana" }))
-  })
-})
-
-describe("a workspace", () => {
-  it("hands itself over after asking, and deletes only once its slug is typed", async () => {
-    render(<PeoplePage />)
-    fireEvent.click(await screen.findByRole("button", { name: /^Acme/ }))
-    const zone = await screen.findByRole("region", { name: "Danger zone" })
-    fireEvent.change(within(zone).getByRole("combobox", { name: "New owner" }), { target: { value: "u-jana" } })
-    fireEvent.click(within(zone).getByRole("button", { name: "Transfer" }))
-    // Transfer names the new owner in the shared confirmation.
-    const transfer = await screen.findByRole("alertdialog", { name: "Make Jana the owner of Acme?" })
-    fireEvent.click(within(transfer).getByRole("button", { name: "Transfer" }))
-    await waitFor(() => expect(body("POST", "/api/v1/admin/instance/workspaces/ws-a/transfer-ownership")).toEqual({ user_id: "u-jana" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
-
-    // Delete needs the typed slug.
-    fireEvent.click(within(zone).getByRole("button", { name: /Delete…/ }))
-    const del = await screen.findByRole("alertdialog", { name: "Delete Acme?" })
-    const go = within(del).getByRole("button", { name: "Delete Acme" })
-    expect(go).toBeDisabled()
-    fireEvent.change(within(del).getByLabelText(/Type/), { target: { value: "acme" } })
-    fireEvent.click(go)
-    await waitFor(() => expect(body("DELETE", "/api/v1/admin/instance/workspaces/ws-a")).toEqual({ confirm_slug: "acme" }))
+    const table = await screen.findByRole("region", { name: "People" })
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Jana" }))
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Perko" }))
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Change the selected people" })).getByRole("button", { name: /Add to workspace/ }))
+    const dialog = await screen.findByRole("dialog", { name: "Add 2 people to a workspace" })
+    expect(within(dialog).queryByRole("radio", { name: "Owner" })).toBeNull()
+    await pick(within(dialog).getByRole("combobox", { name: "Workspace" }), /Lab/)
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Viewer" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add 2" }))
+    await waitFor(() => expect(calls(h.apiFetch, "PUT", "/workspaces/ws-b/members/")).toHaveLength(2))
+    expect(body(h.apiFetch, "PUT", "/workspaces/ws-b/members/u-jana")).toEqual({ role: "VIEWER" })
   })
 })
 
-describe("the access matrix", () => {
-  it("takes access away from a cell", async () => {
+describe("Needs a hand", () => {
+  const HAND = [
+    ...USERS,
+    { id: "u-none", email: "none@ex.com", full_name: "Nowhere", created_at: "2026-09-04T00:00:00Z", workspace: null, role: null, memberships: [], last_active_at: "2026-11-10T00:00:00Z" },
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `u-s${i}`, email: `s${i}@ex.com`, full_name: `Setup ${i}`, created_at: "2026-09-04T00:00:00Z", workspace: null, role: null, memberships: [m("ws-a", "Acme", "MEMBER")], setup_link_expires_at: FUTURE })),
+  ]
+  const EMPTY_ACCOUNT = { id: "ws-iv", name: "Ivana's Workspace", slug: "ivana-s-workspace", kind: "personal", created_at: "2026-09-04T00:00:00Z", _count_members: 1, _count_agents: 0, _count_crews: 0, runs_7d: 0, runs_by_day: [] }
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/people?view=hand")
+    serve(h.apiFetch, { users: HAND, workspaces: [...WORKSPACES, EMPTY_ACCOUNT] })
+  })
+
+  it("shows the four cards, each capped at six rows with a link to the filtered list", async () => {
     render(<PeoplePage />)
-    await screen.findByRole("region", { name: "People" })
-    fireEvent.click(screen.getByRole("button", { name: /^Access$/ }))
-    const matrix = await screen.findByRole("region", { name: "Access" })
-    // The only owner's cell cannot be opened; everyone else's can.
+    const locked = await screen.findByRole("region", { name: "Locked out · 1" })
+    expect(within(locked).getByRole("button", { name: "Unlock" })).toBeInTheDocument()
+    const setup = screen.getByRole("region", { name: "Have not chosen a password · 9" })
+    expect(within(setup).getAllByRole("button", { name: "New setup link" })).toHaveLength(6)
+    expect(setup).toHaveTextContent("6 of 9 shown")
+    expect(screen.getByRole("region", { name: "In no workspace · 1" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Empty personal accounts · 1" })).toBeInTheDocument()
+    fireEvent.click(within(setup).getByRole("button", { name: "Show all" }))
+    await waitFor(() => expect(window.location.search).toContain("facet=setup"))
+    expect(window.location.search).not.toContain("view=hand")
+  })
+
+  it("unlocks, issues a setup link shown once, voids and adds to a workspace", async () => {
+    render(<PeoplePage />)
+    const locked = await screen.findByRole("region", { name: "Locked out · 1" })
+    fireEvent.click(within(locked).getByRole("button", { name: "Unlock" }))
+    await waitFor(() => expect(calls(h.apiFetch, "POST", "/api/v1/admin/users/u-jana/unlock")).toHaveLength(1))
+
+    const setup = screen.getByRole("region", { name: /Have not chosen a password/ })
+    fireEvent.click(within(setup).getAllByRole("button", { name: "Void" })[0])
+    await waitFor(() => expect(calls(h.apiFetch, "DELETE", "/setup-link")).toHaveLength(1))
+    fireEvent.click(within(setup).getAllByRole("button", { name: "New setup link" })[0])
+    const link = await screen.findByRole("dialog", { name: "Send them this link" })
+    expect(within(link).getByLabelText("Setup link")).toHaveValue("https://x/reset-password?token=link")
+
+    fireEvent.click(within(link).getByRole("button", { name: "Done" }))
+    const nowhere = screen.getByRole("region", { name: "In no workspace · 1" })
+    fireEvent.click(within(nowhere).getByRole("button", { name: "Add to a workspace" }))
+    const dialog = await screen.findByRole("dialog", { name: "Add to a workspace" })
+    await pick(within(dialog).getByRole("combobox", { name: "Workspace" }), /Acme/)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(body(h.apiFetch, "PUT", "/workspaces/ws-a/members/u-none")).toEqual({ role: "MEMBER" }))
+  })
+
+  it("removes the empty personal accounts after asking", async () => {
+    render(<PeoplePage />)
+    const card = await screen.findByRole("region", { name: "Empty personal accounts · 1" })
+    fireEvent.click(within(card).getByRole("button", { name: "Remove 1" }))
+    expect(calls(h.apiFetch, "DELETE", "/workspaces/ws-iv")).toHaveLength(0)
+    fireEvent.click(within(await screen.findByTestId("confirm-dialog")).getByRole("button", { name: "Remove" }))
+    await waitFor(() => expect(body(h.apiFetch, "DELETE", "/workspaces/ws-iv")).toEqual({ confirm_slug: "ivana-s-workspace" }))
+  })
+})
+
+describe("All workspaces", () => {
+  it("lists workspace, owner, people, crews, runs and last activity; opens one", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=workspaces")
+    render(<PeoplePage />)
+    const card = await screen.findByRole("region", { name: "Workspaces" })
+    expect(screen.getByText("2 workspaces · 3 people · 3 agents")).toBeInTheDocument()
+    const rows = within(card).getAllByRole("row").slice(1)
+    expect(rows[0]).toHaveTextContent("Acme")
+    expect(rows[0]).toHaveTextContent("Boss")
+    fireEvent.click(within(card).getByRole("radio", { name: "A–Z" }))
+    fireEvent.click(within(card).getByRole("radio", { name: "Newest" }))
+    expect(within(card).getAllByRole("row")[1]).toHaveTextContent("Lab")
+    fireEvent.click(within(card).getByRole("row", { name: /Lab/ }))
+    expect(await screen.findByRole("region", { name: "Members" })).toBeInTheDocument()
+    expect(window.location.search).toContain("ws=ws-b")
+  })
+
+  it("marks a workspace nobody owns", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=workspaces")
+    serve(h.apiFetch, { users: USERS.slice(0, 2), workspaces: WORKSPACES })
+    render(<PeoplePage />)
+    const card = await screen.findByRole("region", { name: "Workspaces" })
+    expect(within(card).getByRole("row", { name: /Lab/ })).toHaveTextContent("No owner")
+  })
+})
+
+describe("Who is where", () => {
+  const WIDE = manyWorkspaces(8)
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/people?view=access")
+  })
+
+  it("takes access away from a cell, and keeps an only owner's cell shut", async () => {
+    render(<PeoplePage />)
+    const matrix = await screen.findByRole("region", { name: "Who is where" })
     expect(within(matrix).getByRole("button", { name: "Perko in Lab: Owner" })).toBeDisabled()
+    expect(within(matrix).getByRole("button", { name: "Perko in Lab: Owner" })).toHaveAttribute("title", "The only owner; hand the workspace over first")
     fireEvent.click(within(matrix).getByRole("button", { name: "Jana in Acme: Member" }))
     fireEvent.change(within(matrix).getByRole("combobox", { name: "Jana in Acme" }), { target: { value: "" } })
-    await waitFor(() => expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-a/members/u-jana")).toHaveLength(1))
+    await waitFor(() => expect(calls(h.apiFetch, "DELETE", "/api/v1/admin/instance/workspaces/ws-a/members/u-jana")).toHaveLength(1))
+  })
+
+  it("draws at most six columns chosen in a searchable dialog, people in them first", async () => {
+    const outsider = { ...USERS[1], id: "u-out", full_name: "Aaron", email: "aaron@ex.com", locked_until: null, memberships: [m("ws-9", "Team 09", "MEMBER")] }
+    serve(h.apiFetch, { users: [outsider, ...USERS], workspaces: WIDE })
+    render(<PeoplePage />)
+    const matrix = await screen.findByRole("region", { name: "Who is where" })
+    expect(within(matrix).getAllByRole("columnheader")).toHaveLength(6)
+    expect(within(matrix).getByText("5 of 10 workspaces", { exact: false })).toBeInTheDocument()
+    fireEvent.click(within(matrix).getByRole("button", { name: "Choose workspaces" }))
+    const dialog = await screen.findByRole("dialog", { name: "Workspaces to compare" })
+    fireEvent.change(within(dialog).getByLabelText("Search workspaces"), { target: { value: "lab" } })
+    expect(within(dialog).getAllByRole("checkbox")).toHaveLength(1)
+    fireEvent.click(within(dialog).getByRole("checkbox"))
+    fireEvent.change(within(dialog).getByLabelText("Search workspaces"), { target: { value: "" } })
+    // Five were drawn, Lab makes six: a seventh cannot be ticked.
+    const boxes = within(dialog).getAllByRole("checkbox")
+    expect(boxes.filter((b) => (b as HTMLInputElement).checked)).toHaveLength(6)
+    expect(boxes.filter((b) => (b as HTMLInputElement).disabled && !(b as HTMLInputElement).checked).length).toBeGreaterThan(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show" }))
+    expect(within(matrix).getByRole("columnheader", { name: /Lab/ })).toBeInTheDocument()
+    // Aaron is in none of the columns chosen: the people in them come first.
+    const rows = within(matrix).getAllByRole("row").slice(1).map((r) => r.textContent ?? "")
+    expect(rows.at(-1)).toMatch(/Aaron/)
   })
 })
 
-// Personal workspaces — the empty "<Name>'s Workspace" a sign-up gets — are
-// kept apart from the ones people share, and can still be found by name.
-describe("workspaces and personal accounts", () => {
+describe("personal accounts", () => {
   const IVANA = { id: "u-ivana", email: "ivana@ex.com", full_name: "Ivana Viewer", created_at: "2026-09-04T00:00:00Z", workspace: null, role: null,
     memberships: [m("ws-a", "Acme", "VIEWER"), m("ws-iv", "Ivana Viewer's Workspace", "OWNER")] }
   const IV_WS = { id: "ws-iv", name: "Ivana Viewer's Workspace", slug: "ivana-viewer-s-workspace", kind: "personal", created_at: "2026-09-04T00:00:00Z",
     _count_members: 1, _count_agents: 0, _count_crews: 0, runs_7d: 0, runs_by_day: [0, 0, 0, 0, 0, 0, 0] }
-  beforeEach(() => {
-    const base = h.apiFetch.getMockImplementation()!
-    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => {
-      const url = String(u)
-      if (url.startsWith("/api/v1/admin/users?")) return res([...USERS, IVANA])
-      if (url.startsWith("/api/v1/admin/workspaces?")) return res([...WORKSPACES.map((w) => ({ ...w, kind: "team" })), IV_WS])
-      return base(u, init)
-    })
-  })
+  beforeEach(() => serve(h.apiFetch, { users: [...USERS, IVANA], workspaces: [...WORKSPACES, IV_WS] }))
 
   it("lists a personal account under People, not among the workspaces, and finds it by its owner", async () => {
     render(<PeoplePage />)
@@ -259,15 +335,13 @@ describe("workspaces and personal accounts", () => {
     const row = within(table).getByRole("row", { name: /Ivana Viewer/ })
     expect(row).toHaveTextContent("Personal account")
     expect(row).not.toHaveTextContent("Ivana Viewer's Workspace")
-    expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("1 personal account is empty.")
-    // Never in the panel's Workspaces.
-    expect(screen.queryByRole("button", { name: /^Ivana Viewer/ })).toBeNull()
+    expect(within(panel()).queryByRole("button", { name: /^Ivana Viewer/ })).toBeNull()
     fireEvent.change(screen.getByPlaceholderText(/Search people, workspaces/), { target: { value: "ivana" } })
-    fireEvent.click(screen.getByRole("button", { name: /^Personal accounts/ }))
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Personal accounts/ }))
     const card = await screen.findByRole("region", { name: "Personal accounts" })
     fireEvent.click(within(card).getByRole("row", { name: /Ivana Viewer/ }))
-    expect(await screen.findByRole("radiogroup", { name: "Workspace or personal account" })).toBeInTheDocument()
-    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Personal accounts")
+    expect(await screen.findByRole("radiogroup", { name: "Kind" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Personal accounts" })).toBeInTheDocument()
   })
 
   it("leaves personal accounts out of the access grid", async () => {
@@ -277,60 +351,79 @@ describe("workspaces and personal accounts", () => {
     expect(screen.queryByRole("columnheader", { name: /Ivana Viewer's Workspace/ })).toBeNull()
   })
 
-  it("renames a personal account and turns it into a workspace", async () => {
-    window.history.replaceState(null, "", "/admin/people?ws=ws-iv")
+  it("ticks only the empty ones and removes them after asking", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=accounts")
     render(<PeoplePage />)
-    fireEvent.click(await screen.findByRole("button", { name: /Rename Ivana Viewer's Workspace/ }))
-    fireEvent.change(screen.getByLabelText("Workspace name"), { target: { value: "Design" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(body("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ name: "Design" }))
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Workspace or personal account" })).getByRole("radio", { name: "Workspace" }))
-    await waitFor(() => expect(calls("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(2))
-    expect(JSON.parse(String((calls("PATCH", "/api/v1/admin/instance/workspaces/ws-iv")[1][1] as RequestInit).body))).toEqual({ kind: "team" })
-  })
-
-  it("removes the empty personal accounts picked, after asking", async () => {
-    window.history.replaceState(null, "", "/admin/people?view=workspaces")
-    render(<PeoplePage />)
-    expect(await screen.findByRole("region", { name: "Workspaces" })).not.toHaveTextContent("Ivana")
-    fireEvent.click(screen.getByRole("button", { name: "Show" }))
     const card = await screen.findByRole("region", { name: "Personal accounts" })
+    expect(card).toHaveTextContent("1 empty")
     fireEvent.click(within(card).getByRole("checkbox", { name: /Ivana Viewer's personal account/ }))
     fireEvent.click(within(card).getByRole("button", { name: /Remove 1 empty/ }))
-    expect(calls("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(0)
-    // The shared confirmation, saying what goes and what stays.
+    expect(calls(h.apiFetch, "DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toHaveLength(0)
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(within(dialog).getByText("Remove 1 empty personal account?")).toBeInTheDocument()
     expect(dialog.querySelector("[data-tone=lost]")).toHaveTextContent(/Only accounts with no crews, agents or data/)
     expect(dialog.querySelector("[data-tone=kept]")).toHaveTextContent(/keep signing in/)
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }))
-    await waitFor(() => expect(body("DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ confirm_slug: "ivana-viewer-s-workspace" }))
+    await waitFor(() => expect(body(h.apiFetch, "DELETE", "/api/v1/admin/instance/workspaces/ws-iv")).toEqual({ confirm_slug: "ivana-viewer-s-workspace" }))
   })
-})
 
-describe("one confirm for one or many", () => {
-  it("suspending the selected people asks once through the shared confirmation", async () => {
+  it("locks a personal account that has crews", async () => {
+    window.history.replaceState(null, "", "/admin/people?view=accounts")
+    serve(h.apiFetch, { users: [...USERS, IVANA], workspaces: [...WORKSPACES, { ...IV_WS, _count_crews: 2 }] })
     render(<PeoplePage />)
-    const table = await screen.findByRole("region", { name: "People" })
-    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Jana" }))
-    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Perko" }))
-    const bar = screen.getByRole("toolbar", { name: "Change the selected people" })
-    fireEvent.click(within(bar).getByRole("button", { name: "Suspend" }))
-    const dialog = await screen.findByTestId("confirm-dialog")
-    expect(within(dialog).getByText("Suspend 2 people?")).toBeInTheDocument()
-    expect(dialog).toHaveTextContent(/sessions end first/)
-    expect(calls("POST", "/suspend")).toHaveLength(0)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Suspend 2" }))
-    await waitFor(() => expect(calls("POST", "/suspend")).toHaveLength(2))
+    const card = await screen.findByRole("region", { name: "Personal accounts" })
+    expect(within(card).getByRole("checkbox", { name: /Ivana Viewer's personal account/ })).toBeDisabled()
   })
 })
 
-describe("People load failure (COM-03)", () => {
+describe("adding", () => {
+  it("creates a person with workspaces found by search, a role each, and shows the setup link once", async () => {
+    render(<PeoplePage />)
+    await screen.findByRole("region", { name: "People" })
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }))
+    const dialog = await screen.findByRole("dialog", { name: "Add person" })
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "new@ex.com" } })
+    await pick(within(dialog).getByRole("combobox", { name: "Add a workspace" }), /Lab/)
+    // Owner is never offered.
+    expect(within(within(dialog).getByRole("radiogroup", { name: "Role in Lab" })).queryByRole("radio", { name: "Owner" })).toBeNull()
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Role in Lab" })).getByRole("radio", { name: "Member" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create and get link" }))
+    await waitFor(() => expect(calls(h.apiFetch, "POST", "/api/v1/admin/instance/people")).toHaveLength(1))
+    expect(body(h.apiFetch, "POST", "/api/v1/admin/instance/people")).toEqual({ email: "new@ex.com", full_name: "", memberships: [{ workspace_id: "ws-b", role: "MEMBER" }] })
+    expect(await screen.findByLabelText("Setup link")).toHaveValue("https://x/reset-password?token=abc")
+  })
+
+  it("creates a workspace owned by the person chosen, with the agent language", async () => {
+    render(<PeoplePage />)
+    await screen.findByRole("region", { name: "People" })
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }))
+    const dialog = await screen.findByRole("dialog", { name: "New workspace" })
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Marketing Team" } })
+    expect(within(dialog).getByLabelText("Address")).toHaveValue("marketing-team")
+    await pick(within(dialog).getByRole("combobox", { name: "Owner" }), /Jana/)
+    await pick(within(dialog).getByRole("combobox", { name: "Agent language" }), /Czech/)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create workspace" }))
+    await waitFor(() => expect(body(h.apiFetch, "POST", "/api/v1/admin/instance/workspaces")).toEqual({ name: "Marketing Team", slug: "marketing-team", owner_user_id: "u-jana", preferred_language: "Czech" }))
+  })
+})
+
+describe("scope and failure", () => {
+  it("keeps the own-workspace banner for someone who sees one workspace only", async () => {
+    const base = h.apiFetch.getMockImplementation()!
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => {
+      const r = (await base(u, init)) as { headers: { get: (k: string) => string | null } }
+      if (String(u).startsWith("/api/v1/admin/users?")) return { ...r, headers: { get: () => "workspace" } }
+      return r
+    })
+    render(<PeoplePage />)
+    expect(await screen.findByText(/You see your own workspace only/)).toBeInTheDocument()
+  })
+
   it("is the kit PageBanner (alert, bad tone) and Retry reads again", async () => {
     const normal = h.apiFetch.getMockImplementation()!
     let fail = true
     h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) =>
-      fail && String(u).startsWith("/api/v1/admin/users?") ? res({ error: "boom" }, 500) : normal(u, init))
+      fail && String(u).startsWith("/api/v1/admin/users?") ? { ok: false, status: 500, json: async () => ({ error: "boom" }), headers: { get: () => null } } : normal(u, init))
     render(<PeoplePage />)
     const banner = await screen.findByRole("alert")
     expect(banner).toHaveAttribute("data-tone", "bad")
