@@ -36,6 +36,10 @@ type ChatMessageOption struct {
 	DocumentCreationIntent   *documents.CreationIntent  `json:"-"`
 	DocumentIterationIntent  *documents.IterationIntent `json:"-"`
 	ArtifactProjectIntent    *artifacts.ProjectIntent   `json:"-"`
+	// UserMessagePersisted marks a deferred send whose human turn (with
+	// OriginalTriggerMessageID) was already saved and acknowledged before the
+	// crew's image build started; the resumed run must not save it again.
+	UserMessagePersisted bool `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
