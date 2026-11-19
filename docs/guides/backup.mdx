@@ -156,6 +156,16 @@ checked before it is put in place. A file already at that path is never
 overwritten: identical bytes count as already present, different bytes are
 left alone and reported as a conflict.
 
+Chat attachments are the exception. A file attached in a chat is stored in the
+agent's output tree at the row's `storage_key`
+(`<crew>/<agent>/attachments/<chat>/<id>/<file>`), not in the content-addressed
+tree. It travels with the crew's `/output` files, not in `attachment-blobs/`,
+and it does not count towards `attachments_included`. An instance backup checks
+it at its `storage_key` in the output store, and `crewship backup drill` opens
+it there. Before #5588 both looked in the content-addressed tree: every chat
+attachment was reported as `attachment_missing`, and the drill failed
+`attachments_open` although the file had been restored.
+
 Nothing a bundle lacks is silent. When a file the rows reference is not on disk
 at backup time (or attachment storage is not configured), the backup still
 completes, and the manifest records it: `contents.attachments_included`,

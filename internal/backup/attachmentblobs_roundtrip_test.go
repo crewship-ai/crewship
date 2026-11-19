@@ -231,3 +231,69 @@ func TestRestore_AttachmentBlobNeverOverwritesADifferentFile(t *testing.T) {
 		t.Fatalf("attachments_conflicts = %d, want 1", res.AttachmentsConflicts)
 	}
 }
+
+// seedChatAttachment plants a chat attachment the way the chat upload path
+// stores it: a row with owner_type 'chat' whose bytes sit in the output store
+// at storage_key (<crew>/<agent>/attachments/<chat>/<id>/<file>), not under
+// the content-addressed attachments/<workspace>/<sha> tree.
+func seedChatAttachment(t *testing.T, db *sql.DB, outputRoot, workspaceID, id, content string) string {
+	t.Helper()
+	ctx := context.Background()
+	sum := sha256.Sum256([]byte(content))
+	sha := hex.EncodeToString(sum[:])
+	chatID := "chat_" + id
+	if _, err := db.ExecContext(ctx, `INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES(?,?,'a_alice','u_admin')`, chatID, workspaceID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+	key := "c_alpha/alice/attachments/" + chatID + "/" + id + "/shot.txt"
+	if _, err := db.ExecContext(ctx, `INSERT INTO attachments
+		(id, workspace_id, owner_type, chat_id, filename, content_type, size_bytes, sha256, storage_key, uploaded_by_user_id)
+		VALUES (?, ?, 'chat', ?, 'shot.txt', 'text/plain', ?, ?, ?, 'u_admin')`,
+		id, workspaceID, chatID, len(content), sha, key); err != nil {
+		t.Fatalf("seed chat attachment: %v", err)
+	}
+	if outputRoot != "" {
+		p := filepath.Join(outputRoot, filepath.FromSlash(key))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sha
+}
+
+// A chat attachment's bytes ride in the crew's /output section, not in
+// attachment-blobs/, so a workspace backup must neither look for it in the
+// content-addressed tree nor mark the bundle incomplete over it (#5588).
+func TestBackup_ChatAttachmentNotReportedMissing(t *testing.T) {
+	ctx := context.Background()
+	source := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, source)
+	sourceRoot := filepath.Join(t.TempDir(), "source-storage")
+	seedAttachment(t, source, sourceRoot, workspaceID, "att_issue", "an issue attachment")
+	seedChatAttachment(t, source, sourceRoot, workspaceID, "att_chat", "a chat attachment")
+
+	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:          backup.ScopeWorkspace,
+		WorkspaceID:    workspaceID,
+		OutputDir:      t.TempDir(),
+		Actor:          backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:     "chat-attachment-passphrase-123",
+		AttachmentRoot: sourceRoot,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	c := created.Manifest.Contents
+	if c.AttachmentsIncluded != 1 || c.AttachmentsMissing != 0 {
+		t.Errorf("attachments included=%d missing=%d, want 1/0 (the chat row is not a content-addressed blob)",
+			c.AttachmentsIncluded, c.AttachmentsMissing)
+	}
+	for _, it := range c.Incomplete {
+		if it.Kind == backup.IncompleteAttachmentMissing {
+			t.Errorf("bundle marked incomplete over a chat attachment: %+v", it)
+		}
+	}
+}

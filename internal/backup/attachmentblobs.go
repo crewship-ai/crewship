@@ -39,6 +39,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -74,6 +75,11 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 	}
 	seenPair := map[string]bool{}
 	for _, row := range dump.Tables["attachments"] {
+		if isChatAttachmentRow(row) {
+			// Not content-addressed: the bytes ride in the crew's /output
+			// section at storage_key (#5588).
+			continue
+		}
 		sha, _ := row["sha256"].(string)
 		ws, _ := row["workspace_id"].(string)
 		if !validSha256Hex(sha) {
@@ -93,6 +99,47 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 		}
 	}
 	return order, byWorkspace, invalid
+}
+
+// attachmentOwnerChat is attachments.owner_type for a chat upload. A chat
+// attachment is the one owner that is NOT content-addressed: the chat upload
+// path writes its bytes into the agent's output tree at storage_key
+// (<crew>/<agent>/attachments/<chat>/<id>/<file>), and they travel with the
+// crew's /output section, never under attachments/<workspace>/<sha>. The
+// readers in internal/api/attachments.go make the same split.
+const attachmentOwnerChat = "chat"
+
+func isChatAttachmentRow(row map[string]any) bool {
+	owner, _ := row["owner_type"].(string)
+	return owner == attachmentOwnerChat
+}
+
+// validChatAttachmentKey reports whether a chat attachment's storage_key is
+// a relative path that cannot leave the store it is resolved under: every
+// slash separated component must be a plain path component.
+func validChatAttachmentKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, c := range strings.Split(key, "/") {
+		if _, err := safepath.ValidateComponent(c); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// chatAttachmentKeyPath resolves a chat attachment's storage_key under the
+// output store root, refusing any key validChatAttachmentKey rejects.
+func chatAttachmentKeyPath(outputRoot, key string) (string, bool) {
+	if outputRoot == "" || !validChatAttachmentKey(key) {
+		return "", false
+	}
+	p, err := safepath.JoinUnder(outputRoot, strings.Split(key, "/")...)
+	if err != nil {
+		return "", false
+	}
+	return p, true
 }
 
 // WriteAttachmentBlobsSection copies every blob the dump's attachments rows
