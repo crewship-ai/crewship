@@ -727,7 +727,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 7a. Every adapter CLI the crew's agents need must resolve now, from the
 	// PATH the agent will actually get — the aggregated one, feature dirs
 	// included, not the temp container's bare PATH.
-	if err := p.verifyRequiredBinaries(ctx, containerID, o.requiredBinaries, requirements.ContainerEnv["PATH"], p.installer.execInContainerAsUser); err != nil {
+	if err := p.verifyRequiredBinaries(ctx, containerID, o.requiredBinaries, requirements.ContainerEnv, p.installer.execInContainerAsUser); err != nil {
 		return fail(ProvStepVerifyBinaries, err)
 	}
 

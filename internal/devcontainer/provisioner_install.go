@@ -360,8 +360,8 @@ func (p *Provisioner) installMiseConfig(ctx context.Context, containerID string,
 // whose adapter CLI did not land stops right there. The failure names the
 // binary and where it looked — the line an operator needs, and the line the
 // chat used to hide behind "No such file or directory".
-func (p *Provisioner) verifyRequiredBinaries(ctx context.Context, containerID string, bins []string, pathValue string, exec ExecFunc) error {
-	return VerifyBinariesResolve(ctx, containerID, bins, pathValue, exec)
+func (p *Provisioner) verifyRequiredBinaries(ctx context.Context, containerID string, bins []string, runtimeEnv map[string]string, exec ExecFunc) error {
+	return verifyBinariesResolveWithEnv(ctx, containerID, bins, runtimeEnv, exec)
 }
 
 // VerifyBinariesResolve is verifyRequiredBinaries without the receiver, shared
@@ -370,6 +370,13 @@ func (p *Provisioner) verifyRequiredBinaries(ctx context.Context, containerID st
 // `${containerEnv:PATH}` reference in it becomes the shell's own $PATH, so the
 // search is the runtime's, not the temp container's bare one.
 func VerifyBinariesResolve(ctx context.Context, containerID string, bins []string, pathValue string, exec ExecFunc) error {
+	return verifyBinariesResolveWithEnv(ctx, containerID, bins, map[string]string{"PATH": pathValue}, exec)
+}
+
+// verifyBinariesResolveWithEnv uses the same managed Mise locations as runtime.
+// Only tool configuration paths cross this boundary: forwarding the entire
+// containerEnv could expose unrelated credentials in recorded build commands.
+func verifyBinariesResolveWithEnv(ctx context.Context, containerID string, bins []string, runtimeEnv map[string]string, exec ExecFunc) error {
 	if len(bins) == 0 {
 		return nil
 	}
@@ -377,7 +384,7 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 	for _, b := range bins {
 		quoted = append(quoted, shellQuote(b))
 	}
-	search := strings.TrimSpace(pathValue)
+	search := strings.TrimSpace(runtimeEnv["PATH"])
 	if search == "" {
 		search = NativeToolPath("${containerEnv:PATH}")
 	}
@@ -392,10 +399,18 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 			break
 		}
 	}
+	probeEnv := []string{"HOME=/home/agent", "USER=agent"}
+	for _, kv := range MiseRuntimeEnv {
+		value := kv[1]
+		if override, ok := runtimeEnv[kv[0]]; ok {
+			value = override
+		}
+		probeEnv = append(probeEnv, kv[0]+"="+value)
+	}
 	output, exitCode, err := exec(ctx, containerID,
 		[]string{"sh", "-c", script},
 		"1001:1001",
-		[]string{"HOME=/home/agent", "USER=agent"},
+		probeEnv,
 	)
 	if err != nil {
 		return fmt.Errorf("verify adapter binaries %v: %w", bins, err)
