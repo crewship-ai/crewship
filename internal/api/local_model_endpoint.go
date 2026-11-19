@@ -174,8 +174,11 @@ func endpointGraceRevision(ctx context.Context, db endpointQuerier, credID, revi
 	if credID == "" || revision == "" {
 		return false
 	}
+	// Only the most recent open rotation, the same row grace delivery uses: a
+	// value from two rotations ago is not the one any current sidecar holds.
 	rows, err := db.QueryContext(ctx, `SELECT old_value FROM credential_rotations
-		WHERE credential_id = ? AND status = 'ACTIVE' AND expires_at > ? AND old_value != ''`,
+		WHERE credential_id = ? AND status = 'ACTIVE' AND expires_at > ? AND old_value != ''
+		ORDER BY rotated_at DESC, id DESC LIMIT 1`,
 		credID, leaseComparisonNow())
 	if err != nil {
 		return false
