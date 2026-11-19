@@ -48,9 +48,15 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 		for _, path := range s.Paths {
 			p := pageAccessPermissions{Read: true}
 			switch {
-			case path == pageReachOwner || path == pageReachRole || strings.HasPrefix(path, pageReachCrew):
+			case path == pageReachOwner || strings.HasPrefix(path, pageReachCrew):
 				p.Comment = true
 				p.Edit = true
+			case path == pageReachRole:
+				// On private output the role path is the administrator read
+				// rule (#4825/#4839): only the custodian audience (the
+				// workspace OWNER) also comments and edits (#5576).
+				p.Edit = !rec.PrivateAudience || privatePageCustodian(rec, viewers[s.SubjectID])
+				p.Comment = p.Edit
 			case path == pageReachGrantPage+pageGrantComment:
 				p.Comment = true
 			case path == pageReachGrantPage+pageGrantPropose:
