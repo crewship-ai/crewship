@@ -150,10 +150,12 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 				terminal := false
 				uncertain := h.execID == ""
+				stopExit := false
 				if h.execID != "" {
-					running, _, err := o.container.ExecInspect(ctx, h.execID)
+					running, code, err := o.container.ExecInspect(ctx, h.execID)
 					terminal = err == nil && !running
 					uncertain = err != nil
+					stopExit = terminal && (code == 143 || code == 137)
 				}
 				if uncertain {
 					absent, err := o.containerRuntimeAbsent(ctx, h.containerID)
@@ -161,7 +163,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				}
 				cancel()
 				if terminal {
-					o.closeDetachedHold(h, true)
+					o.closeDetachedHoldAs(h, true, stopExit || h.requireExecTerminal)
 					return
 				}
 				continue
@@ -240,7 +242,15 @@ func (o *Orchestrator) restopDetachedHold(h *detachedHold) bool {
 // closeDetachedHold performs the terminal bookkeeping, exactly once per hold:
 // the exec.command end journal entry (confirmed, with how the watch ended),
 // the agent's return to online, the unregister, and the run-slot release.
+//
+// A hold registered by the cancellation branch (requireExecTerminal) records
+// the run as cancelled: its caller stopped it, as RunAgent's own confirmed
+// cancellation does with exit 143/137. Every other hold records failed.
 func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
+	o.closeDetachedHoldAs(h, confirmedGone, h.requireExecTerminal)
+}
+
+func (o *Orchestrator) closeDetachedHoldAs(h *detachedHold, confirmedGone, cancelled bool) {
 	// Uncertainty must never become a terminal event or free capacity.
 	if !confirmedGone {
 		return
@@ -255,7 +265,7 @@ func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
 		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}}, "info",
 			fmt.Sprintf("%s: detached exec confirmed gone (%s)", h.agentSlug, time.Since(h.startedAt).Round(time.Second)),
 			h.startedAt, map[string]any{"detached": true, "confirmed_gone": true})
-		o.recordDetachedConfirmedGone(ctx, h.req, h.runID) // no trustworthy exit result survived detachment
+		o.recordDetachedConfirmedGone(h.req, h.runID, cancelled)
 		o.detachedMu.Lock()
 		other := false
 		for _, hold := range o.detached {
@@ -321,29 +331,68 @@ func (o *Orchestrator) closeProtectedHostHold(h *detachedHold) {
 // run.failed, because no trustworthy exit result survived detachment (#5511).
 const DetachedConfirmedGoneOrigin = "detached_confirmed_gone"
 
+// detachedPersistAttempts bounds the retries of the terminal write. The
+// hold is already releasing; a lost write would leave the run RUNNING with
+// no owner until the next restart, which is the bug this replaced.
+const detachedPersistAttempts = 3
+
 // recordDetachedConfirmedGone settles a confirmed-gone detached run exactly
-// like other terminal transitions: the runtime record becomes "error", the
-// agent.run.failed audit row is written, and the journal terminal goes
+// like other terminal transitions: the runtime record becomes terminal, the
+// matching agent.run.* audit row is written, and the journal terminal goes
 // through the durable stop outbox. Nobody else writes it: callers that saw
 // ErrDetachedStillRunning deliberately left the run open for this owner.
+// A stopped run (cancelled) projects as run.cancelled with origin
+// agent_stop; any other as run.failed with DetachedConfirmedGoneOrigin.
 //
 // Only a still-running record changes. A concurrent terminal writer (a
 // confirmed agent stop, a caller that recorded its own outcome) keeps its
 // outcome, and no second audit row is written for it.
-func (o *Orchestrator) recordDetachedConfirmedGone(ctx context.Context, req AgentRunRequest, runID string) {
+func (o *Orchestrator) recordDetachedConfirmedGone(req AgentRunRequest, runID string, cancelled bool) {
+	status, origin := "error", DetachedConfirmedGoneOrigin
+	if cancelled {
+		status, origin = "cancelled", "agent_stop"
+	}
 	atomic, ok := o.state.(provider.AtomicStateProvider)
 	if !ok {
 		// Without an atomic store there is no durable outbox; keep the
 		// previous record update and still audit the transition.
-		o.failRun(ctx, req, runID, "error")
+		ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+		defer cancel()
+		o.failRun(ctx, req, runID, status)
 		return
 	}
-	if raw, err := o.state.Get(ctx, "agent_runs", runID); err == nil && raw == nil {
-		return // no runtime record to settle; never create one here
+	var err error
+	for attempt := 0; attempt < detachedPersistAttempts; attempt++ {
+		var changed bool
+		changed, err = o.persistDetachedTerminal(atomic, runID, status, origin)
+		if err == nil {
+			if changed {
+				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+				o.recordRunAudit(ctx, req, runID, status)
+				cancel()
+			}
+			return
+		}
+		time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
 	}
-	changed := false
+	o.loggerForRun(req).Error("detached hold: could not persist the confirmed-gone run", "run_id", runID, "error", err)
+}
+
+// persistDetachedTerminal is one bounded attempt with its own deadline, so
+// time spent in finalize or the journal cannot starve the write.
+func (o *Orchestrator) persistDetachedTerminal(atomic provider.AtomicStateProvider, runID, status, origin string) (changed bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+	defer cancel()
+	raw, err := o.state.Get(ctx, "agent_runs", runID)
+	if err != nil {
+		return false, err
+	}
+	if raw == nil {
+		return false, nil // no runtime record to settle; never create one here
+	}
 	o.runRecoveryMu.Lock()
-	err := atomic.Update(ctx, "agent_runs", runID, func(raw []byte) ([]byte, error) {
+	defer o.runRecoveryMu.Unlock()
+	err = atomic.Update(ctx, "agent_runs", runID, func(raw []byte) ([]byte, error) {
 		if raw == nil {
 			return nil, nil
 		}
@@ -354,18 +403,11 @@ func (o *Orchestrator) recordDetachedConfirmedGone(ctx context.Context, req Agen
 		if current.Status != "running" {
 			return raw, nil
 		}
-		current.Status, current.LastActivity = "error", time.Now()
-		current.StopJournalPending, current.StopOrigin = true, DetachedConfirmedGoneOrigin
+		current.Status, current.LastActivity = status, time.Now()
+		current.StopJournalPending, current.StopOrigin = true, origin
 		data, err := json.Marshal(current)
 		changed = err == nil
 		return data, err
 	})
-	o.runRecoveryMu.Unlock()
-	if err != nil {
-		o.loggerForRun(req).Error("detached hold: could not persist the confirmed-gone run", "run_id", runID, "error", err)
-		return
-	}
-	if changed {
-		o.recordRunAudit(ctx, req, runID, "error")
-	}
+	return changed, err
 }

@@ -28,7 +28,8 @@ const deletedAgentOrphanBatch = 100
 //   - its run.started is older than deletedAgentOrphanMinAge;
 //   - it has no terminal run.* entry and no durable work attempt (work keeps
 //     its own fenced outcome authority);
-//   - the agent has no non-terminal runtime record. Every orchestrator
+//   - the agent has no non-terminal runtime record, no record whose history
+//     is still pending (stop outbox or retained output). Every orchestrator
 //     launch persists that record before its exec starts, and deleted-agent
 //     runs keep it "running" until StopDeletedAgentRuns confirms the runtime
 //     absent, so a live process always blocks this pass. Undecodable records
@@ -60,8 +61,10 @@ func (s *Server) reapDeletedAgentOrphanRuns(ctx context.Context) (int, error) {
 		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')
 		      AND (je2.entry_type <> 'run.recovered_stop' OR je2.agent_id = je1.agent_id)
 		  )
+		  AND je1.trace_id > ?
 		GROUP BY je1.workspace_id, je1.trace_id
-		LIMIT ?`, cutoff, deletedAgentOrphanBatch)
+		ORDER BY je1.trace_id
+		LIMIT ?`, cutoff, s.deletedOrphanCursor, deletedAgentOrphanBatch)
 	if err != nil {
 		return 0, fmt.Errorf("scan deleted-agent runs: %w", err)
 	}
@@ -80,6 +83,12 @@ func (s *Server) reapDeletedAgentOrphanRuns(ctx context.Context) (int, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
+	}
+	// A short page wraps; a full one resumes after its last trace.
+	if len(orphans) < deletedAgentOrphanBatch {
+		s.deletedOrphanCursor = ""
+	} else {
+		s.deletedOrphanCursor = orphans[len(orphans)-1].id
 	}
 
 	reaped := 0
@@ -139,6 +148,11 @@ func (s *Server) agentHasOpenRuntimeRecord(ctx context.Context, agentID string) 
 		}
 		if run.AgentID != agentID {
 			continue
+		}
+		// Retained host output reaches a terminal status before its journal
+		// projection (flushRetainedOutput): its real outcome is still due.
+		if run.Output != nil && run.Output.Version == 2 && !run.Output.Collected && !run.Output.Acknowledged && run.Output.Unprojected == "" {
+			return true, nil
 		}
 		switch run.Status {
 		case "completed", "error", "failed", "cancelled", "stopped":

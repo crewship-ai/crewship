@@ -13,13 +13,18 @@ func TestDetachedHoldConfirmedGoneRecordsTerminal(t *testing.T) {
 	cases := []struct {
 		name        string
 		stored      string
+		stopHold    bool
 		wantStatus  string
+		wantOrigin  string
 		wantPending bool
-		wantAudit   int
+		wantAudit   string
 	}{
-		{name: "running record becomes failed and projected", stored: "running", wantStatus: "error", wantPending: true, wantAudit: 1},
+		{name: "running record becomes failed and projected", stored: "running", wantStatus: "error", wantOrigin: DetachedConfirmedGoneOrigin, wantPending: true, wantAudit: "agent.run.failed"},
+		// Review S3: the cancellation branch's hold is a stop, not a failure.
+		{name: "stopped run becomes cancelled", stored: "running", stopHold: true, wantStatus: "cancelled", wantOrigin: "agent_stop", wantPending: true, wantAudit: "agent.run.cancelled"},
 		// A concurrent writer that already settled the run keeps its outcome.
-		{name: "settled record keeps its outcome", stored: "completed", wantStatus: "completed", wantPending: false, wantAudit: 0},
+		{name: "settled record keeps its outcome", stored: "completed", wantStatus: "completed", wantPending: false},
+		{name: "confirmed agent stop keeps its outcome", stored: "cancelled", wantStatus: "cancelled", wantPending: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -34,7 +39,7 @@ func TestDetachedHoldConfirmedGoneRecordsTerminal(t *testing.T) {
 			}
 			released := 0
 			h := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, execID: "detached", req: req,
-				release: func() { released++ }, startedAt: time.Now()}
+				requireExecTerminal: tc.stopHold, release: func() { released++ }, startedAt: time.Now()}
 			o.detached[h.runID] = h
 			o.closeDetachedHold(h, true)
 			o.closeDetachedHold(h, true) // exactly once
@@ -53,17 +58,17 @@ func TestDetachedHoldConfirmedGoneRecordsTerminal(t *testing.T) {
 			if run.StopJournalPending != tc.wantPending {
 				t.Fatalf("journal projection pending = %v, want %v", run.StopJournalPending, tc.wantPending)
 			}
-			if tc.wantPending && run.StopOrigin != DetachedConfirmedGoneOrigin {
-				t.Fatalf("stop origin = %q, want %q", run.StopOrigin, DetachedConfirmedGoneOrigin)
+			if tc.wantPending && run.StopOrigin != tc.wantOrigin {
+				t.Fatalf("stop origin = %q, want %q", run.StopOrigin, tc.wantOrigin)
 			}
-			failed := 0
+			var actions []string
 			for _, c := range rec.snapshot() {
-				if c.action == "agent.run.failed" && c.entityID == req.RunID {
-					failed++
+				if c.entityID == req.RunID {
+					actions = append(actions, c.action)
 				}
 			}
-			if failed != tc.wantAudit {
-				t.Fatalf("agent.run.failed audit rows = %d, want %d", failed, tc.wantAudit)
+			if tc.wantAudit == "" && len(actions) != 0 || tc.wantAudit != "" && (len(actions) != 1 || actions[0] != tc.wantAudit) {
+				t.Fatalf("audit rows = %v, want [%s]", actions, tc.wantAudit)
 			}
 			if released != 1 {
 				t.Fatalf("capacity released %d times, want 1", released)

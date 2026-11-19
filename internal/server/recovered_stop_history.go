@@ -157,6 +157,9 @@ func (s *Server) projectRecoveredStop(ctx context.Context, run orchestrator.RunS
 		if !startRecorded {
 			kind = journal.EntryRunRecoveredStop
 			summary = "Zastaveno během obnovy, začátek nebyl zaznamenán."
+			if run.StopOrigin == orchestrator.DetachedConfirmedGoneOrigin {
+				summary = "Detached run ended without a verified result; its start was not recorded."
+			}
 			payload["start_recorded"] = false
 		}
 		if _, err := s.journalWriter.EmitSync(ctx, journal.Entry{

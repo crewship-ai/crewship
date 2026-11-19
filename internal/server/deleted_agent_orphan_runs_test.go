@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -54,6 +55,18 @@ func TestReapDeletedAgentOrphanRuns(t *testing.T) {
 		{name: "deleted agent with a pending stop projection", setup: func(t *testing.T, s *Server) {
 			mustExec(t, s.db, `UPDATE agents SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='a'`)
 			raw, _ := json.Marshal(orchestrator.RunState{ID: "other", AgentID: "a", WorkspaceID: "rw", Status: "cancelled", StopJournalPending: true})
+			setRuntimeRecord(t, s, "other", raw)
+		}},
+		// Review S2: retained output already terminal in the runtime record but
+		// not yet projected to the journal must be left to its own outcome.
+		{name: "deleted agent with unprojected retained output", setup: func(t *testing.T, s *Server) {
+			mustExec(t, s.db, `UPDATE agents SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='a'`)
+			raw, _ := json.Marshal(orchestrator.RunState{ID: "orphan", AgentID: "a", Status: "completed", Output: &orchestrator.RunOutputState{Version: 2}})
+			setRuntimeRecord(t, s, "orphan", raw)
+		}},
+		{name: "deleted agent whose retained output was projected", wantEnds: true, setup: func(t *testing.T, s *Server) {
+			mustExec(t, s.db, `UPDATE agents SET deleted_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='a'`)
+			raw, _ := json.Marshal(orchestrator.RunState{ID: "other", AgentID: "a", Status: "completed", Output: &orchestrator.RunOutputState{Version: 2, Acknowledged: true}})
 			setRuntimeRecord(t, s, "other", raw)
 		}},
 		{name: "deleted agent with durable work ownership", setup: func(t *testing.T, s *Server) {
@@ -109,5 +122,34 @@ func TestReapDeletedAgentOrphanRuns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Review L3: candidates blocked by an open runtime record must not keep the
+// batch full for ever; the scan resumes after them.
+func TestReapDeletedAgentOrphanRunsDoesNotStarve(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status,deleted_at) VALUES('blocked','rw','Blocked','blocked','IDLE',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status,deleted_at) VALUES('gone','rw','Gone','gone','IDLE',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`)
+	raw, _ := json.Marshal(orchestrator.RunState{ID: "live", AgentID: "blocked", ContainerID: "c", AgentSlug: "blocked", Status: "running"})
+	setRuntimeRecord(t, s, "live", raw)
+	for i := 0; i <= deletedAgentOrphanBatch; i++ {
+		seedAgedTrace(t, s, fmt.Sprintf("a-%03d", i), "blocked", "-1 hours")
+	}
+	seedAgedTrace(t, s, "z-reapable", "gone", "-1 hours")
+	reaped := 0
+	for pass := 0; pass < 3; pass++ {
+		n, err := s.reapDeletedAgentOrphanRuns(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		reaped += n
+	}
+	if reaped != 1 || recoveryTerminalCount(t, s, "z-reapable") != 1 {
+		t.Fatalf("reaped %d; the reapable trace behind a full page of blocked ones was starved", reaped)
+	}
+	if recoveryTerminalCount(t, s, "a-000") != 0 {
+		t.Fatal("blocked agent's trace was ended")
 	}
 }
