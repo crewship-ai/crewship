@@ -133,6 +133,24 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Onboarding sets up a workspace of one's own. Someone who only joined
+	// workspaces other people own (an invited ADMIN, MANAGER, MEMBER or
+	// VIEWER) has nothing to set up: report done, and create nothing — the
+	// Crewship Guide below is the owner's, not a side effect of a member's
+	// read (#4876). Not persisted, so a later workspace of their own still
+	// gets the wizard.
+	var memberships, owned int
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN role = 'OWNER' THEN 1 ELSE 0 END), 0)
+		FROM workspace_members WHERE user_id = ?`, user.ID).Scan(&memberships, &owned); err != nil {
+		replyInternalError(w, h.logger, "query onboarding memberships", err)
+		return
+	}
+	if memberships > 0 && owned == 0 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"completed": true})
+		return
+	}
+
 	// Count real agents regardless of the stored flag. Besides smart-detecting
 	// CLI provisioning, this lets Status repair installations where an older
 	// onboarding build marked the user complete after the setup-agent chat but

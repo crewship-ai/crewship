@@ -121,14 +121,14 @@ export default function DashboardPage() {
   // An instance admin with no workspace lands in Admin, not the first-run
   // wizard (lib/dashboard-landing.ts).
   useEffect(() => {
-    const to = dashboardLanding({ workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted })
+    const to = dashboardLanding({ workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted, role })
     if (to === "wait") return
     if (to) {
       window.location.assign(to)
       return
     }
     setOnboardingChecked(true)
-  }, [workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted])
+  }, [workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted, role])
 
   useEffect(() => {
     try {
