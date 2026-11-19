@@ -106281,6 +106281,95 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/crews/{crewId}/provision/lock-resolve": {
+      "post": {
+        "description": "Submit crew provision lock resolve (POST /api/v1/crews/{crewId}/provision/lock-resolve).",
+        "operationId": "post_api_v1_crews_crewId_provision_lock-resolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit crew provision lock resolve",
+        "tags": [
+          "crews"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/crews/{crewId}/provision/revisions": {
       "get": {
         "description": "List crew provision revisions (GET /api/v1/crews/{crewId}/provision/revisions).",
