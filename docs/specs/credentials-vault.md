@@ -265,6 +265,23 @@ the bundle. The separate active-secret export excludes tombstones.
 
 ## Keeper run attribution
 
+Native Keeper execution reaches the crew sidecar before the server starts its
+child command. That child receives the canonical upper/lower-case HTTP proxy
+variables, loopback-only `NO_PROXY` and Node proxy opt-in, plus the selected
+credential. Container-image HOME/PATH/tool defaults are preserved; the agent
+shell's environment and other credentials are not forwarded. Body-selected,
+assigned and derived credential names that replace platform runtime, loader or
+proxy settings are rejected before approval consumption or secret retrieval.
+Proxy names are recognized case-insensitively by their `_proxy` suffix. Provider
+token names such as `OPENAI_API_KEY` remain valid for an explicitly gated child;
+the main model adapter reserves its own authentication slots separately.
+
+Having proxy variables is not proof of authentication or kernel egress
+enforcement. The real-crew Keeper fixture checks actual standard-tool proxy
+allow/deny behavior against an isolated service; its surrounding shared fixture
+container is free-network, so restricted kernel enforcement still needs its own
+runtime qualification.
+
 The sidecar derives `requesting_run_id` from the verified current v2 calling-run
 identity, never from the request body or its boot IPC run. Legacy identities
 without a verified run leave attribution unknown and explicitly clear unrelated

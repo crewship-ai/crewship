@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -82,8 +83,7 @@ type ScriptRunResult struct {
 // Nothing legitimate needs one of these in script.env — egress configuration is
 // the platform's, not the routine's.
 func isProxyEnvKey(name string) bool {
-	lower := strings.ToLower(name)
-	return strings.HasSuffix(lower, "_proxy") || lower == "no_proxy"
+	return credname.ProxyEnvironment(name)
 }
 
 // scriptSharedRoot is the crew shared mount where bundled scripts live and
