@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { BookOpen, Bug, ExternalLink, Info, Sparkles } from "lucide-react"
 
 import { CrewshipLogo, CrewshipLogoTile } from "@/components/branding/crewship-logo"
@@ -68,14 +68,15 @@ export function CrewshipMenu() {
   }, [trusted, check])
 
   useEffect(() => {
-    if (!open || edition) return
+    // /system/license is not on the restricted allowlist either.
+    if (!trusted || !open || edition) return
     let live = true
     apiFetch("/api/v1/system/license")
       .then((r) => (r.ok ? r.json() : null))
       .then((l) => { if (live && l?.edition) setEdition(l.edition) })
       .catch(() => {})
     return () => { live = false }
-  }, [open, edition])
+  }, [trusted, open, edition])
 
   const latest = info?.newer && info.latest ? info.latest : null
   const seenKey = latest ? SEEN_KEY_PREFIX + latest : null
@@ -88,11 +89,14 @@ export function CrewshipMenu() {
     }
   }, [seenKey])
 
+  const notesRef = useRef<HTMLAnchorElement>(null)
   const markSeen = () => {
     if (seenKey) {
       try { localStorage.setItem(seenKey, "1") } catch { /* storage may be unavailable */ }
     }
     setSeen(true)
+    // The button goes away with the dot; keep the keyboard in the panel.
+    requestAnimationFrame(() => notesRef.current?.focus())
   }
 
   const dot = Boolean(latest) && !seen
@@ -136,7 +140,7 @@ export function CrewshipMenu() {
             </p>
             <div className="mt-2.5 flex flex-wrap gap-2">
               <Button asChild size="sm">
-                <a href={info?.url ?? RELEASES_URL} target="_blank" rel="noopener noreferrer">Release notes</a>
+                <a ref={notesRef} href={info?.url ?? RELEASES_URL} target="_blank" rel="noopener noreferrer">Release notes</a>
               </Button>
               {!seen && (
                 <Button size="sm" variant="outline" onClick={markSeen}>Mark as seen</Button>
@@ -170,7 +174,7 @@ export function CrewshipMenu() {
           </li>
         </ul>
       </BarMenu>
-      <AboutCrewship open={aboutOpen} onOpenChange={setAboutOpen} />
+      <AboutCrewship open={aboutOpen} onOpenChange={setAboutOpen} trusted={trusted} />
     </>
   )
 }
@@ -202,11 +206,13 @@ const LINKS = [
   { label: "Report a problem", href: SUPPORT_URL, icon: Bug },
 ]
 
-export function AboutCrewship({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function AboutCrewship({ open, onOpenChange, trusted }: { open: boolean; onOpenChange: (open: boolean) => void; trusted: boolean }) {
   const [build, setBuild] = useState<Build | null>(null)
   const [edition, setEdition] = useState<string | undefined>()
   useEffect(() => {
-    if (!open || build) return
+    // A restricted session reads neither: both are off its allowlist, so
+    // About shows what Crewship is and the links, without the build.
+    if (!trusted || !open || build) return
     let live = true
     apiFetch("/api/v1/system/version")
       .then((r) => (r.ok ? r.json() : null))
@@ -217,7 +223,7 @@ export function AboutCrewship({ open, onOpenChange }: { open: boolean; onOpenCha
       .then((l) => { if (live && l?.edition) setEdition(l.edition) })
       .catch(() => {})
     return () => { live = false }
-  }, [open, build])
+  }, [trusted, open, build])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

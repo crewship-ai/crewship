@@ -275,7 +275,9 @@ export function AppToolbar() {
               then Activity, Inbox and the Crewship sail. The rule marks where
               one ends. On a phone it is Activity and the sail: Inbox is a
               tab, and the account is a row in the More sheet. */}
-          <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />
+          {/* Restricted sessions have no bells, so the sail's own rule is
+              the only one. */}
+          {trusted && <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />}
           {trusted && <ActivityBell />}
           {trusted && (
             <div className="hidden md:flex">

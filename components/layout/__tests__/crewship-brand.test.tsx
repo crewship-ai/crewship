@@ -77,6 +77,9 @@ describe("the Crewship sail in the top bar", () => {
     expect(localStorage.getItem(SEEN_KEY_PREFIX + "0.9.0")).toBe("1")
     // The panel still offers the notes once seen.
     expect(screen.getByRole("link", { name: "Release notes" })).toBeInTheDocument()
+    // The button left with the dot; focus stays in the panel.
+    await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))) })
+    expect(screen.getByRole("link", { name: "Release notes" })).toHaveFocus()
     unmount()
 
     render(<CrewshipMenu />)
@@ -102,7 +105,11 @@ describe("the Crewship sail in the top bar", () => {
     render(<CrewshipMenu />)
     await flush()
     expect(screen.getByRole("button", { name: "Crewship" })).toBeInTheDocument()
-    expect(apiFetch).not.toHaveBeenCalledWith("/api/v1/system/version")
+    fireEvent.click(screen.getByTestId("crewship-trigger"))
+    fireEvent.click(screen.getByRole("button", { name: "About Crewship" }))
+    await screen.findByRole("dialog", { name: "About Crewship" })
+    await flush()
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 
   it("links the docs, what's new and support, and opens About Crewship", async () => {
