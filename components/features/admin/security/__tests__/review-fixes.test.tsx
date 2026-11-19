@@ -9,6 +9,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.api(...a) }
 vi.mock("sonner", () => ({ toast: h.toast }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/components/features/admin/keeper-health-card", () => ({ KeeperHealthCard: () => null }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
 
 import { BulkGovernanceForm } from "../bulk-governance"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
@@ -151,7 +152,7 @@ describe("R4 · a late answer for an earlier selection never replaces the curren
 })
 
 describe("R5 · green only after a check that ran", () => {
-  const base = { entries: [], workspaceId: "a", onOpenActivity: () => {} }
+  const base = { entries: [], workspaceId: "a", rows: [] as InstanceGovRow[], go: { params: () => {}, workspace: () => {}, activity: () => {} }, onChanged: () => {} }
 
   it("does not say the posture is fine when it could not be read", () => {
     render(<SecurityOverview {...base} status={null} posture={null} postureError="HTTP 500" health={[]} />)
@@ -162,15 +163,15 @@ describe("R5 · green only after a check that ran", () => {
   })
 
   it("says the judge's health could not be read instead of showing no workspace", () => {
-    render(<SecurityOverview {...base} status={null} posture={null} postureError={null} health={[]} healthError="HTTP 502" selectedCount={2} />)
+    render(<SecurityOverview {...base} status={null} posture={null} postureError={null} health={[]} healthError="HTTP 502" />)
     const card = screen.getByRole("region", { name: "Judge health" })
     expect(card).toHaveTextContent("could not be read")
-    expect(card).not.toHaveTextContent("No workspace ticked")
+    expect(card).not.toHaveTextContent("no alarm")
   })
 
   it("shows why recent activity is missing instead of 'Nothing yet'", () => {
     render(<SecurityOverview {...base} status={null} posture={null} postureError={null} health={[]} activityError="HTTP 500" />)
-    const card = screen.getByRole("region", { name: "Recent activity" })
+    const card = screen.getByRole("region", { name: "Latest decisions" })
     expect(card).toHaveTextContent("HTTP 500")
     expect(card).not.toHaveTextContent("Nothing yet")
   })

@@ -11,6 +11,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { toastSaveError } from "@/components/ui/page-save-bar"
 import { SettingsCard, SettingsSaveBar, controlHeight, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { saveDefaults, saveInstanceGovernance, type DefaultsResult, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
+import { PRESET_KEYS, PRESET_LABEL } from "./security-model"
+import { SAMPLE_DEFAULT } from "./watch-labels"
 
 /**
  * One form for several workspaces at once. Each field shows the value the
@@ -25,44 +27,59 @@ export type BulkSection = "workspace-judge" | "watchdog" | "alerts" | "leases"
 
 type Key = keyof InstanceGovSettings
 interface Option { value: string | number | boolean; label: string }
-interface Field { key: Key; label: string; hint: string; options?: Option[]; text?: boolean; when?: (d: Draft, rows: InstanceGovRow[]) => boolean }
+/** A number beside the quick picks, for any other valid value: `scale` turns what is typed into what is stored (minutes into seconds). */
+interface NumberBeside { min: number; max: number; unit: string; scale?: number }
+interface Field {
+  key: Key; label: string; hint: string; options?: Option[]; text?: boolean
+  /** Any number in range, beside the quick picks. */
+  number?: NumberBeside
+  /** The watch presets: toggles, held as a sorted comma list like the panel's. */
+  presets?: boolean
+  when?: (d: Draft, rows: InstanceGovRow[]) => boolean
+}
 type Draft = Partial<Record<Key, string | number | boolean>>
 
-export const SAMPLE_DEFAULT = 5
-const eff = (key: Key, v: unknown) => (key === "behavior_sample_every" && (!v || v === 0) ? SAMPLE_DEFAULT : v)
+const presetKey = (v: unknown) => (Array.isArray(v) ? [...(v as string[])].sort().join(",") : typeof v === "string" ? v : "")
+const eff = (key: Key, v: unknown) => key === "watch_presets" ? presetKey(v) : (key === "behavior_sample_every" && (!v || v === 0) ? SAMPLE_DEFAULT : v)
 
 export const BULK_FIELDS: Record<BulkSection, Field[]> = {
   watchdog: [
     { key: "enabled", label: "Watchdog", hint: "Samples tool calls and raises findings", options: [{ value: true, label: "On" }, { value: false, label: "Off" }] },
     {
-      key: "behavior_sample_every", label: "Review", hint: "How many tool calls per review; each review is a judge call",
+      key: "behavior_sample_every", label: "Check", hint: "How many tool calls per check; each check is a judge call. Any number from 1 to 100.",
       options: [1, 2, 5, 10, 20, 50].map((n) => ({ value: n, label: n === 1 ? "Every call" : `1 in ${n}` })),
+      number: { min: 1, max: 100, unit: "1 in" },
     },
+    { key: "watch_presets", label: "Flag", hint: "What counts as suspicious; replaces the flags each workspace has", presets: true },
   ],
   alerts: [
-    { key: "deny_notify_min_risk", label: "Alert on DENY from risk", hint: "A denial at or above this risk also reaches the inbox; escalations always do", options: [1, 3, 5, 7, 9, 10].map((n) => ({ value: n, label: String(n) })) },
-    { key: "require_second_approver", label: "Four-eyes approval", hint: "A credential escalation needs someone other than the agent's owner", options: [{ value: true, label: "On" }, { value: false, label: "Off" }] },
+    {
+      key: "deny_notify_min_risk", label: "Alert on a denial from risk", hint: "A denied request at or above this risk raises an alert; escalations always do. Any number from 1 to 10.",
+      options: [1, 3, 5, 7, 9, 10].map((n) => ({ value: n, label: String(n) })), number: { min: 1, max: 10, unit: "risk" },
+    },
+    { key: "require_second_approver", label: "Second approver", hint: "Someone other than the owner of the requesting agent confirms an approval", options: [{ value: true, label: "On" }, { value: false, label: "Off" }] },
   ],
   leases: [
     {
-      key: "auto_lease_seconds", label: "Approved access lasts", hint: "Standing keeps a grant until revoked",
-      options: [{ value: 0, label: "Standing" }, { value: 900, label: "15 min" }, { value: 3600, label: "1 h" }, { value: 28800, label: "8 h" }, { value: 86400, label: "24 h" }],
+      key: "auto_lease_seconds", label: "Approved access lasts", hint: "Applies to level 3 and 4 credentials. Until revoked keeps access until someone revokes it.",
+      options: [{ value: 0, label: "Until revoked" }, { value: 900, label: "15 min" }, { value: 3600, label: "1 h" }, { value: 28800, label: "8 h" }, { value: 86400, label: "24 h" }],
+      number: { min: 1, max: 43200, unit: "min", scale: 60 },
     },
   ],
   "workspace-judge": [
     {
-      key: "gov_model_provider", label: "Judge", hint: "The instance judge, or a different one for these workspaces",
+      key: "gov_model_provider", label: "Judge", hint: "The instance judge, or its own judge for these workspaces",
       options: [{ value: "", label: "Instance judge" }, { value: "ollama", label: "Ollama" }, { value: "anthropic", label: "Anthropic" }, { value: "openai_compat", label: "OpenAI-compatible" }],
     },
     {
-      key: "gov_model_id", label: "Model", hint: "Required with a provider other than the instance judge", text: true,
+      key: "gov_model_id", label: "Model", hint: "Required with its own judge. The key is set on one workspace at a time.", text: true,
       when: (d, rows) => (d.gov_model_provider ?? commonValue(rows, "gov_model_provider")) !== "" ,
     },
   ],
 }
 
-const SECTION_TITLE: Record<BulkSection, string> = {
-  "workspace-judge": "Judge per workspace", watchdog: "Watchdog", alerts: "Alerts & approvals", leases: "Credential leases",
+export const SECTION_TITLE: Record<BulkSection, string> = {
+  "workspace-judge": "Judge", watchdog: "Watchdog", alerts: "Alerts and approval", leases: "Access time",
 }
 
 /** The value every row shares, or undefined when they differ. */
@@ -73,7 +90,14 @@ export function commonValue(rows: InstanceGovRow[], key: Key): unknown {
 }
 
 function labelOf(field: Field, v: unknown): string {
+  if (field.presets) {
+    const keys = presetKey(v) === "" ? [] : presetKey(v).split(",")
+    return keys.length ? keys.map((k) => PRESET_LABEL[k] ?? k).join(", ") : "None"
+  }
   if (field.text) return v ? String(v) : "—"
+  if (field.number && !field.options?.some((o) => o.value === v) && typeof v === "number") {
+    return field.number.scale ? `${v / field.number.scale} ${field.number.unit}` : `${field.number.unit} ${v}`.replace(/^risk /, "")
+  }
   return field.options?.find((o) => o.value === v)?.label ?? String(v)
 }
 
@@ -96,6 +120,85 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
         </button>
       ))}
     </div>
+  )
+}
+
+/**
+ * Any other valid value beside the quick picks. Typing a number that is not
+ * valid sets nothing (and says why); clearing the box drops the pick.
+ */
+function NumberField({ field, value, onSet, onClear }: { field: Field; value: unknown; onSet: (v: number) => void; onClear: () => void }) {
+  const n = field.number!
+  const scale = n.scale ?? 1
+  const shown = typeof value === "number" && !field.options?.some((o) => o.value === value) ? String(value / scale) : ""
+  const [text, setText] = React.useState(shown)
+  // A quick pick moves the value away from what was typed: the box follows.
+  React.useEffect(() => { setText(shown) }, [shown])
+  const num = Number(text)
+  const bad = text.trim() !== "" && (!Number.isInteger(num) || num < n.min || num > n.max)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-label text-muted-foreground max-sm:hidden">or</span>
+      <Input type="number" min={n.min} max={n.max} step={1} inputMode="numeric" value={text} aria-label={`${field.label}: any number from ${n.min} to ${n.max}`}
+        aria-invalid={bad} className={cn(controlHeight, "w-20 text-right tabular-nums")} data-testid={`bulk-number-${field.key}`}
+        onChange={(e) => {
+          const v = e.target.value
+          setText(v)
+          const k = Number(v)
+          if (v.trim() === "") onClear()
+          else if (Number.isInteger(k) && k >= n.min && k <= n.max) onSet(k * scale)
+        }} />
+      <span className="text-label text-muted-foreground">{n.unit}</span>
+      {bad && <span className="text-label text-destructive" data-testid={`bulk-number-invalid-${field.key}`}>{n.min} to {n.max}</span>}
+    </span>
+  )
+}
+
+/** The watch presets as toggles; the value is a sorted comma list. */
+function PresetToggles({ value, onPick, name }: { value: string; onPick: (v: string) => void; name: string }) {
+  const on = value === "" ? [] : value.split(",")
+  return (
+    <div role="group" aria-label={name} className="flex flex-wrap gap-1.5">
+      {PRESET_KEYS.map((k) => {
+        const checked = on.includes(k)
+        return (
+          <button key={k} type="button" role="checkbox" aria-checked={checked}
+            onClick={() => onPick([...(checked ? on.filter((x) => x !== k) : [...on, k])].sort().join(","))}
+            className={cn("inline-flex h-8 items-center rounded-lg border px-2.5 text-xs transition-colors coarse:min-h-[44px]",
+              checked ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+            {PRESET_LABEL[k]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The draft as the server's partial update: the flags travel as a list. */
+function draftToSet(draft: Draft): Partial<InstanceGovSettings> {
+  const { watch_presets, ...rest } = draft
+  return {
+    ...(rest as Partial<InstanceGovSettings>),
+    ...(watch_presets === undefined ? {} : { watch_presets: String(watch_presets) === "" ? [] : String(watch_presets).split(",") }),
+  }
+}
+
+/** The control for one field: quick picks (and any number), the flags, or text. */
+function FieldControl({ f, value, mixed, onValue, onClear }: {
+  f: Field; value: unknown; mixed?: boolean; onValue: (v: string | number | boolean) => void; onClear: () => void
+}) {
+  if (f.presets) return <PresetToggles value={presetKey(value)} name={f.label} onPick={onValue} />
+  if (f.text) {
+    return (
+      <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
+        placeholder={mixed ? "Mixed" : undefined} onChange={(e) => onValue(e.target.value)} />
+    )
+  }
+  return (
+    <>
+      <Segmented field={f} value={value} name={f.label} onPick={onValue} />
+      {f.number && <NumberField field={f} value={value} onSet={onValue} onClear={onClear} />}
+    </>
   )
 }
 
@@ -143,7 +246,7 @@ export function BulkGovernanceForm({
   }, [scopeKey])
 
   const targets: GovTargets = all ? { all: true } : { workspaces: rows.map((r) => r.workspace_id) }
-  const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
+  const set = draftToSet(draft)
   const n = rows.length
 
   /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
@@ -190,13 +293,9 @@ export function BulkGovernanceForm({
           <div className="text-label text-muted-foreground">{f.hint}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {f.text ? (
-            <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
-              placeholder={shared === undefined ? "Mixed" : undefined}
-              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
-          ) : (
-            <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
-          )}
+          <FieldControl f={f} value={value} mixed={shared === undefined}
+            onValue={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+            onClear={() => setDraft((d) => { const { [f.key]: _, ...rest } = d; return rest })} />
           {shared === undefined && !(f.key in draft) && (
             <span className="font-mono text-micro text-warn" data-slot="mixed">MIXED · {distinct.join(" / ")}</span>
           )}
@@ -221,7 +320,7 @@ export function BulkGovernanceForm({
       consequences={[
         { tone: "lost", text: "Each listed workspace's own value for these fields is replaced." },
         { tone: "kept", text: "Fields you did not change stay as each workspace has them. Every change is in the instance audit log." },
-        { tone: "kept", text: "New workspaces are not changed; they start from Defaults for new workspaces." },
+        { tone: "kept", text: "New workspaces are not changed; they start from what New workspaces holds." },
       ]}
       onConfirm={apply}
     />
@@ -233,7 +332,7 @@ export function BulkGovernanceForm({
       <div className="flex flex-col gap-4" data-slot="bulk-dialog-form">
         <div className="flex flex-col gap-3">{fieldRows}</div>
         <p className="text-label text-muted-foreground">
-          Saving replaces the value in each of the {n} workspaces; fields you leave alone stay as each has them. New workspaces are not changed.
+          Only what you set here changes; the rest stays as each workspace has it. Saving replaces the value in each of the {n} workspaces. New workspaces are not changed.
         </p>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={inDialog.onCancel}>Cancel</Button>
@@ -254,12 +353,12 @@ export function BulkGovernanceForm({
         <p>
           <b className="text-warn">{all ? `All ${n} workspace${n === 1 ? "" : "s"} selected.` : `${n} workspaces selected.`}</b>{" "}
           Saving writes what you change here into {all ? "every existing workspace" : "each of them"} and replaces the value it has now.
-          Fields you leave alone stay as each workspace has them. New workspaces are not changed: they start from Defaults for new workspaces.
+          Fields you leave alone stay as each workspace has them. New workspaces are not changed: they start from the New workspaces settings.
         </p>
       </div>
       {onEditOne && (
         <p className="text-label text-muted-foreground" data-slot="edit-one">
-          The security contact, a workspace&apos;s own judge key and its watch rules are set one workspace at a time:{" "}
+          The security contact, a workspace&apos;s own judge key and its own rules are set one workspace at a time:{" "}
           {rows.map((r, i) => (
             <React.Fragment key={r.workspace_id}>
               {i > 0 && " · "}
@@ -329,7 +428,7 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
   const [preview, setPreview] = React.useState<{ result: DefaultsResult; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
   const row = { ...current, workspace_id: "defaults", workspace_name: "New workspaces", workspace_slug: "defaults", configured: true } as InstanceGovRow
-  const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
+  const set = draftToSet(draft)
   const byField = new Map(DEFAULT_FIELDS.map((f) => [f.key as string, f]))
 
   /** The bar's Save: preview first. A failed preview is thrown for the bar's toast. */
@@ -347,18 +446,18 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
     if (!preview) return
     try {
       await saveDefaults(preview.set, false, preview.result.preview_id)
-      toast.success("Defaults for new workspaces saved")
+      toast.success("New workspaces saved")
       setDraft({}); setPreview(null)
       onSaved()
     } catch (e) {
       setPreview(null)
-      toastSaveError("Defaults for new workspaces", e instanceof Error ? e.message : "The save failed; nothing was changed.")
+      toastSaveError("New workspaces", e instanceof Error ? e.message : "The save failed; nothing was changed.")
     }
   }
 
   return (
     <>
-      <SettingsCard title="Defaults for new workspaces" description="A new workspace copies these when it is created. No existing workspace changes.">
+      <SettingsCard title="Starts with" description="A new workspace copies these when it is created. No existing workspace changes.">
         <div className="flex flex-col gap-3 px-4 py-3">
           {DEFAULT_FIELDS.filter((f) => !f.when || f.when(draft, [row])).map((f) => {
             const value = f.key in draft ? draft[f.key] : eff(f.key, row[f.key])
@@ -369,24 +468,20 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
                   <div className="text-label text-muted-foreground">{f.hint}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {f.text ? (
-                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
-                      onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
-                  ) : (
-                    <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
-                  )}
+                  <FieldControl f={f} value={value} onValue={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+                    onClear={() => setDraft((d) => { const { [f.key]: _, ...rest } = d; return rest })} />
                 </div>
               </div>
             )
           })}
         </div>
       </SettingsCard>
-      <SettingsSaveBar label="Defaults for new workspaces" count={Object.keys(draft).length} saving={busy}
+      <SettingsSaveBar label="New workspaces" count={Object.keys(draft).length} saving={busy}
         onSave={review} onDiscard={() => setDraft({})} />
       <ConfirmDialog
         open={preview !== null}
         onOpenChange={(o) => { if (!o) setPreview(null) }}
-        title="Save defaults for new workspaces?"
+        title="Save what new workspaces start with?"
         confirmLabel="Save defaults"
         description={preview && (
           <ul className="mt-2 space-y-0.5 rounded-md border border-border px-3 py-2 text-label" data-slot="defaults-changes">
@@ -398,7 +493,7 @@ export function DefaultsForm({ current, onSaved }: { current: InstanceGovSetting
           </ul>
         )}
         consequences={[
-          { tone: "kept", text: "No existing workspace changes. To change them, use a setting's page with All workspaces." },
+          { tone: "kept", text: "No existing workspace changes. To change them, tick workspaces in the Workspaces view." },
           { tone: "warn", text: "Every workspace created from now on starts with these settings." },
         ]}
         onConfirm={apply}

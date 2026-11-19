@@ -29,14 +29,16 @@ import { adminFetch } from "@/lib/admin-api"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { Check, Gavel } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
-import { SettingsCard, SettingsRow, settingsControl } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, settingsControl } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 
 /** Where an effective value came from. Mirrors keepercfg.Source. */
@@ -72,9 +74,9 @@ interface KeeperConfigResponse {
  */
 function ProvenanceChip({ source }: { source: ConfigSource }) {
   const label =
-    source === "instance" ? "instance override"
-      : source === "env" ? "from server config"
-        : "built-in default"
+    source === "instance" ? "Set here"
+      : source === "env" ? "From the server's settings"
+        : "Built-in default"
   return (
     <span
       className={cn(
@@ -89,20 +91,31 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
   )
 }
 
+/** The name of a step in its row; the stepper above carries the order and what is done. */
+function StepLabel({ children }: { n: number; children: React.ReactNode }) {
+  return <span>{children}</span>
+}
+
 /**
- * StepLabel numbers the three things that have to happen in order. The card used
- * to lead with the engine switch, which invited turning Keeper on before there
- * was a judge for it to use — and Keeper is fail-closed, so that is the one
- * ordering that produces an outage.
+ * The three steps as a stepper, in the order they have to happen: a Keeper
+ * turned on before it has a judge to use is the one ordering that produces an
+ * outage, since Keeper is fail-closed.
  */
-function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
+function Stepper({ steps }: { steps: { label: string; done: boolean }[] }) {
+  const current = steps.findIndex((st) => !st.done)
   return (
-    <span className="flex items-center gap-2">
-      <span className="grid place-items-center h-4 w-4 rounded-full bg-muted/60 border border-border/60 text-micro font-semibold text-muted-foreground shrink-0">
-        {n}
-      </span>
-      <span>{children}</span>
-    </span>
+    <ol aria-label="Setup steps" data-testid="keeper-judge-steps" className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border px-4 py-3">
+      {steps.map((st, i) => (
+        <li key={st.label} aria-current={i === current ? "step" : undefined} className={cn("flex items-center gap-2 text-control", st.done ? "text-foreground" : i === current ? "font-medium text-foreground" : "text-muted-foreground")}>
+          <span aria-hidden className={cn("grid size-5 place-items-center rounded-full border text-micro font-semibold",
+            st.done ? "border-success bg-success/10 text-success" : i === current ? "border-primary text-primary" : "border-border")}>
+            {st.done ? <Check className="size-3" /> : i + 1}
+          </span>
+          {st.label}
+          <span className="sr-only">{st.done ? " (done)" : ""}</span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -179,6 +192,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   const [cfg, setCfg] = useState<KeeperConfigResponse | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
   // Discovery + verification state. Kept out of the draft: they are questions
   // about an address, not values to save.
   const [models, setModels] = useState<string[]>([])
@@ -464,7 +478,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
 
   if (err) {
     return (
-      <SettingsCard title="Credential access judge" description="Which model decides credential access, instance-wide.">
+      <SettingsCard title="Credential judge" description="Which model decides credential requests, for the whole instance.">
         <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-xs text-destructive/90">{err}</span>
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setErr(null); void load() }}>
@@ -511,33 +525,18 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     return want
   })()
 
+  const serverDone = form.draft.endpoint.trim() !== "" && (connectResult?.ok === true || models.length > 0 || cfg.judge_configured)
+  const modelDone = form.draft.model.trim() !== ""
+
   return (
+    <>
     <SettingsCard
-      title="Credential access judge"
-      description="Three steps, in order: point it at a model server, pick a model it actually has, then turn it on. Changes apply to the next credential request — no restart."
-      actions={
-        canEdit && cfg.overridden ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={() => { void handleReset() }}
-            disabled={resetting}
-            data-testid="keeper-judge-reset"
-            // Names its real scope. DELETE /admin/keeper/config drops the whole
-            // keeper_runtime_settings row, and since the judge profile landed
-            // that row also holds the evidence block, the unbound-credential
-            // refusal, the escalation floor and the prompt budget — settings
-            // shown on the card BENEATH this one, two of which are security
-            // controls. "Reset to inherited" scoped to the fields above it when
-            // it was written and stopped being true when that card was added.
-            title="Clears every Keeper override on this instance — the judge above AND the judge profile below it (computed facts, unbound-credential refusal, human-approval floor, prompt budget)."
-          >
-            {resetting ? "Resetting…" : "Reset all Keeper overrides"}
-          </Button>
-        ) : undefined
-      }
+      icon={Gavel}
+      tint="var(--purple)"
+      title="Credential judge"
+      description="The model that decides each credential request. Changes apply to the next request, without a restart."
     >
+      <Stepper steps={[{ label: "Model server", done: serverDone }, { label: "Model", done: modelDone }, { label: "Turn it on", done: form.draft.enabled }]} />
       {/* Which of the two judge cards am I on, and why are there two? (#1558)
           The instance row stores a provider and a wire but the server refuses
           anything except native Ollama on write — so without this the first
@@ -548,11 +547,9 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
         data-testid="keeper-judge-scope"
       >
-        <strong className="font-medium text-foreground/80">Scope:</strong> the instance-wide judge — the default for
-        every workspace on this server. It speaks the native Ollama API only; an Anthropic or OpenAI-compatible judge
-        takes its endpoint or API key from a workspace vault, so it is configured on{" "}
-        <strong className="font-medium text-foreground/80">Judge for this workspace</strong> below, which overrides
-        this card for that one workspace.
+        This judge is instance-wide: every workspace uses it unless it has its own judge. It speaks the native Ollama API only; an Anthropic
+        or OpenAI-compatible judge takes its endpoint or API key from a workspace vault, so set it on that workspace, under
+        <strong className="font-medium text-foreground/80"> Its own judge</strong>.
       </div>
 
       {/* Step 1. The endpoint and its own Connect button, because "is anything
@@ -844,8 +841,33 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           canSave={!failClosed && !timeoutInvalid}
           onSave={handleSave}
           onCancel={form.reset}
+          label="Credential judge"
         />
       )}
     </SettingsCard>
+    {canEdit && cfg.overridden && (
+      <SettingsDangerCard title="Reset every override" description="Puts the judge and the decision rules back to what the server was started with"
+        actions={
+          <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setConfirmReset(true)} disabled={resetting}
+            data-testid="keeper-judge-reset"
+            // Names its real scope. DELETE /admin/keeper/config drops the whole
+            // keeper_runtime_settings row, which also holds the decision rules.
+            title="Clears everything set on this instance: the judge, and the decision rules (computed facts, earlier decisions, asking more than once, the person-confirms level, the prompt budget).">
+            {resetting ? "Resetting…" : "Reset…"}
+          </Button>
+        }>
+        <p className="px-4 py-3 text-label text-muted-foreground">
+          Clears everything set on this instance: the judge above and the decision rules. The server&apos;s own settings come back.
+        </p>
+      </SettingsDangerCard>
+    )}
+    <ConfirmDialog open={confirmReset} onOpenChange={setConfirmReset} title="Reset every override?" destructive confirmLabel="Reset everything"
+      description="The judge and the decision rules go back to what the server was started with."
+      consequences={[
+        { tone: "lost", text: "The server, model, time budget and every decision rule set here." },
+        { tone: "warn", text: "If an override is what turned Keeper on, resetting turns it off." },
+      ]}
+      onConfirm={handleReset} />
+    </>
   )
 }

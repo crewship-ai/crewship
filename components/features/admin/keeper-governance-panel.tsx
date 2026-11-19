@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Bell, Brain, FileLock2, Gavel, Globe, Info, KeyRound, Plus, Radar, Timer, Trash2, type LucideIcon } from "lucide-react"
+import { Bell, Brain, FileLock2, Gavel, Globe, Info, KeyRound, Plus, Radar, Server, Timer, Trash2, type LucideIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -51,6 +51,9 @@ import { apiFetch } from "@/lib/api-fetch"
 import { providerDefaultModel, providerModels } from "@/lib/model-catalog"
 import { adminFetch } from "@/lib/admin-api"
 import { saveInstanceGovernance, type InstanceGovRow, type InstanceGovSettings } from "@/components/features/admin/security/use-instance-keeper"
+import { PRESET_LABEL } from "@/components/features/admin/security/security-model"
+import { OptionList, QuickPicks } from "@/components/features/admin/security/security-kit"
+import { Segmented } from "@/components/ui/segmented"
 import { cn } from "@/lib/utils"
 
 interface GovernanceResponse {
@@ -107,7 +110,6 @@ interface GovernanceResponse {
 // keeper_governance.go / the CLI: "" (server default), "ollama", "anthropic",
 // "openai_compat". Radix Select forbids value="" on items, so the "server
 // default" option uses a sentinel that maps back to the empty wire value.
-const GOV_PROVIDER_DEFAULT = "__server_default__"
 const GOV_CREDENTIAL_NONE = "__none__"
 
 /** The cheap catalog model for a provider — the same one the server's own
@@ -128,26 +130,26 @@ const GOV_MODEL_PROVIDERS: {
 }[] = [
   {
     value: "",
-    label: "Use the instance judge",
-    note: "Whatever the Credential access judge above is set to. Nothing extra to configure.",
+    label: "Instance judge",
+    note: "Whatever the Credential judge is set to. Nothing extra to configure.",
   },
   {
     value: "ollama",
-    label: "A different local model",
+    label: "Ollama",
     modelHint: "qwen2.5:3b-instruct",
     catalogue: "OLLAMA",
     note: "Costs nothing per decision. Needs an ENDPOINT_URL credential if the model server is not the one the instance judge uses.",
   },
   {
     value: "anthropic",
-    label: "Anthropic (Claude)",
+    label: "Anthropic",
     modelHint: auxModelHint("anthropic"),
     catalogue: "ANTHROPIC",
     note: "Bills per decision against the API key you pick below. Sharper than a small local model on ambiguous intents.",
   },
   {
     value: "openai_compat",
-    label: "OpenAI-compatible endpoint",
+    label: "OpenAI-compatible",
     modelHint: auxModelHint("openai"),
     catalogue: "OPENAI",
     note: "Any endpoint that speaks the OpenAI chat API. Needs an ENDPOINT_URL credential; add an API_KEY one if it authenticates.",
@@ -210,11 +212,11 @@ const WATCH_SPEC_MAX_LEN = 4096
 // into the evaluator prompts; these captions are UI summaries. Keep the key set
 // in sync by hand (five stable keys; changing them is a product decision).
 const WATCH_PRESETS: { key: string; label: string; caption: string; icon: LucideIcon }[] = [
-  { key: "credentials", label: "Credential access", caption: "Disproportionate or bulk secret access, unjustified high-security reads.", icon: KeyRound },
-  { key: "egress", label: "Network egress", caption: "Exfiltration-shaped outbound: non-allowlisted hosts, piping secrets out.", icon: Globe },
-  { key: "memory", label: "Memory tampering", caption: "Overwriting facts, mass deletes, or planting misleading memory entries.", icon: Brain },
-  { key: "destructive", label: "Destructive ops", caption: "rm -rf, DROP/TRUNCATE without WHERE, force-push, wholesale overwrites.", icon: Trash2 },
-  { key: "secret_files", label: "Sensitive files", caption: "Reads of ~/.ssh, id_rsa, .env, cloud credential files, private keys.", icon: FileLock2 },
+  { key: "credentials", label: PRESET_LABEL.credentials, caption: "Disproportionate or bulk secret access, unjustified high-security reads.", icon: KeyRound },
+  { key: "egress", label: PRESET_LABEL.egress, caption: "Exfiltration-shaped outbound: non-allowlisted hosts, piping secrets out.", icon: Globe },
+  { key: "memory", label: PRESET_LABEL.memory, caption: "Overwriting facts, mass deletes, or planting misleading memory entries.", icon: Brain },
+  { key: "destructive", label: PRESET_LABEL.destructive, caption: "rm -rf, DROP/TRUNCATE without WHERE, force-push, wholesale overwrites.", icon: Trash2 },
+  { key: "secret_files", label: PRESET_LABEL.secret_files, caption: "Reads of ~/.ssh, id_rsa, .env, cloud credential files, private keys.", icon: FileLock2 },
 ]
 
 /** A label with its explanation behind an ⓘ: the row says what, the hint says why. */
@@ -235,28 +237,6 @@ function Hinted({ children, hint }: { children: React.ReactNode; hint: React.Rea
           <TooltipContent side="top" className="max-w-xs text-xs leading-snug">{hint}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
-    </span>
-  )
-}
-
-/** The usual values one click away; the field beside it takes any other. */
-function QuickPick({ label, value, options, onPick, disabled }: {
-  label: string
-  value: string
-  options: { value: string; label: string }[]
-  onPick: (v: string) => void
-  disabled?: boolean
-}) {
-  return (
-    // A phone keeps the field alone: the row has no room for both.
-    <span role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5 max-sm:hidden">
-      {options.map((o) => (
-        <button key={o.value} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onPick(o.value)}
-          className={cn("h-7 rounded-md px-2.5 text-xs transition-colors disabled:opacity-50",
-            value === o.value ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-          {o.label}
-        </button>
-      ))}
     </span>
   )
 }
@@ -554,13 +534,13 @@ function OwnRules({ value, onChange, disabled }: { value: string; onChange: (v: 
     return (
       <button type="button" onClick={() => setOpen(true)} disabled={disabled}
         className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-xs text-primary-hover hover:underline disabled:opacity-50">
-        <Plus className="h-3.5 w-3.5" />Own rules, in your own words
+        <Plus className="h-3.5 w-3.5" />Your own rules
       </button>
     )
   }
   return (
     <div className="px-4 py-2.5">
-      <Hinted hint="One rule per line, in your own words. Optional — the checks above still apply without any."><span className="text-xs text-foreground">Own rules{lines ? ` · ${lines}` : ""}</span></Hinted>
+      <Hinted hint="Plain sentences, one per line. Optional: the checks above still apply without any."><span className="text-xs text-foreground">Your own rules{lines ? ` · ${lines}` : ""}</span></Hinted>
       <Textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -629,7 +609,7 @@ function WatchdogCard({
       icon={Radar}
       tint="var(--success)"
       title="Watchdog"
-      description="Samples tool calls; suspicious ones land in the inbox"
+      description="Samples tool calls; suspicious ones land in the Inbox"
     >
       <SettingsRow
         label={<Hinted hint="Separate from credential access: it samples the tool calls agents make — files read, commands run, hosts contacted — and raises a finding when something looks wrong. It never blocks a credential; the judge does that.">Watch this workspace</Hinted>}
@@ -640,7 +620,7 @@ function WatchdogCard({
           onCheckedChange={(checked) => form.set("enabled", checked)}
           disabled={!canEdit}
           data-testid="keeper-governance-switch"
-          aria-label="Toggle watchdog enabled"
+          aria-label="Watchdog"
         />
       </SettingsRow>
 
@@ -659,13 +639,13 @@ function WatchdogCard({
           switch. A cadence that silenced the monitor while that switch still
           read on is the one thing this control must not be able to express. */}
       <SettingsRow
-        label={<Hinted hint="Tool calls between reviews, counted per crew. Lower catches more and calls the governance model more often — 1 reviews everything. Higher is cheaper and quieter.">Review</Hinted>}
+        label={<Hinted hint="Tool calls between checks, counted per crew. Lower catches more and calls the judge more often: 1 checks everything. Higher is cheaper and quieter. Any number from 1 to 100.">Check</Hinted>}
         description="Lower catches more, costs more judge calls"
       >
         <span className="flex flex-col items-end gap-1">
           <span className="flex flex-wrap items-center justify-end gap-1.5">
-            <QuickPick label="Review" value={form.draft.sampleEvery} disabled={!canEdit} onPick={(v) => form.set("sampleEvery", v)}
-              options={[{ value: "1", label: "Every call" }, { value: "2", label: "1 in 2" }, { value: "5", label: "1 in 5" }, { value: "10", label: "1 in 10" }, { value: "20", label: "1 in 20" }]} />
+            <QuickPicks label="Check" value={form.draft.sampleEvery} disabled={!canEdit} onPick={(v) => form.set("sampleEvery", v)}
+              options={[{ value: "1", label: "Every call" }, { value: "2", label: "1 in 2" }, { value: "5", label: "1 in 5" }, { value: "10", label: "1 in 10" }, { value: "20", label: "1 in 20" }, { value: "50", label: "1 in 50" }]} />
             <span className="text-xs text-muted-foreground"><span className="max-sm:hidden">or </span>1 in</span>
             <Input
               type="number"
@@ -677,7 +657,7 @@ function WatchdogCard({
               onChange={(e) => form.set("sampleEvery", e.target.value)}
               disabled={!canEdit}
               className={cn(settingsControl, "w-16 sm:w-16 text-right tabular-nums")}
-              aria-label={`Review one in every N tool calls (${SAMPLE_EVERY_MIN}-${SAMPLE_EVERY_MAX})`}
+              aria-label={`Check one in every N tool calls (${SAMPLE_EVERY_MIN}-${SAMPLE_EVERY_MAX})`}
               aria-invalid={sampleEveryProblem !== null}
               data-testid="keeper-governance-sample-every"
             />
@@ -697,8 +677,8 @@ function WatchdogCard({
               className="text-xs text-muted-foreground/80 text-right max-w-[15rem] leading-snug"
               data-testid="keeper-governance-sample-every-cost"
             >
-              Most tool calls will carry a governance-model round-trip. On a
-              hosted judge that bills per review.
+              Most tool calls will carry a judge round-trip. On a
+              hosted judge that bills per check.
             </span>
           ) : null}
         </span>
@@ -707,7 +687,7 @@ function WatchdogCard({
       {/* What it looks for, as toggles with the product's icon for each; what
           a check catches is behind its tooltip. */}
       <div className="border-b border-border/40 px-4 py-2.5">
-        <Hinted hint="Added to the checks it always does. Pick the ones that matter here."><span className="text-xs text-foreground">Flag</span></Hinted>
+        <Hinted hint="What counts as suspicious. Added to the checks it always does."><span className="text-xs text-foreground">Flag</span></Hinted>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {WATCH_PRESETS.map((p) => {
             const on = presetKeys.includes(p.key)
@@ -854,8 +834,8 @@ function FindingsRoutingCard({
     <SettingsCard
       icon={Bell}
       tint="var(--warn)"
-      title="Findings"
-      description="Who hears, and when a denial is worth it"
+      title="Alerts and approval"
+      description="Who hears, and when a second person is needed"
       actions={
         canEdit ? (
           <Button
@@ -872,7 +852,7 @@ function FindingsRoutingCard({
       }
     >
       <SettingsRow
-        label={<Hinted hint="Findings go to this person's inbox in real time; without one, to everyone with the MANAGER role.">Goes to</Hinted>}
+        label={<Hinted hint="Findings go to this person's Inbox in real time; without one, to everyone with the Manager role.">Findings go to</Hinted>}
       >
         <Select
           value={form.draft.contact === "" ? MANAGER_FANOUT : form.draft.contact}
@@ -888,7 +868,7 @@ function FindingsRoutingCard({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={MANAGER_FANOUT} className="text-xs">
-              Everyone with MANAGER role
+              Everyone with the Manager role
             </SelectItem>
             {admins.map((m) => (
               <SelectItem key={m.user_id} value={m.user_id} className="text-xs">
@@ -905,12 +885,12 @@ function FindingsRoutingCard({
       </SettingsRow>
 
       <SettingsRow
-        label={<Hinted hint="ESCALATE decisions always notify; this also surfaces a DENY at or above this risk (1–10).">DENY alert from risk</Hinted>}
-        description="Escalations always reach the inbox"
+        label={<Hinted hint="Escalations always notify; this also raises an alert for a denial at or above this risk (1 to 10).">Alert on a denial from risk</Hinted>}
+        description="A denied request at or above this risk raises an alert"
       >
         <span className="flex flex-col items-end gap-1">
           <span className="flex flex-wrap items-center justify-end gap-1.5">
-          <QuickPick label="DENY alert from risk" value={form.draft.risk} disabled={!canEdit} onPick={(v) => form.set("risk", v)}
+          <QuickPicks label="Alert on a denial from risk" value={form.draft.risk} disabled={!canEdit} onPick={(v) => form.set("risk", v)}
             options={["3", "5", "7", "9"].map((v) => ({ value: v, label: v }))} />
           <span className="text-xs text-muted-foreground max-sm:hidden">or</span>
           <Input
@@ -923,7 +903,7 @@ function FindingsRoutingCard({
             onChange={(e) => form.set("risk", e.target.value)}
             disabled={!canEdit}
             className={cn(settingsControl, "w-14 sm:w-14 text-right tabular-nums")}
-            aria-label="DENY notification risk threshold (1-10)"
+            aria-label="Alert on a denial from risk (1-10)"
             aria-invalid={!riskValid}
             data-testid="keeper-governance-risk"
           />
@@ -947,9 +927,9 @@ function FindingsRoutingCard({
           while the switch is off — with it on the row's own description
           already says a second approver is required. */}
       <SettingsRow
-        label={<Hinted hint="Four-eyes: a credential escalation cannot be approved by the person who owns the requesting agent. Needs at least two OWNER/ADMIN/MANAGER members. A credential's tier can only tighten this rule, never loosen it.">Four-eyes approval</Hinted>}
+        label={<Hinted hint="Someone other than the owner of the requesting agent confirms an approval. Needs at least two Owner, Admin or Manager members. A credential's level can only tighten this rule, never loosen it.">Second approver</Hinted>}
         description={!form.draft.secondApprover && tierFloorLabel ? (
-          <span data-testid="keeper-second-approver-tier-note">Off here · {tierFloorLabel} credentials still require one; a tier can only tighten this</span>
+          <span data-testid="keeper-second-approver-tier-note">Off here · {tierFloorLabel} credentials still need one; a level can only tighten this</span>
         ) : undefined}
         border={false}
       >
@@ -958,7 +938,7 @@ function FindingsRoutingCard({
           onCheckedChange={(checked) => form.set("secondApprover", checked)}
           disabled={!canEdit}
           data-testid="keeper-governance-second-approver"
-          aria-label="Toggle require a second approver"
+          aria-label="Second approver"
         />
       </SettingsRow>
 
@@ -1022,9 +1002,9 @@ function CredentialLeasesCard({
   const seconds = leaseMinutesToSeconds(form.draft.minutes)
   const problem =
     seconds === null
-      ? "Must be a whole number of minutes (0 or empty turns it off)."
+      ? "Must be a whole number of minutes (0 or empty keeps access until revoked)."
       : seconds > 0 && seconds < AUTO_LEASE_MIN_SECONDS
-        ? "At least 1 minute — a shorter lease can lapse inside Keeper's own evaluation."
+        ? "At least 1 minute: a shorter time can lapse inside the judge's own evaluation."
         : seconds > AUTO_LEASE_MAX_SECONDS
           ? "At most 30 days (43200 minutes)."
           : null
@@ -1043,8 +1023,8 @@ function CredentialLeasesCard({
     <SettingsCard
       icon={Timer}
       tint="var(--info)"
-      title="Credential leases"
-      description="How long an approval lasts"
+      title="Access time"
+      description="How long an approved secret stays readable"
     >
       {/* #1373. Empty/0 = off, the default: grants stay standing and nothing
           changes. A value makes every Keeper ALLOW (and every approved
@@ -1052,14 +1032,15 @@ function CredentialLeasesCard({
           length, refreshed on each approval. Never shortens a longer hand-set
           --ttl lease. */}
       <SettingsRow
-        label={<Hinted hint="Minutes an L3/L4 credential grant stays valid after each Keeper approval. Standing (empty or 0) keeps grants until revoked, the default. At least 1 minute, at most 30 days. L1/L2 self-service keys are never leased.">Approved access lasts</Hinted>}
+        label={<Hinted hint="Minutes a level 3 or 4 credential stays readable after each approval. Until revoked (empty or 0) keeps it until someone revokes it, the default. 1 minute to 30 days. Level 1 and 2 credentials are handed over for the whole run and never time out.">Approved access lasts</Hinted>}
+        description="Applies to level 3 and 4 credentials. 1 minute to 30 days."
         border={false}
       >
         <span className="flex flex-col items-end gap-1">
           <span className="flex flex-wrap items-center justify-end gap-1.5">
-            <QuickPick label="Approved access lasts" disabled={!canEdit}
+            <QuickPicks label="Approved access lasts" disabled={!canEdit}
               value={form.draft.minutes === "0" ? "" : form.draft.minutes} onPick={(v) => form.set("minutes", v)}
-              options={[{ value: "", label: "Standing" }, { value: "15", label: "15 min" }, { value: "60", label: "1 h" }, { value: "480", label: "8 h" }, { value: "1440", label: "24 h" }]} />
+              options={[{ value: "", label: "Until revoked" }, { value: "15", label: "15 min" }, { value: "60", label: "1 h" }, { value: "480", label: "8 h" }, { value: "1440", label: "24 h" }]} />
             <span className="text-xs text-muted-foreground max-sm:hidden">or</span>
             <Input
               type="number"
@@ -1067,12 +1048,12 @@ function CredentialLeasesCard({
               max={AUTO_LEASE_MAX_SECONDS / 60}
               step={1}
               inputMode="numeric"
-              placeholder="off"
+              placeholder="until revoked"
               value={form.draft.minutes}
               onChange={(e) => form.set("minutes", e.target.value)}
               disabled={!canEdit}
               className={cn(settingsControl, "sm:w-20 text-right tabular-nums")}
-              aria-label="Credential auto-lease TTL in minutes (0 or empty to disable)"
+              aria-label="Approved access lasts, in minutes (0 or empty keeps it until revoked)"
               aria-invalid={problem !== null}
               data-testid="keeper-governance-auto-lease"
             />
@@ -1227,55 +1208,37 @@ function GovernanceModelCard({
         ) : undefined
       }
     >
-      {/* The other half of the #1558 scope explanation. An operator who wants a
-          hosted judge starts on the instance card above, because that is the one
-          titled "Credential access judge" — and the only thing that used to send
-          them here was the server refusing the write. Say it on both cards, in
-          the same words, before either mistake is possible. */}
       <div
         className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
         data-testid="keeper-gov-scope"
       >
-        <Hinted hint="It overrides the instance-wide Credential access judge, which speaks native Ollama only — so this is the only place the judge can be Anthropic or OpenAI-compatible, on an endpoint or API key from this workspace's vault. It governs the Reviews evaluators too and is resolved per request. If that credential is later revoked, decisions fall back to the instance judge rather than failing.">
+        <Hinted hint="It overrides the Credential judge, which speaks native Ollama only, so this is the only place the judge can be Anthropic or OpenAI-compatible, on an endpoint or API key from this workspace's vault. It also decides for the background checks here, and is resolved per request. If that credential is later revoked, decisions fall back to the instance judge rather than failing.">
           <span>This workspace only · otherwise the instance judge decides</span>
         </Hinted>
       </div>
 
-      <SettingsRow
-        label="What decides"
-        description={chosen?.note ?? "Leave on the instance judge unless this workspace needs its own."}
-      >
-        <Select
-          value={form.draft.provider === "" ? GOV_PROVIDER_DEFAULT : form.draft.provider}
-          onValueChange={(v) => form.set("provider", v === GOV_PROVIDER_DEFAULT ? "" : v)}
-          disabled={!canEdit}
-        >
-          <SelectTrigger
-            className={settingsControl}
-            aria-label="Governance model provider"
-            data-testid="keeper-gov-provider"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {GOV_MODEL_PROVIDERS.map((p) => (
-              <SelectItem
-                key={p.value || GOV_PROVIDER_DEFAULT}
-                value={p.value === "" ? GOV_PROVIDER_DEFAULT : p.value}
-                className="text-xs"
-              >
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingsRow>
+      <OptionList label="Judge" value={form.draft.provider === "" ? "instance" : "own"} disabled={!canEdit}
+        onChange={(v) => form.patch(v === "instance"
+          ? { provider: "" }
+          // A hosted judge is the usual reason to have one of its own.
+          : { provider: form.draft.provider || "anthropic" })}
+        options={[
+          { value: "instance", title: "Instance judge", description: "Whatever the Credential judge is set to. Nothing extra to configure." },
+          { value: "own", title: "Its own judge", description: "Pick a provider and a model for this workspace only." },
+        ]} data-testid="keeper-gov-which" />
+
+      {form.draft.provider !== "" && (
+        <SettingsRow label="Provider" description={chosen?.note} lead={Server}>
+          <Segmented ariaLabel="Provider" value={form.draft.provider} onChange={(v) => form.set("provider", v)}
+            options={GOV_MODEL_PROVIDERS.filter((o) => o.value !== "").map((o) => ({ value: o.value, label: o.label, disabled: !canEdit }))} />
+        </SettingsRow>
+      )}
 
       {form.draft.provider !== "" && (
         <>
           <SettingsRow
             label="Model"
-            description="Required. Pick one the provider serves — typing a tag from memory is how a judge ends up denying every request."
+            description="Required. Pick one the provider serves: typing a tag from memory is how a judge ends up denying every request."
           >
             <span className="flex flex-col items-end gap-1.5">
               <Input
@@ -1285,7 +1248,7 @@ function GovernanceModelCard({
                 disabled={!canEdit}
                 placeholder={chosen?.modelHint}
                 className={cn(settingsControl, "font-mono")}
-                aria-label="Governance model id"
+                aria-label="Judge model"
                 aria-required="true"
                 aria-invalid={modelMissing}
                 data-testid="keeper-gov-model-id"
@@ -1327,7 +1290,7 @@ function GovernanceModelCard({
 
           <SettingsRow
             label="Key"
-            description="Which stored credential authenticates it. Several Anthropic keys is the normal case on an orchestration platform — each carries its own subscription limit — so this picks by NAME, and Test tells you whether the one you picked still answers."
+            description="A credential from this workspace's vault. Test tells you whether the one you picked still answers."
             border={false}
           >
             <Select
@@ -1337,7 +1300,7 @@ function GovernanceModelCard({
             >
               <SelectTrigger
                 className={settingsControl}
-                aria-label="Governance model credential"
+                aria-label="Judge key"
                 data-testid="keeper-gov-credential"
               >
                 <SelectValue />

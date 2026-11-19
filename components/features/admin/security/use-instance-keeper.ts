@@ -75,10 +75,17 @@ export interface InstanceHealthRow {
   workspace_name: string
   workspace_slug: string
   samples: number
+  allow?: number
+  deny?: number
+  escalate?: number
+  judge_failures?: number
   min_samples: number
   progressed_rate: number
   judge_failure_rate: number
   p95_latency_ms: number
+  /** The thresholds travel with the numbers (internal/api/admin_keeper_health.go). */
+  alarm_progressed_rate?: number
+  alarm_judge_failure_rate?: number
   alarm?: { kind: string; summary: string; at?: string } | null
 }
 
@@ -135,7 +142,8 @@ export interface RequestFilter {
   decision?: string
 }
 
-const PAGE = 100
+/** 25 a step, like every paged list on these pages. */
+const PAGE = 25
 
 /**
  * The instance reads. `selected` narrows the decision log (null = every

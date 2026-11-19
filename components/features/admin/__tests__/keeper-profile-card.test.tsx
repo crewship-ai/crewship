@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { KeeperProfileCard } from "../keeper-profile-card"
@@ -53,18 +53,61 @@ describe("KeeperProfileCard", () => {
   it("renders the capabilities the judge is actually using", async () => {
     render(<KeeperProfileCard workspaceId="ws1" />)
     expect(await screen.findByText(/computed facts/i)).toBeInTheDocument()
-    expect(screen.getByText(/refuse an unbound credential/i)).toBeInTheDocument()
-    expect(screen.getByText(/human approval/i)).toBeInTheDocument()
+    expect(screen.getByText(/refuse a credential bound to nothing/i)).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "When a person confirms" })).toBeInTheDocument()
   })
 
-  // precedent and consistency-samples are accepted and stored by the API but
-  // nothing implements them yet. A switch that does nothing is a promise the
-  // product does not keep, and this card is where an operator would believe it.
-  it("does not offer the capabilities that are not implemented", async () => {
+  // Precedent and "ask more than once" are the API's own settings (judge_precedent,
+  // judge_precedent_n, judge_consistency_samples): the card offers them, in words.
+  it("offers facts, earlier decisions and asking more than once, in plain words", async () => {
     render(<KeeperProfileCard workspaceId="ws1" />)
     await screen.findByText(/computed facts/i)
-    expect(screen.queryByText(/precedent/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/self-consistency|majority vote/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("group", { name: "Facts it may compute" })).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "Credential is bound to the agent" })).toBeChecked()
+    expect(screen.getByText("Compare with earlier decisions")).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Ask more than once" })).toBeInTheDocument()
+    expect(screen.getByRole("radiogroup", { name: "Level" })).toBeInTheDocument()
+  })
+
+  it("lists the four levels with the reason each needs, read-only", async () => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    const card = (await screen.findByText("The four levels")).closest("section")!
+    expect(card).toHaveTextContent("1 · Low")
+    expect(card).toHaveTextContent("reason of at least 10 characters")
+    expect(card).toHaveTextContent("reason of at least 35 characters")
+    expect(card).toHaveTextContent("second approver always")
+    expect(card.querySelector("button, input, [role=switch]")).toBeNull()
+  })
+
+  it("sends the new rules with the types the server validates", async () => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    await screen.findByText(/computed facts/i)
+    mockFetch.mockClear()
+    mockFetch.mockResolvedValue(ok(profile()))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Credential is bound to the agent" }))
+    fireEvent.click(screen.getByTestId("keeper-profile-precedent"))
+    fireEvent.change(screen.getByTestId("keeper-profile-precedent-n"), { target: { value: "5" } })
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Ask more than once" })).getByRole("radio", { name: "3 times" }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "When a person confirms" })).getByRole("radio", { name: /From level 3/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /save/i }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([, , init]) => (init as RequestInit)?.method === "PUT")).toBe(true))
+    const put = mockFetch.mock.calls.find(([, , init]) => (init as RequestInit)?.method === "PUT")!
+    expect(JSON.parse((put[2] as RequestInit).body as string)).toEqual({
+      judge_evidence_facts: "prior_requests_same_pair",
+      judge_precedent: true,
+      judge_precedent_n: 5,
+      judge_consistency_samples: 3,
+      judge_escalate_from: 3,
+    })
+  })
+
+  it("refuses to save with no fact picked, since an empty list means every fact", async () => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    await screen.findByText(/computed facts/i)
+    fireEvent.click(screen.getByRole("checkbox", { name: "Credential is bound to the agent" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Earlier requests by the same pair" }))
+    expect(await screen.findByTestId("facts-invalid")).toBeInTheDocument()
+    expect((screen.getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   // The whole reason provenance is on the wire: "off by default" and "somebody
@@ -72,7 +115,7 @@ describe("KeeperProfileCard", () => {
   it("shows where each value came from", async () => {
     mockFetch.mockResolvedValue(ok(profile({ hard_gate: field(false, "instance") })))
     render(<KeeperProfileCard workspaceId="ws1" />)
-    expect(await screen.findByText(/instance override/i)).toBeInTheDocument()
+    expect(await screen.findByText("Set here")).toBeInTheDocument()
   })
 
   // Full autonomy removes a person from production credentials. It must not read
@@ -109,6 +152,22 @@ describe("KeeperProfileCard", () => {
     expect(body).toHaveProperty("judge_hard_gate")
     expect(body).not.toHaveProperty("judge_evidence")
     expect(body).not.toHaveProperty("judge_prompt_budget_tokens")
+  })
+
+  // internal/api/admin_keeper_config.go (triFromJSON) accepts true, false or
+  // null for the three toggles and answers 400 to anything else, "on" and "off"
+  // included. The card used to send those strings, so flipping a toggle failed.
+  it("sends the toggles as booleans, never as the strings on/off", async () => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    await screen.findByText(/computed facts/i)
+    mockFetch.mockClear()
+    mockFetch.mockResolvedValue(ok(profile({ hard_gate: field(false, "instance") })))
+    fireEvent.click(screen.getByTestId("keeper-profile-hard-gate"))
+    fireEvent.click(await screen.findByRole("button", { name: /save/i }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([, , init]) => (init as RequestInit)?.method === "PUT")).toBe(true))
+    const put = mockFetch.mock.calls.find(([, , init]) => (init as RequestInit)?.method === "PUT")!
+    const body = JSON.parse((put[2] as RequestInit).body as string)
+    expect(body.judge_hard_gate).toBe(false)
   })
 
   // A response missing the profile block — an older server, a mangled proxy

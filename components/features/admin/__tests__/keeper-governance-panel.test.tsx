@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { KeeperGovernancePanel } from "../keeper-governance-panel"
 
 // The panel is four cards over ONE partial-update endpoint (#1001 M0), so the
@@ -203,7 +203,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
     fireEvent.click(await screen.findByTestId("keeper-governance-switch"))
     // Own rules are folded until there are some.
-    fireEvent.click(screen.getByRole("button", { name: /Own rules/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Your own rules/ }))
     fireEvent.change(screen.getByTestId("keeper-watch-spec"), {
       target: { value: "flag egress to non-allowlisted hosts" },
     })
@@ -593,40 +593,31 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(scope).toHaveTextContent(/anthropic|openai-compatible/i)
     expect(scope).toHaveTextContent(/vault/i)
     // The pointer at the other card, named as it is titled, with its limit.
-    expect(scope).toHaveTextContent(/credential access judge/i)
+    expect(scope).toHaveTextContent(/credential judge/i)
     expect(scope).toHaveTextContent(/ollama/i)
   })
 
-  it("renders the four governance-model provider options (#1001 gov-model)", async () => {
+  it("offers the instance judge or its own judge, and the three providers for its own (#1001 gov-model)", async () => {
     mockRoutes(BASE)
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
-    const trigger = await screen.findByTestId("keeper-gov-provider")
-    // Defaults to "use the instance judge", and no model input until a concrete
-    // provider is chosen. The labels name the DECISION rather than the provider
-    // taxonomy: an operator picking a judge is choosing where it thinks and what
-    // it costs, and "Server default" told them neither.
-    expect(trigger).toHaveTextContent(/use the instance judge/i)
+    const which = await screen.findByRole("radiogroup", { name: "Judge" })
+    // Defaults to the instance judge, and no model input until it has its own.
+    expect(within(which).getByRole("radio", { name: /Instance judge/ })).toHaveAttribute("aria-checked", "true")
     expect(screen.queryByTestId("keeper-gov-model-id")).not.toBeInTheDocument()
 
-    openSelect(trigger)
-    for (const label of [
-      /use the instance judge/i,
-      /a different local model/i,
-      /anthropic \(claude\)/i,
-      /openai-compatible endpoint/i,
-    ]) {
-      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument()
-    }
+    fireEvent.click(within(which).getByRole("radio", { name: /Its own judge/ }))
+    const provider = await screen.findByRole("radiogroup", { name: "Provider" })
+    expect(within(provider).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Ollama", "Anthropic", "OpenAI-compatible"])
+    expect(within(provider).getByRole("radio", { name: "Anthropic" })).toHaveAttribute("aria-checked", "true")
   })
 
   it("blocks save when a provider is set but the model id is empty (#1001 gov-model)", async () => {
     mockRoutes(BASE)
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
-    const trigger = await screen.findByTestId("keeper-gov-provider")
-    openSelect(trigger)
-    fireEvent.click(await screen.findByRole("option", { name: /anthropic/i }))
+    fireEvent.click(await screen.findByRole("radio", { name: /Its own judge/ }))
+    fireEvent.click(within(await screen.findByRole("radiogroup", { name: "Provider" })).getByRole("radio", { name: "Anthropic" }))
 
     // Model input now shown, empty → required message + Save disabled.
     const modelInput = await screen.findByTestId("keeper-gov-model-id")
@@ -644,9 +635,8 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     mockRoutes(BASE)
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
-    const trigger = await screen.findByTestId("keeper-gov-provider")
-    openSelect(trigger)
-    fireEvent.click(await screen.findByRole("option", { name: /anthropic/i }))
+    fireEvent.click(await screen.findByRole("radio", { name: /Its own judge/ }))
+    fireEvent.click(within(await screen.findByRole("radiogroup", { name: "Provider" })).getByRole("radio", { name: "Anthropic" }))
 
     fireEvent.change(await screen.findByTestId("keeper-gov-model-id"), {
       target: { value: "claude-haiku-4-5" },
@@ -682,7 +672,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     expect(await screen.findByTestId("keeper-gov-model-id")).toHaveValue("qwen2.5:3b-instruct")
-    expect(screen.getByTestId("keeper-gov-provider")).toHaveTextContent(/a different local model/i)
+    expect(within(screen.getByRole("radiogroup", { name: "Provider" })).getByRole("radio", { name: "Ollama" })).toHaveAttribute("aria-checked", "true")
     expect(screen.queryByTestId("keeper-gov-model-save")).not.toBeInTheDocument()
   })
 
@@ -695,9 +685,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     })
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
-    const trigger = await screen.findByTestId("keeper-gov-provider")
-    openSelect(trigger)
-    fireEvent.click(await screen.findByRole("option", { name: /use the instance judge/i }))
+    fireEvent.click(await screen.findByRole("radio", { name: /Instance judge/ }))
     fireEvent.click(screen.getByTestId("keeper-gov-model-save"))
 
     await waitFor(() => expect(putBodies()).toHaveLength(1))
@@ -788,7 +776,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(screen.getByTestId("keeper-governance-risk")).toBeDisabled()
     expect(screen.getByTestId("keeper-governance-second-approver")).toBeDisabled()
     expect(screen.getByTestId("keeper-governance-auto-lease")).toBeDisabled()
-    expect(screen.getByRole("button", { name: /Own rules/ })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /Your own rules/ })).toBeDisabled()
     for (const id of ["keeper-watchdog-save", "keeper-findings-save", "keeper-leases-save", "keeper-gov-model-save"]) {
       expect(screen.queryByTestId(id)).not.toBeInTheDocument()
     }
@@ -854,7 +842,7 @@ describe("WatchdogCard — how much it asks for before it is on", () => {
     // give up.
     expect(await screen.findByTestId("keeper-watch-preset-credentials")).toBeTruthy()
     // Own rules are one click away, folded while there are none.
-    fireEvent.click(screen.getByRole("button", { name: /Own rules/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Your own rules/ }))
     expect(screen.getByTestId("keeper-watch-spec")).toBeTruthy()
   })
 
@@ -865,5 +853,51 @@ describe("WatchdogCard — how much it asks for before it is on", () => {
     // Two switches, one of which silently gates the other, is exactly the shape
     // that produces "I turned it on and nothing happened".
     expect(await screen.findByText(/engine above is off/i)).toBeTruthy()
+  })
+})
+
+// The workspace page's cards, in the words the whole page uses.
+describe("KeeperGovernancePanel, one word per thing", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset(); toastWarning.mockReset(); canManage = true })
+
+  it("names the cards Watchdog, Alerts and approval, Access time and Judge", async () => {
+    mockRoutes({ ...BASE, enabled: true })
+    const r = render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    for (const title of ["Watchdog", "Alerts and approval", "Access time"]) {
+      expect(await screen.findByRole("region", { name: title })).toBeInTheDocument()
+    }
+    expect(screen.getByText("Alert on a denial from risk")).toBeInTheDocument()
+    expect(screen.getByText("Second approver")).toBeInTheDocument()
+    expect(screen.getByText("Findings go to")).toBeInTheDocument()
+    expect(r.container.textContent).not.toMatch(/four-eyes|lease|DENY alert/i)
+  })
+
+  it("flags with human labels, and takes any check from 1 to 100 beside the quick picks", async () => {
+    mockRoutes({ ...BASE, enabled: true, watch_presets: ["egress"] })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    const names = ["Credentials", "Network egress", "Memory", "Destructive commands", "Secret files"]
+    for (const n of names) expect(await screen.findByRole("checkbox", { name: new RegExp(`^${n}`) })).toBeInTheDocument()
+    const picks = screen.getByRole("group", { name: "Check" })
+    expect(within(picks).getAllByRole("button").map((b) => b.textContent)).toEqual(["Every call", "1 in 2", "1 in 5", "1 in 10", "1 in 20", "1 in 50"])
+    fireEvent.change(screen.getByTestId("keeper-governance-sample-every"), { target: { value: "37" } })
+    fireEvent.click(screen.getByTestId("keeper-watchdog-save"))
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    expect(putBodies()[0]).toMatchObject({ behavior_sample_every: 37, watch_presets: ["egress"] })
+  })
+
+  it("says that access time applies to level 3 and 4", async () => {
+    mockRoutes({ ...BASE })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    const card = await screen.findByRole("region", { name: "Access time" })
+    expect(card).toHaveTextContent("Applies to level 3 and 4 credentials")
+    expect(within(within(card).getByRole("group", { name: "Approved access lasts" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Until revoked", "15 min", "1 h", "8 h", "24 h"])
+  })
+
+  it("shows the server's warning after a save", async () => {
+    mockRoutes({ ...BASE, require_second_approver: false }, { putWarning: "No second eligible approver in this workspace." })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    fireEvent.click(await screen.findByTestId("keeper-governance-second-approver"))
+    fireEvent.click(screen.getByTestId("keeper-findings-save"))
+    await waitFor(() => expect(toastWarning).toHaveBeenCalledWith("No second eligible approver in this workspace."))
   })
 })
