@@ -83,6 +83,7 @@ func TestForkedRestore_SourceIsolationAndReferences(t *testing.T) {
 	for _, table := range []string{
 		"workspace_mcp_servers", "crew_mcp_servers",
 		"notification_channels", "automations", "journal_entries",
+		"recurring_issues", "budget_limits",
 	} {
 		if err := seedOneBackupTable(t, db, table, source); err != nil {
 			t.Fatalf("seed %s: %v", table, err)
@@ -95,6 +96,9 @@ func TestForkedRestore_SourceIsolationAndReferences(t *testing.T) {
 		{`INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope) VALUES ('amb_ws', 'a_alice', 'gen_workspace_mcp_servers', 'workspace')`, nil},
 		{`INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope) VALUES ('amb_crew', 'a_bob', 'gen_crew_mcp_servers', 'crew')`, nil},
 		{`UPDATE missions SET assignee_type = 'agent', assignee_id = 'a_bob' WHERE id = ?`, []any{missionID}},
+		{`UPDATE recurring_issues SET assignee_type = 'agent', assignee_id = 'a_bob' WHERE id = 'gen_recurring_issues'`, nil},
+		{`UPDATE budget_limits SET scope_kind = 'agent', scope_id = 'a_alice' WHERE id = 'gen_budget_limits'`, nil},
+		{`UPDATE agents SET parent_lead_id = 'a_alice' WHERE id = 'a_bob'`, nil},
 		{`UPDATE journal_entries SET crew_id = 'c_alpha', agent_id = 'a_alice', mission_id = ?, span_id = ? WHERE id = 'gen_journal_entries'`, []any{missionID, activityID}},
 	} {
 		if _, err := db.ExecContext(ctx, q.sql, q.args...); err != nil {
@@ -155,6 +159,15 @@ func TestForkedRestore_SourceIsolationAndReferences(t *testing.T) {
 		{"issue assignee → fork's agent",
 			`SELECT COUNT(*) FROM missions m WHERE m.workspace_id = ?1 AND m.assignee_type = 'agent'
 			   AND m.assignee_id IN (SELECT id FROM agents WHERE workspace_id = ?1)`},
+		{"recurring issue assignee → fork's agent",
+			`SELECT COUNT(*) FROM recurring_issues r WHERE r.workspace_id = ?1
+			   AND r.assignee_id IN (SELECT id FROM agents WHERE workspace_id = ?1)`},
+		{"agent budget scope → fork's agent",
+			`SELECT COUNT(*) FROM budget_limits b WHERE b.workspace_id = ?1 AND b.scope_kind = 'agent'
+			   AND b.scope_id IN (SELECT id FROM agents WHERE workspace_id = ?1)`},
+		{"parent lead → fork's agent",
+			`SELECT COUNT(*) FROM agents a WHERE a.workspace_id = ?1 AND a.parent_lead_id IS NOT NULL
+			   AND a.parent_lead_id IN (SELECT id FROM agents WHERE workspace_id = ?1)`},
 		{"journal crew/agent/mission/span → fork's rows",
 			`SELECT COUNT(*) FROM journal_entries j WHERE j.workspace_id = ?1
 			   AND j.crew_id IN (SELECT id FROM crews WHERE workspace_id = ?1)

@@ -692,7 +692,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 			// RemapIDs just rewrote identity columns the journal's
 			// keyed hash commits to (the entry's own id, and every FK
-			// column SQLite reports — workspace_id on today's schema)
+			// column SQLite reports or virtualForeignKeys lists)
 			// while seq/prev_hash/entry_hash rode through verbatim, so
 			// every restored row now carries a signature over values it
 			// no longer holds. Left alone, the restore
