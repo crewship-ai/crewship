@@ -401,7 +401,7 @@ func tmuxExecDir(agentSlug, runID string) string {
 // explicitly so tests can supply fixtures. An empty paneFile never proves
 // absence through the no-server branch.
 func tmuxSessionProbeAt(session, paneFile, procRoot string) string {
-	return fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
+	return tmuxPaneProbeFunc(paneFile) + fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
 elif tmux has-session -t '=%[1]s' 2>/dev/null; then echo PRESENT;
 elif crewship_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); then
  case "
@@ -429,12 +429,24 @@ func tmuxPaneIdentityWriter(paneFile string) string {
 	return fmt.Sprintf(`crewship_pane_stat=$(cat /proc/$$/stat 2>/dev/null) && crewship_pane_group=$(printf '%%s\n' "$crewship_pane_stat" | awk '{print $5}') && crewship_pane_stamp=$(printf '%%s\n' "$crewship_pane_stat" | awk '{print $22}') && [ "$crewship_pane_group" = "$$" ] && [ -n "$crewship_pane_stamp" ] && (set -C; printf '%%s %%s\n' "$$" "$crewship_pane_stamp" > '%s') 2>/dev/null`, paneFile)
 }
 
+// tmuxPaneProbeFunc defines the pane group probe as a function at the top
+// level of the script. Its case statements must not sit textually inside a
+// $( ) command substitution: bash 3.2 (macOS /bin/sh) cannot parse that, and a
+// parse error fails the WHOLE probe with exit 2, including the managed and
+// legacy paths that never reach tmux. Only the call is substituted.
+func tmuxPaneProbeFunc(paneFile string) string {
+	if paneFile == "" {
+		return ""
+	}
+	return "crewship_pane_probe() {\n" + managedDirectRunProbeAt(paneFile, false) + "echo UNKNOWN\n}\n"
+}
+
 // tmuxNoServerProbe prints ABSENT only when the client found no server AND
 // no tmux process is visible in a process table that hides nothing.
 func tmuxNoServerProbe(paneFile, procRoot string) string {
 	pane := "crewship_tmux_state=UNKNOWN"
 	if paneFile != "" {
-		pane = fmt.Sprintf(`if [ -f '%s' ]; then crewship_pane_state=$( %s echo UNKNOWN ); [ "$crewship_pane_state" = ABSENT ] || crewship_tmux_state=UNKNOWN; else crewship_tmux_state=UNKNOWN; fi`, paneFile, managedDirectRunProbeAt(paneFile, false))
+		pane = fmt.Sprintf(`if [ -f '%s' ]; then crewship_pane_state=$(crewship_pane_probe); [ "$crewship_pane_state" = ABSENT ] || crewship_tmux_state=UNKNOWN; else crewship_tmux_state=UNKNOWN; fi`, paneFile)
 	}
 	return fmt.Sprintf(`crewship_tmux_err=$(LC_ALL=C tmux list-sessions 2>&1 >/dev/null) && crewship_tmux_err=''
  case "$crewship_tmux_err" in
