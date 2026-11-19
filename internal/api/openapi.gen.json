@@ -16403,6 +16403,31 @@
         ],
         "type": "object"
       },
+      "NativeCraftDecider": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "Recorded decider, `user:\u003cid\u003e` or `system:superseded`.",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "system"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "display_name",
+          "kind"
+        ],
+        "type": "object"
+      },
       "NativeCraftDocument": {
         "additionalProperties": false,
         "properties": {
@@ -16562,11 +16587,9 @@
             "type": "string"
           },
           "kind": {
-            "description": "system only on a proposal's decided_by when a newer version superseded it.",
             "enum": [
               "human",
-              "agent",
-              "system"
+              "agent"
             ],
             "type": "string"
           },
@@ -16781,10 +16804,10 @@
           "decided_by": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/NativeCraftHolder"
+                "$ref": "#/components/schemas/NativeCraftDecider"
               }
             ],
-            "description": "Who decided a non-open proposal: the person who accepted or rejected it (kind human), or the system when a newer version superseded it (kind system). Absent while open."
+            "description": "Who decided a non-open proposal. kind human: the person who accepted or rejected it, or whose accept found the document content changed and recorded it stale. kind system (system:superseded): only when a newer proposal's sweep marked it stale before anyone decided. Absent while open."
           },
           "id": {
             "pattern": "^ncp_[a-f0-9]{24}$",

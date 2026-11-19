@@ -203,10 +203,12 @@ transaction. If the document changed meanwhile, the proposal becomes `stale` and
 nothing is applied. `reject-proposal` needs write rights but no lease. Decisions
 are final.
 
-A decided proposal names who decided it and when: `decided_by` (same shape as
-`author`; `kind` is `human` for the person who accepted or rejected it, or
-`system` when a newer version made it stale) and `decided_at`. An open proposal
-has neither.
+A decided proposal names who decided it and when: `decided_by` (`actor_id`,
+`display_name`, `kind`) and `decided_at`. `kind` is `human` for the person who
+accepted or rejected it, and also for the person whose `accept-proposal` found
+the document changed and recorded it `stale`. `kind` is `system`
+(`system:superseded`) only when a newer agent proposal marked an open proposal
+stale before anyone decided. An open proposal has neither field.
 
 ```json
 {"id": "ncp_0123456789abcdef01234567", "author": {"actor_id": "agent:AGENT_ID", "display_name": "Drafting Agent", "kind": "agent", "agent_id": "AGENT_ID"}, "base_version": 1, "summary": "Insert greeting", "created_at": "2026-10-31T08:30:00Z", "state": "accepted", "result_version": 2, "decided_by": {"actor_id": "user:USER_ID", "display_name": "Pavel", "kind": "human"}, "decided_at": "2026-10-31T09:00:00Z"}

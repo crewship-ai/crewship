@@ -840,11 +840,13 @@ and the writer. The agent stays the proposal's author. Both are visible:
 
 - Every proposal view (list, candidate, accept and reject responses) carries
   `decided_by` and `decided_at` once the proposal is no longer open.
-  `decided_by` has the same shape as `author` (`actor_id`, `display_name`,
-  `kind`): `kind: "human"` for the person who accepted or rejected it, or
-  `kind: "system"` (`system:superseded`, display name `Crewship`) when a newer
-  version made it stale before anyone decided. Only the actor id and display
-  name are returned, never other profile data.
+  `decided_by` is a `NativeCraftDecider` (`actor_id`, `display_name`, `kind`).
+  `kind: "human"` names the person who accepted or rejected it, and also the
+  person whose accept found the document content changed: that accept records
+  the proposal `stale` with the attempting person as decider. `kind: "system"`
+  (`system:superseded`, display name `Crewship`) appears only when a new
+  proposal's sweep marked an open proposal stale before anyone decided. Only
+  the actor id and display name are returned, never other profile data.
 - A version history entry (`GET .../craft/document/versions` and
   `GET .../craft/document/versions/{version}`) saved by accepting a proposal
   carries `proposal: {id, author}`, with `author` in the history's own author

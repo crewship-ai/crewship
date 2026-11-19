@@ -22,10 +22,20 @@ type craftNativeProposalResponse struct {
 	CreatedAt     string                    `json:"created_at"`
 	State         string                    `json:"state"`
 	ResultVersion int64                     `json:"result_version,omitempty"`
-	// DecidedBy names who accepted or rejected the proposal, or the system
-	// when a newer version superseded it. Absent while the proposal is open.
-	DecidedBy *craftNativeHolderResponse `json:"decided_by,omitempty"`
-	DecidedAt string                     `json:"decided_at,omitempty"`
+	// DecidedBy names who decided the proposal: the person who accepted or
+	// rejected it, or whose accept found the document changed (stale); the
+	// system only when a newer proposal's sweep marked it stale. Absent while
+	// the proposal is open.
+	DecidedBy *craftNativeDeciderResponse `json:"decided_by,omitempty"`
+	DecidedAt string                      `json:"decided_at,omitempty"`
+}
+
+// craftNativeDeciderResponse is a proposal's decider: a person (kind human)
+// or the system (kind system). Only the recorded actor and its display name.
+type craftNativeDeciderResponse struct {
+	ActorID     string `json:"actor_id"`
+	DisplayName string `json:"display_name"`
+	Kind        string `json:"kind"`
 }
 
 type craftNativeProposalListResponse struct {
@@ -61,7 +71,7 @@ func (d *craftNativeDocumentsHTTP) proposalView(r *http.Request, workspaceID str
 		// recorded actor and its display name, nothing else about the person.
 		decider := d.versionAuthor(r, workspaceID, p.DecidedBy)
 		// Only a person (user:) or the system (system:superseded) decides.
-		out.DecidedBy = &craftNativeHolderResponse{ActorID: decider.ActorID, DisplayName: decider.DisplayName, Kind: decider.Kind}
+		out.DecidedBy = &craftNativeDeciderResponse{ActorID: decider.ActorID, DisplayName: decider.DisplayName, Kind: decider.Kind}
 		out.DecidedAt = p.DecidedAt
 	}
 	return out
