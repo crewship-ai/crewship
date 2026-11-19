@@ -144,3 +144,109 @@ func TestMiseLockWriteCleansBothAuxiliaryLayouts(t *testing.T) {
 		t.Fatalf("v4 auxiliary not written at its relative path with parent checks:\n%s", joined)
 	}
 }
+
+func TestReadMiseLockBundleV4ReferencesFailClosed(t *testing.T) {
+	write := func(t *testing.T, dir string, files map[string]string) {
+		t.Helper()
+		for name, data := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ref := func(p string) string { return "lockfile_version = 4\naube = { path = \"" + p + "\" }\n" }
+
+	t.Run("nested files inside a referenced directory are packed", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/1"), "locks/opencode/1/package.json": "{}", "locks/opencode/1/sub/extra.yaml": "x: 1\n"})
+		got, err := ReadMiseLockBundle(dir)
+		if err != nil || got.Files["locks/opencode/1/sub/extra.yaml"] != "x: 1\n" {
+			t.Fatalf("nested auxiliary dropped: %v %+v", err, got)
+		}
+	})
+	t.Run("missing referenced directory", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/1")})
+		if _, err := ReadMiseLockBundle(dir); err == nil {
+			t.Fatal("incomplete bundle accepted")
+		}
+	})
+	t.Run("empty referenced directory", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/1")})
+		if err := os.MkdirAll(filepath.Join(dir, "locks/opencode/1"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadMiseLockBundle(dir); err == nil {
+			t.Fatal("empty reference accepted")
+		}
+	})
+	t.Run("reference naming a file", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/package.json"), "locks/opencode/package.json": "{}"})
+		if _, err := ReadMiseLockBundle(dir); err == nil {
+			t.Fatal("file reference accepted")
+		}
+	})
+	t.Run("traversal reference", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": ref("locks/../config"), "config/x": "x"})
+		if _, err := ReadMiseLockBundle(dir); err == nil {
+			t.Fatal("traversal reference accepted")
+		}
+	})
+	t.Run("symlinked referenced directory", func(t *testing.T) {
+		dir := t.TempDir()
+		outside := t.TempDir()
+		write(t, outside, map[string]string{"package.json": "outside"})
+		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/1")})
+		if err := os.MkdirAll(filepath.Join(dir, "locks/opencode"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(dir, "locks/opencode/1")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if _, err := ReadMiseLockBundle(dir); err == nil {
+			t.Fatal("symlinked reference accepted")
+		}
+	})
+	t.Run("unrelated locks tree is never opened for a v3 lock", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": "lockfile_version = 3\n", ".mise/locks/node/1/package.json": "{}", "locks/" + strings.Repeat("a", 250) + "/" + strings.Repeat("b", 20): "project"})
+		got, err := ReadMiseLockBundle(dir)
+		if err != nil || len(got.Files) != 2 {
+			t.Fatalf("unrelated locks/ tree affected v3 packing: %v %+v", err, got)
+		}
+	})
+	t.Run("locks as a file is ignored when unreferenced", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"mise.lock": "lockfile_version = 3\n", "locks": "project file"})
+		if _, err := ReadMiseLockBundle(dir); err != nil {
+			t.Fatalf("unreferenced locks file broke packing: %v", err)
+		}
+	})
+}
+
+func TestResolverArchiveRejectsNonLockV4Neighbours(t *testing.T) {
+	for _, name := range []string{"config/conf.d/x.toml", "config/locks/x", "config/locks/opencode/../../mise.toml"} {
+		var data bytes.Buffer
+		tw := tar.NewWriter(&data)
+		for _, f := range []string{"config/mise.lock", name} {
+			if err := tw.WriteHeader(&tar.Header{Name: f, Typeflag: tar.TypeReg, Size: 1, Mode: 0o600}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.WriteString(tw, "x"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if b, err := readResolverLockArchive(&data); err == nil {
+			t.Errorf("%s accepted: %+v", name, b.Files)
+		}
+	}
+}

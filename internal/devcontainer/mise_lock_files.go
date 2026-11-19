@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strings"
 )
 
 // miseLockAuxReference finds the auxiliary directories a v4 mise.lock names,
@@ -60,30 +61,47 @@ func ReadMiseLockBundle(dir string) (*MiseLockBundle, error) {
 	if err := read("mise.lock"); err != nil {
 		return nil, err
 	}
-	for _, parent := range []string{".mise", miseLockAuxV3, miseLockAuxV4} {
-		stat, err := root.Lstat(parent)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
+	// `.mise/locks` is mise's own directory and is packed whole. `locks` is a
+	// generic name a project may use for something else, so from it only the
+	// directories mise.lock itself references are walked; the rest of that
+	// tree is never opened. A reference that is not a real directory, or that
+	// yields no file, fails here rather than as an incomplete bundle at
+	// `mise install --locked`.
+	roots := []string{}
+	for _, parent := range []string{".mise", miseLockAuxV3} {
+		ok, err := lockDirPresent(root, parent)
 		if err != nil {
 			return nil, err
 		}
-		if !stat.IsDir() {
-			return nil, fmt.Errorf("mise lock: auxiliary directory must not be a symlink or file")
+		if ok && parent == miseLockAuxV3 {
+			roots = append(roots, parent)
 		}
 	}
-	// `.mise/locks` is mise's own directory. `locks` is a generic name a
-	// project may use for something else, so only directories mise.lock
-	// itself references are packed from it.
-	referenced := map[string]bool{}
+	seen := map[string]bool{}
 	for _, m := range miseLockAuxReference.FindAllStringSubmatch(b.Files["mise.lock"], -1) {
-		referenced[m[1]] = true
-	}
-	for _, aux := range []string{miseLockAuxV3, miseLockAuxV4} {
-		err = fs.WalkDir(root.FS(), aux, func(name string, d fs.DirEntry, err error) error {
-			if errors.Is(err, fs.ErrNotExist) && name == aux {
-				return nil
+		ref := m[1]
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		if path.Clean(ref) != ref || len(strings.Split(ref, "/")) < 2 {
+			return nil, fmt.Errorf("mise lock: invalid auxiliary reference")
+		}
+		// Every component, including `locks` itself, must be a real directory.
+		for dir := ref; dir != "."; dir = path.Dir(dir) {
+			ok, err := lockDirPresent(root, dir)
+			if err != nil {
+				return nil, err
 			}
+			if !ok {
+				return nil, fmt.Errorf("mise lock: referenced auxiliary directory is missing")
+			}
+		}
+		roots = append(roots, ref)
+	}
+	for _, aux := range roots {
+		before := len(b.Files)
+		err = fs.WalkDir(root.FS(), aux, func(name string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -93,17 +111,33 @@ func ReadMiseLockBundle(dir string) (*MiseLockBundle, error) {
 			if d.IsDir() {
 				return nil
 			}
-			if aux == miseLockAuxV4 && !referenced[path.Dir(name)] {
-				return nil
-			}
 			return read(name)
 		})
 		if err != nil {
 			return nil, err
+		}
+		if aux != miseLockAuxV3 && len(b.Files) == before {
+			return nil, fmt.Errorf("mise lock: referenced auxiliary directory is empty")
 		}
 	}
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// lockDirPresent reports whether name exists as a real directory. A symlink
+// or file in its place is an error, never followed.
+func lockDirPresent(root *os.Root, name string) (bool, error) {
+	stat, err := root.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !stat.IsDir() {
+		return false, fmt.Errorf("mise lock: auxiliary directory must not be a symlink or file")
+	}
+	return true, nil
 }
