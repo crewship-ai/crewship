@@ -143,3 +143,40 @@ func TestCraftNativeAgentTaskRefusalWithoutPageAccessIsGeneric(t *testing.T) {
 		}
 	})
 }
+
+// #5596 review F2: the owner/delegation check comes after the recorded
+// instruction and policy checks, so a non-owner Page editor cannot probe an
+// agent's grant through a chat that is not their own recorded instruction.
+func TestCraftNativeAgentTaskRefusalChecksDelegationLast(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		arrange      func(t *testing.T, f *artifactPrincipalFixture)
+	}{
+		{"group chat with an ungranted agent", craftNativeAgentReasonChatNotPrivate, func(t *testing.T, f *artifactPrincipalFixture) {
+			mustExec(t, f.rig.db, `UPDATE chats SET visibility='group' WHERE id=?`, f.a.ChatID)
+		}},
+		{"ordinary turn with an ungranted agent", craftNativeAgentReasonInstructionNotRecorded, func(t *testing.T, f *artifactPrincipalFixture) {
+			mustExec(t, f.rig.db, `UPDATE conversation_messages SET native_craft_instruction=0 WHERE id=?`, f.a.MessageID)
+		}},
+		{"policy disabled with an ungranted agent", craftNativeAgentReasonPolicyDisabled, func(t *testing.T, f *artifactPrincipalFixture) {
+			mustExec(t, f.rig.db, `UPDATE workspace_artifact_creation_policy SET enabled=0`)
+		}},
+		{"recorded instruction with an ungranted agent", craftNativeAgentReasonNotOwnerOrDelegated, func(*testing.T, *artifactPrincipalFixture) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, m, ctx := nativeAgentAdmissionFixture(t)
+			// A human Edit grantee who does not own the document; the agent
+			// has no grant from the owner.
+			mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id='native-agent-page'`, f.rig.adminID)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-agent-page','user',?,'write',?)`, f.a.HumanUserID, f.rig.adminID)
+			tc.arrange(t, f)
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
+			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
+				t.Fatalf("refusal lost the mandate sentinel: %+v %v", accepted, err)
+			}
+			if got := craftNativeAgentRefusalReason(err); got != tc.reason {
+				t.Fatalf("reason = %q, want %q", got, tc.reason)
+			}
+		})
+	}
+}

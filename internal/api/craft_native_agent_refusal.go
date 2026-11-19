@@ -9,9 +9,13 @@ import (
 
 // Reasons a native Craft agent task start is refused (#5596). The requester
 // learns one only after Page authority passed: a caller who cannot see and
-// edit the Page keeps the generic refusal, so no reason is an existence or
-// policy oracle. docs/specs/craft-native.md lists them; the CLI accepts only
-// these values.
+// edit the Page keeps the generic refusal, whatever the state behind it. An
+// authorized Page editor who holds their own recorded instruction does learn
+// state: whether the workspace agent artifact policy is on and whether it
+// allows that agent's crew (deliberately, so they know what to ask an
+// administrator for), and, after that, whether the agent may borrow their
+// write. docs/specs/craft-native.md lists them; the CLI accepts only these
+// values.
 const (
 	craftNativeAgentReasonPolicyDisabled         = "workspace_policy_disabled"
 	craftNativeAgentReasonCrewNotAllowed         = "crew_not_allowed"

@@ -621,7 +621,13 @@ reason is one of `workspace_policy_disabled`, `crew_not_allowed`,
 `duplicate_task`, `capacity`, `credential_expiring`, `clock_unavailable` or
 `task_too_large`. Telling these apart reads only the requester's own chat and
 message, that chat's agent and the workspace policy row. A database error
-keeps the generic body. A Comment or Read grantee, a non-member and a caller
+keeps the generic body. The reasons are deliberately not opaque to an
+authorized editor: one who holds their own recorded instruction learns whether
+the workspace agent artifact policy is on and whether it allows that agent's
+crew. The owner/delegation check runs after the instruction and policy checks,
+so `not_owner_or_delegated` only ever concerns an agent the requester already
+has their own recorded instruction with, never any agent in a chat they can
+merely see. A Comment or Read grantee, a non-member and a caller
 naming a missing Page all get the same generic answer.
 
 The mode follows Q16 (owner decision 2026-10-19). The author's targeted

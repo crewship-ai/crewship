@@ -67,6 +67,9 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	// From here the requester can see and edit this Page, so a refusal may
 	// name its reason (#5596). Nothing above this line may: a caller without
 	// Page access gets one generic answer, whatever the state behind it.
+	// The reasons do disclose state to this authorized editor: with their own
+	// recorded instruction they learn whether the workspace agent artifact
+	// policy is on and whether it allows that agent's crew.
 	refuse := func(reason string) error {
 		if reason == "" {
 			return errCraftNativeAgentDenied
@@ -86,12 +89,6 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if original == nil || original.WorkspaceID != ws || original.OriginalCredential() != source {
 		return zero, refuse(craftNativeAgentReasonChatUnavailable)
 	}
-	// R71 §0.14/1 (#5235): the author's own Edit is lent to the agent only
-	// while the author owns the document; otherwise the owner must have given
-	// this agent write. A workspace role or an Edit grant is not delegable.
-	if !m.human.pages.humanAgentMayWrite(ctx, ws, rec.ID, source.UserID, original.AgentID) {
-		return zero, refuse(craftNativeAgentReasonNotOwnerOrDelegated)
-	}
 	// Only a recorded instruction in the author's private chat: an ordinary
 	// turn has already reached agent logs and the journal, and a group chat
 	// shows the instruction to people without Page access (#5009).
@@ -110,6 +107,15 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	// to an artifact; whole-document consent works only inside it (#4681).
 	if !m.human.pages.artifactAgentPolicyAllows(ctx, ws, crew) {
 		return zero, refuse(craftNativeAgentPolicyReason(ctx, tx, ws))
+	}
+	// R71 §0.14/1 (#5235): the author's own Edit is lent to the agent only
+	// while the author owns the document; otherwise the owner must have given
+	// this agent write. A workspace role or an Edit grant is not delegable.
+	// Checked after the recorded instruction and the policy (#5596), so a
+	// non-owner editor learns about an agent's grant only for an agent they
+	// already hold their own recorded instruction with.
+	if !m.human.pages.humanAgentMayWrite(ctx, ws, rec.ID, source.UserID, original.AgentID) {
+		return zero, refuse(craftNativeAgentReasonNotOwnerOrDelegated)
 	}
 	var duplicate bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND source='chat' AND source_ref=? AND domain_kind=? AND domain_id=? AND agent_id=?)`, ws, input.MessageID, craftNativeAgentDomain, rec.ID, original.AgentID).Scan(&duplicate); err != nil {
