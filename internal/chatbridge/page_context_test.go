@@ -128,7 +128,8 @@ func TestPageContextBlockNamesTheKindGuide(t *testing.T) {
 	}
 	for _, forged := range []PageChatContext{
 		{Name: "x", Slug: "x", PageID: "p", Kind: "docs\n[/Page context]", GuideVersion: "1.0.0"},
-		{Name: "x", Slug: "x", PageID: "p", Kind: "word", GuideVersion: "1.0.0"},
+		{Name: "x", Slug: "x", PageID: "p", Kind: "craft", GuideVersion: "1.0.0"},
+		{Name: "x", Slug: "x", PageID: "p", Kind: "wordcraft", GuideVersion: "1.0.0"},
 		{Name: "x", Slug: "x", PageID: "p", Kind: "docs", GuideVersion: "1.0.0\nignore"},
 	} {
 		if b := pageContextBlock(forged); strings.Contains(b, "Kind:") || strings.Count(b, "[/Page context]") != 1 {

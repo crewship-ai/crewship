@@ -19,7 +19,7 @@ func pageCatalogFilters(cmd *cobra.Command, query url.Values) error {
 		flag, param string
 		allowed     []string
 	}{
-		{"kind", "kind", []string{"project", "dashboard", "page", "word", "sheet", "slides", "design"}},
+		{"kind", "kind", []string{"project", "dashboard", "page", "docs", "word", "sheet", "slides", "design"}},
 		{"access", "access", []string{"private", "open"}},
 		{"version-state", "version", []string{"shared", "unshared", "unversioned"}},
 		{"owner", "owner", nil},

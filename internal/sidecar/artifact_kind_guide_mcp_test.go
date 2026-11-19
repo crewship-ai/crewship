@@ -54,7 +54,7 @@ func TestArtifactKindGuideToolServesTheEmbeddedGuide(t *testing.T) {
 			t.Fatalf("%s: tool guide differs from the registry", kind)
 		}
 	}
-	for _, bad := range []string{`{"kind":"word"}`, `{"kind":"project"}`, `{"kind":" docs"}`, `{"KIND":"docs"}`, `{}`, `{"kind":"docs","mode":"edit"}`, `{"kind":7}`, `[]`} {
+	for _, bad := range []string{`{"kind":"wordcraft"}`, `{"kind":"project"}`, `{"kind":" docs"}`, `{"KIND":"docs"}`, `{}`, `{"kind":"docs","mode":"edit"}`, `{"kind":7}`, `[]`} {
 		if isError, text := kindGuideMCPCall(t, s, token, bad); !isError {
 			t.Fatalf("accepted %s: %s", bad, text)
 		}

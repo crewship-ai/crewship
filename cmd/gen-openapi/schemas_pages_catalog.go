@@ -20,7 +20,7 @@ func pageCatalogQueryParameters() []map[string]any {
 	sort["schema"].(map[string]any)["enum"] = []string{"updated", "name", "kind"}
 	return []map[string]any{
 		text("q", "Case-insensitive literal substring of the Page name or slug; query operators are not interpreted."),
-		facet("kind", "Caller-visible kind, derived from the same selected metadata as the index row.", "project", "dashboard", "page", "word", "sheet", "slides", "design"),
+		facet("kind", "Caller-visible kind, derived from the same selected metadata as the index row. docs is a structured Docs document (has_document without a typed kind); word is native Word only (artifact_kind word).", "project", "dashboard", "page", "docs", "word", "sheet", "slides", "design"),
 		facet("access", "Explicit private_audience classification, independent of ownership or folder.", "private", "open"),
 		facet("version", "Version-store state; legacy storage without a typed version head is unversioned.", "shared", "unshared", "unversioned"),
 		facet("owner", "Canonical index owner reference user/ID or crew/slug; me means the authenticated human's user reference."),

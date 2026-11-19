@@ -70,7 +70,9 @@ func TestArtifactKindGuideServesOneKindAndAliases(t *testing.T) {
 		{"docs", "docs", 200},
 		{"design-system", "library", 200},
 		{"App", "app", 200},
-		{"word", "", 404},
+		{"word", "word", 200},
+		{"gridcraft", "sheet", 200},
+		{"craft", "", 404},
 		{"rules", "", 404},
 	} {
 		rr := kindGuideRequest(t, "/api/v1/artifact-kind-guides/"+tc.kind, tc.kind, true)
