@@ -23,7 +23,7 @@ const SUMMARY_TONE: Record<Tone, "success" | "warn" | "danger" | undefined> = { 
 /** What the overview can open: a place in this page, found from a finding's link or a row. */
 export interface OverviewGo {
   /** ?view= ?section= ?watch= ?judge= ?second= of a link that stays on this page. */
-  params: (q: URLSearchParams) => void
+  params: (fn: (q: URLSearchParams) => void) => void
   workspace: (id: string) => void
   activity: () => void
 }

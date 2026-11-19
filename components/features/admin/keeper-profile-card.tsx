@@ -76,9 +76,8 @@ const NEVER = 5
  *  "no cap" sentinel and is always allowed. */
 const MIN_BUDGET = 512
 const MAX_BUDGET = 131072
-/** keepercfg.MaxPrecedentExamples / MaxConsistencySamples. */
+/** keepercfg.MaxPrecedentExamples. */
 const MAX_PRECEDENT = 10
-const MAX_SAMPLES = 9
 
 /** The level, named for what it adds. The server's own words for the presets
  *  are lean / standard / thorough (internal/keepercfg/profile.go). */

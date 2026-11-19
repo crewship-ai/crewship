@@ -39,7 +39,7 @@ interface Field {
 }
 type Draft = Partial<Record<Key, string | number | boolean>>
 
-const presetKey = (v: unknown) => (Array.isArray(v) ? [...(v as string[])].sort().join(",") : "")
+const presetKey = (v: unknown) => (Array.isArray(v) ? [...(v as string[])].sort().join(",") : typeof v === "string" ? v : "")
 const eff = (key: Key, v: unknown) => key === "watch_presets" ? presetKey(v) : (key === "behavior_sample_every" && (!v || v === 0) ? SAMPLE_DEFAULT : v)
 
 export const BULK_FIELDS: Record<BulkSection, Field[]> = {

@@ -658,4 +658,13 @@ describe("JudgeModelsCard — the rows of the background checks", () => {
       expect(JSON.parse(String((put![1] as RequestInit).body))).toEqual({ timeout_ms: 45000 })
     })
   })
+
+  it("says why Run now is missing when the administrator has no workspace, and still tests", async () => {
+    route()
+    render(<JudgeModelsCard workspaceId="__instance__" />)
+    await screen.findByTestId("keeper-aux-probe-curator")
+    expect(screen.queryByTestId("keeper-review-run-curator")).toBeNull()
+    expect(screen.getByTestId("keeper-review-run-unavailable-curator")).toHaveTextContent("Run now needs a workspace")
+    expect(screen.queryByTestId("keeper-review-run-unavailable-run_summary")).toBeNull()
+  })
 })

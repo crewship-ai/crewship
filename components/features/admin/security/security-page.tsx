@@ -27,7 +27,6 @@ import { useSecurity } from "./use-security"
 import { useInstanceKeeper, type InstanceGovRow } from "./use-instance-keeper"
 import { DefaultsForm } from "./bulk-governance"
 import { INSTANCE_ITEMS, STREAMS, findings, secondApprover, watchdogFinding, type DecisionFilter, type InstanceItem, type Stream } from "./security-model"
-import { watchSummary } from "./watch-labels"
 
 const ITEM_ICON: Record<InstanceItem, LucideIcon> = { judge: Gavel, rules: ListChecks, background: Clock, defaults: Sparkles }
 
@@ -111,7 +110,7 @@ function writeUrl(s: UrlState) {
  * has a page each, with "← Overview" and a "Whole instance" mark.
  */
 export function SecurityPage() {
-  const { workspaceId, loading: workspaceLoading, workspace } = useWorkspace() as ReturnType<typeof useWorkspace> & { workspace?: { name?: string } | null }
+  const { workspaceId, loading: workspaceLoading, workspace } = useWorkspace()
   const data = useSecurity(workspaceId, workspaceLoading)
   // The instance-wide cards need no workspace: an instance admin who belongs
   // to none uses them with INSTANCE_SCOPE; null still means "not known yet".

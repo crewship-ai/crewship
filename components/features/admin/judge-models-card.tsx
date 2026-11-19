@@ -721,7 +721,13 @@ function SlotEditor({
             evaluator exists to ask — and until this button there was no way to
             ask it except by waiting for the nightly sweep, which is why the
             behaviour watchdog had never run outside its own tests. */}
-        {evaluator && (
+        {/* A review runs against one workspace's data, so the route needs one
+            (400 "choose a workspace" without). An instance administrator in no
+            workspace gets the reason instead of a button that can only fail. */}
+        {evaluator && realWorkspace(workspaceId) === null && (
+          <span data-testid={`keeper-review-run-unavailable-${slot.slot}`} title="A review runs against one workspace's data">Run now needs a workspace</span>
+        )}
+        {evaluator && realWorkspace(workspaceId) !== null && (
           <button
             type="button"
             disabled={busy || runningNow || !slot.model.value}

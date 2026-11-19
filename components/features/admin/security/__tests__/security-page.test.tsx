@@ -153,7 +153,7 @@ describe("the panel", () => {
     expect(screen.getByRole("button", { name: "All 3 workspaces…" })).toBeInTheDocument()
     // No segmented control for the views, no stream rows in the panel.
     expect(screen.queryByRole("group", { name: "View" })).toBeNull()
-    expect(screen.queryByRole("button", { name: /^Behaviour/ })).toBeNull()
+    expect([...document.querySelectorAll("[data-slot=drill-section]")].map((n) => n.textContent).join(" ")).not.toMatch(/Lessons from failures|Memory health/)
   })
 
   it("lists at most five workspaces with the watchdog off", async () => {
@@ -161,8 +161,8 @@ describe("the panel", () => {
     GOV.workspaces.push(...many)
     try {
       render(<SecurityPage />)
-      await inPanel(/^Off 0/)
-      expect(panelButtons(/^Off \d/)).toHaveLength(5)
+      await inPanel(/^Off 2/)
+      expect(panelButtons(/^(Coolify|Quiet|Off \d)/)).toHaveLength(5)
       expect(screen.getByRole("button", { name: /^All 12 workspaces…/ })).toBeInTheDocument()
     } finally {
       GOV.workspaces.length = 3
@@ -592,7 +592,7 @@ describe("old links still land", () => {
     window.history.replaceState(null, "", "/admin/security?view=activity&stream=behavior")
     render(<SecurityPage />)
     await waitFor(() => expect(reqURLs().some((u) => u.includes("request_type=behavior"))).toBe(true))
-    expect(screen.getByRole("button", { name: /^Behaviour/ })).toHaveAttribute("aria-pressed", "true")
+    expect(within(screen.getByRole("group", { name: "Kind" })).getByRole("button", { name: /^Behaviour/ })).toHaveAttribute("aria-pressed", "true")
   })
 })
 
