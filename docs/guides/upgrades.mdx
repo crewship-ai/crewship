@@ -102,8 +102,8 @@ nightly-specific differences under the hood:
   identity, and a stable upgrade still accepts only `release.yml` — neither
   channel accepts the other's signatures.
 
-Passive update checks (the CLI boot banner and the dashboard's version badge
-via `/api/v1/system/version`) cache the nightly answer on disk for 1 hour
+Passive update checks (the CLI boot banner and the dot on the Crewship sail in
+the dashboard's top bar, via `/api/v1/system/version`) cache the nightly answer on disk for 1 hour
 (24 hours on the stable channel), so a frequently polled server stays within
 GitHub's unauthenticated API quota. An explicit `crewship self-update` or
 `--check` always asks GitHub directly.

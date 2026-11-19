@@ -64,7 +64,7 @@ func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := parsePagination(r, 50, 200)
+	limit, _ := parsePagination(r, 50, cartographer.MaxListLimit)
 
 	rows, err := cartographer.List(r.Context(), h.db, workspaceID, missionID, limit)
 	if err != nil {

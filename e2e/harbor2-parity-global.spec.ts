@@ -5,12 +5,12 @@ import { test, expect } from "@playwright/test"
 // use the suite's stored session (global-setup.ts). Written before deploy:
 // run them against dev1 after `crew deploy`.
 
-// Round 63 (#3784): the workspace mark, search, every app, the sail and the
-// avatar share one axis, 28 px from the sidebar's left edge, open or folded;
-// icons are 18 px and the three identities 28 px.
+// Round 63 (#3784): the workspace mark, search, every app and the avatar
+// share one axis (the sail moved to the top bar in #5552), 28 px from the sidebar's left edge, open or folded;
+// icons are 18 px and the two identities 28 px.
 async function expectOnAxis(page: import("@playwright/test").Page) {
   // Measure only once the rail has rendered (evaluate does not auto-wait).
-  for (const sel of ["[data-slot=sidebar-container]", ".rail-ws", ".rail-brand", ".rail-user [data-slot=presence-dot]", 'a[href="/inbox"] [data-slot=rail-tile]']) {
+  for (const sel of ["[data-slot=sidebar-container]", ".rail-ws", ".rail-user [data-slot=presence-dot]", 'a[href="/inbox"] [data-slot=rail-tile]']) {
     await page.locator(sel).first().waitFor({ state: "attached" })
   }
   const r = await page.evaluate(() => {
@@ -22,7 +22,6 @@ async function expectOnAxis(page: import("@playwright/test").Page) {
       search: glyph(".rail-search .rail-tile"),
       inbox: glyph('a[href="/inbox"] [data-slot=rail-tile]'),
       settings: glyph('a[href="/settings"] [data-slot=rail-tile]'),
-      brand: centre(document.querySelector(".rail-brand")),
       avatar: centre(document.querySelector(".rail-user [data-slot=presence-dot]")?.parentElement ?? null),
     }
   })
@@ -30,7 +29,7 @@ async function expectOnAxis(page: import("@playwright/test").Page) {
     expect(v, k).not.toBeNull()
     expect(Math.abs(v!.c - 28), `${k} centre ${v!.c}`).toBeLessThanOrEqual(1)
   }
-  for (const k of ["ws", "brand", "avatar"] as const) expect(Math.round(r[k]!.w), k).toBe(28)
+  for (const k of ["ws", "avatar"] as const) expect(Math.round(r[k]!.w), k).toBe(28)
   expect(Math.round(r.inbox!.w)).toBe(18)
 }
 

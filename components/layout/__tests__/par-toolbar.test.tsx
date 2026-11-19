@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 
 // PAR-001 and the phone header (PAR-025, 052, 063, 092, 096, 136): the bar
-// ends with the activity and inbox bells; on a phone it is ONE row — area
-// tile, title, the page's primary action, search, bell.
+// ends with Activity, Inbox and the Crewship sail (#5552); on a phone it is
+// ONE row — area tile, title, the page's primary action, search, bell, sail.
 
 const h = vi.hoisted(() => ({ mobile: false }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
@@ -48,12 +48,27 @@ beforeEach(() => { h.mobile = false })
 afterEach(cleanup)
 
 describe("the top bar's right edge (PAR-001)", () => {
-  it("has no provisioning chip and no connection button, only the two bells", () => {
+  it("has no provisioning chip and no connection button, only Activity, Inbox and the sail", () => {
     const header = bar()
     expect(within(header).queryByRole("button", { name: /crew images/i })).toBeNull()
     expect(header.querySelector('[data-testid="system-status-pill"]')).toBeNull()
     expect(within(header).getByRole("button", { name: "Activity" })).toBeInTheDocument()
     expect(within(header).getByRole("button", { name: "Inbox" })).toBeInTheDocument()
+    expect(within(header).getByRole("button", { name: "Crewship" })).toBeInTheDocument()
+  })
+
+  it("ends with the Crewship sail, after Activity and Inbox (#5552)", () => {
+    const header = bar()
+    const names = within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))
+    expect(names.slice(-3)).toEqual(["Activity", "Inbox", "Crewship"])
+    // A rule sets it apart from the bells, on every width (owner, 19 Nov).
+    const rule = header.querySelector('[data-slot="crewship-sail-rule"]') as HTMLElement
+    expect(rule).not.toBeNull()
+    expect(rule.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    const sail = within(header).getByRole("button", { name: "Crewship" })
+    expect(rule.compareDocumentPosition(sail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const inbox = within(header).getByRole("button", { name: "Inbox" })
+    expect(inbox.compareDocumentPosition(rule) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
@@ -66,6 +81,7 @@ describe("the phone's top bar (PAR-025 ... PAR-136)", () => {
     expect(slot.className).not.toMatch(/(^|\s)hidden(\s|$)/)
     expect(within(header).getByRole("button", { name: "Search" })).toBeInTheDocument()
     expect(within(header).getByRole("button", { name: "Activity" })).toBeInTheDocument()
+    expect(within(header).getByRole("button", { name: "Crewship" })).toBeInTheDocument()
   })
 
   it("keeps Inbox for the tab bar, and the account for the More sheet", () => {

@@ -44,6 +44,9 @@ type skillFakeClient struct {
 	// and ExportSkills.
 	listGetErr bool
 
+	// details answers GET /api/v1/skills/{id}, keyed by id (#5334).
+	details map[string]any
+
 	calls []string
 }
 
@@ -79,6 +82,11 @@ func (f *skillFakeClient) Get(_ context.Context, path string) (*internalapi.Resp
 			out = append(out, s)
 		}
 		return skillJSONResp(200, out), nil
+	}
+	if id, ok := strings.CutPrefix(path, "/api/v1/skills/"); ok {
+		if row, found := f.details[id]; found {
+			return skillJSONResp(200, row), nil
+		}
 	}
 	return skillJSONResp(404, map[string]any{"error": "not found"}), nil
 }
@@ -473,7 +481,9 @@ func TestSkill_Plan_UpdateWhenDrifted(t *testing.T) {
 // a body source, regardless of whether the metadata matches. Repeated
 // applies of an unchanged manifest now POST every time; loud over
 // silently-wrong. See the comment block in Plan() at the hasBodySource
-// branch.
+// branch. Since #5334 a server that returns the stored row can confirm an
+// unchanged body (TestSkill_Plan_UnchangedBodyIsNoop); this fake cannot, so
+// the plan must still update.
 func TestSkill_Plan_BodyDeclared_AlwaysUpdate(t *testing.T) {
 	doc := makeSkillDoc()
 	if err := doc.Validate(internalapi.WorkspaceContext{}); err != nil {

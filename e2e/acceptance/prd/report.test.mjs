@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
-import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatNotes, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
+import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatNotes, formatTable, parseArgs, readRows, readRunRows, resultOf, summarize, writeSummary } from "./report.mjs"
 import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
 // The Craft rows' lost-line checker, the hour rows' cycle confirmation and the API session renewal have their
 // own tests; loading them here runs them in the CI step of this file ("PRD acceptance runner tests").
@@ -89,6 +89,22 @@ test("readRows + writeSummary round-trip", () => {
     assert.equal(s.ok, true)
     assert.match(fs.readFileSync(path.join(dir, "summary.md"), "utf8"), /App SHA: abc · 1 passed, 0 failed, 0 skipped/)
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "summary.json"), "utf8")).rows.length, 1)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("readRunRows reads a summary file, a run directory and a rows/ directory", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "prd-run-rows-"))
+  try {
+    fs.mkdirSync(path.join(dir, "rows"))
+    fs.writeFileSync(path.join(dir, "rows", "a.json"), JSON.stringify(row()))
+    assert.equal(readRunRows(dir).length, 1)
+    assert.equal(readRunRows(path.join(dir, "rows")).length, 1)
+    writeSummary(dir, [row(), row({ test: "second" })], { mode: "full" })
+    assert.equal(readRunRows(dir).length, 2)
+    assert.equal(readRunRows(path.join(dir, "summary.json")).length, 2)
+    assert.throws(() => readRunRows(path.join(dir, "missing.json")), /ENOENT/)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
