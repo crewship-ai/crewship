@@ -1676,7 +1676,7 @@ func (p *Provider) buildMounts(id, slug, workspacePath, outputPath, crewPath str
 		},
 	)
 	if p.cfg.agentCLIArtifact != nil {
-		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: p.cfg.agentCLIArtifact.Path, Target: "/usr/local/bin/crewship", ReadOnly: true})
+		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: p.cfg.agentCLIArtifact.Path, Target: agentCLIExecutable, ReadOnly: true})
 	}
 	if err := p.validateAgentCLIBindSources(mounts); err != nil {
 		return nil, err

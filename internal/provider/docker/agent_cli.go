@@ -111,6 +111,10 @@ func validateAgentCLIProbe(probe buildinfo.AgentRuntimeProbe, artifact *runtimes
 	return nil
 }
 
+// agentCLIExecutable is where createMounts binds the staged native agent CLI;
+// qualifyAgentCLI and the Codex outer attestation check that same target.
+const agentCLIExecutable = "/usr/local/bin/crewship"
+
 // qualifyAgentCLI checks actual Docker mounts and the executing client before
 // the runtime is advertised ready. Metadata labels alone are not this proof.
 func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
@@ -137,7 +141,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || !slices.Contains(c.HostConfig.CapDrop, "ALL") || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
 		return denied
 	}
-	const executable = "/usr/local/bin/crewship"
+	const executable = agentCLIExecutable
 	bound := false
 	var writable []container.MountPoint
 	for _, m := range c.Mounts {
