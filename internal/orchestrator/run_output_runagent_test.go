@@ -28,16 +28,21 @@ func init() {
 	}
 	input, err := runoutput.ReadHostInput(os.Stdin)
 	var fixture struct {
-		TestFixture    bool   `json:"test_fixture"`
-		Delay          bool   `json:"delay"`
-		CompletionPath string `json:"completion_path"`
-		StopPath       string `json:"stop_path"`
+		TestFixture         bool   `json:"test_fixture"`
+		Delay               bool   `json:"delay"`
+		CompletionPath      string `json:"completion_path"`
+		StopPath            string `json:"stop_path"`
+		ProviderStopReceipt bool   `json:"provider_stop_receipt"`
 	}
 	parseErr := json.Unmarshal(input.Authority, &fixture)
 	if err != nil || parseErr != nil || !fixture.TestFixture {
 		os.Exit(125)
 	}
-	_, err = runoutput.CaptureHost(context.Background(), input, runAgentHostExecutor{delay: fixture.Delay, stopPath: fixture.StopPath})
+	stopDirectory := ""
+	if fixture.ProviderStopReceipt {
+		stopDirectory = input.Directory
+	}
+	_, err = runoutput.CaptureHost(context.Background(), input, runAgentHostExecutor{delay: fixture.Delay, stopPath: fixture.StopPath, stopDirectory: stopDirectory})
 	if err != nil {
 		os.Exit(125)
 	}
@@ -51,8 +56,9 @@ func init() {
 }
 
 type runAgentHostExecutor struct {
-	delay    bool
-	stopPath string
+	delay         bool
+	stopPath      string
+	stopDirectory string
 }
 
 func runAgentHostOutputRoot(t *testing.T) string {
@@ -113,17 +119,29 @@ func (e runAgentHostExecutor) Stop(_ context.Context, id string) error {
 		return errors.New("wrong execution identity")
 	}
 	if e.stopPath != "" {
-		return os.WriteFile(e.stopPath, []byte("stop"), 0600)
+		if e.stopDirectory != "" {
+			if err := runoutput.RequestHostStop(e.stopDirectory); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(e.stopPath, []byte("stop"), 0600); err != nil {
+			return err
+		}
+		if e.stopDirectory != "" {
+			return runoutput.RecordHostStopConfirmed(e.stopDirectory, id)
+		}
+		return nil
 	}
 	return errors.New("fixture should complete naturally")
 }
 
 type runAgentHostProvider struct {
 	*covContainer
-	prepared       []provider.ExecConfig
-	delay          bool
-	completionPath string
-	stopPath       string
+	prepared            []provider.ExecConfig
+	delay               bool
+	completionPath      string
+	stopPath            string
+	providerStopReceipt bool
 }
 
 func (*runAgentHostProvider) SupportsHostCapture() bool { return true }
@@ -134,6 +152,7 @@ func (*runAgentHostProvider) QualifyHostCapture(context.Context, string) (bool, 
 func (p *runAgentHostProvider) PrepareHostCapture(_ context.Context, cfg provider.ExecConfig, _ string, _ []string) (string, json.RawMessage, error) {
 	p.prepared = append(p.prepared, cfg)
 	fixture := map[string]any{"test_fixture": true, "delay": p.delay}
+	fixture["provider_stop_receipt"] = p.providerStopReceipt
 	if p.stopPath != "" {
 		fixture["stop_path"] = p.stopPath
 	}
@@ -143,9 +162,13 @@ func (p *runAgentHostProvider) PrepareHostCapture(_ context.Context, cfg provide
 	authority, _ := json.Marshal(fixture)
 	return "unix:///synthetic-test-only", authority, nil
 }
-func (p *runAgentHostProvider) RestoreHostCapture(runoutput.HostInput, string) (runoutput.HostExecutor, io.Closer, error) {
+func (p *runAgentHostProvider) RestoreHostCapture(input runoutput.HostInput, _ string) (runoutput.HostExecutor, io.Closer, error) {
 	if p.stopPath != "" {
-		return runAgentHostExecutor{stopPath: p.stopPath}, io.NopCloser(strings.NewReader("")), nil
+		stopDirectory := ""
+		if p.providerStopReceipt {
+			stopDirectory = input.Directory
+		}
+		return runAgentHostExecutor{stopPath: p.stopPath, stopDirectory: stopDirectory}, io.NopCloser(strings.NewReader("")), nil
 	}
 	return nil, nil, errors.New("completed fixture must not restore")
 }
@@ -329,6 +352,15 @@ func awaitRunAgentHostFixtureCompletion(t *testing.T, completionPath string, dea
 }
 
 func TestHostRunAgentExplicitStopRequiresRetainedTerminal(t *testing.T) {
+	testHostRunAgentExplicitStop(t, false)
+}
+
+func TestHostRunAgentExplicitStopConfirmsProviderCancelledReceipt(t *testing.T) {
+	testHostRunAgentExplicitStop(t, true)
+}
+
+func testHostRunAgentExplicitStop(t *testing.T, providerStopReceipt bool) {
+	t.Helper()
 	requireProtectedHostTestUID(t)
 	state, err := bbolt.New(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -341,7 +373,7 @@ func TestHostRunAgentExplicitStopRequiresRetainedTerminal(t *testing.T) {
 		_ = os.WriteFile(stopPath, []byte("cleanup"), 0600)
 		awaitRunAgentHostFixtureCompletion(t, completion, time.Now().Add(3*time.Second))
 	}()
-	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{}), stopPath: stopPath, completionPath: completion}
+	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{}), stopPath: stopPath, completionPath: completion, providerStopReceipt: providerStopReceipt}
 	o := New(p, state, covQuietLogger())
 	o.ipcToken = "fixture-key"
 	o.SetHostOutputRoot(runAgentHostOutputRoot(t))
@@ -381,7 +413,11 @@ func TestHostRunAgentExplicitStopRequiresRetainedTerminal(t *testing.T) {
 		t.Fatalf("stop state=%s", run.Status)
 	}
 	snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
-	if err != nil || !snapshot.Complete || snapshot.Result.ExitCode != 143 || snapshot.Result.Reason != "exited" {
+	wantReason := "exited"
+	if providerStopReceipt {
+		wantReason = "execution_cancelled"
+	}
+	if err != nil || !snapshot.Complete || snapshot.Result.ExitCode != 143 || snapshot.Result.Reason != wantReason {
 		t.Fatalf("authoritative terminal missing: %+v %v", snapshot, err)
 	}
 }
