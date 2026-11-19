@@ -68,6 +68,15 @@ describe("AgentMemoryTab", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Memory could not be loaded.")
   })
 
+  for (const body of [[], {}, { documents: null }]) {
+    it(`keeps the viewer's preferences when the memory reply is ${JSON.stringify(body)}`, async () => {
+      apiFetch.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => String(url).includes("/memory?") ? body : { id: "agent-1", memory_enabled: true } }))
+      render(<AgentMemoryTab agentId="agent-1" workspaceId="ws-1" />)
+      expect(await screen.findByText("Jamie has not saved anything yet.")).toBeInTheDocument()
+      expect(screen.getByRole("region", { name: "Your preferences for this agent" })).toBeInTheDocument()
+    })
+  }
+
   it("says memory is off instead of 'nothing saved' when the agent does not remember between runs", async () => {
     documents = []
     memoryEnabled = false

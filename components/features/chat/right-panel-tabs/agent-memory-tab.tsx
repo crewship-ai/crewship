@@ -55,10 +55,13 @@ export function AgentMemoryTab({ agentId, workspaceId }: { agentId: string; work
   const settings = useWorkspaceResource<{ memory_enabled?: boolean }>(ws ? `/api/v1/agents/${encodeURIComponent(agentId)}?workspace_id=${ws}` : "")
   const memoryOff = settings.data?.memory_enabled === false
   // Keep the last good read on screen while a refresh is in flight.
-  const [shown, setShown] = useState<{ url: string; docs: MemoryDocument[] } | null>(null)
+  // Compared by the response object's identity, never by a derived value: a
+  // reply without a documents array must not make every render set state.
+  const [shown, setShown] = useState<{ url: string; data: Inventory } | null>(null)
   const url = workspaceId ? `${agentId}:${workspaceId}` : ""
-  if (inventory.data && (shown?.url !== url || shown.docs !== inventory.data.documents)) setShown({ url, docs: inventory.data.documents ?? [] })
-  const docs = shown?.url === url ? shown.docs : null
+  if (inventory.data && (shown?.url !== url || shown.data !== inventory.data)) setShown({ url, data: inventory.data })
+  const shownDocs = shown?.url === url ? shown.data?.documents : undefined
+  const docs = shown?.url !== url ? null : Array.isArray(shownDocs) ? shownDocs : []
   const agentDocs = docs ? ordered(docs.filter((doc) => doc.scope === "agent")) : []
   const crewDocs = docs ? ordered(docs.filter((doc) => doc.scope === "crew" && !doc.name.startsWith("daily/"))) : []
 
