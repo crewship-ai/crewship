@@ -83,7 +83,10 @@ func CreationToolPath(sources ...string) string {
 	for i, source := range sources {
 		migrated[i] = migrateGeneratedToolOrder(source)
 	}
-	return NativeToolPath(migrated...)
+	// Completing a PATH that lacks only the home bin prepends it ahead of the
+	// pins and forms the generated run again; migrate once more so image ENV
+	// and runtime creation agree (CreationToolPath is idempotent).
+	return NativeToolPath(migrateGeneratedToolOrder(NativeToolPath(migrated...)))
 }
 
 // sanitizeToolPath drops control bytes and U+FFFD. Older captured login paths

@@ -86,7 +86,7 @@ func TestDeclaredMisePinPrecedesPersistentHomeBinary(t *testing.T) {
 	}
 }
 
-// Only the exact sequence Crewship generated is migrated; an operator who
+// Only Crewship's generated contiguous run is migrated; an operator who
 // deliberately orders the home bin first, or interleaves other entries, keeps
 // that order.
 func TestCreationToolPathKeepsOperatorOrder(t *testing.T) {
@@ -128,5 +128,27 @@ func TestAgentToolProfileRestoresDeclaredPinFirst(t *testing.T) {
 	got := ":" + string(out) + ":"
 	if strings.Index(got, ":"+MiseShimsDir+":") > strings.Index(got, ":"+agentLocalBinDir+":") {
 		t.Fatalf("login hook puts persistent home before declared pins: %s", out)
+	}
+}
+
+// Image ENV is built with one CreationToolPath pass and runtime creation adds
+// another; both must yield the same PATH.
+func TestCreationToolPathIsIdempotent(t *testing.T) {
+	for _, in := range []string{
+		"",
+		legacyDefaultContainerPath,
+		"/home/agent/.local/bin:" + legacyDefaultContainerPath,
+		"${containerEnv:PATH}:" + legacyDefaultContainerPath,
+		"/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/usr/bin",
+		"/home/agent/.local/bin:/usr/bin:/opt/mise/data/shims",
+		"/usr/local/bin:/usr/bin:/bin",
+	} {
+		once := CreationToolPath(in)
+		if twice := CreationToolPath(once); twice != once {
+			t.Fatalf("not idempotent for %q:\n once  %s\n twice %s", in, once, twice)
+		}
+		if strings.Contains(":"+once+":", ":"+MiseShimsDir+":") && strings.Index(":"+once+":", ":"+agentLocalBinDir+":") < strings.Index(":"+once+":", ":"+MiseShimsDir+":") && !strings.HasPrefix(in, agentLocalBinDir+":/usr/bin") {
+			t.Fatalf("home bin ahead of declared pins for %q: %s", in, once)
+		}
 	}
 }

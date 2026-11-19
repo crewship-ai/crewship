@@ -27,8 +27,9 @@ import (
 // dedicated fixture whose oversized metadata must leave PATH inherited.
 // CREWSHIP_NATIVE_TOOLS_GLAB_PATH asserts the glab path selected by the
 // terminal, a child sh and non-login zsh (declared pin precedence, #5459).
-// CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
-// (terminal, child, login and zsh) against the declared version after an update.
+// CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every non-login selection
+// (terminal, child and zsh) against the declared version after an update;
+// bash login output is recorded under LOGIN_OUT only.
 func TestNativeToolsLiveTerminal(t *testing.T) {
 	profile, crewID := os.Getenv("CREWSHIP_NATIVE_TOOLS_PROFILE"), os.Getenv("CREWSHIP_NATIVE_TOOLS_CREW_ID")
 	if profile == "" || crewID == "" {
@@ -110,16 +111,16 @@ code=$?; printf 'TOOL_STATUS:claude:%s\n' "$code"; test "$code" -eq 0 || fail=1
 printf 'MODE_PATH:terminal:glab:%s\n' "$(command -v glab)"
 printf 'MODE_PATH:child:glab:%s\n' "$(sh -c 'command -v glab')"
 printf 'MODE_PATH:bash-login:glab:%s\n' "$(bash -lc 'command -v glab' 2>/dev/null)"
-if command -v zsh >/dev/null; then printf 'MODE_PATH:zsh:glab:%s\n' "$(zsh -c 'command -v glab' 2>/dev/null)"; printf 'MODE_PATH:zsh-login:glab:%s\n' "$(zsh -l -c 'command -v glab' 2>/dev/null)"; fi
+if command -v zsh >/dev/null; then printf 'MODE_PATH:zsh:glab:%s\n' "$(zsh -c 'command -v glab' 2>/dev/null)"; printf 'MODE_PATH:zsh-login:glab:%s\n' "$(zsh -l -c 'command -v glab' 2>/dev/null)"; else printf 'MODE_PATH:zsh:absent\n'; fi
 sh -c 'glab --version && codex --version && claude --version'
 code=$?; printf 'CHILD_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
-bash -lc 'glab --version && codex --version && claude --version'
-code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
+login_out=$(bash -lc 'glab --version && codex --version && claude --version' 2>&1)
+code=$?; printf '%s\n' "$login_out" | sed 's/^/LOGIN_OUT:/'; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
 fp() { "$@" 'env | grep -vE "^(_|SHLVL|PWD|OLDPWD|PATH|LINES|COLUMNS|BASH_EXECUTION_STRING)=" | sort; declare -F | sort; printf "COMPLETIONS=%s\n" "$(complete -p 2>/dev/null | wc -l)"; alias' </dev/null 2>/dev/null; }
 fp_dir=$(mktemp -d); fp bash -l -i -c > "$fp_dir/login"; fp bash -i -c > "$fp_dir/nonlogin"
 cmp -s "$fp_dir/login" "$fp_dir/nonlogin"; code=$?; printf 'FEATURE_INIT_PARITY:%s:login_lines=%s:nonlogin_lines=%s\n' "$code" "$(wc -l < "$fp_dir/login")" "$(wc -l < "$fp_dir/nonlogin")"
-if [ "$code" -ne 0 ]; then diff "$fp_dir/login" "$fp_dir/nonlogin" | head -20 | sed 's/^/FEATURE_INIT_DIFF:/'; fail=1; fi; rm -rf "$fp_dir"
+if [ "$code" -ne 0 ]; then diff "$fp_dir/login" "$fp_dir/nonlogin" | head -20 | sed -E 's/^([<>] [^=]*)=.*/\1=/; s/^/FEATURE_INIT_DIFF:/'; fail=1; fi; rm -rf "$fp_dir"
 printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
 	if os.Getenv("CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES") == "1" {
@@ -186,7 +187,7 @@ done
 			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_PATH"); expected != "" {
 				for _, mode := range []string{"terminal", "child", "zsh"} {
 					match := regexp.MustCompile(`(?m)^MODE_PATH:` + mode + `:glab:([^\r\n]*)\r?$`).FindStringSubmatch(output.String())
-					if mode == "zsh" && match == nil {
+					if mode == "zsh" && regexp.MustCompile(`(?m)^MODE_PATH:zsh:absent\r?$`).MatchString(output.String()) {
 						continue
 					}
 					if len(match) != 2 || match[1] != expected {
@@ -195,7 +196,10 @@ done
 				}
 			}
 			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_VERSION"); expected != "" {
-				versions := regexp.MustCompile(`glab ([^[:space:]]+) \(`).FindAllStringSubmatch(output.String(), -1)
+				// Login shells run ~/.profile and may select a home binary;
+				// their LOGIN_OUT lines are recorded, not asserted.
+				nonLogin := regexp.MustCompile(`(?m)^LOGIN_OUT:.*$`).ReplaceAllString(output.String(), "")
+				versions := regexp.MustCompile(`glab ([^[:space:]]+) \(`).FindAllStringSubmatch(nonLogin, -1)
 				if len(versions) == 0 {
 					t.Fatal("no actual glab version evidence")
 				}
