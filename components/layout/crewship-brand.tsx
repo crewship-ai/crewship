@@ -109,7 +109,7 @@ export function CrewshipMenu() {
         widthClass="w-[320px] max-md:fixed max-md:inset-x-2 max-md:top-12 max-md:w-auto"
       >
         <div className="flex items-center gap-3 px-3 pb-2.5 pt-3">
-          <CrewshipLogoTile size="h-9 w-9" rounded="rounded-[10px]" iconSize="h-[18px] w-[18px]" />
+          <CrewshipLogoTile size="h-9 w-9" rounded="rounded-xl" iconSize="h-[18px] w-[18px]" />
           <div className="min-w-0">
             <p className="type-row font-semibold text-foreground">Crewship</p>
             {info && (
