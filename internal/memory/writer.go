@@ -216,7 +216,7 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	}
 
 	if inSharedTree(filepath.Dir(path)) {
-		if err := f.Chmod(sharedFilePerm(true, 0o644)); err != nil {
+		if err := shareFile(f); err != nil {
 			_ = f.Close()
 			cleanupTmp()
 			return WriteResult{}, fmt.Errorf("chmod tempfile: %w", err)

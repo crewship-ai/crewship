@@ -200,9 +200,14 @@ crewshipd ran as.
 **Fix: give the crewshipd service user gid 1002 as a supplementary group**
 (for a systemd unit, `SupplementaryGroups=1002`) and restart it. That is host
 configuration; Crewship does not change it for you. Once crewshipd can write the
-tree, every writer — agent, sidecar and host — creates its locks `0660`, its
-files group-writable and its directories `2775`, so whoever writes first does
-not lock the others out until the next container start.
+tree, every writer (agent, sidecar and host) creates its locks `0660`. It adds
+group write to files and directories that already have group read, and
+directories keep setgid. Under the usual `0022` umask that gives `0664` files and
+`2775` directories, so whoever writes first does not lock the others out until
+the next container start. The umask still decides read access: under `0077`
+entries stay private. A crewshipd that does not hold gid 1002 leaves the new
+directory's mode as created. Changing the mode would make the kernel clear the
+inherited setgid bit.
 
 </Accordion>
 

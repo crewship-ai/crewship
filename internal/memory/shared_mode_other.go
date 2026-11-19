@@ -5,7 +5,9 @@ package memory
 import "os"
 
 // Non-unix platforms have no setgid directories, so inSharedTree is never
-// true there and these are never reached with work to do.
-func chmodDirNoFollow(string, os.FileMode) error { return nil }
+// true there and these never have work to do.
+func shareNewDir(string) error { return nil }
 
 func shareConfinedChild(_, _ *confinedDir) error { return nil }
+
+func canKeepSetgid(os.FileInfo) bool { return false }

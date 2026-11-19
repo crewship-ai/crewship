@@ -163,9 +163,9 @@ func (f *mutationFile) lock() interface {
 	return NewRootFileLock(f.root, f.name+".lock")
 }
 
-// shareRootedChild sets MemoryDirPerm on part, a directory just created
-// beneath root, when root is in the shared memory tree (#4777). The chmod
-// goes through a root opened on part, so it stays confined to that
+// shareRootedChild applies sharedDirTarget to part, a directory just
+// created beneath root, when root is in the shared memory tree (#4777). The
+// chmod goes through a root opened on part, so it stays confined to that
 // directory.
 func shareRootedChild(root *os.Root, part string) error {
 	parent, err := root.Stat(".")
@@ -177,5 +177,12 @@ func shareRootedChild(root *os.Root, part string) error {
 		return err
 	}
 	defer func() { _ = child.Close() }()
-	return child.Chmod(".", MemoryDirPerm)
+	fi, err := child.Stat(".")
+	if err != nil {
+		return err
+	}
+	if mode, ok := sharedDirTarget(fi); ok {
+		return child.Chmod(".", mode)
+	}
+	return nil
 }

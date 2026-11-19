@@ -31,6 +31,7 @@ func TestSharedTreeWritersAreGroupWritable(t *testing.T) {
 	}
 	cases := []struct {
 		name  string
+		umask int // 0 means the service default, 0o022
 		write func(t *testing.T, mem string)
 		want  []want
 	}{
@@ -160,6 +161,81 @@ func TestSharedTreeWritersAreGroupWritable(t *testing.T) {
 			want: []want{{"peers", os.ModeSetgid | 0o775}},
 		},
 		{
+			// A hardened umask keeps its say over read access: group write
+			// is only added where group read already is (review F1).
+			name:  "umask 077 durable write stays 0600",
+			umask: 0o077,
+			write: func(t *testing.T, mem string) {
+				if err := WriteFileDurable(filepath.Join(mem, "a"), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"a", 0o600}},
+		},
+		{
+			name:  "umask 077 rooted durable write stays 0600",
+			umask: 0o077,
+			write: func(t *testing.T, mem string) {
+				root, err := os.OpenRoot(mem)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer root.Close()
+				if err := WriteFileDurableRoot(root, "r", []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"r", 0o600}},
+		},
+		{
+			name:  "umask 077 WriteFile keeps dirs and file private",
+			umask: 0o077,
+			write: func(t *testing.T, mem string) {
+				if _, err := WriteFile(context.Background(), filepath.Join(mem, "d", "f.md"), []byte("x"), WriteConfig{}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"d", os.ModeSetgid | 0o700}, {"d/f.md", 0o600}},
+		},
+		{
+			name:  "umask 077 MkdirAllShared keeps 2700",
+			umask: 0o077,
+			write: func(t *testing.T, mem string) {
+				if err := MkdirAllShared(filepath.Join(mem, "p")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"p", os.ModeSetgid | 0o700}},
+		},
+		{
+			name:  "umask 027 durable write gains group write, not other read",
+			umask: 0o027,
+			write: func(t *testing.T, mem string) {
+				if err := WriteFileDurable(filepath.Join(mem, "g"), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"g", 0o660}},
+		},
+		{
+			// An existing level (for example one another uid just created)
+			// is left alone; only levels this call creates are changed
+			// (review F2).
+			name: "MkdirAllShared leaves an existing level alone",
+			write: func(t *testing.T, mem string) {
+				if err := os.Mkdir(filepath.Join(mem, "x"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(filepath.Join(mem, "x"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := MkdirAllShared(filepath.Join(mem, "x", "y")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: []want{{"x", 0o755}},
+		},
+		{
 			name: "MkdirAllShared creates 02775 at every level",
 			write: func(t *testing.T, mem string) {
 				if err := MkdirAllShared(filepath.Join(mem, "a", "b")); err != nil {
@@ -173,6 +249,10 @@ func TestSharedTreeWritersAreGroupWritable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mem := newSharedTree(t)
+			if tc.umask != 0 {
+				prev := syscallUmask(tc.umask)
+				defer syscallUmask(prev)
+			}
 			tc.write(t, mem)
 			for _, w := range tc.want {
 				fi, err := os.Lstat(filepath.Join(mem, w.rel))
@@ -231,7 +311,7 @@ func newSharedTree(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if fi.Mode()&os.ModeSetgid == 0 {
-		t.Skip("filesystem does not keep the setgid bit on directories")
+		t.Fatalf("setgid did not stick on %s (mode %v); the shared-tree tests need it", mem, fi.Mode())
 	}
 	return mem
 }

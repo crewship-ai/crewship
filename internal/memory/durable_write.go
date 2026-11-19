@@ -74,12 +74,9 @@ func writeFileDurableRoot(root *os.Root, name string, content []byte, perm os.Fi
 		return fmt.Errorf("rand for tempname: %w", rerr)
 	}
 	tmpName := name + ".tmp." + hex.EncodeToString(randBuf[:])
+	shared := false
 	if parent, statErr := root.Stat(filepath.Dir(name)); statErr == nil {
-		if isSharedDir(parent) && perm&0o040 != 0 {
-			// The umask would strip the group write the shared tree needs
-			// (#4777), so set the mode explicitly before publishing.
-			perm, exactMode = sharedFilePerm(true, perm), true
-		}
+		shared = !exactMode && isSharedDir(parent)
 	}
 	createMode := perm
 	if exactMode {
@@ -97,6 +94,15 @@ func writeFileDurableRoot(root *os.Root, name string, content []byte, perm os.Fi
 	}
 	if exactMode {
 		if err = f.Chmod(perm); err != nil {
+			_ = f.Close()
+			cleanup()
+			return fmt.Errorf("chmod tempfile: %w", err)
+		}
+	}
+	if shared {
+		// The umask strips the group write the next writer (another uid)
+		// needs to replace this file (#4777); add it through the fd.
+		if err = shareFile(f); err != nil {
 			_ = f.Close()
 			cleanup()
 			return fmt.Errorf("chmod tempfile: %w", err)
@@ -141,7 +147,7 @@ func writeFileDurable(path string, content []byte, perm os.FileMode) (err error)
 		return fmt.Errorf("rand for tempname: %w", rerr)
 	}
 	tmpPath := path + ".tmp." + hex.EncodeToString(randBuf[:])
-	shared := inSharedTree(filepath.Dir(path)) && perm&0o040 != 0
+	shared := inSharedTree(filepath.Dir(path))
 
 	// O_EXCL so we never adopt a crashed writer's leftover tempfile.
 	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
@@ -158,8 +164,8 @@ func writeFileDurable(path string, content []byte, perm os.FileMode) (err error)
 	if shared {
 		// In the shared memory tree the rename publishes a file the next
 		// writer (another uid) must be able to replace and edit; the umask
-		// strips group write from perm, so set it through the fd (#4777).
-		if err = f.Chmod(sharedFilePerm(true, perm)); err != nil {
+		// strips group write, so add it through the fd (#4777).
+		if err = shareFile(f); err != nil {
 			_ = f.Close()
 			cleanup()
 			return fmt.Errorf("chmod tempfile: %w", err)

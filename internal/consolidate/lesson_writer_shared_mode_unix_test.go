@@ -27,7 +27,7 @@ func TestWriteCrewLesson_SharedTreeModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(shared); err != nil || fi.Mode()&os.ModeSetgid == 0 {
-		t.Skip("filesystem does not keep the setgid bit on directories")
+		t.Fatalf("setgid did not stick on %s: %v", shared, err)
 	}
 	mem := filepath.Join(shared, ".memory")
 	entry := LessonEntry{
