@@ -61,8 +61,14 @@ describe("the top bar's right edge (PAR-001)", () => {
     const header = bar()
     const names = within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))
     expect(names.slice(-3)).toEqual(["Activity", "Inbox", "Crewship"])
-    // It stands apart from the bells (owner, 19 Nov).
-    expect(within(header).getByRole("button", { name: "Crewship" }).closest('[data-slot="crewship-sail-slot"]')).toHaveClass("ml-1.5", "md:ml-3")
+    // A rule sets it apart from the bells, on every width (owner, 19 Nov).
+    const rule = header.querySelector('[data-slot="crewship-sail-rule"]') as HTMLElement
+    expect(rule).not.toBeNull()
+    expect(rule.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    const sail = within(header).getByRole("button", { name: "Crewship" })
+    expect(rule.compareDocumentPosition(sail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const inbox = within(header).getByRole("button", { name: "Inbox" })
+    expect(inbox.compareDocumentPosition(rule) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 

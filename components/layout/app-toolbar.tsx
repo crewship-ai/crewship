@@ -282,11 +282,11 @@ export function AppToolbar() {
               <InboxBell />
             </div>
           )}
-          {/* The sail is the product's mark, not a third bell: it stands a
-              little apart from Activity and Inbox (owner, 19 Nov). */}
-          <div className="ml-1.5 flex md:ml-3" data-slot="crewship-sail-slot">
-            <CrewshipMenu />
-          </div>
+          {/* The sail is the product's mark, not a third bell: the same rule
+              that ends the page's actions sets it apart from Activity and
+              Inbox, on phones too (owner, 19 Nov). */}
+          <span className="mx-1.5 h-5 w-px bg-foreground/[0.1]" aria-hidden data-slot="crewship-sail-rule" />
+          <CrewshipMenu />
         </div>
       </div>
 
