@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 func runCraftAgentCLI(t *testing.T, args ...string) (string, error) {
@@ -32,6 +34,8 @@ func TestCraftAgentCLIStartRequiresExplicitWholeDocumentConsent(t *testing.T) {
 		{"task", "start", "health", "--chat-id", "chat\x00bad", "--message-id", "message", "--whole-document"},
 		{"task", "start", "health", "--chat-id", strings.Repeat("界", 201), "--message-id", "message", "--whole-document"},
 		{"task", "start", "..", "--chat-id", "chat", "--message-id", "message", "--whole-document"},
+		{"task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", "direct"},
+		{"task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", ""},
 		{"task", "status", "health", ""}, {"task", "status", "health", "bad\x00work"}, {"task", "stop", ""},
 	} {
 		if _, err := runCraftAgentCLI(t, args...); err == nil {
@@ -61,6 +65,24 @@ func TestCraftAgentCLIStartUsesOnlyHumanAuthAndExactConsentBody(t *testing.T) {
 	}
 	if len(stub.CallsFor("POST", path)) != 1 || len(stub.Calls()) != 1 {
 		t.Fatal("start retried, admitted human editor or used wrong API")
+	}
+}
+
+// Q16 (#5579): --mode is sent only when given, exactly as chosen.
+func TestCraftAgentCLIStartSendsExplicitMode(t *testing.T) {
+	for _, mode := range []string{"propose", "apply"} {
+		stub := pageStub(t)
+		path := "/api/v1/pages/health/craft/tasks"
+		stub.OnPost(path, func(_ *http.Request, body []byte) (int, []byte, string) {
+			var v map[string]any
+			if json.Unmarshal(body, &v) != nil || len(v) != 4 || v["mode"] != mode || v["whole_document"] != true {
+				t.Errorf("wrong mode body: %s", body)
+			}
+			return 202, []byte(`{"work_id":"accepted-work","status":"queued"}`), "application/json"
+		})
+		if out, err := runCraftAgentCLI(t, "task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", mode); err != nil || !strings.Contains(out, "accepted-work") {
+			t.Fatalf("start --mode %s: %v %s", mode, err, out)
+		}
 	}
 }
 func TestCraftAgentCLIStatusAndStopUseScopedEscapedPathsWithoutSession(t *testing.T) {
@@ -158,5 +180,38 @@ func TestCraftAgentCLIStatusPrintsProposalOutcome(t *testing.T) {
 	out, err := runCraftAgentCLI(t, "task", "status", "health", "work")
 	if err != nil || !strings.Contains(out, "succeeded") || !strings.Contains(out, `"outcome"`) || !strings.Contains(out, "proposal") || !strings.Contains(out, "ncp_05ce1f638d32a97955d06534") {
 		t.Fatal("status did not print the proposal outcome", out, err)
+	}
+}
+
+// #5596: a refused start names the server's reason, only from the known set,
+// and still reflects no other body text.
+func TestCraftAgentCLIStartNamesRefusalReason(t *testing.T) {
+	path := "/api/v1/pages/health/craft/tasks"
+	for _, tc := range []struct {
+		body, want string
+	}{
+		{`{"error":"native Craft agent task denied","reason":"chat_not_private"}`, "native HTTP 403 (chat_not_private: "},
+		{`{"error":"native Craft agent task denied","reason":"workspace_policy_disabled"}`, "native HTTP 403 (workspace_policy_disabled: "},
+		{`{"error":"native Craft access denied"}`, "native HTTP 403"},
+		{`{"error":"private-runtime-token","reason":"private-runtime-token"}`, "native HTTP 403"},
+		{`not json private-runtime-token`, "native HTTP 403"},
+	} {
+		stub := pageStub(t)
+		stub.OnPost(path, func(*http.Request, []byte) (int, []byte, string) {
+			return 403, []byte(tc.body), "application/json"
+		})
+		out, err := runCraftAgentCLI(t, "task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("body %s: want %q, got %v", tc.body, tc.want, err)
+		}
+		if strings.Contains(out+err.Error(), "private-runtime-token") {
+			t.Fatalf("refusal body text was reflected: %v", err)
+		}
+		if code := cli.ExitCodeFor(err); code != cli.ExitAuth {
+			t.Fatalf("refusal exit code %d", code)
+		}
+		if len(stub.CallsFor("POST", path)) != 1 {
+			t.Fatal("refused start was retried")
+		}
 	}
 }

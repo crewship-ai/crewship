@@ -159,7 +159,61 @@ func craftAgentResponse(cmd *cobra.Command, r *http.Response, err error) error {
 	return craftResponse(cmd, r, err, "")
 }
 
-type craftStatusError struct{ status int }
+// craftAgentStartResponse is craftAgentResponse for `task start`. A refusal
+// still reflects no body text; it names only the server's machine-readable
+// reason (#5596), and only one of the known values, so a body can never put
+// its own words into the CLI's output.
+func craftAgentStartResponse(cmd *cobra.Command, r *http.Response, err error) error {
+	if err == nil && r.StatusCode == http.StatusForbidden {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		_ = r.Body.Close()
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(raw, &body) != nil || craftAgentRefusalHints[body.Reason] == "" {
+			body.Reason = ""
+		}
+		return &craftStatusError{status: r.StatusCode, reason: body.Reason}
+	}
+	return craftAgentResponse(cmd, r, err)
+}
 
-func (e *craftStatusError) Error() string { return fmt.Sprintf("native HTTP %d", e.status) }
+// craftAgentRefusalHints are the task start refusal reasons the server names
+// to a requester who can edit the Page (docs/cli/craft.mdx), with what to fix.
+var craftAgentRefusalHints = map[string]string{
+	"workspace_policy_disabled": "the workspace agent artifact policy is off; an administrator must enable it",
+	"crew_not_allowed":          "the agent's crew is not on the workspace agent artifact policy",
+	"chat_unavailable":          "the chat does not exist or you cannot use it",
+	"chat_not_private":          "the instruction must be in a private chat you created; use craft task instruction",
+	"instruction_not_recorded":  "the message is not a recorded native Craft instruction of yours; use craft task instruction",
+	"instruction_unusable":      "the recorded instruction is empty or too large",
+	"agent_unavailable":         "the chat's agent or its crew no longer exists or has expired",
+	"not_owner_or_delegated":    "you do not own the document and its owner has not given this agent write",
+	"duplicate_task":            "this message already started a task; record a new instruction",
+	"capacity":                  "the server is running its maximum number of agent tasks; try again later",
+	"credential_expiring":       "your sign-in expires too soon; sign in again",
+	"clock_unavailable":         "the server clock is unavailable; try again later",
+	"task_too_large":            "the task input is too large; shorten the instruction",
+}
+
+type craftStatusError struct {
+	status int
+	reason string
+}
+
+func (e *craftStatusError) Error() string {
+	if e.reason != "" {
+		return fmt.Sprintf("native HTTP %d (%s: %s)", e.status, e.reason, craftAgentRefusalHints[e.reason])
+	}
+	return fmt.Sprintf("native HTTP %d", e.status)
+}
 func (e *craftStatusError) ExitCode() int { return (&cli.APIError{Status: e.status}).ExitCode() }
+
+// Unwrap gives a reasoned refusal's status and reason to the --format json
+// error envelope. A refusal without a reason keeps its bare envelope.
+func (e *craftStatusError) Unwrap() error {
+	if e.reason == "" {
+		return nil
+	}
+	return &cli.APIError{Status: e.status, Extensions: map[string]any{"reason": e.reason}}
+}

@@ -595,7 +595,8 @@ admission before accepting work.
 
 An authenticated human with current Page write access may send
 `POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
-`{chat_id, message_id, whole_document: true}`. The message must be that human's
+`{chat_id, message_id, whole_document: true}` and an optional
+`mode: "propose" | "apply"`. The message must be that human's
 persisted original user message in the actual registered agent's chat, saved
 as a native Craft instruction in a private chat that human created: such a
 message started no turn. An ordinary turn or a group chat message is refused,
@@ -607,6 +608,38 @@ work attempt are required before the actual run credential can access the
 native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
+
+Every refusal of a start is `403` and, inside the host, the same mandate
+denial. The reason is decided only after Page authority passed (#5596). Until
+the requester is shown to be able to see and edit the Page, the refusal is the
+generic `{error}` body and depends on no policy, chat or registry state. That
+includes the registry limit, which is checked after Page authority. After that
+point the body is `{error: "native Craft agent task denied", reason}`. The
+reason is one of `workspace_policy_disabled`, `crew_not_allowed`,
+`chat_unavailable`, `chat_not_private`, `instruction_not_recorded`,
+`instruction_unusable`, `agent_unavailable`, `not_owner_or_delegated`,
+`duplicate_task`, `capacity`, `credential_expiring`, `clock_unavailable` or
+`task_too_large`. Telling these apart reads only the requester's own chat and
+message, that chat's agent and the workspace policy row. A database error
+keeps the generic body. The reasons are deliberately not opaque to an
+authorized editor: one who holds their own recorded instruction learns whether
+the workspace agent artifact policy is on and whether it allows that agent's
+crew. The owner/delegation check runs after the instruction and policy checks,
+so `not_owner_or_delegated` only ever concerns an agent the requester already
+has their own recorded instruction with, never any agent in a chat they can
+merely see. A Comment or Read grantee, a non-member and a caller
+naming a missing Page all get the same generic answer.
+
+The mode follows Q16 (owner decision 2026-10-19). The author's targeted
+instruction is the mandate. Without `mode`, a document in the author's personal
+space (private, unfiled, not crew-owned, owned by the author) is changed
+directly, and any other document gets a proposal. `mode: "apply"` on a shared
+document is the explicit direct mandate. The work input records the resolved
+mode and whether the human chose it. A proposing task is refused `craft_apply`
+and lease acquisition with `409 {reason: "proposal_required"}`, even when the
+lease is free. The publishing transaction checks the same rule again. Moving
+the document out of the personal space advances its authority epoch, which
+stops the task before any further write.
 
 The normal human CLI uses the same explicit consent, Page authority and
 instruction send:

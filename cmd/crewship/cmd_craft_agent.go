@@ -24,6 +24,7 @@ func newCraftAgentTaskCommand() *cobra.Command {
 	start.Flags().String("chat-id", "", "Chat containing your original instruction")
 	start.Flags().String("message-id", "", "Your original human message in that chat")
 	start.Flags().Bool("whole-document", false, "Explicitly consent to whole-document native edits for this task")
+	start.Flags().String("mode", "", "propose or apply; default: apply in your personal space, propose anywhere shared")
 	_ = start.MarkFlagRequired("chat-id")
 	_ = start.MarkFlagRequired("message-id")
 	task.AddCommand(start)
@@ -151,6 +152,10 @@ func craftAgentStart(cmd *cobra.Command, args []string) error {
 	if !craftAgentIdentifier(args[0]) || !craftAgentIdentifier(chat) || !craftAgentIdentifier(message) {
 		return fmt.Errorf("invalid native agent Page, chat or message identifier")
 	}
+	mode, _ := cmd.Flags().GetString("mode")
+	if cmd.Flags().Changed("mode") && mode != "propose" && mode != "apply" {
+		return fmt.Errorf("--mode must be propose or apply")
+	}
 	c, err := craftAgentClient(cmd)
 	if err != nil {
 		return err
@@ -159,9 +164,10 @@ func craftAgentStart(cmd *cobra.Command, args []string) error {
 		ChatID        string `json:"chat_id" yaml:"chat_id"`
 		MessageID     string `json:"message_id" yaml:"message_id"`
 		WholeDocument bool   `json:"whole_document" yaml:"whole_document"`
-	}{chat, message, consent}
+		Mode          string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	}{chat, message, consent, mode}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/tasks", body)
-	return craftAgentResponse(cmd, response, err)
+	return craftAgentStartResponse(cmd, response, err)
 }
 func craftAgentStatus(cmd *cobra.Command, args []string) error {
 	if !craftAgentIdentifier(args[0]) || !craftAgentIdentifier(args[1]) {
