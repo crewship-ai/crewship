@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`keeper execute` reports known pre-execution refusals (#5548).** HTTP 400, 404 and 409 now print a fixed definite refusal (nothing executed) with exit 2, 3 and 5 instead of "outcome unavailable"; 5xx, other statuses and transport errors keep the ambiguous message. The server body is still never echoed. `agent stop -f json` (#3049) was already fixed on main.
 - **Credential tests cannot send file/login material to API-token probes (#5466).** Probe dispatch now checks the credential type, preserves metered provider-login and dedicated Claude OAuth checks, refuses unknown types, and reports unsupported checks without an authentication-success audit claim. Native CLI create/update apply the same policy.
 - **Tmux runs use their own native credential environment (#5467).** Existing server-only token/path variables are excluded from the target CLI, image PATH/mise settings are preserved, and setup payloads move from process arguments to stdin. Run-private files are created with restricted permissions and removed after the run settles.
 
