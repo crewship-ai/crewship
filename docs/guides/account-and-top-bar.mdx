@@ -64,29 +64,29 @@ When a session ends, the app shows one of these full screens instead of a bare l
 
 ## Settings → Appearance
 
-Styles are grouped by category. **Gaming** holds Afterglow, a dark theme pack; see [Theme packs](/guides/theme-packs).
+The page reads top to bottom: **Your look**, **Colours**, **Text and layout**, **Motion**, **Devices and workspace**. **Your look** shows a live preview, "Style · Accent · Theme", whether that look is the workspace default or your own choice, and one **Reset to default** button (back to the workspace default, or the built-in look when none is set; **Undo** in the toast takes it back). **Change style** opens the 45 styles inline, grouped by look: Neutral, Warm, Violet and Made for dark, which holds Afterglow, a dark theme pack; see [Theme packs](/guides/theme-packs). Corners, Cards (Outlined or Raised) and Lines follow the grid.
 
 `/settings?tab=appearance`
 
 - **Theme** — Dark, Light or System (follows the OS). A new device starts on System; a device that used Crewship before keeps Dark unless you chose otherwise.
   - In light, the left rail sits on a quiet grey ground; content, section panels and cards are white and separated by hairlines.
-- **Accent** — eight presets as large swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in a preview strip. Green, red and amber are never accents — they mean done, failed and needs-attention.
-  - **Team colour** (its own row under the swatches) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
+- **Accent** — eight presets as swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in the **Your look** preview. The hint names the current accent, including one only a style carries. Green, red and amber are never accents — they mean done, failed and needs-attention.
+  - **Team colour** (the ninth swatch) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
 - **Text size** — Small (13 px text, what a new device starts at), Standard (14 px, the earlier default) or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account. A size you, or an earlier version of Crewship, saved keeps its size; a device that used Crewship before without saving one keeps Standard.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
 - **Touch** — on any touch screen (phone, tablet or touch laptop, at any window width) every button, field, tab and menu item is at least 44 px tall, and checkboxes and radios get a 44 px tap area.
 - **Sidebar** — Expanded (default), Expand on hover, or Collapsed; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
-- **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Animated avatars** — on by default. Voxel Bot and Voxel Art agent avatars blink and stretch now and then when drawn at 32 px or larger; turn this off to keep them still. Reduce motion On keeps them still too, and so does an operating system set to reduce motion while Reduce motion is System. It is yours alone: a workspace default never sets it, and **Use workspace default** leaves it as it is. See [Avatar styles](/api-reference/agents#avatar-styles).
+- **Reduce motion** — As my system (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
+- **Animated avatars** — on by default. Voxel Bot and Voxel Art agent avatars blink and stretch now and then when drawn at 32 px or larger; turn this off to keep them still. Reduce motion On keeps them still too, and so does an operating system set to reduce motion while Reduce motion is System. It is yours alone: a workspace default never sets it, and **Reset to default** leaves it as it is. See [Avatar styles](/api-reference/agents#avatar-styles).
 - **Sync across devices** — on by default. Theme, accent, text size, density, sidebar, motion and animated avatars are stored with your account under the `appearance` key of the per-user preference store, the visual style under `appearance.style` (`GET`/`PUT /api/v1/me/preferences/{key}`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser. Changes are written in order and retried when the connection drops; if the server refuses one, **Not synced · Retry** appears next to the switch and your look on this device stays as you set it.
 
 ### Workspace default look
 
-An owner or admin can make a look the **workspace default** (**Settings → Appearance → Workspace default → Use my look as default**; CLI: `crewship workspace update --appearance-default`). It holds a style with its options, an accent and a theme, and **Reset** clears it.
+An owner or admin can make a look the **workspace default** (**Settings → Appearance → Devices and workspace → Workspace default → Use my look**; CLI: `crewship workspace update --appearance-default`). It holds a style with its options, an accent and a theme, and **Clear** removes it. Members see what it is, and nothing when none is set.
 
-- A value is **yours** only when you change it, in Appearance or the top-bar menu. A card says **Set by you** or **Workspace default** for the style, theme and accent.
+- A value is **yours** only when you change it, in Appearance or the top-bar menu. The **Your look** line says whether the look is the workspace default, partly yours, or yours.
 - Everything you did not choose follows the default: when an admin changes it, it changes for you; when you switch workspace, you get that workspace's default (or the built-in look when it has none).
-- **Use workspace default** forgets your own style, theme and accent and returns to it. Text size, density, sidebar and motion are never part of the default.
+- **Reset to default** forgets your own style, theme and accent and returns to it. Text size, density, sidebar and motion are never part of the default.
 - Only what you chose is saved to your account under `appearance` and `appearance.style`. A device that only inherits writes nothing.
 - With **Sync across devices** off, your choices on this device still win and the rest is inherited; nothing is sent.
 
