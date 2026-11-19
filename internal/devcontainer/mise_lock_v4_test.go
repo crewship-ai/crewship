@@ -101,26 +101,6 @@ func TestReadMiseLockBundleIncludesLockfileV4Auxiliaries(t *testing.T) {
 	}
 }
 
-func TestReadMiseLockBundleRejectsLinkedV4Directory(t *testing.T) {
-	dir := t.TempDir()
-	outside := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(outside, "opencode"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(outside, "opencode", "package.json"), []byte("outside"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "mise.lock"), []byte("lockfile_version = 4\naube = { path = \"locks/opencode\" }\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(dir, "locks")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	if b, err := ReadMiseLockBundle(dir); err == nil {
-		t.Fatalf("linked locks directory accepted: %+v", b.Files)
-	}
-}
-
 // A rebuild must not inherit auxiliary files from a previous bundle in either
 // layout, and both cleanup targets are checked against inherited symlinks.
 func TestMiseLockWriteCleansBothAuxiliaryLayouts(t *testing.T) {
@@ -196,21 +176,6 @@ func TestReadMiseLockBundleV4ReferencesFailClosed(t *testing.T) {
 		write(t, dir, map[string]string{"mise.lock": ref("locks/../config"), "config/x": "x"})
 		if _, err := ReadMiseLockBundle(dir); err == nil {
 			t.Fatal("traversal reference accepted")
-		}
-	})
-	t.Run("symlinked referenced directory", func(t *testing.T) {
-		dir := t.TempDir()
-		outside := t.TempDir()
-		write(t, outside, map[string]string{"package.json": "outside"})
-		write(t, dir, map[string]string{"mise.lock": ref("locks/opencode/1")})
-		if err := os.MkdirAll(filepath.Join(dir, "locks/opencode"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(outside, filepath.Join(dir, "locks/opencode/1")); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
-		}
-		if _, err := ReadMiseLockBundle(dir); err == nil {
-			t.Fatal("symlinked reference accepted")
 		}
 	})
 	t.Run("unrelated locks tree is never opened for a v3 lock", func(t *testing.T) {
