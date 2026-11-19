@@ -552,7 +552,8 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 	// Append to /etc/environment (preserves existing content).
 	cmd := []string{"bash", "-c", fmt.Sprintf("printf '%%s' %q >> /etc/environment", content) +
 		" && mkdir -p /etc/profile.d && printf '%s' " + shellQuote(AgentToolProfile()) +
-		" > /etc/profile.d/zz-crewship-tools.sh && chmod 0644 /etc/profile.d/zz-crewship-tools.sh"}
+		" > /etc/profile.d/zz-crewship-tools.sh && chmod 0644 /etc/profile.d/zz-crewship-tools.sh && {\n" +
+		HomeProfileGuardScript(HomeProfileSeeds...) + "}"}
 	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("writing containerEnv: %w", err)
