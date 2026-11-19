@@ -72,11 +72,11 @@ needs a new dry run.`,
 }
 
 type pageUnsharePermissions struct {
-	Read    bool `json:"read"`
-	Comment bool `json:"comment"`
-	Edit    bool `json:"edit"`
-	Produce bool `json:"produce"`
-	Propose bool `json:"propose"`
+	Read    bool `json:"read" yaml:"read"`
+	Comment bool `json:"comment" yaml:"comment"`
+	Edit    bool `json:"edit" yaml:"edit"`
+	Produce bool `json:"produce" yaml:"produce"`
+	Propose bool `json:"propose" yaml:"propose"`
 }
 
 func (p pageUnsharePermissions) String() string {
@@ -99,35 +99,35 @@ func (p pageUnsharePermissions) String() string {
 // before they confirm.
 func pageUnshareHuman(raw []byte) (string, error) {
 	var r struct {
-		DryRun       bool   `json:"dry_run"`
-		Page         string `json:"page"`
-		Kind         string `json:"kind"`
-		PagesVersion int64  `json:"pages_version"`
+		DryRun       bool   `json:"dry_run" yaml:"dry_run"`
+		Page         string `json:"page" yaml:"page"`
+		Kind         string `json:"kind" yaml:"kind"`
+		PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
 		FromFolder   *struct {
-			Slug string `json:"slug"`
-		} `json:"from_folder"`
+			Slug string `json:"slug" yaml:"slug"`
+		} `json:"from_folder" yaml:"from_folder"`
 		Changes []struct {
-			SubjectType string                 `json:"subject_type"`
-			SubjectID   string                 `json:"subject_id"`
-			Label       string                 `json:"label"`
-			Before      pageUnsharePermissions `json:"before"`
-			After       pageUnsharePermissions `json:"after"`
-		} `json:"changes"`
+			SubjectType string                 `json:"subject_type" yaml:"subject_type"`
+			SubjectID   string                 `json:"subject_id" yaml:"subject_id"`
+			Label       string                 `json:"label" yaml:"label"`
+			Before      pageUnsharePermissions `json:"before" yaml:"before"`
+			After       pageUnsharePermissions `json:"after" yaml:"after"`
+		} `json:"changes" yaml:"changes"`
 		RemovedGrants []struct {
-			SubjectType string `json:"subject_type"`
-			SubjectID   string `json:"subject_id"`
-			Label       string `json:"label"`
-			Level       string `json:"level"`
-		} `json:"removed_grants"`
+			SubjectType string `json:"subject_type" yaml:"subject_type"`
+			SubjectID   string `json:"subject_id" yaml:"subject_id"`
+			Label       string `json:"label" yaml:"label"`
+			Level       string `json:"level" yaml:"level"`
+		} `json:"removed_grants" yaml:"removed_grants"`
 		RevokedPublicLinks []struct {
-			ID string `json:"id"`
-		} `json:"revoked_public_links"`
-		RevokedMandates    int64  `json:"revoked_mandates"`
-		ReleasedEditLeases int64  `json:"released_edit_leases"`
-		Reshare            string `json:"reshare"`
-		Notice             string `json:"notice"`
-		Changed            bool   `json:"changed"`
-		ReviewToken        string `json:"review_token"`
+			ID string `json:"id" yaml:"id"`
+		} `json:"revoked_public_links" yaml:"revoked_public_links"`
+		RevokedMandates    int64  `json:"revoked_mandates" yaml:"revoked_mandates"`
+		ReleasedEditLeases int64  `json:"released_edit_leases" yaml:"released_edit_leases"`
+		Reshare            string `json:"reshare" yaml:"reshare"`
+		Notice             string `json:"notice" yaml:"notice"`
+		Changed            bool   `json:"changed" yaml:"changed"`
+		ReviewToken        string `json:"review_token" yaml:"review_token"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)

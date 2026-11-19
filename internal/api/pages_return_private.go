@@ -508,7 +508,7 @@ func (h *PageHandler) commitReturnToPrivate(ctx context.Context, tx *sql.Tx, wsI
 		return nil, nil, errReturnPrivateChanged
 	}
 	var left int64
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM page_grants WHERE page_id=?)+(SELECT count(*) FROM page_public_tokens WHERE page_id=? AND revoked_at IS NULL)`, rec.ID, rec.ID).Scan(&left); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM page_grants WHERE page_id=? AND retired_at IS NULL)+(SELECT count(*) FROM page_public_tokens WHERE page_id=? AND revoked_at IS NULL)`, rec.ID, rec.ID).Scan(&left); err != nil {
 		return nil, nil, err
 	}
 	if left != 0 {
