@@ -236,7 +236,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents).
 	// AssignmentHandler instance comes from registerOrchestrationRoutes so the
 	// public list endpoint shares state with the internal create/get.
-	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(http.HandlerFunc(oh.assign.Create)))
+	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(withRoutineStepEffect(r.db, "assignment.create", http.HandlerFunc(oh.assign.Create))))
 	r.mux.Handle("GET /api/v1/internal/assignments/{assignmentId}", internalAuth(http.HandlerFunc(oh.assign.Get)))
 
 	// Internal mission routes (called by sidecar on behalf of lead agents)
@@ -251,7 +251,9 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/missions/{missionId}", internalAuth(http.HandlerFunc(internalMissions.Get)))
 	r.mux.Handle("POST /api/v1/internal/missions/{missionId}/start", internalAuth(http.HandlerFunc(internalMissions.Start)))
 
-	// Internal issue routes (called by sidecar on behalf of agents)
+	// Internal issue routes (called by sidecar on behalf of agents). The write
+	// routes a routine `crewship` step reaches are wrapped in
+	// withRoutineStepEffect (#5332): a resumed step replays, never writes twice.
 	internalIssues := NewInternalIssueHandler(r.db, r.hub, r.logger)
 	// Same emitter the public issue handler gets (router_orchestration.go).
 	// Without it an agent's issue change wrote a mission_activity row and
@@ -270,14 +272,14 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.Get)))
 	r.mux.Handle("PATCH /api/v1/internal/chat-proposals/{sourceId}", internalAuth(http.HandlerFunc(r.internalProposalEdit)))
 	r.mux.Handle("POST /api/v1/internal/chat-proposals", internalAuth(http.HandlerFunc(r.internalProposalCreate)))
-	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
+	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(withRoutineStepEffect(r.db, "issue.create", http.HandlerFunc(internalIssues.Create))))
 	r.mux.Handle("POST /api/v1/internal/issues/authority", internalAuth(http.HandlerFunc(internalIssues.ClassifyRun)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/show", internalAuth(http.HandlerFunc(internalIssues.Show)))
-	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
+	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(withRoutineStepEffect(r.db, "issue.update", http.HandlerFunc(internalIssues.UpdateStatus))))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/work", internalAuth(http.HandlerFunc(internalIssues.Work)))
-	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))
+	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(withRoutineStepEffect(r.db, "issue.comment", http.HandlerFunc(internalIssues.CreateComment))))
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.ListComments)))
-	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/relations", internalAuth(http.HandlerFunc(internalIssues.CreateRelation)))
+	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/relations", internalAuth(withRoutineStepEffect(r.db, "issue.link", http.HandlerFunc(internalIssues.CreateRelation))))
 
 	// Internal attachment routes (#1768 item 7) — the half that makes the
 	// feature real. A person drops a stack trace on an issue so the agent
@@ -304,7 +306,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// router_orchestration.go using the same QueryHandler instance.
 	r.mux.Handle("POST /api/v1/internal/queries", internalAuth(http.HandlerFunc(oh.queries.Create)))
 	r.mux.Handle("GET /api/v1/internal/standup", internalAuth(http.HandlerFunc(oh.queries.Standup)))
-	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(http.HandlerFunc(oh.queries.CreateEscalation)))
+	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(withRoutineStepEffect(r.db, "escalation.create", http.HandlerFunc(oh.queries.CreateEscalation))))
 	r.mux.Handle("GET /api/v1/internal/escalations/{escalationId}/wait", internalAuth(http.HandlerFunc(oh.queries.WaitForEscalationResponse)))
 	r.mux.Handle("POST /api/v1/internal/report-confidence", internalAuth(http.HandlerFunc(oh.queries.ReportConfidence)))
 
