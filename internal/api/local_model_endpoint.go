@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/credhostgate"
@@ -13,9 +15,13 @@ import (
 // Ollama-behind-proxy / LiteLLM endpoint. A zero BaseURL means "no endpoint
 // configured" and the orchestrator falls back to the deprecated server env.
 type localModelEndpoint struct {
-	BaseURL string
-	APIKey  string
-	Headers map[string]string
+	SourceRevision string
+	CredentialID   string
+	LeaseExpiresAt string
+	AgentGrants    map[string]string
+	BaseURL        string
+	APIKey         string
+	Headers        map[string]string
 	// AgentIDs carries the SOURCE credential's crew grantees (#2052) so the
 	// OPENAI_COMPAT entry appendProxiedEndpointCredential derives from it is
 	// scoped the same way the ENDPOINT_URL credential was. Nil for the
@@ -44,7 +50,12 @@ type localModelEndpoint struct {
 // the deprecated server-env fallback (CREWSHIP_LOCAL_MODEL_BASE_URL). The
 // stored value is re-validated through the same gate as create so a value that
 // was somehow stored malformed can't reach OpenCode's config.
-func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Logger, agentID, workspaceID string, assigned []mcpCredEntry) localModelEndpoint {
+type endpointQuerier interface {
+	sqlQuerier
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func resolveLocalModelEndpoint(ctx context.Context, db endpointQuerier, logger *slog.Logger, agentID, workspaceID string, assigned []mcpCredEntry) localModelEndpoint {
 	// 1. Per-agent override: an assigned ENDPOINT_URL credential. `assigned`
 	//    is already ACTIVE-filtered and sentinel-filtered by
 	//    resolveAgentCredentials, and ordered by priority ASC — take the
@@ -61,6 +72,10 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 			// scope (#2052): an endpoint granted to one member must not answer
 			// another member's model call out of the shared CredStore.
 			ep.AgentIDs = c.AgentIDs
+			ep.CredentialID = c.ID
+			ep.LeaseExpiresAt = c.LeaseExpiresAt
+			ep.AgentGrants = c.AgentGrants
+			ep.SourceRevision = c.SourceRevision
 			return ep
 		}
 	}
@@ -85,11 +100,11 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 	//    and this branch skips it. If it was granted to THIS agent it has
 	//    already been returned by branch 1 above, where it keeps its scope.
 	//
-	//    Crew scope is deliberately NOT excluded here and the comment no longer
-	//    claims it is: this function is given a workspace and no crew, so it
-	//    cannot tell a link to this agent's crew from a link to another one.
-	//    Narrowing that needs the crew id threaded in — see the follow-up note
-	//    in credential_grantees.go's header.
+	//    Crew authority is resolved through the acting agent (#5542): a
+	//    CREW-scoped row must be linked to this agent's crew (an orphan CREW
+	//    row is not a workspace default), and a row linked or bound to crews
+	//    serves only agents of one of those crews. The same query runs inside
+	//    proxy admission, so a stale sidecar cannot keep a foreign endpoint.
 	var credID, encValue string
 	err := db.QueryRowContext(ctx, `
 		SELECT c.id, c.encrypted_value FROM credentials c
@@ -101,9 +116,16 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 		      SELECT 1 FROM credential_bindings b
 		      WHERE b.credential_id = c.id AND b.scope = 'AGENT'
 		  )
+		  AND (c.scope = 'WORKSPACE'
+		       OR EXISTS (SELECT 1 FROM credential_crews cc JOIN agents a ON a.crew_id=cc.crew_id WHERE cc.credential_id=c.id AND a.id=? AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL))
+		  AND (NOT EXISTS (SELECT 1 FROM credential_crews cc WHERE cc.credential_id=c.id)
+		       OR EXISTS (SELECT 1 FROM credential_crews cc JOIN agents a ON a.crew_id=cc.crew_id WHERE cc.credential_id=c.id AND a.id=? AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL))
+		  AND (NOT EXISTS (SELECT 1 FROM credential_bindings cb WHERE cb.credential_id=c.id AND cb.scope='CREW')
+		       OR EXISTS (SELECT 1 FROM credential_bindings cb JOIN agents a ON a.crew_id=cb.crew_id WHERE cb.credential_id=c.id AND cb.scope='CREW' AND cb.workspace_id=c.workspace_id AND a.id=? AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL))
+		  AND COALESCE(c.handle_only,0)=0
 		ORDER BY c.created_at DESC, c.id ASC
 		LIMIT 1
-	`, workspaceID, CredTypeEndpointURL).Scan(&credID, &encValue)
+	`, workspaceID, CredTypeEndpointURL, agentID, agentID, agentID).Scan(&credID, &encValue)
 	if err != nil {
 		if err != sql.ErrNoRows && logger != nil {
 			logger.Warn("resolve workspace local-model endpoint", "error", err)
@@ -130,7 +152,45 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 		return localModelEndpoint{}
 	}
 	ep, _ := endpointFromValue(dec)
+	ep.CredentialID = credID
+	ep.SourceRevision = endpointSourceRevision(encValue)
 	return ep
+}
+
+// Hash ciphertext, never low-entropy plaintext. The revision binds an endpoint
+// projection to the exact Vault value and changes on rotation without exposing
+// auth material. Authority and host restrictions are rechecked separately.
+func endpointSourceRevision(encrypted string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(encrypted)))
+}
+
+// endpointGraceRevision reports whether revision is the previous value of
+// credID inside an open rotation grace window (#1882). Rotation keeps the old
+// ciphertext verbatim in credential_rotations.old_value, so a sidecar booted
+// before the rotation presents sha256 of exactly that ciphertext. The window
+// gate matches attachDeliveredCredentialGrace: ACTIVE, not expired, value
+// still present. Ending grace early or expiry refuses the old revision.
+func endpointGraceRevision(ctx context.Context, db endpointQuerier, credID, revision string) bool {
+	if credID == "" || revision == "" {
+		return false
+	}
+	// Only the most recent open rotation, the same row grace delivery uses: a
+	// value from two rotations ago is not the one any current sidecar holds.
+	rows, err := db.QueryContext(ctx, `SELECT old_value FROM credential_rotations
+		WHERE credential_id = ? AND status = 'ACTIVE' AND expires_at > ? AND old_value != ''
+		ORDER BY rotated_at DESC, id DESC LIMIT 1`,
+		credID, leaseComparisonNow())
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var old string
+		if rows.Scan(&old) == nil && endpointSourceRevision(old) == revision {
+			return true
+		}
+	}
+	return false
 }
 
 // endpointFromValue parses a validated stored ENDPOINT_URL value into a

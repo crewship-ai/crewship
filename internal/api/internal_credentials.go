@@ -138,9 +138,9 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 
 	// Provider logins are delivered through the per-agent path. Include their
 	// IDs for reaping, without adding them to the global plaintext token pool.
-	typeClause := "type IN ('AI_CLI_TOKEN', 'API_KEY', 'PROVIDER_LOGIN')"
+	typeClause := "(type IN ('AI_CLI_TOKEN', 'API_KEY', 'PROVIDER_LOGIN') AND provider != 'NONE' OR type = 'ENDPOINT_URL')"
 	if includeValues {
-		typeClause = "type IN ('AI_CLI_TOKEN', 'API_KEY')"
+		typeClause = "(type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE')"
 	}
 
 	// rotation_grace_until (#1882): the end of this credential's open
@@ -159,7 +159,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		    AND cr.expires_at > ? AND cr.old_value != '') AS rotation_grace_ids
 		FROM credentials
 		WHERE ` + statusClause + ` AND deleted_at IS NULL
-		AND ` + typeClause + ` AND provider != 'NONE'`
+		AND ` + typeClause
 
 	now := leaseComparisonNow()
 	args := []any{now, now}
