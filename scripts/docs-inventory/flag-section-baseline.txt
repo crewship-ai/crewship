@@ -150,6 +150,7 @@ project milestone create --name
 project milestone create --status
 project milestone create --target-date
 project milestone update --description
+project milestone update --name
 project milestone update --position
 project milestone update --status
 project milestone update --target-date
