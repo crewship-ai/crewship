@@ -495,8 +495,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	page["required"] = []string{"created_by_test", "archived"}
 	pageRow["required"] = []string{"created_by_test", "archived"}
 	return map[string]DomainSchema{
-		"POST /api/v1/pages/{slug}/archive":   {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
-		"POST /api/v1/pages/{slug}/unarchive": {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
+		"POST /api/v1/pages/{slug}/archive":        {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
+		"POST /api/v1/pages/{slug}/unarchive":      {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
+		"POST /api/v1/pages/{slug}/return-private": {Request: archiveRequest, RequestRequired: true, Response: pageReturnPrivateSchema(accessSubject)},
 		"GET /api/v1/pages": {
 			Response:   arr(pageRow),
 			Parameters: pageCatalogQueryParameters(),

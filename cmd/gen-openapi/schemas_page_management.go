@@ -40,3 +40,32 @@ func pageManagementSchemas(subject map[string]any) (map[string]any, map[string]a
 	}, "dry_run", "page_id", "page", "pages_version", "from_folder", "to_folder", "before", "after", "changes", "changed")
 	return request, response, move
 }
+
+// pageReturnPrivateSchema is the response of POST /api/v1/pages/{slug}/return-private
+// (PX-11): the reviewed access impact of returning a shared artifact to its
+// owner's personal space, plus the grants, public links and mandates it ends.
+func pageReturnPrivateSchema(subject map[string]any) map[string]any {
+	text := map[string]any{"type": "string"}
+	boolean := map[string]any{"type": "boolean"}
+	count := map[string]any{"type": "integer", "minimum": 0}
+	responseVersion := map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+	object := func(props map[string]any, required ...string) map[string]any {
+		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required}
+	}
+	array := func(item map[string]any) map[string]any { return map[string]any{"type": "array", "items": item} }
+	folder := object(map[string]any{"id": text, "slug": text, "acl_version": map[string]any{"type": "integer", "minimum": 0}}, "id", "slug", "acl_version")
+	snapshot := object(map[string]any{"subjects": array(subject), "withheld": boolean}, "subjects", "withheld")
+	change := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "before": pageManagementPermissionsSchema(), "after": pageManagementPermissionsSchema()}, "subject_type", "subject_id", "before", "after")
+	grant := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "level": text}, "subject_type", "subject_id", "level")
+	link := object(map[string]any{"id": text, "expires_at": text}, "id", "expires_at")
+	kind := map[string]any{"type": "string", "enum": []string{"document", "workbook", "word", "sheet", "artifact_project"}}
+	out := object(map[string]any{
+		"dry_run": boolean, "page_id": text, "page": text, "kind": kind, "pages_version": responseVersion,
+		"from_folder": map[string]any{"oneOf": []any{folder, nullOnlySchema()}},
+		"before":      snapshot, "after": snapshot, "changes": array(change),
+		"removed_grants": array(grant), "revoked_public_links": array(link), "revoked_mandates": count,
+		"notice": text, "changed": boolean, "review_token": text,
+	}, "dry_run", "page_id", "page", "kind", "pages_version", "from_folder", "before", "after", "changes", "removed_grants", "revoked_public_links", "revoked_mandates", "notice", "changed")
+	out["description"] = "Same Page ID afterwards. Grants are deleted and public links revoked, so a later share starts from nothing. Workspace OWNER and ADMIN keep the audited read."
+	return out
+}

@@ -51,6 +51,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `share <slug> --user\|--crew <subject>\|--everyone --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
 | `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
 | `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
+| `unshare <page> --dry-run --pages-version <n>` | Preview returning a shared artifact to your personal space; same Page ID, every grant, public link and agent mandate ends |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
@@ -227,6 +228,49 @@ review. The artifact spelling is an alias of the same Page API.
 | `--pages-version <n>` | Exact Page version read before the preview; required. |
 | `--review-token <token>` | Exact server token returned by the matching preview. |
 | `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page unshare <page>`
+
+Returns a shared artifact to its owner's personal space with the **same Page
+ID** (PRD PX-11). It calls `POST /api/v1/pages/{slug}/return-private`. Run
+`crewship page unshare <page> --dry-run --pages-version N` first: the preview
+lists every subject that loses access (with its rights before and after), the
+folder the Page leaves, every page grant that is deleted, every public link
+that is revoked and the number of live agent mandates that are revoked. Then
+confirm with `crewship page unshare <page> --yes --pages-version N
+--review-token TOKEN`.
+
+Confirming is one transaction. It sets the private audience, takes the Page out
+of its folder, deletes every page grant, revokes every public link and every
+live agent mandate on the Page, and writes the audit row
+`artifact.returned_to_private` (actor, time, audience change, counts; no page
+name or content) plus the journal entries for each removed grant and link. The
+authority epoch advances, so a running agent's mandate stops at its next
+check. Former readers get 404 on their next read, export or write. The owner
+keeps full access. Workspace OWNER and ADMIN keep the audited read of private
+output (decision of 30 October, #4825); they cannot return or share it.
+
+Grants are deleted, not paused: sharing the Page again starts with no grants,
+no folder and no public links. Copies someone already downloaded, exported or
+read cannot be recalled; the response says so in `notice`.
+
+Only the Page's human owner may run it. Statuses: 400 invalid review request,
+401 unauthenticated, 403 not the owner (including workspace OWNER and ADMIN),
+404 hidden or missing Page, 409 stale `pages_version`, stale review, crew-owned
+Page (`crew_owned`), already private (`already_private`) or a type without a
+private audience (`unsupported_type`), 500 storage failure.
+
+Supported types (`kind` in the response): `document` (Docs), `workbook`,
+`word` and `sheet` (native Word and Sheet), `artifact_project` (HTML artifact
+project). Design, Slides, Mooring JSON documents, dashboards with panels and
+plain Pages are refused.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview the accesses that end, without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed return, with version and token. |
 
 ## `crewship page artifact archive <page>`
 
