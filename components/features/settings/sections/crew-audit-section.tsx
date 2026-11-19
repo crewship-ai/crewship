@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
-import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, ScrollText, Cpu } from "lucide-react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, Cpu } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
@@ -12,15 +12,11 @@ import { apiFetch } from "@/lib/api-fetch"
 import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { SettingsCard, SettingsEmpty } from "../shared"
 import {
-  AUDIT_SOURCES,
-  DEFAULT_AUDIT_FILTERS,
   activeFilterChips,
   auditQueryParams,
   type AuditFilters,
 } from "../audit-log/audit-filters"
 import { useAuditFilters } from "../audit-log/use-audit-filters"
-import { AuditToolbar } from "../audit-log/audit-toolbar"
-import { useWorkspacePeople } from "../audit-log/use-workspace-people"
 
 interface AuditLog {
   id: string
@@ -180,30 +176,32 @@ function dayHeading(day: string): string {
 interface CrewAuditSectionProps {
   workspaceId: string
   /** Controlled filters, when a parent owns them (the Audit log page's side
-   *  panel picks the trail and time range). Omitted → the URL-backed hook. */
+   *  panel picks the record, the time range and the facets). Omitted → the
+   *  URL-backed hook. */
   filters?: AuditFilters
   onFiltersChange?: (next: Partial<AuditFilters>) => void
-  /** The trail tabs; hidden when the page's side panel shows them. */
-  showSources?: boolean
-  /** Card heading; the Audit log page names the card by what it lists. */
+  /** The Events card's title: the record's name ("All changes"). */
   title?: string
-  description?: string
-  /** The search / person / type / range bar; hidden when the page's side
-   *  panel holds those filters. */
-  showToolbar?: boolean
-  /** Fold adjacent repeats of the same event into one line. */
-  groupRepeats?: boolean
-  /** Mark rows that change who can reach what. */
-  highlightAccess?: boolean
+  /** The range, in words, after the event count ("last 7 d"). */
+  rangeText?: string
+  /** The page's histogram, drawn inside the card between the header and the table. */
+  chart?: ReactNode
   /** Profile photos by user id: the audit API names a person but sends no
    *  photo, and the page already holds the roster. */
   avatars?: Record<string, string | null | undefined>
+  /** "Everything about <entity>" in an event's detail: the page narrows to it. */
+  onEntity?: (entityId: string, label: string) => void
 }
 
 /** The rows read the photos from here rather than through every prop list. */
 const AuditAvatars = createContext<Record<string, string | null | undefined>>({})
+/** What "Everything about <entity>" does; absent, the link is not offered. */
+const AuditEntityAction = createContext<((entityId: string, label: string) => void) | null>(null)
 
-export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true, avatars = EMPTY_AVATARS }: CrewAuditSectionProps) {
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, title = "All changes", rangeText, chart, avatars = EMPTY_AVATARS, onEntity }: CrewAuditSectionProps) {
+  // The two display switches of the card header (chips).
+  const [groupRepeats, setGroupRepeats] = useState(true)
+  const [highlightAccess, setHighlightAccess] = useState(true)
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -232,7 +230,6 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   }
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
   const [exporting, setExporting] = useState(false)
-  const people = useWorkspacePeople(workspaceId)
   const abortRef = useRef<AbortController | null>(null)
 
   // Cap on rows an export may walk across pages. The audit table can
@@ -241,12 +238,6 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   // while it walks pagination. 10k is enough for >6 months of typical
   // CRUD activity and small enough to stay snappy.
   const EXPORT_MAX_ROWS = 10_000
-
-  // Every filter change starts again from page one.
-  const changeFilters = useCallback((next: Partial<AuditFilters>) => {
-    setFilters(next)
-    setExpandedId(null)
-  }, [setFilters])
 
   const fetchLogs = useCallback(async (opts?: { silent?: boolean }) => {
     // Abort any in-flight request
@@ -328,6 +319,8 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         entity_name: log.entity_name ?? "",
         user: personLabel(log.user?.full_name, log.user?.email ?? ""),
         ip_address: log.ip_address ?? "",
+        user_agent: log.user_agent ?? "",
+        metadata: log.metadata && Object.keys(log.metadata).length > 0 ? JSON.stringify(log.metadata) : "",
       }))
       // Neutralise spreadsheet-formula prefixes (=, +, -, @) so an
       // attacker-controlled entity_id or user field can't exfiltrate
@@ -375,76 +368,67 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   const rangeEnd = Math.min(page * PAGE_SIZE, total)
   const filtered = activeFilterChips(filters, {}).length > 0
 
+  const chipClass = (on: boolean) =>
+    cn(
+      "inline-flex h-7 items-center rounded-full border px-2.5 text-label transition-colors coarse:min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+      on ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground",
+    )
+
   return (
     <AuditAvatars.Provider value={avatars}>
-    <SettingsCard icon={ScrollText}
-      title={title}
-      // v67: the line that says what is shown sits on the right of the head,
-      // beside an icon-only refresh and Export CSV, not under the title.
-      actions={
-        <>
-          {description && <span className="hidden text-label text-muted-foreground sm:inline">{description}</span>}
+    <AuditEntityAction.Provider value={onEntity ?? null}>
+    <SettingsCard title={title} hideHeader>
+      {/* One header for the record: its name, how many events and over what,
+          the two display switches as chips, and the export. */}
+      <div data-slot="audit-events-head" className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+        <h3 aria-hidden className="text-control font-semibold text-foreground">{title}</h3>
+        <span data-testid="audit-count" className="text-label text-muted-foreground">
+          {loading && !pagination ? "Loading…" : `${total.toLocaleString("en-US")} ${total === 1 ? "event" : "events"}`}
+          {rangeText ? ` · ${rangeText}` : ""}
+        </span>
+        <span className="flex-1" />
+        <button type="button" aria-pressed={groupRepeats} onClick={() => setGroupRepeats((v) => !v)} className={chipClass(groupRepeats)}>
+          Group repeats
+        </button>
+        <button type="button" aria-pressed={highlightAccess} onClick={() => setHighlightAccess((v) => !v)} className={chipClass(highlightAccess)}>
+          Mark access changes
+        </button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => fetchLogs({ silent: true })}
+          disabled={loading || refreshing}
+          aria-label="Refresh audit log"
+          title="Refresh"
+          className="coarse:h-[44px] coarse:w-[44px]"
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="px-2.5 text-xs coarse:min-h-[44px]"
+          onClick={handleExport}
+          disabled={(pagination?.total ?? 0) === 0 || exporting || loading}
+          aria-label="Export audit log to CSV"
+        >
+          <Download className={cn("h-3 w-3 mr-1.5", exporting && "animate-pulse")} />
+          {exporting ? "Exporting…" : "Export CSV"}
+        </Button>
+        {exporting && (
           <Button
             variant="ghost"
-            size="icon-sm"
-            onClick={() => fetchLogs({ silent: true })}
-            disabled={loading || refreshing}
-            aria-label="Refresh audit log"
-            title="Refresh"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-          </Button>
-          <Button
-            variant="outline"
             size="sm"
-            className="px-2.5 text-xs"
-            onClick={handleExport}
-            disabled={(pagination?.total ?? 0) === 0 || exporting || loading}
-            aria-label="Export audit log to CSV"
+            className="px-2.5 text-xs text-muted-foreground hover:text-foreground coarse:min-h-[44px]"
+            onClick={handleCancelExport}
+            aria-label="Cancel export"
           >
-            <Download className={cn("h-3 w-3 mr-1.5", exporting && "animate-pulse")} />
-            {exporting ? "Exporting…" : "Export CSV"}
+            Cancel
           </Button>
-          {exporting && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2.5 text-xs text-muted-foreground hover:text-foreground"
-              onClick={handleCancelExport}
-              aria-label="Cancel export"
-            >
-              Cancel
-            </Button>
-          )}
-        </>
-      }
-    >
-      {/* ── Which trail ──
-          Four separate tables, one place to read them. The tables stay split
-          — the keeper ledger is append-only on purpose — so this changes what
-          is read, never where anything is stored. */}
-      {showSources && <div className="flex flex-wrap items-center gap-1 border-b border-border/60 px-4 pt-2" role="tablist" aria-label="Audit trail">
-        {AUDIT_SOURCES.map((s) => {
-          const on = filters.source === s.value
-          return (
-            <button
-              key={s.value}
-              type="button"
-              onClick={() => changeFilters({ ...DEFAULT_AUDIT_FILTERS, source: s.value, range: filters.range, from: filters.from, to: filters.to })}
-              aria-pressed={on}
-              title={s.hint}
-              className={cn(
-                "-mb-px border-b-2 px-3 pb-2 pt-1 text-xs font-medium transition-colors",
-                on ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {s.label}
-            </button>
-          )
-        })}
-      </div>}
+        )}
+      </div>
 
-      {showToolbar && <AuditToolbar filters={filters} onChange={changeFilters} people={people} />}
+      {chart}
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
@@ -458,8 +442,8 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         <div className="hidden grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 bg-surface-subtle px-4 py-1.5 sm:grid">
           <span />
           <span className="eyebrow text-muted-foreground">Time</span>
-          <span className="eyebrow text-muted-foreground">Person</span>
-          <span className="eyebrow text-muted-foreground">Event</span>
+          <span className="eyebrow text-muted-foreground">Who</span>
+          <span className="eyebrow text-muted-foreground">What happened</span>
           <span />
         </div>
       )}
@@ -479,7 +463,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         // opposite ("your rows are still here, they're just old").
         <div className="p-6 text-center">
           <p role="alert" className="text-xs text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => fetchLogs()}>
+          <Button variant="outline" size="sm" className="px-2.5 text-xs coarse:min-h-[44px]" onClick={() => fetchLogs()}>
             Retry
           </Button>
         </div>
@@ -540,7 +524,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="px-2 text-xs"
+                  className="px-2 text-xs coarse:min-h-[44px]"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
@@ -550,7 +534,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="px-2 text-xs"
+                  className="px-2 text-xs coarse:min-h-[44px]"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
@@ -563,6 +547,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         </>
       )}
     </SettingsCard>
+    </AuditEntityAction.Provider>
     </AuditAvatars.Provider>
   )
 }
@@ -615,6 +600,7 @@ function AuditRow({
   log, expanded, onToggle, highlightAccess = true,
 }: { log: AuditLog; expanded: boolean; onToggle: () => void; highlightAccess?: boolean }) {
   const label = entityLabel(log)
+  const onEntity = useContext(AuditEntityAction)
   const security = highlightAccess && isSecurityRelevant(log)
   return (
     <div data-audit-weight={security ? "security" : "routine"}>
@@ -646,7 +632,7 @@ function AuditRow({
         </span>
         <span className="flex items-center gap-2">
           <span className="font-mono text-micro tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(log.created_at)}</span>
-          {security && <StatusPill tone="warn" label="Access" />}
+          {security && <StatusPill tone="warn" label="Access" title="Changes who can reach what" />}
         </span>
       </button>
 
@@ -691,6 +677,20 @@ function AuditRow({
                     {log.user_agent ?? "—"}
                   </div>
                 </div>
+                {log.entity_id && onEntity && (
+                  <div className="sm:col-span-2">
+                    <div className="eyebrow mb-1 text-muted-foreground">
+                      More
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onEntity(log.entity_id!, label)}
+                      className="max-w-full truncate text-control text-primary-hover underline-offset-2 hover:underline coarse:min-h-[44px]"
+                    >
+                      Everything about {shortIdLabel(label)}
+                    </button>
+                  </div>
+                )}
                 {log.metadata && Object.keys(log.metadata).length > 0 && (
                   <div className="sm:col-span-2">
                     <div className="eyebrow mb-1 text-muted-foreground">
@@ -758,7 +758,7 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
         </span>
         <span className="flex items-center gap-2">
           <span className="font-mono text-micro tabular-nums text-muted-foreground sm:hidden">{formatTimeOfDay(first.created_at)}</span>
-          {security && <StatusPill tone="warn" label="Access" />}
+          {security && <StatusPill tone="warn" label="Access" title="Changes who can reach what" />}
         </span>
       </button>
 

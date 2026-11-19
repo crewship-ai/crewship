@@ -738,6 +738,21 @@ GET /api/v1/admin/journal/verify        # ADMIN or OWNER
 while walking the chain. On a broken chain the response stays `200` with
 `"ok": false` plus `broken_seq`, `broken_id`, and a human-readable `reason`.
 
+In the web app, **Settings → Audit log** (ADMIN or OWNER) shows one quiet line in
+the page head, "Record intact · checked 02:00", with **Check now**. Check now
+runs this call and opens a dialog with the whole answer: the result, the entries
+and checkpoints walked, the first break (`broken_seq`, `broken_id`, `reason`),
+every item of `breaks`, `continuation_verified` and `historical_status`. A break
+raises an incident on the server. The same page names the four records **All
+changes**, **Between crews**, **Secret use** and **Keeper decisions**, filters by
+**Who**, **Run result** and category, and an event's detail has **Everything about
+\<thing\>**, which filters by its `entity_id` (`audit_entity` in the page URL).
+**Export CSV** writes what is shown, up to 10 000 rows, including `user_agent` and
+`metadata` columns. **Change how long** sets `audit_log_retention_days` (All
+changes) and `credential_audit_retention_days` (Secret use) with
+`PATCH /api/v1/workspaces/{id}`; shortening asks first, because older entries are
+deleted at the next daily sweep.
+
 <Info>
   Upgrading an existing instance runs a migration that **backfills** every
   historical row into a valid chain (ordered by `workspace_id, ts, id`), so

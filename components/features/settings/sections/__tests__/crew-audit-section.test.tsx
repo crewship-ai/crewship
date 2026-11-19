@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
 import { CrewAuditSection } from "../crew-audit-section"
+import { DEFAULT_AUDIT_FILTERS } from "../../audit-log/audit-filters"
 
 // Characterisation tests for the settings-shell restyle (visual only —
 // data fetching / behaviour must be byte-identical before and after).
@@ -199,20 +200,14 @@ describe("Audit log — grouped by day", () => {
   })
 })
 
-describe("Audit log — four trails, one page", () => {
+describe("Audit log — four records, one page", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
-  it("asks the server for the trail you picked", async () => {
+  it("asks the server for the record the page picked", async () => {
     apiFetch.mockResolvedValue(page([row("create", { entity_name: "Riley" })]))
-    render(<CrewAuditSection workspaceId="ws-1" />)
+    render(<CrewAuditSection workspaceId="ws-1" filters={{ ...DEFAULT_AUDIT_FILTERS, source: "keeper" }} />)
     await screen.findByText("Riley")
-
-    apiFetch.mockClear()
-    fireEvent.click(screen.getByRole("button", { name: /keeper/i }))
-
-    await waitFor(() => {
-      expect(apiFetch.mock.calls.some(([url]) => String(url).includes("source=keeper"))).toBe(true)
-    })
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes("source=keeper"))).toBe(true)
   })
 
   it("defaults to the workspace trail, so an existing link lands where it did", async () => {

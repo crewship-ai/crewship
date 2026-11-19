@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  AUDIT_CATEGORIES,
+  AUDIT_SOURCES,
   DEFAULT_AUDIT_FILTERS,
   activeFilterChips,
   auditQueryParams,
@@ -77,8 +79,25 @@ describe("auditQueryParams", () => {
   })
 
   it("knows which trail supports which filter", () => {
-    expect(sourceSupports("workspace")).toEqual({ search: true, person: true, category: true, result: true })
-    expect(sourceSupports("keeper")).toEqual({ search: false, person: false, category: false, result: false })
+    expect(sourceSupports("workspace")).toEqual({ search: true, person: true, category: true, result: true, entity: true })
+    expect(sourceSupports("keeper")).toEqual({ search: false, person: false, category: false, result: false, entity: false })
+  })
+
+  // "Everything about <entity>": the list endpoint accepts entity_id.
+  it("sends an entity for the workspace trail only", () => {
+    expect(auditQueryParams("ws", f({ entityId: "crew-1" }), 1, 50, NOW).get("entity_id")).toBe("crew-1")
+    expect(auditQueryParams("ws", f({ source: "crews", entityId: "crew-1" }), 1, 50, NOW).has("entity_id")).toBe(false)
+    expect(auditQueryParams("ws", f(), 1, 50, NOW).has("entity_id")).toBe(false)
+  })
+
+  it("names the four records by what they hold, and the categories in the prototype's words", () => {
+    expect(AUDIT_SOURCES.map((s) => [s.value, s.label, s.hint])).toEqual([
+      ["workspace", "All changes", "Settings, people, crews, agents and runs"],
+      ["crews", "Between crews", "Work handed over, messages and shared files"],
+      ["credentials", "Secret use", "Which secret was used, revealed or replaced"],
+      ["keeper", "Keeper decisions", "What the gatekeeper allowed, denied or escalated"],
+    ])
+    expect(AUDIT_CATEGORIES.map((c) => c.label)).toEqual(["Everything", "Runs", "Agents", "Crews", "Crew links", "Credentials", "People", "Workspace settings"])
   })
 })
 
@@ -86,8 +105,9 @@ describe("auditQueryParams", () => {
 // on the same slice of the log.
 describe("filters in the URL", () => {
   it("round-trips every non-default filter and leaves unrelated params alone", () => {
-    const filters = f({ source: "workspace", q: "role", userId: "u1", category: "WorkspaceMember", range: "custom", from: "2026-09-01", to: "2026-09-10" })
+    const filters = f({ source: "workspace", q: "role", userId: "u1", category: "WorkspaceMember", entityId: "m1", range: "custom", from: "2026-09-01", to: "2026-09-10" })
     const search = filtersToSearch(filters, "?tab=audit&x=1")
+    expect(new URLSearchParams(search).get("audit_entity")).toBe("m1")
     expect(new URLSearchParams(search).get("tab")).toBe("audit")
     expect(new URLSearchParams(search).get("x")).toBe("1")
     expect(filtersFromSearch(search)).toEqual(filters)
@@ -107,10 +127,16 @@ describe("activeFilterChips", () => {
     const chips = activeFilterChips(f({ q: "role", userId: "u1", category: "CREW", range: "custom", from: "2026-09-01", to: "2026-09-10" }), { u1: "Demo User" })
     expect(chips.map((c) => [c.key, c.label])).toEqual([
       ["q", "“role”"],
-      ["userId", "Person: Demo User"],
+      ["userId", "Who: Demo User"],
       ["category", "Crews"],
       ["range", "1 Sep 2026 – 10 Sep 2026"],
     ])
+  })
+
+  it("reads an entity filter back as everything about it", () => {
+    expect(activeFilterChips(f({ entityId: "c1" }), {}, "Ops").map((c) => [c.key, c.label])).toEqual([["entityId", "Everything about Ops"]])
+    expect(activeFilterChips(f({ entityId: "c1" }), {})[0].label).toBe("Everything about this item")
+    expect(activeFilterChips(f({ source: "keeper", entityId: "c1" }), {})).toEqual([])
   })
 
   it("shows the default time range as nothing to clear", () => {

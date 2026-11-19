@@ -9,6 +9,16 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 
 import { AuditLogPage } from "../audit-log-page"
 
+/** The panel's Filter button, then one facet by its header. */
+function openFacet(name: string) {
+  const facetBlock = document.querySelector("[data-slot=facet-block]")
+  if (!facetBlock) fireEvent.click(screen.getByRole("button", { name: /^Filter/ }))
+  const block = document.querySelector<HTMLElement>("[data-slot=facet-block]")!
+  const header = within(block).getByRole("button", { name: new RegExp(`^${name}`) })
+  if (header.getAttribute("aria-expanded") !== "true") fireEvent.click(header)
+  return block
+}
+
 const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b })
 const auditCalls = () => api.mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith("/api/v1/audit"))
 
@@ -55,7 +65,8 @@ describe("Audit log page", () => {
 
   it("filters failed runs on the server and shows the chip", async () => {
     render(<AuditLogPage />)
-    fireEvent.click(screen.getByRole("button", { name: /^Failed/ }))
+    const block = openFacet("Run result")
+    fireEvent.click(within(block).getByRole("button", { name: /^Failed/ }))
     await waitFor(() => expect(auditCalls().at(-1)).toContain("action=agent.run.failed"))
     expect(screen.getByRole("button", { name: "Remove filter Runs: failed" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
@@ -131,13 +142,17 @@ describe("Audit log page", () => {
     ]
     api.mockImplementation(async (u: string) => (u.includes("/members") ? ok([]) : ok({ data: rows, pagination: { page: 1, limit: 100, total: 4, total_pages: 1 } })))
     render(<AuditLogPage />)
-    await waitFor(() => expect(screen.getByRole("button", { name: /^Failed/ }).textContent).toContain("2"))
+    const block = await waitFor(() => {
+      const b = openFacet("Run result")
+      expect(within(b).getByRole("button", { name: /^Failed/ }).textContent).toContain("2")
+      return b
+    })
     expect(screen.getByRole("button", { name: /^Runs/ }).textContent).toContain("3")
     // "Crews" is also a trail; the category row is the one with a count.
     const crews = screen.getByRole("button", { name: /^Crews\s*1$/ })
     // Picking Crews leaves no failed runs to show.
     fireEvent.click(crews)
-    await waitFor(() => expect(screen.getByRole("button", { name: /^Failed/ }).textContent).toContain("0"))
+    await waitFor(() => expect(within(block).getByRole("button", { name: /^Failed/ }).textContent).toContain("0"))
   })
 
   it("has a back link to Settings", () => {
@@ -155,11 +170,13 @@ describe("Audit log page", () => {
     expect(auditCalls()).toHaveLength(0)
   })
 
-  it("opens with the section head and offers to verify the journal chain", () => {
+  it("opens with the section head, the integrity line and Check now, and no chain banner", () => {
     render(<AuditLogPage />)
     expect(screen.getByRole("heading", { level: 2, name: "Audit log" })).toBeInTheDocument()
-    expect(document.querySelector("[data-slot=journal-verify]")).not.toBeNull()
-    expect(screen.getByRole("button", { name: "Verify now" })).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=journal-integrity]")).not.toBeNull()
+    expect(document.querySelector("[data-slot=journal-verify]")).toBeNull()
+    expect(screen.getByRole("button", { name: "Check now" })).toBeInTheDocument()
+    expect(screen.queryByText(/Journal chain/)).toBeNull()
   })
 })
 
@@ -202,16 +219,17 @@ describe("Audit log — range, display, detail and paging", () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_range")).toBe("all"))
   })
 
-  it("keeps Group repeated events and Mark access changes above the table, not in the panel", async () => {
+  it("keeps Group repeats and Mark access changes as chips in the Events card header, not in the panel", async () => {
     render(<AuditLogPage />)
-    const strip = document.querySelector<HTMLElement>("[data-slot=audit-display]")!
-    expect(strip).not.toBeNull()
-    const group = within(strip).getByRole("switch", { name: "Group repeated events" })
-    expect(group).toHaveAttribute("aria-checked", "true")
-    expect(within(strip).getByRole("switch", { name: "Mark access changes" })).toHaveAttribute("aria-checked", "true")
-    expect(within(screen.getByRole("complementary", { name: "Audit log navigation" })).queryByText("Group repeated events")).toBeNull()
+    const head = document.querySelector<HTMLElement>("[data-slot=audit-events-head]")!
+    expect(head).not.toBeNull()
+    const group = within(head).getByRole("button", { name: "Group repeats" })
+    expect(group).toHaveAttribute("aria-pressed", "true")
+    expect(within(head).getByRole("button", { name: "Mark access changes" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.queryByRole("switch")).toBeNull()
+    expect(within(screen.getByRole("complementary", { name: "Audit log navigation" })).queryByText("Group repeats")).toBeNull()
     fireEvent.click(group)
-    expect(group).toHaveAttribute("aria-checked", "false")
+    expect(group).toHaveAttribute("aria-pressed", "false")
   })
 
   it("opens a row's detail: action, entity, IP, user agent, details, immutable", async () => {
@@ -250,7 +268,7 @@ describe("Audit log — range, display, detail and paging", () => {
   // SET-07: one section head, drawn by the Settings drill frame.
   it("says what the page is once, in the section head", () => {
     render(<AuditLogPage />)
-    expect(screen.getAllByText(/Every state-changing action, immutably recorded/)).toHaveLength(1)
+    expect(screen.getAllByText(/Every change in this workspace, kept exactly as it happened/)).toHaveLength(1)
     const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")!
     expect(head).toHaveTextContent("Admins and the owner")
   })
