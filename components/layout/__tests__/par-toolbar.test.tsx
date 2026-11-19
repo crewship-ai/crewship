@@ -61,6 +61,8 @@ describe("the top bar's right edge (PAR-001)", () => {
     const header = bar()
     const names = within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label"))
     expect(names.slice(-3)).toEqual(["Activity", "Inbox", "Crewship"])
+    // It stands apart from the bells (owner, 19 Nov).
+    expect(within(header).getByRole("button", { name: "Crewship" }).closest('[data-slot="crewship-sail-slot"]')).toHaveClass("ml-1.5", "md:ml-3")
   })
 })
 

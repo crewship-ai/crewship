@@ -282,7 +282,11 @@ export function AppToolbar() {
               <InboxBell />
             </div>
           )}
-          <CrewshipMenu />
+          {/* The sail is the product's mark, not a third bell: it stands a
+              little apart from Activity and Inbox (owner, 19 Nov). */}
+          <div className="ml-1.5 flex md:ml-3" data-slot="crewship-sail-slot">
+            <CrewshipMenu />
+          </div>
         </div>
       </div>
 
