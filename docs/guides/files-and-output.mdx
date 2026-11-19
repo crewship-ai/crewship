@@ -152,7 +152,7 @@ The `/crew/shared/` directory is accessible to all agents in a crew. Use it for:
 
 Any agent in the crew can read from and write to this directory.
 
-The `/crew/shared/.memory/` subdirectory holds **crew shared memory** -- FTS5-indexed knowledge shared across all agents. The Lead agent writes to `CREW.md` and `topics/*.md`; all agents can search it. See the [Memory System](/guides/agent-memory) guide for details.
+The `/crew/shared/.memory/` subdirectory holds **crew shared memory** -- FTS5-indexed knowledge shared across all agents. The Lead agent writes to `CREW.md`, which all agents can search; `topics/*.md` files in the same directory are plain files, not part of memory search. See the [Memory System](/guides/agent-memory) guide for details.
 
 ## File Events via WebSocket
 

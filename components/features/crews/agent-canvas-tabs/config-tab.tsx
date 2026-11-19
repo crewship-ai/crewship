@@ -21,7 +21,8 @@ import type { AgentRecord } from "./types"
 //
 // Every field here exists in the API — verified against internal/api/agents.go
 // and agents_create.go. Fields the schema carries but no handler exposes
-// (temperature, max_tokens, the delegation limits) are deliberately absent:
+// (temperature, max_tokens, the unused per-agent delegation columns; delegation
+// is limited per instance, see docs/guides/orchestration.mdx) are deliberately absent:
 // rendering a control that silently fails to save is worse than not offering
 // it. The create-agent dialog's "Not editable here" note says the same thing;
 // it used to send people to this tab instead (#1781), so if that ever changes
