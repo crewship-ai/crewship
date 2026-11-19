@@ -765,9 +765,12 @@ composer control for other wording.
 A Document created from a private chat has an explicit private audience: its
 human owner. A workspace OWNER or ADMIN can read it, and every such read of
 somebody else's private document writes a durable audit entry
-(`artifact.private_owner_accessed`) before access. Only the owner comments,
-shares or manages access; an ADMIN never edits it. Other roles cannot see its
-title, catalog entry or content, and direct reads return 404. Crew membership,
+(`artifact.private_owner_accessed`) before access. Only the owner comments.
+The owner and the workspace OWNER keep edit and access-administration rights;
+an ADMIN's read never becomes edit, share or publish rights. Ordinary grants and
+legacy links cannot widen the audience; only an explicit publication can. Other
+roles cannot see its title, catalog entry or content, and direct Page reads
+return 404. Crew membership,
 folder inheritance and ordinary sharing grants do not widen this audience. Legacy public links cannot publish it. Storage limits continue
 to count the whole workspace. If its owner leaves, removal returns 409 until
 the workspace OWNER explicitly selects an active human successor.
