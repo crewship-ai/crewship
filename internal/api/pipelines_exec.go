@@ -1303,12 +1303,6 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// who learns/guesses a pending waitpoint token from workspace B could
 	// approve/deny B's gated run.
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	// The path normally carries the public waitpoint id. A value captured
-	// before #1910 (the old secret token) is mapped to its id through the
-	// row's callback digest, within this workspace only.
-	if rr, ok := h.waitpoints.(waitpointRefResolver); ok {
-		token = rr.ResolveWaitpointRef(r.Context(), workspaceID, token)
-	}
 	if err := wp.Decide(r.Context(), workspaceID, token, body.Approved, decider, payload); err != nil {
 		err = explainDecideError(r.Context(), wp, workspaceID, token, err)
 		replyWaitpointDecideError(w, h.logger, "waitpoint complete", token, err)

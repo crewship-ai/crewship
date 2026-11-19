@@ -133,11 +133,6 @@ type waitpointCallbackResolver interface {
 	ResolveCallbackToken(ctx context.Context, presented string) (id, workspaceID string, err error)
 }
 
-// waitpointRefResolver maps an authed approve path value to a waitpoint id.
-type waitpointRefResolver interface {
-	ResolveWaitpointRef(ctx context.Context, workspaceID, ref string) string
-}
-
 // waitpointCallbackMinter mints a waitpoint's callback secret.
 type waitpointCallbackMinter interface {
 	MintCallbackToken(ctx context.Context, workspaceID, id string) (secret string, rotated bool, err error)
@@ -167,9 +162,6 @@ func (h *PipelineHandler) MintWaitpointCallbackToken(w http.ResponseWriter, r *h
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if rr, ok := h.waitpoints.(waitpointRefResolver); ok {
-		id = rr.ResolveWaitpointRef(r.Context(), workspaceID, id)
-	}
 	secret, rotated, err := minter.MintCallbackToken(r.Context(), workspaceID, id)
 	switch {
 	case errors.Is(err, pipeline.ErrWaitpointNotFound):

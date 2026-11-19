@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -68,10 +67,6 @@ type SQLWaitpointStore struct {
 	// handle and has no dependencies of its own, so the feature needs no
 	// bootstrap wiring — every construction of a waitpoint store gets it.
 	trust *TrustGrantStore
-
-	// legacyTokens counts rows still holding a pre-#1910 secret as their id;
-	// the sweeper retries their migration while it is non-zero.
-	legacyTokens atomic.Int64
 }
 
 // SetTimeoutResumer wires the callback the sweeper (and boot recovery)
@@ -119,7 +114,8 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 	}
 	// Before anything can read a waitpoint: give legacy rows a public id and
 	// hash their secret in place (#1910, waitpoints_callback_token.go).
-	s.legacyTokens.Store(int64(prepareWaitpointTokens(db)))
+	ensureWaitpointDigestColumn(db)
+	s.migrateLegacyTokens()
 	s.sweeperWg.Add(1)
 	go s.sweeper()
 	return s
@@ -870,7 +866,7 @@ func (s *SQLWaitpointStore) sweeper() {
 			return
 		case <-t.C:
 			s.sweepOnce()
-			s.retryLegacyTokens()
+			s.migrateLegacyTokens()
 		}
 	}
 }
@@ -939,15 +935,6 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 		// wired and detaches so a slow resume can't stall the sweep.
 		s.resumeRun(wp.runID)
 	}
-}
-
-// retryLegacyTokens re-runs the legacy-row migration while rows that failed
-// at construction remain (#1910). Normally a no-op.
-func (s *SQLWaitpointStore) retryLegacyTokens() {
-	if s.legacyTokens.Load() <= 0 {
-		return
-	}
-	s.legacyTokens.Store(int64(prepareWaitpointTokens(s.db)))
 }
 
 // generateWaitpointToken returns a 32-hex-char random value. It no longer

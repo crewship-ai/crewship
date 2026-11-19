@@ -13,14 +13,15 @@
 -- 20260810171000_hash_capability_tokens uses for webhooks and port exposures
 -- (unkeyed, for the reasons recorded there).
 --
--- WHY THE BACKFILL IS NOT IN THIS FILE. SQLite has no SHA-256. The Go half
--- runs when the waitpoint store is constructed (NewSQLWaitpointStore, before
--- anything serves) and is retried by its sweeper: for every row whose token is
--- not a "wp_" id it stores the digest of the existing token IN PLACE (an
--- external system already holding a callback URL keeps working), replaces
--- the token with a fresh public id, and rewrites the copies of the old value
--- in inbox_items, notification_deliveries and audit_logs — one transaction
--- per row. See internal/pipeline/waitpoints_callback_token.go.
+-- WHY THE CONVERSION IS NOT IN THIS FILE. The old token is copied into
+-- inbox_items.id ("ibx_<ws>_waitpoint_<token>"), inbox_item_reads,
+-- notification_deliveries.dedup_key and audit_logs, and every copy has to
+-- move to the new id in one transaction per row — easier to state and test in
+-- Go than as a chain of SQL string surgery. It runs when the waitpoint store
+-- is constructed (NewSQLWaitpointStore, before anything serves) and on every
+-- sweep. Old secrets are NOT hashed forward: any member could read them before
+-- this change, so a waitpoint pending at upgrade time needs a newly minted
+-- callback URL. See internal/pipeline/waitpoints_callback_token.go.
 --
 -- The column keeps the name `token` on purpose: every internal lookup keys on
 -- it, and none of them needed a secret.

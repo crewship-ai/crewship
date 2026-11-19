@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -158,66 +157,63 @@ SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE c
 	return id, workspaceID, nil
 }
 
-// ResolveWaitpointRef maps what an AUTHENTICATED caller put in the approve
-// path to a waitpoint id in their workspace. Normally that is the id itself.
-// A pre-#1910 token value (a script that captured `waitpoint_token` before
-// the upgrade) is no longer an id, but its digest is still the row's callback
-// digest, so it is resolved through that — scoped to the caller's workspace,
-// so it grants nothing the authenticated route did not already allow. Anything
-// else is returned unchanged and the decide path answers it as before.
-func (s *SQLWaitpointStore) ResolveWaitpointRef(ctx context.Context, workspaceID, ref string) string {
-	if ref == "" || strings.HasPrefix(ref, WaitpointIDPrefix) {
-		return ref
-	}
-	digest := CapabilityLookupDigest(ref)
-	if digest == "" {
-		return ref
-	}
-	var id string
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT token FROM pipeline_waitpoints WHERE workspace_id = ? AND callback_token_hash = ?`,
-		workspaceID, digest).Scan(&id); err != nil {
-		return ref
-	}
-	return id
-}
-
 // ---------------------------------------------------------------------------
 // Legacy-row migration
 //
-// The SQL half (migrations/20261119153114_waitpoint_callback_token_hash.sql)
-// adds callback_token_hash; SQLite has no SHA-256, so the rest happens here,
-// when the store is constructed — before anything serves a request — and is
-// retried by the sweeper for any row that failed. For each row whose token is
-// not a public id, in ONE transaction:
+// The SQL half (migrations/20261119180903_waitpoint_callback_token_hash.sql)
+// adds callback_token_hash. The rest runs in Go when the store is constructed
+// — before anything serves a request — and again on every sweep, so a row
+// that failed, or a pre-#1910 row a restore brought back into a running
+// server, is converted within one sweep interval.
 //
-//   - callback_token_hash = HashCapabilityToken(old token), IN PLACE, so an
-//     external system already holding a callback URL keeps working;
-//   - token = a fresh public id, so the cleartext leaves the row;
-//   - every copy of the old value is rewritten to the new id:
-//     inbox_items.source_id, notification_deliveries.source_id + dedup_key,
-//     audit_logs.entity_id.
+// OLD SECRETS ARE NOT CARRIED FORWARD. Before #1910 every workspace member
+// could read a working callback URL from GET …/pipelines/waitpoints, and the
+// token also sat in the clear in several other tables, so a pre-upgrade secret
+// cannot be presumed private. A legacy row therefore gets NO digest: the
+// public callback refuses it until a MANAGER mints a new URL
+// (`crewship routine waitpoints callback-url`). The authenticated routes keep
+// working because they key on the new id.
 //
-// A row that fails stays exactly as it was (the transaction rolls back): the
-// authed routes still find it by its old value, the public callback does not
-// (fail closed), and the next sweep tries again.
+// For each row whose token is not a public id, in ONE transaction, the old
+// value is replaced by a fresh public id everywhere it was copied, so no
+// trace of it is left in the database:
+//
+//   - pipeline_waitpoints.token;
+//   - inbox_items.source_id AND inbox_items.id, which the inbox writer derives
+//     as "ibx_<workspace>_waitpoint_<source_id>" (internal/inbox/writer.go);
+//   - inbox_item_reads.inbox_item_id, the one foreign key onto inbox_items.id;
+//   - notification_deliveries.source_id and dedup_key ("<category>:<source>");
+//   - audit_logs.entity_id for waitpoint refusals.
+//
+// A row that fails stays exactly as it was (the transaction rolls back) and
+// is retried on the next sweep.
 // ---------------------------------------------------------------------------
 
+// legacyWaitpointPredicate selects rows whose token is not a public id. It is
+// written as a range over the primary key — every "wp_…" value sorts in
+// ['wp_', 'wp`') because '`' follows '_' — so the per-sweep check is two index
+// probes, not a table scan.
+const legacyWaitpointPredicate = `(token < 'wp_' OR token >= 'wp` + "`" + `')`
+
 // legacyWaitpointRefTables are the copies of a waitpoint's identity outside
-// its own row. Each statement binds ?1 = new id, ?2 = old value, ?3 = the
-// row's workspace.
+// its own row, in the order they must be rewritten (children before the
+// inbox_items row whose id they reference). Each statement binds ?1 = new id,
+// ?2 = old value, ?3 = the row's workspace.
 var legacyWaitpointRefTables = []struct{ table, stmt string }{
-	{"inbox_items", `UPDATE inbox_items SET source_id = ?1 WHERE source_id = ?2 AND workspace_id = ?3 AND kind = 'waitpoint'`},
-	// dedup_key is "<category>:<source_id>" (notifyroute.Router).
+	{"inbox_item_reads", `UPDATE inbox_item_reads SET inbox_item_id = replace(inbox_item_id, ?2, ?1)
+ WHERE inbox_item_id IN (SELECT id FROM inbox_items WHERE source_id = ?2 AND workspace_id = ?3 AND kind = 'waitpoint')`},
+	{"inbox_items", `UPDATE inbox_items SET id = replace(id, ?2, ?1), source_id = ?1 WHERE source_id = ?2 AND workspace_id = ?3 AND kind = 'waitpoint'`},
 	{"notification_deliveries", `UPDATE notification_deliveries SET source_id = ?1, dedup_key = replace(dedup_key, ?2, ?1) WHERE source_id = ?2 AND workspace_id = ?3 AND source_kind = 'waitpoint'`},
 	{"audit_logs", `UPDATE audit_logs SET entity_id = ?1 WHERE entity_id = ?2 AND workspace_id = ?3 AND entity_type = 'waitpoint'`},
 }
 
-// migrateLegacyWaitpointTokens converts every legacy row. Returns how many it
-// converted and how many are still legacy afterwards.
-func migrateLegacyWaitpointTokens(ctx context.Context, db *sql.DB) (migrated, remaining int, err error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT token, workspace_id FROM pipeline_waitpoints WHERE substr(token, 1, 3) <> ?`, WaitpointIDPrefix)
+// migrateLegacyWaitpointTokens converts every legacy row, pending ones first
+// (a live gate matters more than history if the budget runs out). Returns how
+// many it converted and how many are still legacy afterwards. onMigrated, when
+// set, is told each (old, new) pair after its commit.
+func migrateLegacyWaitpointTokens(ctx context.Context, db *sql.DB, onMigrated func(old, id string)) (migrated, remaining int, err error) {
+	rows, err := db.QueryContext(ctx, `SELECT token, workspace_id FROM pipeline_waitpoints WHERE `+
+		legacyWaitpointPredicate+` ORDER BY status <> 'pending'`)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -254,74 +250,105 @@ func migrateLegacyWaitpointTokens(ctx context.Context, db *sql.DB) (migrated, re
 		if cerr := ctx.Err(); cerr != nil {
 			return migrated, len(todo) - i, nil
 		}
-		if err := migrateLegacyWaitpointRow(ctx, db, present, l.token, l.workspaceID); err != nil {
+		id, err := migrateLegacyWaitpointRow(ctx, db, present, l.token, l.workspaceID)
+		if err != nil {
 			remaining++
-			// The row id is the secret being migrated: log a fingerprint only.
-			slog.Error("waitpoint tokens: migrating a legacy row failed — it is retried by the sweeper",
+			// The old value may be a live secret: log a fingerprint only.
+			slog.Error("waitpoint tokens: migrating a legacy row failed — retried on the next sweep",
 				"workspace_id", l.workspaceID, "token", tokenDigestFingerprint(l.token), "error", err)
 			continue
 		}
-		migrated++
+		if id != "" {
+			migrated++
+			if onMigrated != nil {
+				onMigrated(l.token, id)
+			}
+		}
 	}
 	return migrated, remaining, nil
 }
 
-func migrateLegacyWaitpointRow(ctx context.Context, db *sql.DB, present map[string]bool, old, workspaceID string) error {
+func migrateLegacyWaitpointRow(ctx context.Context, db *sql.DB, present map[string]bool, old, workspaceID string) (string, error) {
 	id, err := newWaitpointID()
 	if err != nil {
-		return err
+		return "", err
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer func() { _ = tx.Rollback() }()
-	// An empty token cannot be presented at the callback, so it gets no
-	// digest; HashCapabilityToken("") is "" and NULL is stored instead.
-	var digest any
-	if h := HashCapabilityToken(old); h != "" {
-		digest = h
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return "", err
 	}
-	res, err := tx.ExecContext(ctx, `
-UPDATE pipeline_waitpoints SET token = ?, callback_token_hash = COALESCE(callback_token_hash, ?)
- WHERE token = ? AND substr(token, 1, 3) <> ?`, id, digest, old, WaitpointIDPrefix)
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
+	// inbox_item_reads references inbox_items(id), which is rewritten in the
+	// same transaction; check the constraint at COMMIT, when both agree.
+	// Resets itself when the transaction ends.
+	if _, err := conn.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
+		return "", err
+	}
+	res, err := conn.ExecContext(ctx, `
+UPDATE pipeline_waitpoints SET token = ?, callback_token_hash = NULL
+ WHERE token = ? AND `+legacyWaitpointPredicate, id, old)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return nil // migrated concurrently
+		return "", nil // migrated concurrently
 	}
 	for _, ref := range legacyWaitpointRefTables {
 		if !present[ref.table] {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, ref.stmt, id, old, workspaceID); err != nil {
-			return fmt.Errorf("%s: %w", ref.table, err)
+		if _, err := conn.ExecContext(ctx, ref.stmt, id, old, workspaceID); err != nil {
+			return "", fmt.Errorf("%s: %w", ref.table, err)
 		}
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return "", err
+	}
+	committed = true
+	return id, nil
 }
 
-// prepareWaitpointTokens is the constructor-time sequence: make sure the
-// digest column exists, then migrate legacy rows. Returns how many rows are
-// still legacy; never fatal — a store that refuses to construct would take
-// the daemon down, and an unmigrated row fails closed at the public callback.
-func prepareWaitpointTokens(db *sql.DB) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// ensureWaitpointDigestColumn makes sure callback_token_hash exists (hand-rolled
+// test schemas and partial restores lack the migration).
+func ensureWaitpointDigestColumn(db *sql.DB) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := ensureCapabilityDigestColumn(ctx, db, "pipeline_waitpoints", "callback_token_hash"); err != nil {
 		slog.Warn("waitpoint tokens: ensure callback_token_hash column", "error", err)
-		return 1
 	}
-	migrated, remaining, err := migrateLegacyWaitpointTokens(ctx, db)
-	if err != nil {
+}
+
+// migrateLegacyTokens is the store's conversion pass (construction and every
+// sweep). Normally it costs two index probes and finds nothing. A converted
+// row's in-memory listener, if any, follows it to the new id, so a waiter
+// parked on the old value is still woken by a decision on the new one.
+func (s *SQLWaitpointStore) migrateLegacyTokens() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	migrated, remaining, err := migrateLegacyWaitpointTokens(ctx, s.db, func(old, id string) {
+		s.mu.Lock()
+		if ch, ok := s.listeners[old]; ok {
+			delete(s.listeners, old)
+			s.listeners[id] = ch
+		}
+		s.mu.Unlock()
+	})
+	switch {
+	case err != nil:
 		slog.Error("waitpoint tokens: legacy migration failed", "migrated", migrated, "error", err)
-		return 1
+	case migrated > 0:
+		slog.Warn("waitpoint tokens: legacy waitpoints given public ids; their old callback URLs no longer work — mint new ones with `crewship routine waitpoints callback-url`",
+			"rows", migrated, "remaining", remaining)
 	}
-	if migrated > 0 {
-		slog.Info("waitpoint tokens: legacy rows given public ids, callback tokens hashed at rest", "rows", migrated)
-	}
-	return remaining
 }
 
 // tokenDigestFingerprint is a log-safe handle for a legacy (secret) token.

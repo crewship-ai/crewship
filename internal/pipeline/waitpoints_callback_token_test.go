@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // #1910: the waitpoint's identity is public, the callback capability is a
@@ -124,36 +128,37 @@ func TestWaitpointCallback_MintRefusals(t *testing.T) {
 	}
 }
 
-// A pre-#1910 database: the token column holds the secret, and copies of it
-// sit in the inbox, the notification outbox and the audit log.
-func TestWaitpointCallback_LegacyRowsMigrateInPlace(t *testing.T) {
-	db := openStoreTestDB(t)
-	defer db.Close()
+// A pre-#1910 database on the real migrated schema: the token column holds
+// the secret, and the production writers have copied it into the inbox (row
+// id included), a read marker, the notification outbox and the audit log.
+func TestWaitpointCallback_LegacyRowsMigrate_NoTraceLeft(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
 	ctx := context.Background()
-	for _, ddl := range []string{
-		`CREATE TABLE pipeline_waitpoints (
-    token TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, pipeline_run_id TEXT NOT NULL,
-    step_id TEXT NOT NULL, kind TEXT NOT NULL, prompt TEXT, invoking_crew_id TEXT,
-    status TEXT NOT NULL DEFAULT 'pending', decision_payload TEXT, decided_by_user_id TEXT,
-    timeout_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    decided_at TEXT, decision_form_json TEXT NOT NULL DEFAULT '', routine_version INTEGER)`,
-		`CREATE TABLE inbox_items (id TEXT PRIMARY KEY, workspace_id TEXT, kind TEXT, source_id TEXT)`,
-		`CREATE TABLE notification_deliveries (id TEXT PRIMARY KEY, workspace_id TEXT, dedup_key TEXT, source_kind TEXT, source_id TEXT)`,
-		`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, workspace_id TEXT, entity_type TEXT, entity_id TEXT)`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatal(err)
-		}
-	}
 	const legacy = "0123456789abcdef0123456789abcdef"
 	const decidedLegacy = "fedcba9876543210fedcba9876543210"
 	for _, q := range []string{
+		`INSERT INTO workspaces(id,name,slug) VALUES('ws_a','A','a')`,
+		`INSERT INTO users(id,email,full_name) VALUES('u_1','u1@example.com','U')`,
 		`INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, timeout_at) VALUES ('` + legacy + `','ws_a','run_1','gate','approval','2999-01-01T00:00:00Z')`,
 		`INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at) VALUES ('` + decidedLegacy + `','ws_a','run_2','gate','approval','approved','2999-01-01T00:00:00Z')`,
-		`INSERT INTO inbox_items VALUES ('in_1','ws_a','waitpoint','` + legacy + `')`,
-		`INSERT INTO inbox_items VALUES ('in_2','ws_a','escalation','` + legacy + `')`, // not a waitpoint ref
-		`INSERT INTO notification_deliveries VALUES ('nd_1','ws_a','approval:` + legacy + `','waitpoint','` + legacy + `')`,
-		`INSERT INTO audit_logs VALUES ('al_1','ws_a','waitpoint','` + legacy + `')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The inbox card through the production writer, so its id has the real
+	// "ibx_<ws>_waitpoint_<source_id>" shape.
+	if err := inbox.Insert(ctx, db, slog.Default(), inbox.Item{WorkspaceID: "ws_a", Kind: inbox.KindWaitpoint, SourceID: legacy, Title: "Ship?", Blocking: true}); err != nil {
+		t.Fatal(err)
+	}
+	var inboxID string
+	if err := db.QueryRow(`SELECT id FROM inbox_items WHERE source_id = ?`, legacy).Scan(&inboxID); err != nil || !strings.Contains(inboxID, legacy) {
+		t.Fatalf("fixture: writer-built inbox id %q (%v) does not embed the token", inboxID, err)
+	}
+	for _, q := range []string{
+		`INSERT INTO inbox_item_reads(inbox_item_id,user_id,read_at) VALUES('` + inboxID + `','u_1','2026-11-19T00:00:00Z')`,
+		`INSERT INTO notification_deliveries(id,workspace_id,channel_id,category,dedup_key,source_kind,source_id) VALUES('nd_1','ws_a','ch_1','approval','approval:` + legacy + `','waitpoint','` + legacy + `')`,
+		`INSERT INTO audit_logs(id,workspace_id,action,entity_type,entity_id) VALUES('al_1','ws_a','waitpoint.decision_refused','waitpoint','` + legacy + `')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -170,40 +175,73 @@ func TestWaitpointCallback_LegacyRowsMigrateInPlace(t *testing.T) {
 	if !strings.HasPrefix(id, WaitpointIDPrefix) {
 		t.Fatalf("legacy row kept token %q", id)
 	}
-	for _, secret := range []string{legacy, decidedLegacy} {
-		assertNoPlaintext(t, db, secret, "inbox_items:in_2")
+	// No trace of either old value anywhere in the database.
+	assertNoPlaintext(t, db, legacy)
+	assertNoPlaintext(t, db, decidedLegacy)
+	// Old secrets are not carried forward: nothing opens the public callback
+	// until a MANAGER mints a new URL.
+	if d := callbackDigest(t, db, id); d != "" {
+		t.Fatalf("legacy row kept a live callback digest")
 	}
-	// In place: the external holder of the old callback URL keeps working.
-	gotID, gotWS, err := store.ResolveCallbackToken(ctx, legacy)
-	if err != nil || gotID != id || gotWS != "ws_a" {
-		t.Fatalf("legacy secret resolved to (%q,%q,%v); want (%q, ws_a)", gotID, gotWS, err, id)
+	if gotID, _, _ := store.ResolveCallbackToken(ctx, legacy); gotID != "" {
+		t.Fatalf("the pre-upgrade secret still opens the callback")
 	}
-	// Every copy follows the new id.
-	var inbox, nd, dedup, audit string
-	_ = db.QueryRow(`SELECT source_id FROM inbox_items WHERE id='in_1'`).Scan(&inbox)
+	// Every copy follows the new id, and the inbox card is still the card.
+	var source, newInboxID, readRef, nd, dedup, audit string
+	_ = db.QueryRow(`SELECT id, source_id FROM inbox_items WHERE kind='waitpoint'`).Scan(&newInboxID, &source)
+	_ = db.QueryRow(`SELECT inbox_item_id FROM inbox_item_reads`).Scan(&readRef)
 	_ = db.QueryRow(`SELECT source_id, dedup_key FROM notification_deliveries WHERE id='nd_1'`).Scan(&nd, &dedup)
 	_ = db.QueryRow(`SELECT entity_id FROM audit_logs WHERE id='al_1'`).Scan(&audit)
-	if inbox != id || nd != id || dedup != "approval:"+id || audit != id {
-		t.Fatalf("refs not rewritten: inbox=%q delivery=%q dedup=%q audit=%q want %q", inbox, nd, dedup, audit, id)
+	if want := strings.Replace(inboxID, legacy, id, 1); newInboxID != want || source != id || readRef != want {
+		t.Fatalf("inbox not rewritten: id=%q source=%q read=%q want id %q source %q", newInboxID, source, readRef, want, id)
 	}
-	// The authed route still accepts a token a script captured pre-upgrade.
-	if got := store.ResolveWaitpointRef(ctx, "ws_a", legacy); got != id {
-		t.Fatalf("ResolveWaitpointRef(legacy) = %q, want %q", got, id)
+	if nd != id || dedup != "approval:"+id || audit != id {
+		t.Fatalf("refs not rewritten: delivery=%q dedup=%q audit=%q want %q", nd, dedup, audit, id)
 	}
-	if got := store.ResolveWaitpointRef(ctx, "ws_b", legacy); got == id {
-		t.Fatalf("ResolveWaitpointRef resolved across workspaces")
+	var fkProblems int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&fkProblems); err != nil || fkProblems != 0 {
+		t.Fatalf("foreign key check after migration: %d (%v)", fkProblems, err)
 	}
-	if err := store.CompleteApproval(ctx, "ws_a", id, true, "user_1", ""); err != nil {
+	// The authed path keys on the new id, and a new URL can be minted.
+	if _, _, err := store.MintCallbackToken(ctx, "ws_a", id); err != nil {
+		t.Fatalf("cannot mint for a migrated waitpoint: %v", err)
+	}
+	if err := store.CompleteApproval(ctx, "ws_a", id, true, "u_1", ""); err != nil {
 		t.Fatalf("migrated waitpoint cannot be decided by id: %v", err)
 	}
 
-	// Idempotent: a second construction finds nothing to do.
-	again := NewSQLWaitpointStore(db)
-	again.Close()
+	// Idempotent, and a legacy row restored into a running server is picked
+	// up by the next sweep without a restart.
+	store.sweepOnce()
+	store.migrateLegacyTokens()
 	var after string
 	_ = db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id='run_1'`).Scan(&after)
 	if after != id {
-		t.Fatalf("second construction re-migrated the row: %q -> %q", id, after)
+		t.Fatalf("second pass re-migrated the row: %q -> %q", id, after)
+	}
+	const restored = "aaaabbbbccccddddaaaabbbbccccdddd"
+	if _, err := db.Exec(`INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, timeout_at) VALUES ('` + restored + `','ws_a','run_3','gate','approval','2999-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	ch := make(chan waitDecision, 1)
+	store.listeners[restored] = ch
+	store.mu.Unlock()
+	store.migrateLegacyTokens()
+	assertNoPlaintext(t, db, restored)
+	var restoredID string
+	_ = db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id='run_3'`).Scan(&restoredID)
+	// A waiter parked on the old value is woken by a decision on the new id.
+	if err := store.CompleteApproval(ctx, "ws_a", restoredID, true, "u_1", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case d := <-ch:
+		if !d.approved {
+			t.Fatal("listener got a denial")
+		}
+	default:
+		t.Fatal("the listener registered under the old value was not moved to the new id")
 	}
 }
 
