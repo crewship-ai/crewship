@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
-	for _, which := range []string{"valid", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running"} {
+	for _, which := range []string{"valid", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate"} {
 		t.Run(which, func(t *testing.T) {
 			root := t.TempDir()
 			crew := "outer-crew"
@@ -117,6 +118,22 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 				volumes["crew-volume"]["Labels"] = copyLabels
 			case "volume-driver":
 				volumes["crew-volume"]["Driver"] = "foreign"
+			case "agent-cli":
+				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
+			case "agent-cli-unconfigured":
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
+			case "agent-cli-missing":
+				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+			case "agent-cli-rw":
+				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": true})
+			case "agent-cli-source":
+				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/tmp/forged", "Destination": "/usr/local/bin/crewship", "RW": false})
+			case "agent-cli-duplicate":
+				p.cfg.agentCLIArtifact = &runtimestage.AgentCLIArtifact{Path: "/trusted/agent-cli"}
+				mounts = append(mounts, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false}, map[string]any{"Type": "bind", "Source": "/trusted/agent-cli", "Destination": "/usr/local/bin/crewship", "RW": false})
 			case "wrong-image":
 				metadata["Image"] = "sha256:" + strings.Repeat("b", 64)
 			case "not-running":
@@ -124,7 +141,7 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 			}
 			d := managedlaunch.Descriptor{ImageID: image}
 			err := p.attestCodexOuterMetadata(context.Background(), "c1", crew, d)
-			if (err == nil) != (which == "valid") {
+			if (err == nil) != (which == "valid" || which == "agent-cli") {
 				t.Fatalf("%s qualification: %v", which, err)
 			}
 		})

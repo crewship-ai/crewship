@@ -137,7 +137,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || !slices.Contains(c.HostConfig.CapDrop, "ALL") || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
 		return denied
 	}
-	const executable = "/usr/local/bin/crewship"
+	const executable = agentCLIExecutable
 	bound := false
 	var writable []container.MountPoint
 	for _, m := range c.Mounts {

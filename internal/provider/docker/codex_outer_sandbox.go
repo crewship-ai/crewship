@@ -95,7 +95,11 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 				return denied
 			}
 		case mount.TypeBind:
-			if m.RW || !((m.Destination == managedlaunch.LauncherPath && m.Source == p.cfg.SidecarBinaryPath) || (m.Destination == "/usr/local/bin/entrypoint.sh" && m.Source == p.cfg.EntrypointPath)) {
+			// The immutable native agent CLI (#5491) is the third trusted
+			// read-only bind, accepted only from this provider's staged
+			// artifact (#5549); without a staged artifact it stays denied.
+			agentCLI := p.cfg.agentCLIArtifact != nil && m.Destination == agentCLIExecutable && m.Source == p.cfg.agentCLIArtifact.Path
+			if m.RW || !((m.Destination == managedlaunch.LauncherPath && m.Source == p.cfg.SidecarBinaryPath) || (m.Destination == "/usr/local/bin/entrypoint.sh" && m.Source == p.cfg.EntrypointPath) || agentCLI) {
 				return denied
 			}
 		case mount.TypeVolume:
@@ -144,10 +148,17 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 			return denied
 		}
 	}
-	for _, destination := range []string{"/output", "/workspace", "/crew", "/home/agent", "/opt/crew-tools", managedlaunch.LauncherPath, "/usr/local/bin/entrypoint.sh"} {
+	required := []string{"/output", "/workspace", "/crew", "/home/agent", "/opt/crew-tools", managedlaunch.LauncherPath, "/usr/local/bin/entrypoint.sh"}
+	if p.cfg.agentCLIArtifact != nil {
+		required = append(required, agentCLIExecutable)
+	}
+	for _, destination := range required {
 		if !seen[destination] {
 			return denied
 		}
 	}
 	return nil
 }
+
+// agentCLIExecutable is where createMounts binds the staged native agent CLI.
+const agentCLIExecutable = "/usr/local/bin/crewship"

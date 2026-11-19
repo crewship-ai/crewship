@@ -36,7 +36,10 @@ UID 1001, read-only rootfs, no privileged mode, CapDrop ALL, no added capabiliti
 or devices, no-new-privileges, private PID/IPC/network namespaces, no volumes-from,
 no unconfined security profile, and only approved crew mounts. Docker sockets,
 host-sensitive binds and writable overlays of executable/launcher code refuse
-qualification. The existing trusted static launcher checks effective UID, GID, NoNewPrivs,
+qualification. The only accepted binds are read-only: the trusted launcher, the
+entrypoint, and, when the installation stages one, the immutable native agent
+CLI at `/usr/local/bin/crewship` from that exact staged artifact (required then,
+refused otherwise). The existing trusted static launcher checks effective UID, GID, NoNewPrivs,
 seccomp and zero capabilities in its own process immediately before exec.
 It creates no additional probe process or RunID. Seccomp mode 2 alone does not
 attest filter contents.
