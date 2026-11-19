@@ -8133,6 +8133,159 @@
         },
         "type": "array"
       },
+      "CrewMiseLockProposal": {
+        "additionalProperties": false,
+        "description": "Reviewable proposal only; hashes are input/output identities, not authorization. Does not apply config, publish a revision, replace a runtime or qualify installed tools.",
+        "properties": {
+          "lock": {
+            "$ref": "#/components/schemas/CrewMiseNativeLockBundle"
+          },
+          "lock_changed": {
+            "type": "boolean"
+          },
+          "lock_sha256": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "mise_version": {
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "linux-x64",
+              "linux-arm64"
+            ],
+            "type": "string"
+          },
+          "previous_lock_sha256": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "resolver_image_id": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "selectors_sha256": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "previous_versions": {
+                  "items": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array"
+                },
+                "resolved_versions": {
+                  "items": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array"
+                },
+                "version_changed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "backend",
+                "previous_versions",
+                "resolved_versions",
+                "version_changed"
+              ],
+              "type": "object"
+            },
+            "maxItems": 128,
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools",
+          "selectors_sha256",
+          "lock_sha256",
+          "lock_changed",
+          "resolver_image_id",
+          "platform",
+          "mise_version",
+          "lock"
+        ],
+        "type": "object"
+      },
+      "CrewMiseLockResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "bump": {
+            "default": false,
+            "type": "boolean"
+          },
+          "config": {
+            "additionalProperties": false,
+            "properties": {
+              "lock": {
+                "$ref": "#/components/schemas/CrewMiseNativeLockBundle"
+              },
+              "tools": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Validated native mise tool selectors. No config environment, tasks or caller-selected resolver image.",
+                "maxProperties": 20,
+                "minProperties": 1,
+                "type": "object"
+              }
+            },
+            "required": [
+              "tools"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "type": "object"
+      },
+      "CrewMiseNativeLockBundle": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "additionalProperties": {
+              "maxLength": 131072,
+              "type": "string"
+            },
+            "description": "Complete UTF-8 native bundle. mise.lock is required; auxiliary paths are bounded relative .mise/locks paths. Server enforces 128 KiB per file and 512 KiB aggregate bytes, no NUL, traversal or parent/file conflicts.",
+            "maxProperties": 128,
+            "minProperties": 1,
+            "type": "object"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "files"
+        ],
+        "type": "object"
+      },
       "CrewMissionResponseV1": {
         "properties": {
           "created_at": {
@@ -106299,17 +106452,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CrewMiseLockResolveRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewMiseLockProposal"
                 }
               }
             },
