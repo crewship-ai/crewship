@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/work"
@@ -45,7 +46,7 @@ func (h *InternalHandler) beginHostChatWork(w http.ResponseWriter, r *http.Reque
 	_, fresh, err = store.BeginHostChat(r.Context(), request)
 	if err != nil {
 		if errors.Is(err, work.ErrNoWork) {
-			replyError(w, 429, "chat execution capacity unavailable")
+			replyErrorCode(w, 429, "chat execution capacity unavailable", chatbridge.ChatCapacityUnavailableCode, "")
 		} else if errors.Is(err, work.ErrNotBound) || errors.Is(err, work.ErrStaleGeneration) {
 			replyError(w, 409, "run attempt identity is not current")
 		} else {

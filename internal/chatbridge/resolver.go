@@ -319,6 +319,14 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 	return nil
 }
 
+// ChatCapacityUnavailableCode is the machine-readable code of the 429 that
+// POST /internal/runs returns when the agent's chat work slot is held.
+const ChatCapacityUnavailableCode = "chat_capacity_unavailable"
+
+// ErrChatCapacityUnavailable reports that run admission was refused because
+// the agent is still finishing or recovering a previous turn.
+var ErrChatCapacityUnavailable = errors.New("chat execution capacity unavailable")
+
 // CreateRun records a new agent run via the internal API.
 func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
@@ -381,6 +389,14 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			var refusal struct {
+				Code string `json:"code"`
+			}
+			if json.Unmarshal(respBody, &refusal) == nil && refusal.Code == ChatCapacityUnavailableCode {
+				return fmt.Errorf("create run: %w", ErrChatCapacityUnavailable)
+			}
+		}
 		return fmt.Errorf("create run: server returned %d: %s", resp.StatusCode, respBody)
 	}
 	if requestedWork {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -171,5 +172,29 @@ func TestHostChatTurnReplayIsRefusedWithoutQueueing(t *testing.T) {
 	}
 	if after != before {
 		t.Fatalf("a refused replay queued work: %d -> %d items", before, after)
+	}
+}
+
+// A second host chat turn for an agent whose chat slot is held is refused with
+// 429 and a machine-readable code, so the chat bridge can tell it from a crash.
+func TestHostChatCapacityRefusalCarriesCode(t *testing.T) {
+	rig := newHostChatControlRig(t)
+	var agent string
+	if err := rig.h.db.QueryRow(`SELECT agent_id FROM chats WHERE id='control-chat'`).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, rig.h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('control-chat-2',?,?,?,'private')`, rig.ws, agent, rig.user)
+	receipt, err := chataudience.CaptureTrusted(t.Context(), rig.h.db, "control-chat-2", rig.user, nil)
+	if err != nil || receipt == nil {
+		t.Fatalf("human admission: %+v %v", receipt, err)
+	}
+	var seen error
+	server := httptest.NewServer(rig.mux)
+	t.Cleanup(server.Close)
+	resolver := chatbridge.NewIPCResolver(server.URL, "tok", newTestLogger())
+	ctx := chatbridge.WithHostChatWorkAdmission(runauthority.WithTriggerMessage(chataudience.WithReceipt(t.Context(), receipt), "control-message-2"))
+	seen = resolver.CreateRun(ctx, "msg_control_second", agent, "control-chat-2", rig.ws, "USER", nil)
+	if !errors.Is(seen, chatbridge.ErrChatCapacityUnavailable) {
+		t.Fatalf("want capacity refusal, got %v", seen)
 	}
 }

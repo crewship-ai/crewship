@@ -1368,6 +1368,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Error("failed to create durable run record", "error", err)
+		if errors.Is(err, ErrChatCapacityUnavailable) {
+			streamFn(ws.ChatEvent{Type: "error", Content: "The agent is busy: it is still finishing or recovering a previous turn. Try again shortly.", Metadata: map[string]any{"code": ChatCapacityUnavailableCode}})
+			return fmt.Errorf("create durable run: %w", err)
+		}
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to start a durable run"})
 		return fmt.Errorf("create durable run: %w", err)
 	}

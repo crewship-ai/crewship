@@ -244,6 +244,8 @@ const (
 // was created with an "automatic" UID — 1001 only when the base image
 // already had a user at 1000 (node, vscode), and 1000 on a slim image, where
 // the runtime's UID 1001 then had no account ("sudo: you do not exist").
+var accountOptionKeys = []string{"username", "userUid", "userGid", "uid", "gid"}
+
 var legacyCommonUtilsKeys = map[string]string{"uid": "userUid", "gid": "userGid"}
 
 // ErrAgentAccountConflict is returned when a declared common-utils feature
@@ -295,6 +297,15 @@ func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
 			c.Features[ref] = opts
 			changed = true
 		}
+		// Build env keys are uppercased, so a case variant of an account option
+		// would reach the feature as a second value for the same variable.
+		for key := range opts {
+			for _, canon := range accountOptionKeys {
+				if key != canon && strings.EqualFold(key, canon) {
+					return false, fmt.Errorf("%w: %s has option %q, a case variant of %q (feature options are uppercased into the build environment, so both would set the same variable); rename it to %q", ErrAgentAccountConflict, ref, key, canon, canon)
+				}
+			}
+		}
 		// username none/root: this feature creates no account, so the base
 		// image must provide agent at 1001 itself. Nothing to settle here.
 		if u := strings.ToLower(strings.TrimSpace(fmt.Sprint(opts["username"]))); u == "none" || u == "root" {
@@ -325,7 +336,7 @@ func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
 			if got != want {
 				return false, fmt.Errorf("%w: %s has %s=%q, but Crewship runs every crew container as user %s (UID %s); set %s to %q or remove it", ErrAgentAccountConflict, ref, key, got, agentUsername, agentUID, key, want)
 			}
-			if _, isString := v.(string); !isString {
+			if s, isString := v.(string); !isString || s != want {
 				opts[key] = want
 				changed = true
 			}
