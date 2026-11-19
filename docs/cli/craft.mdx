@@ -19,6 +19,8 @@ crewship craft preview <page>
 crewship craft versions <page>
 crewship craft version <page> <version> [--output FILE]
 crewship craft connect <page>
+crewship craft initialize <page> [--application word|sheet] --file <native.json>
+crewship craft task instruction|start|status|stop ...
 ```
 
 `preview` reads only `GET /api/v1/pages/{slug}/craft/preview` under ordinary
@@ -71,6 +73,8 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `share` | `POST /api/v1/pages/{slug}/craft/document/share` |
 | `proposals` | `GET /api/v1/pages/{slug}/craft/proposals` |
 | `proposal` | `GET /api/v1/pages/{slug}/craft/proposals/{proposal_id}` |
+| `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
+| `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
 A Read grantee can open `connect`, but only `status`, `watch` and `reauthorize`
 answer: they report who holds the lease, never content. `read`, `versions`,
@@ -82,8 +86,6 @@ rule and otherwise answer `403` (exit code `4`). Comment alone cannot open
 are not enough: they answer `403` (exit code `4`) with
 `only the page owner may share a version`, even while holding the lease. The
 lease row's `can_share` says whether this connection may share.
-| `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
-| `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
 ```json
 {"action":"status"}
