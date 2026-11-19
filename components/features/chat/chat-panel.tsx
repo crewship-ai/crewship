@@ -1894,6 +1894,8 @@ function CopyLinkButton() {
         ? <Check className="h-3 w-3 text-success" aria-hidden="true" />
         : <Link2 className="h-3 w-3" aria-hidden="true" />}
       <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
+      {/* Phones hide the label; say it to a screen reader as well. */}
+      <span className="sr-only" role="status">{copied ? "Link copied" : ""}</span>
     </button>
   )
 }

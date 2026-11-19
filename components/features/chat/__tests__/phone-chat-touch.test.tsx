@@ -36,6 +36,8 @@ describe("#3883 run preflight on a phone", () => {
     const box = await screen.findByTestId("run-preflight")
     expect(classes(box)).toContain("mx-2")
     expect(classes(box.querySelector("summary"))).toEqual(expect.arrayContaining(["flex", "items-center", "coarse:min-h-[44px]"]))
+    // A flex summary has no ::marker; it must still read as something that opens.
+    expect(box.querySelector("summary [data-testid=run-preflight-chevron]")).not.toBeNull()
   })
 })
 
@@ -46,6 +48,7 @@ describe("#3883 Copy link on a phone", () => {
     expect(fn).toMatch(/inline-flex items-center justify-center/)
     expect(fn).toMatch(/coarse:min-w-\[44px\]/)
     expect(fn).toMatch(/copied\s*\?\s*<Check/)
+    expect(fn).toMatch(/role="status">\{copied \? "Link copied"/)
   })
 })
 
@@ -54,7 +57,7 @@ describe("#3869 empty chat on a phone or with the list folded", () => {
     const client = src("app/(dashboard)/chat/chat-client.tsx")
     const empty = client.slice(client.indexOf("Pick a conversation"), client.indexOf("Pick a conversation") + 1400)
     expect(empty).toMatch(/isMobile \|\| leftCollapsed\s*\?\s*"Or start one with an agent\."/)
-    expect(empty).toMatch(/Show conversations/)
+    expect(empty).toMatch(/Open conversation list/)
     expect(empty).toMatch(/isMobile \? setDrawerOpen\(true\) : setLeftCollapsed\(false\)/)
   })
 })
@@ -68,6 +71,10 @@ describe("#3871 chat header on a phone", () => {
   })
 
   it("titles the phone bar with the agent's name", () => {
-    expect(src("app/(dashboard)/chat/chat-client.tsx")).toMatch(/title=\{isMobile && agent \? agent\.name : "Chat"\}/)
+    // Keyed on the phone breakpoint (md), where SubBar hides the Crews path —
+    // not the wider compact chat layout, where the path still shows.
+    const client = src("app/(dashboard)/chat/chat-client.tsx")
+    expect(client).toMatch(/const isPhone = useIsMobile\(\)/)
+    expect(client).toMatch(/title=\{isPhone && agent \? agent\.name : "Chat"\}/)
   })
 })
