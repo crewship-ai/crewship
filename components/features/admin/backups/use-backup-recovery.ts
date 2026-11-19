@@ -7,7 +7,7 @@ import { INSTANCE_BACKUPS, isUnavailableStatus, listOf, readError, send, useReso
 
 /** GET /admin/instance/backups/restores — every restore, dry run and drill. */
 export function useRestores() {
-  return useResource<RestoreRecord[]>(`${INSTANCE_BACKUPS}/restores`, () => restoresFixture(new Date()), listOf)
+  return useResource<RestoreRecord[]>(`${INSTANCE_BACKUPS}/restores?limit=500`, () => restoresFixture(new Date()), listOf)
 }
 
 /** GET /admin/instance/backups/drills */
@@ -77,6 +77,10 @@ export interface RestoreRequest {
   as_workspace?: string
   as_crew?: string
   dry_run: boolean
+  /** Also bring back the data of crew services (databases, caches). */
+  recover_services?: boolean
+  /** Replace only: acknowledge that the target's open workbooks are discarded. */
+  discard_workbooks?: boolean
 }
 
 /** POST …/restore/checks — space, format, runtime, unsafe settings, conflicts. */
@@ -171,6 +175,8 @@ export async function restore(req: RestoreRequest, workspaceId: string | null): 
         as_workspace: req.target === "new_workspace" ? req.as_workspace : undefined,
         as_crew: req.target === "crew" ? req.as_crew : undefined,
         replace: req.target === "replace" ? true : undefined,
+        recover_services: req.recover_services ? true : undefined,
+        discard_workbooks: req.target === "replace" && req.discard_workbooks ? true : undefined,
       }),
     })
     if (!res.ok) return { ok: false, unavailable: isUnavailableStatus(res.status), error: await readError(res, `HTTP ${res.status}`) }

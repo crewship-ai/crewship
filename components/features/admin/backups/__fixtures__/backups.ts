@@ -11,7 +11,7 @@
 import type {
   BackupPlan, BackupRecipient, BackupRun, BackupSettings, CalendarResponse, InstanceHold, Night,
   OverviewResponse, RestoreChecks, RestoreRecord, RestoreReport, RetentionResponse, ScopeWorkspace,
-  VaultKeysResponse, BackupIncident, NightStatus, ProofLevel, OffsiteDestination,
+  VaultKeysResponse, BackupIncident, NightStatus, ProofLevel, OffsiteDestination, BundleManifest,
 } from "../backups-model"
 
 const GB = 1_000_000_000
@@ -56,9 +56,9 @@ export function overviewFixture(now: Date, scope: "instance" | "workspaces", sel
   const inst = scope === "instance"
   const cov: Record<string, { last: string | null; status: "ok" | "warn" | "bad" }> = {
     "ws-dess": { last: at(now, 0, 3), status: "ok" },
-    "ws-unify": { last: at(now, 2, 3), status: "warn" },
+    "ws-unify": { last: null, status: "bad" },
     "ws-coolify": { last: at(now, 0, 3), status: "ok" },
-    "ws-pages": { last: at(now, 9, 3), status: "bad" },
+    "ws-pages": { last: at(now, 9, 3), status: "warn" },
     "ws-sandbox": { last: null, status: "bad" },
   }
   // As the server does: a workspace that holds no crew gets no row of its
@@ -99,7 +99,7 @@ export function overviewFixture(now: Date, scope: "instance" | "workspaces", sel
         ? [{ id: "vault", severity: "bad" as const, title: "On a new server the latest backup cannot unlock credentials", detail: "Key versions v1 and v2 are not in it; restoring elsewhere means re-entering 41 credentials.", action: { kind: "keys" as const, label: "Keys" } }]
         : risk.map((w) => ({
             id: `cov-${w.id}`, severity: "bad" as const,
-            title: `${w.name}: ${cov[w.id].last ? `last backup ${w.id === "ws-unify" ? "2 days ago" : "9 days ago"}` : "never backed up"}`,
+            title: `${w.name}: ${cov[w.id].last ? "last backup 9 days ago" : "never backed up"}`,
             detail: "No plan covers it.",
             action: { kind: "back_up_now" as const, label: "Back up now", workspace_id: w.id },
           }))),
@@ -113,7 +113,7 @@ export function overviewFixture(now: Date, scope: "instance" | "workspaces", sel
     crewless_workspaces: inst ? 0 : crewless.length,
     workspaces: inst ? undefined : rows.map((w) => ({
       workspace_id: w.id, name: w.name, last_backup_at: cov[w.id].last, status: cov[w.id].status,
-      plan: cov[w.id].status === "ok" ? "Workspace backup" : null, proof: cov[w.id].status === "ok" ? 2 : 0,
+      plan: cov[w.id].last ? "Workspace backup" : null, proof: cov[w.id].status === "ok" ? 2 : cov[w.id].last ? 1 : 0,
     })),
   }
 }
@@ -140,12 +140,14 @@ export function runsFixture(now: Date): BackupRun[] {
     restorable: "direct" as const, retried_at: null, drill_result: null,
   }
   return [
-    { ...base, id: "run-1", plan_id: "plan-complete", plan_name: "Complete recovery", scope: "instance", status: "incomplete", started_at: at(now, 0, 3), size_bytes: 3.9 * GB, proof_level: 2, bundle_path: "/b/instance-1.cship", incomplete: INCOMPLETE,
+    { ...base, id: "run-1", plan_id: "plan-complete", plan_name: "Complete recovery", scope: "instance", status: "incomplete", started_at: at(now, 0, 3), size_bytes: 3.9 * GB, proof_level: 2, bundle_path: "/b/instance-1.cship", incomplete: INCOMPLETE, hold_ms: 4200,
       phases: phases(now, 0, [["copy", 400], ["pack", 660], ["encrypt", 30], ["check", 240], ["off-site", null]]) },
     { ...base, id: "run-2", plan_id: "plan-memory", plan_name: "Memory every 6 h", scope: "workspaces", workspace_id: "ws-dess", workspace_name: "Dess", kind: "custom", status: "done", started_at: at(now, 0, 0), size_bytes: 38 * MB, proof_level: 2, bundle_path: "/b/dess-mem.cship",
       phases: phases(now, 0, [["copy", 12], ["pack", 4], ["encrypt", 1], ["check", 3]]) },
     { ...base, id: "run-3", plan_id: "plan-complete", plan_name: "Complete recovery", scope: "instance", status: "interrupted", retried_at: at(now, 1, 3, 41), started_at: at(now, 1, 3), size_bytes: 3.9 * GB, proof_level: 0, bundle_path: "/b/instance-2.cship",
       phases: [{ name: "pack", status: "failed", detail: "server restarted during pack · staging wiped · retried 03:41, done" }] },
+    { ...base, id: "run-8", plan_id: "plan-complete", plan_name: "Complete recovery", trigger: "catchup", retry_of: "run-3", scope: "instance", status: "done", started_at: at(now, 1, 3, 41), size_bytes: 3.9 * GB, proof_level: 1, bundle_path: "/b/instance-2b.cship", hold_ms: 3100,
+      phases: phases(now, 1, [["copy", 390], ["pack", 650], ["encrypt", 30], ["check", 220]]) },
     { ...base, id: "run-4", plan_id: "plan-complete", plan_name: "Complete recovery", scope: "instance", status: "incomplete", started_at: at(now, 2, 3), size_bytes: 3.8 * GB, proof_level: 3, drill_result: "partial", drill_at: at(now, 2, 10, 2), drill_note: "12 attachments did not open", bundle_path: "/b/instance-3.cship", incomplete: INCOMPLETE,
       phases: phases(now, 2, [["copy", 372], ["pack", 600], ["encrypt", 30], ["check", 230]]) },
     { ...base, id: "run-5", plan_id: "plan-complete", plan_name: "Complete recovery", scope: "instance", kind: "environments", status: "done", started_at: at(now, 3, 4), size_bytes: 11.2 * GB, proof_level: 2, bundle_path: "/b/instance-env.cship",
@@ -198,6 +200,9 @@ export function settingsFixture(): BackupSettings {
   return {
     limits: { concurrency: 1, cpu_cores: 2, disk_mbps: 80, upload_mbps: 20 },
     heartbeat_url: "https://hc.example.com/ping/…",
+    heartbeat_last_at: "2026-09-29T03:07:00Z",
+    heartbeat_last_ok: true,
+    heartbeat_last_error: null,
     recovery_kit_enabled: false,
     // The design's Tell row: the inbox, Slack #ops and an e-mail list.
     channels: ["nch-slack"],
@@ -319,5 +324,26 @@ export function retentionFixture(): RetentionResponse {
       { key: "delivered_bodies", label: "Delivered work bodies", note: "housekeeping", days: 7, housekeeping: true, fixed: "7 d" },
       { key: "orphans", label: "Page builds, orphaned attachments", note: "housekeeping", days: null, housekeeping: true, fixed: "hourly sweep" },
     ],
+  }
+}
+
+/** What GET …/bundles/inspect answers for a run's bundle (?demo=1). */
+export function manifestFixture(run: Pick<BackupRun, "scope" | "workspace_name" | "started_at" | "kind" | "format_version">): BundleManifest {
+  const instance = run.scope === "instance"
+  return {
+    format_version: run.format_version ?? 3,
+    crewship_version_at_backup: "1.4.2",
+    scope: instance ? "instance" : "workspace",
+    created_at: run.started_at,
+    created_by: { email: "demo@crewship.ai", role: "owner" },
+    kind: run.kind === "custom" ? "custom" : undefined,
+    categories: run.kind === "custom" ? ["memory"] : undefined,
+    contents: {
+      crews: Array.from({ length: instance ? 8 : 4 }),
+      workspace: instance ? null : { name: run.workspace_name ?? "Dess", slug: "dess" },
+      instance_config_included: instance, credstore_included: instance, auth_keys_included: instance,
+      attachments_included: 1204, attachments_missing: 12, memory_blobs_included: 3310, memory_blobs_missing: 0,
+    },
+    encryption: { enabled: true },
   }
 }
