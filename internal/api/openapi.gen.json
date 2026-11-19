@@ -8237,7 +8237,12 @@
             "additionalProperties": false,
             "properties": {
               "lock": {
-                "$ref": "#/components/schemas/CrewMiseNativeLockBundle"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CrewMiseNativeLockBundle"
+                  }
+                ],
+                "nullable": true
               },
               "tools": {
                 "additionalProperties": {
