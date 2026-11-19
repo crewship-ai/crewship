@@ -309,11 +309,21 @@ hook restores. A **login shell** (`bash -l`, `bash -lc`, postStart hooks, which
 run that way, and `zsh -l`, whose `~/.zprofile` from common-utils sources
 `~/.profile`) finally runs `~/.profile` from the persistent home. The container entrypoint copies the image's
 `/etc/skel/.profile` there on first boot; from then on it is the user's file.
-The Debian default prepends `~/.local/bin` whenever the directory exists (the
-entrypoint creates it), so in a login shell a binary there still wins over the
-declared pin. Crewship does not rewrite files in the user's home; remove the
-stale binary, or that `~/.profile` line, when a login shell must select the
-declared version.
+The Debian and Ubuntu default contains `PATH="$HOME/.local/bin:$PATH"`, which
+would put `~/.local/bin` back ahead of the declared pins in every login shell.
+Provisioning therefore rewrites exactly that line in the image's
+`/etc/skel/.profile` and `/home/agent/.profile` (the seeds of a new home) so
+that it adds the directory only when PATH lacks it:
+
+```sh
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+```
+
+Any other profile content stays byte-identical. Crewship never rewrites a file
+in an existing home volume: a home seeded before this change keeps its own
+`~/.profile`, and a login shell there still selects a binary in `~/.local/bin`
+first. Replace that line with the one above, or remove the stale binary, when
+a login shell must select the declared version.
 
 Changing the generated hook invalidates crew image cache keys. The next provision
 builds a new crew image even with unchanged declarations; underlying feature

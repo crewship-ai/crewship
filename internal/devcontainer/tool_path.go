@@ -266,3 +266,31 @@ func nativeToolPathParts(path string) []string {
 	}
 	return append(parts, path[start:])
 }
+
+// homeProfileSkeletonPattern matches the Debian/Ubuntu skeleton line in
+// ~/.profile that prepends the persistent home bin unconditionally. A login
+// shell runs ~/.profile last, so that line would put ~/.local/bin back ahead
+// of the declared mise pins the login hook just restored (#5543).
+const homeProfileSkeletonPattern = `^([[:space:]]*)PATH="\$HOME/\.local/bin:\$PATH"[[:space:]]*$`
+
+// homeProfileGuardLine keeps the skeleton's intent (make ~/.local/bin
+// available) but leaves an existing position alone.
+const homeProfileGuardLine = `case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac # Crewship: keep declared mise pins first`
+
+// HomeProfileSeeds are the image files a new home volume is seeded from: the
+// image's own agent home and the skeleton scripts/entrypoint.sh copies on
+// first boot. Existing home volumes are never rewritten.
+var HomeProfileSeeds = []string{"/etc/skel/.profile", agentHome + "/.profile"}
+
+// HomeProfileGuardScript rewrites exactly the skeleton line in each existing
+// file and leaves every other byte, and every other profile shape, untouched.
+// It is best effort: an image without sed keeps its profile as documented.
+func HomeProfileGuardScript(files ...string) string {
+	var b strings.Builder
+	for _, file := range files {
+		q := shellQuote(file)
+		b.WriteString("if [ -f " + q + " ] && grep -qE " + shellQuote(homeProfileSkeletonPattern) + " " + q + " 2>/dev/null; then sed -i -E " +
+			shellQuote("s|"+homeProfileSkeletonPattern+"|\\1"+homeProfileGuardLine+"|") + " " + q + " 2>/dev/null || true; fi\n")
+	}
+	return b.String()
+}
