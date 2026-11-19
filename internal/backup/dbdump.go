@@ -808,6 +808,16 @@ func tableRowCounts(dump *DBDump) map[string]int {
 	return out
 }
 
+// crewDumpTables is every table DumpCrew can select from. DumpCrew refuses a
+// filter that is not listed here, so the two cannot drift. A restore uses it
+// to recognise a crew extract from the decrypted payload itself instead of
+// the unauthenticated manifest (see isCrewJournalExtract, #5578).
+var crewDumpTables = map[string]bool{
+	"users": true, "workspaces": true, "crews": true, "environment_revisions": true,
+	"service_runtime_intents": true, "agents": true, "skills": true, "agent_skills": true,
+	"crew_members": true, "chats": true, "agent_mcp_bindings": true, "journal_entries": true,
+}
+
 // DumpCrew exports rows for a single crew within its workspace. Useful
 // for `--scope=crew` backups which produce same-instance bundles (per
 // PRD section 2.3).
@@ -872,6 +882,9 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		{"journal_entries", "crew_id = ?", []any{crewID}, ""},
 	}
 	for _, f := range filters {
+		if !crewDumpTables[f.table] {
+			return nil, fmt.Errorf("backup: crew dump table %s is not listed in crewDumpTables", f.table)
+		}
 		exists, err := tableExists(ctx, tx, f.table)
 		if err != nil {
 			return nil, err

@@ -94,6 +94,53 @@ type resignProvenance struct {
 	CrewExtract bool
 }
 
+// isCrewJournalExtract reports whether a dump's journal is a crew extract
+// whose seq gaps are expected (#5578). It is decided from the decrypted
+// payload, before RemapIDs, never from the manifest alone: the manifest is a
+// plaintext tar member nothing authenticates, and flipping its scope to
+// "crew" must not turn a workspace bundle's real gaps (deleted rows) into
+// renumbered, clean-verifying history.
+//
+// All of these must hold:
+//   - the manifest says crew scope and names exactly one crew;
+//   - the dump carries rows only in tables DumpCrew selects (a workspace
+//     dump carries many more, and the payload cannot be edited without the
+//     key);
+//   - the dump holds exactly one crews row, the manifest's crew;
+//   - it carries no compaction checkpoints (DumpCrew never selects them);
+//   - every chained journal row names that crew.
+func isCrewJournalExtract(manifest *Manifest, dump *DBDump) bool {
+	if manifest == nil || dump == nil || manifest.Scope != ScopeCrew || len(manifest.Contents.Crews) != 1 {
+		return false
+	}
+	for table, rows := range dump.Tables {
+		if len(rows) > 0 && !crewDumpTables[table] {
+			return false
+		}
+	}
+	crews := dump.Tables["crews"]
+	if len(crews) != 1 {
+		return false
+	}
+	crewID := rowString(crews[0], "id")
+	if crewID == "" || crewID != manifest.Contents.Crews[0].ID {
+		return false
+	}
+	if len(dump.Tables[journalCheckpointsTable]) > 0 {
+		return false
+	}
+	for _, row := range dump.Tables[journalEntriesTable] {
+		seq, err := rowInt64(row, "seq")
+		if err != nil {
+			return false
+		}
+		if seq > 0 && rowString(row, "crew_id") != crewID {
+			return false
+		}
+	}
+	return true
+}
+
 // journalRechainStats reports what the re-sign touched, so the caller can put
 // real numbers in front of the operator instead of "done".
 type journalRechainStats struct {

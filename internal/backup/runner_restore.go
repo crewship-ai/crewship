@@ -676,6 +676,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// primary key and rewrite every FK so INSERT OR IGNORE does
 		// not drop the whole bundle on PK collision.
 		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			// Decided before RemapIDs rewrites the crew id it compares.
+			crewJournalExtract := isCrewJournalExtract(manifest, extracted.DBDump)
 			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
 				return nil, err
 			}
@@ -714,7 +716,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			chainProv.Actor = opts.Actor
 			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
 			chainProv.CheckpointSourceIDs = checkpointSourceIDs
-			chainProv.CrewExtract = manifest.Scope == ScopeCrew
+			chainProv.CrewExtract = crewJournalExtract
 			auditKeys, keyErr := journal.SigningKeysForContext(ctx)
 			if keyErr != nil {
 				return nil, keyErr
