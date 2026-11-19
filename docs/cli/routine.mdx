@@ -1808,9 +1808,12 @@ person, `creator_not_member`, `creator_suspended`, `creator_access_revoked`,
 creator and to workspace OWNER/ADMIN, everyone else sees
 `creator_not_in_good_standing`. The state is computed with the same check
 every fire runs. Except for `routine_agent_authored`, a change to what the
-schedule runs (for example `schedules update <id> --cron …`) by a person in
-good standing restores it; `routine_agent_authored` clears only when the
-schedule runs a routine a person authored.
+schedule runs (for example `schedules update <id> --cron …`) by a workspace
+OWNER or ADMIN in good standing restores it and makes them its creator.
+`schedules update` is ADMIN or higher, so a MANAGER, the schedule's creator
+included, gets `API error (403): Forbidden` and cannot restore it; they can
+create a new schedule instead (#5411). `routine_agent_authored` clears only
+when the schedule runs a routine a person authored.
 With the flag off ARTIFACTS is `—`.
 
 LAST STATUS shows the last recorded outcome. For `SKIPPED` it names the stored
