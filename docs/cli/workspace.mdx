@@ -38,6 +38,7 @@ and setup link were created; it never includes the setup link itself.
 | `workspace delete [slug-or-id]` | Delete a workspace (OWNER only, irreversible). Requires `--confirm <slug>`. |
 | `workspace logo set <file>` | Upload or replace the current workspace's logo (PNG, JPEG or WebP, max 2MB; ADMIN+). |
 | `workspace logo remove` | Remove the logo; the workspace is drawn with its initial again (ADMIN+). |
+| `workspace logo get --output <path>` | Download the current logo; the destination is replaced only after a complete download. |
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. Takes a **user** id. |
 | `workspace member role <member-id-or-user-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
@@ -117,6 +118,16 @@ crewship workspace logo remove
 
 With `--format json`, both print the updated workspace document — after
 `set` its `logo_url` is the new logo, after `remove` it is `null`.
+
+### `workspace logo get`
+
+Downloads the current workspace logo to `--output`. The file is replaced only
+after a complete download (at most 2 MiB); a refused request leaves it
+untouched.
+
+```bash
+crewship workspace logo get --output ./logo.png
+```
 
 ### `workspace delete`
 
