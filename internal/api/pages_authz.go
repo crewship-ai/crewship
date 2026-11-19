@@ -276,7 +276,11 @@ func (g pageGrant) covers(panelID string) bool {
 
 // isPageOwner reports whether the caller IS the page's owner — the user named
 // in owner_user_id, or a member of the crew named in owner_crew_id (§7.1
-// rule 1: exactly one of the two).
+// rule 1: exactly one of the two) while that crew is not deleted and belongs
+// to the page's workspace. A deleted crew owns nothing (#5259): its
+// crew_members rows can outlive it (a restore, an older build), and they
+// must not keep owner rights. pageOwnerForDelegation, pageGrantIssuerCurrent
+// and the issuer_standing arm of page_grant_verdicts read the same rule.
 func (h *PageHandler) isPageOwner(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
 	if rec.OwnerUserID != "" {
 		return rec.OwnerUserID == userID
@@ -286,7 +290,9 @@ func (h *PageHandler) isPageOwner(ctx context.Context, wsID, userID string, rec 
 	}
 	var one int
 	err := h.pageAuthReader(ctx).QueryRowContext(ctx,
-		`SELECT 1 FROM crew_members WHERE crew_id = ? AND user_id = ?`, rec.OwnerCrewID, userID).Scan(&one)
+		`SELECT 1 FROM crew_members cm JOIN crews c ON c.id = cm.crew_id
+		 WHERE cm.crew_id = ? AND cm.user_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+		rec.OwnerCrewID, userID, wsID).Scan(&one)
 	return err == nil
 }
 
