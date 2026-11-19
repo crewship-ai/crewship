@@ -336,9 +336,9 @@ reaches agents, routines and the terminal alike.
 A container from an image built before the login hook existed still loses the
 mise shims in a login shell (`bash -lc`, postStart hooks run that way), because
 `/etc/profile` resets PATH and nothing restores it. The terminal and non-login
-agent exec are unaffected. Reprovision such a crew (`crewship crew provision
-<slug>`) once; the changed cache key means the next provision builds the image
-with the hook.
+agent exec are unaffected. Reprovision such a crew once with
+`crewship crew provision <slug>`; the changed cache key means the next
+provision builds the image with the hook.
 
 ### Adapter CLIs are installed and verified
 
