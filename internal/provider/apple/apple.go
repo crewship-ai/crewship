@@ -218,6 +218,9 @@ type Provider struct {
 	cfg    Config
 	logger *slog.Logger
 	hostIP string
+	// cliVersion is the detected `container` CLI version; exec environment
+	// delivery is refused below minExecEnvCLIVersion (#5497).
+	cliVersion string
 
 	mu      sync.RWMutex
 	execSeq atomic.Int64
@@ -399,11 +402,12 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	cfg = stageRuntimeArtifacts(cfg, logger)
 
 	p := &Provider{
-		cfg:    cfg,
-		logger: logger,
-		hostIP: detected.HostIP,
-		execs:  make(map[string]*execEntry),
-		done:   make(chan struct{}),
+		cfg:        cfg,
+		logger:     logger,
+		hostIP:     detected.HostIP,
+		cliVersion: detected.Version,
+		execs:      make(map[string]*execEntry),
+		done:       make(chan struct{}),
 	}
 
 	logger.Info("apple container runtime detected",

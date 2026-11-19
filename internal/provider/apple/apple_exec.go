@@ -84,7 +84,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	}
 
 	// Values travel off argv (#5497); see execEnv.
-	env, err := buildExecEnv(cfg.Env)
+	env, err := p.execEnvFor(cfg.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 	args := []string{"exec", "--tty"}
 
 	// Values travel off argv (#5497); see execEnv.
-	env, err := buildExecEnv(cfg.Env)
+	env, err := p.execEnvFor(cfg.Env)
 	if err != nil {
 		return nil, err
 	}
