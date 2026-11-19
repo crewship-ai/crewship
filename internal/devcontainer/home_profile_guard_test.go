@@ -136,10 +136,31 @@ func TestWriteAggregatedContainerEnvRunsGuardAfterHook(t *testing.T) {
 	if hook < 0 || guard < hook || !strings.Contains(script, "chmod 0644 /etc/profile.d/zz-crewship-tools.sh && {") {
 		t.Fatalf("guard must run only after the hook was written:\n%s", script)
 	}
-	// Replacing the hook write with a failing command must fail the script.
-	failing := strings.Replace(script, "mkdir -p /etc/profile.d", "false", 1)
-	failing = strings.Replace(failing, "printf '%s' ", "true ", 1)
-	if err := exec.Command("bash", "-c", "cd \"$(mktemp -d)\" && "+strings.SplitN(failing, ">> /etc/environment", 2)[1][len(" && "):]).Run(); err == nil {
+	// The guard is joined with && to the hook write, so a failed write skips it
+	// and fails the step. Rebuild that shape with a failing stand-in and the
+	// real guard pointed at a temp profile; never run the real script.
+	const join = "chmod 0644 /etc/profile.d/zz-crewship-tools.sh && {\n"
+	tail := script[strings.Index(script, join)+len(join):]
+	if tail != HomeProfileGuardScript(HomeProfileSeeds...)+"}" {
+		t.Fatalf("guard block is not exactly the seed guard:\n%s", tail)
+	}
+	profile := filepath.Join(t.TempDir(), ".profile")
+	if err := os.WriteFile(profile, []byte(debianSkelProfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("bash", "-c", "false && {\n"+HomeProfileGuardScript(profile)+"}").Run(); err == nil {
 		t.Fatal("a failed hook write was masked by the guard")
+	}
+	if got, _ := os.ReadFile(profile); string(got) != debianSkelProfile {
+		t.Fatal("guard ran although the hook write failed")
+	}
+	// A symlinked profile is left alone rather than replaced by a copy.
+	link := filepath.Join(t.TempDir(), ".profile")
+	if err := os.Symlink(profile, link); err != nil {
+		t.Fatal(err)
+	}
+	runGuard(t, link)
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlinked profile replaced: %v", err)
 	}
 }

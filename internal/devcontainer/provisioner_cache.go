@@ -64,6 +64,7 @@ func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) st
 	h := sha256.New()
 	h.Write([]byte(provisionerSchemaVersion))
 	h.Write([]byte(AgentToolProfile()))
+	h.Write([]byte("|"))
 	h.Write([]byte(HomeProfileGuardScript(HomeProfileSeeds...)))
 	h.Write([]byte("|"))
 	// Feature-provided CLIs may leave the mise inputs unchanged. Include the

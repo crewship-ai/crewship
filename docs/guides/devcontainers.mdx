@@ -307,8 +307,11 @@ This covers every environment Crewship assembles: non-login agent exec,
 routines, the terminal, child processes, non-login zsh and the PATH the login
 hook restores. A **login shell** (`bash -l`, `bash -lc`, postStart hooks, which
 run that way, and `zsh -l`, whose `~/.zprofile` from common-utils sources
-`~/.profile`) finally runs `~/.profile` from the persistent home. The container entrypoint copies the image's
-`/etc/skel/.profile` there on first boot; from then on it is the user's file.
+`~/.profile`) finally runs `~/.profile` from the persistent home. A new home
+is seeded from the image: Docker fills an empty home volume from the image's
+`/home/agent`, and the container entrypoint copies `/etc/skel/.profile` into a
+home that has no `~/.bashrc` (the Apple runtime's home). From then on it is
+the user's file.
 The Debian and Ubuntu default contains `PATH="$HOME/.local/bin:$PATH"`, which
 would put `~/.local/bin` back ahead of the declared pins in every login shell.
 Provisioning therefore rewrites exactly that line in the image's
