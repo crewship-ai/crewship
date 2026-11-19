@@ -100,11 +100,11 @@ func resolveLocalModelEndpoint(ctx context.Context, db endpointQuerier, logger *
 	//    and this branch skips it. If it was granted to THIS agent it has
 	//    already been returned by branch 1 above, where it keeps its scope.
 	//
-	//    Crew scope is deliberately NOT excluded here and the comment no longer
-	//    claims it is: this function is given a workspace and no crew, so it
-	//    cannot tell a link to this agent's crew from a link to another one.
-	//    Narrowing that needs the crew id threaded in — see the follow-up note
-	//    in credential_grantees.go's header.
+	//    Crew authority is resolved through the acting agent (#5542): a
+	//    CREW-scoped row must be linked to this agent's crew (an orphan CREW
+	//    row is not a workspace default), and a row linked or bound to crews
+	//    serves only agents of one of those crews. The same query runs inside
+	//    proxy admission, so a stale sidecar cannot keep a foreign endpoint.
 	var credID, encValue string
 	err := db.QueryRowContext(ctx, `
 		SELECT c.id, c.encrypted_value FROM credentials c
@@ -116,6 +116,8 @@ func resolveLocalModelEndpoint(ctx context.Context, db endpointQuerier, logger *
 		      SELECT 1 FROM credential_bindings b
 		      WHERE b.credential_id = c.id AND b.scope = 'AGENT'
 		  )
+		  AND (c.scope = 'WORKSPACE'
+		       OR EXISTS (SELECT 1 FROM credential_crews cc JOIN agents a ON a.crew_id=cc.crew_id WHERE cc.credential_id=c.id AND a.id=? AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL))
 		  AND (NOT EXISTS (SELECT 1 FROM credential_crews cc WHERE cc.credential_id=c.id)
 		       OR EXISTS (SELECT 1 FROM credential_crews cc JOIN agents a ON a.crew_id=cc.crew_id WHERE cc.credential_id=c.id AND a.id=? AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL))
 		  AND (NOT EXISTS (SELECT 1 FROM credential_bindings cb WHERE cb.credential_id=c.id AND cb.scope='CREW')
@@ -123,7 +125,7 @@ func resolveLocalModelEndpoint(ctx context.Context, db endpointQuerier, logger *
 		  AND COALESCE(c.handle_only,0)=0
 		ORDER BY c.created_at DESC, c.id ASC
 		LIMIT 1
-	`, workspaceID, CredTypeEndpointURL, agentID, agentID).Scan(&credID, &encValue)
+	`, workspaceID, CredTypeEndpointURL, agentID, agentID, agentID).Scan(&credID, &encValue)
 	if err != nil {
 		if err != sql.ErrNoRows && logger != nil {
 			logger.Warn("resolve workspace local-model endpoint", "error", err)

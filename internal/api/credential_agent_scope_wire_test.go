@@ -176,17 +176,25 @@ func TestAgentScope_ProxiedEndpointInheritsItsSourceScope(t *testing.T) {
 	if !added {
 		t.Fatal("the resolved endpoint was not delivered to the CredStore at all")
 	}
+	// #5542: the proxy entry carries the real Vault source ID and replaces the
+	// raw ENDPOINT_URL snapshot, so exactly one entry under that ID remains.
+	found := 0
 	for _, c := range withEndpoint {
-		if c.ID != "local-model-endpoint" {
+		if c.ID != "awe-ep" {
 			continue
 		}
+		found++
+		if c.Provider != sidecarOpenAICompatProvider || c.Type != string(CredTypeAPIKey) || c.EnvVar != "" {
+			t.Errorf("source entry = %s/%s env %q, want the proxy-only OPENAI_COMPAT projection", c.Type, c.Provider, c.EnvVar)
+		}
 		if strings.Join(c.AgentIDs, ",") != agentA {
-			t.Errorf("synthetic OPENAI_COMPAT entry AgentIDs = %v, want [%s]: one member's "+
+			t.Errorf("projected OPENAI_COMPAT entry AgentIDs = %v, want [%s]: one member's "+
 				"gateway is served to the whole crew", c.AgentIDs, agentA)
 		}
-		return
 	}
-	t.Fatal("no synthetic local-model-endpoint entry in the extended list")
+	if found != 1 {
+		t.Fatalf("entries under the source ID = %d, want exactly the one projection", found)
+	}
 }
 
 // #2052 through DELIVERY rather than through Select: the workspace-default

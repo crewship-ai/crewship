@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -29,27 +30,228 @@ func TestEndpointProxySourceAdmission(t *testing.T) {
 	mustExec(t, db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,status,scope,created_by) VALUES('endpoint-source',?,'endpoint-source',?,'ENDPOINT_URL','OLLAMA','ACTIVE','WORKSPACE',?)`, ws, enc, user)
 	mustExec(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('endpoint-grant',?,'endpoint-source','OWN_ENDPOINT')`, agent)
 	h := NewInternalHandler(db, bindTestMaster, testLogger())
-	ep := resolveLocalModelEndpoint(context.Background(), db, testLogger(), agent, ws, []mcpCredEntry{{ID: "endpoint-source", Type: CredTypeEndpointURL, Value: value, SourceRevision: endpointSourceRevision(enc), AgentIDs: []string{agent}, AgentGrants: map[string]string{agent: ""}}})
-	projected, added := h.appendProxiedEndpointCredential(nil, ep)
+	original := mcpCredEntry{ID: "endpoint-source", Type: CredTypeEndpointURL, EnvVar: "OWN_ENDPOINT", Value: value, SourceRevision: endpointSourceRevision(enc), AgentIDs: []string{agent}, AgentGrants: map[string]string{agent: ""}}
+	ep := resolveLocalModelEndpoint(context.Background(), db, testLogger(), agent, ws, []mcpCredEntry{original})
+	projected, added := h.appendProxiedEndpointCredential([]mcpCredEntry{original}, ep)
 	if !added || len(projected) != 1 {
-		t.Fatal("authenticated endpoint not projected")
+		t.Fatalf("authenticated endpoint not projected exactly once: %d entries", len(projected))
 	}
-	t.Run("real source identity", func(t *testing.T) {
-		if projected[0].ID != "endpoint-source" {
-			t.Errorf("proxy identity = %q; want real Vault ID", projected[0].ID)
+	t.Run("real source identity replaces raw snapshot", func(t *testing.T) {
+		p := projected[0]
+		if p.ID != "endpoint-source" || p.Type != string(CredTypeAPIKey) || p.Provider != sidecarOpenAICompatProvider {
+			t.Errorf("projection = %q/%q/%q; want real ID as proxy-only OPENAI_COMPAT", p.ID, p.Type, p.Provider)
 		}
-		if projected[0].AgentGrants == nil {
-			t.Error("effective grant snapshot lost")
+		if p.EnvVar != "" {
+			t.Errorf("projection EnvVar = %q; the endpoint key must not enter agent env", p.EnvVar)
 		}
-	})
-	t.Run("native host admission", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/api/v1/internal/cost/admit", strings.NewReader(`{"agent_id":"`+agent+`","credential_id":"endpoint-source","provider":"OPENAI_COMPAT","source_revision":"`+endpointSourceRevision(enc)+`"}`))
-		req.RemoteAddr = "127.0.0.1:1234"
-		req.Header.Set("X-Internal-Token", internaltoken.DeriveCrewToken(bindTestMaster, ws, crew))
-		rr := httptest.NewRecorder()
-		h.requireInternal(http.HandlerFunc(r.handleSidecarCostAdmit)).ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("endpoint admission %d: %s", rr.Code, rr.Body.String())
+		if p.AgentGrants == nil || p.SourceRevision != endpointSourceRevision(enc) {
+			t.Error("effective grant snapshot or source revision lost")
 		}
 	})
+	t.Run("native host admission records real source", func(t *testing.T) {
+		code, body := admitEndpoint(t, r, h, ws, crew, agent, "endpoint-source", endpointSourceRevision(enc))
+		if code != http.StatusOK {
+			t.Fatalf("endpoint admission %d: %s", code, body)
+		}
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM credential_audit WHERE credential_id='endpoint-source' AND event_type=? AND agent_id=? AND metadata_json LIKE '%"run_id":"endpoint-run"%'`, string(AuditEventProxyAdmitted), agent).Scan(&n); err != nil || n == 0 {
+			t.Fatalf("PROXY_ADMITTED for real source and agent missing: n=%d err=%v", n, err)
+		}
+	})
+}
+
+// admitEndpoint drives the real internal cost-admission handler the sidecar
+// calls before forwarding an LLM request.
+func admitEndpoint(t *testing.T, r *Router, h *InternalHandler, ws, crew, agent, cred, revision string) (int, string) {
+	t.Helper()
+	// An active journal run in the caller's scope: admission audits only an
+	// unambiguous run it validated itself (#5518).
+	mustExec(t, r.db, `INSERT OR IGNORE INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES('endpoint-run-start',?,?,?,'run.started','orchestrator','fixture','{}','endpoint-run')`, ws, crew, agent)
+	payload := `{"agent_id":"` + agent + `","credential_id":"` + cred + `","provider":"OPENAI_COMPAT","run_id":"endpoint-run"`
+	if revision != "" {
+		payload += `,"source_revision":"` + revision + `"`
+	}
+	req := httptest.NewRequest("POST", "/api/v1/internal/cost/admit", strings.NewReader(payload+"}"))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Internal-Token", internaltoken.DeriveCrewToken(bindTestMaster, ws, crew))
+	rr := httptest.NewRecorder()
+	h.requireInternal(http.HandlerFunc(r.handleSidecarCostAdmit)).ServeHTTP(rr, req)
+	return rr.Code, rr.Body.String()
+}
+
+// Admission re-resolves the selected endpoint inside its own transaction, so a
+// stale or foreign sidecar snapshot cannot keep spending through an endpoint
+// whose authority changed (#5542).
+func TestEndpointProxyAdmissionAuthority(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	const value = `{"baseURL":"https://fixture.example:38423/v1","apiKey":"synthetic-endpoint-token"}`
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+
+	cases := []struct {
+		name string
+		// setup seeds the endpoint row(s) and returns the credential ID the
+		// sidecar presents and whether a correct revision is sent.
+		setup        func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string
+		revision     string // "ok", "stale" or ""
+		wantAdmitted bool
+	}{
+		{
+			name: "assigned grant with current revision",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('g','`+agent+`','ep','OWN_ENDPOINT')`)
+				return "ep"
+			},
+			revision: "ok", wantAdmitted: true,
+		},
+		{
+			name: "stale revision after rotation",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('g','`+agent+`','ep','OWN_ENDPOINT')`)
+				return "ep"
+			},
+			revision: "stale",
+		},
+		{
+			name: "missing revision from an older sidecar",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('g','`+agent+`','ep','OWN_ENDPOINT')`)
+				return "ep"
+			},
+		},
+		{
+			name: "expired grant",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name,expires_at) VALUES('g','`+agent+`','ep','OWN_ENDPOINT',?)`, past)
+				return "ep"
+			},
+			revision: "ok",
+		},
+		{
+			name: "revoked source",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('g','`+agent+`','ep','OWN_ENDPOINT')`)
+				mustExec(t, r.db, `UPDATE credentials SET status='REVOKED' WHERE id='ep'`)
+				return "ep"
+			},
+			revision: "ok",
+		},
+		{
+			name: "workspace default",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				return "ep"
+			},
+			revision: "ok", wantAdmitted: true,
+		},
+		{
+			name: "orphan CREW-scoped row is not a workspace default",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "CREW", user)
+				return "ep"
+			},
+			revision: "ok",
+		},
+		{
+			name: "CREW-scoped row linked to the agent's crew",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "CREW", user)
+				mustExec(t, r.db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('ep', ?)`, crew)
+				return "ep"
+			},
+			revision: "ok", wantAdmitted: true,
+		},
+		{
+			name: "row linked only to a foreign crew",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "CREW", user)
+				mustExec(t, r.db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('ep', ?)`, other)
+				return "ep"
+			},
+			revision: "ok",
+		},
+		{
+			name: "workspace row linked only to a foreign crew",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('ep', ?)`, other)
+				return "ep"
+			},
+			revision: "ok",
+		},
+		{
+			name: "presented ID is not the selected endpoint",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				seedEndpoint(t, r, "ep-other", ws, enc, "WORKSPACE", user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('g','`+agent+`','ep','OWN_ENDPOINT')`)
+				return "ep-other"
+			},
+			revision: "ok",
+		},
+		{
+			name: "assigned OPENAI_COMPAT key wins over the endpoint",
+			setup: func(t *testing.T, r *Router, ws, crew, other, agent, user, enc string) string {
+				seedEndpoint(t, r, "ep", ws, enc, "WORKSPACE", user)
+				key, err := encryption.Encrypt(`{"baseURL":"https://gateway.example/v1","apiKey":"synthetic-compat"}`)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mustExec(t, r.db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,status,scope,created_by) VALUES('compat',?,'compat',?,'API_KEY','OPENAI_COMPAT','ACTIVE','WORKSPACE',?)`, ws, key, user)
+				mustExec(t, r.db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('gc','`+agent+`','compat','COMPAT_KEY')`)
+				return "ep"
+			},
+			revision: "ok",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := costRouter(t)
+			user := seedTestUser(t, r.db)
+			ws := seedTestWorkspace(t, r.db, user)
+			crew := seedCrewRow(t, r.db, "endpoint-crew", ws, "Endpoint", "endpoint")
+			other := seedCrewRow(t, r.db, "foreign-crew", ws, "Foreign", "foreign")
+			agent := seedAgentRow(t, r.db, "endpoint-agent", ws, crew, "Endpoint", "endpoint", "AGENT")
+			enc, err := encryption.Encrypt(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cred := tc.setup(t, r, ws, crew, other, agent, user, enc)
+			revision := ""
+			switch tc.revision {
+			case "ok":
+				revision = endpointSourceRevision(enc)
+			case "stale":
+				old, err := encryption.Encrypt(`{"baseURL":"https://old.example/v1","apiKey":"synthetic-old"}`)
+				if err != nil {
+					t.Fatal(err)
+				}
+				revision = endpointSourceRevision(old)
+			}
+			h := NewInternalHandler(r.db, bindTestMaster, testLogger())
+			code, body := admitEndpoint(t, r, h, ws, crew, agent, cred, revision)
+			if tc.wantAdmitted && code != http.StatusOK {
+				t.Fatalf("want admitted, got %d: %s", code, body)
+			}
+			if !tc.wantAdmitted && code != http.StatusForbidden {
+				t.Fatalf("want 403 refusal, got %d: %s", code, body)
+			}
+			var audited int
+			if err := r.db.QueryRow(`SELECT COUNT(*) FROM credential_audit WHERE credential_id=? AND event_type=?`, cred, string(AuditEventProxyAdmitted)).Scan(&audited); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantAdmitted != (audited > 0) {
+				t.Errorf("PROXY_ADMITTED rows = %d; want admitted=%v", audited, tc.wantAdmitted)
+			}
+		})
+	}
+}
+
+func seedEndpoint(t *testing.T, r *Router, id, ws, enc, scope, user string) {
+	t.Helper()
+	mustExec(t, r.db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,status,scope,created_by) VALUES(?,?,?,?,'ENDPOINT_URL','OLLAMA','ACTIVE',?,?)`, id, ws, id, enc, scope, user)
 }
