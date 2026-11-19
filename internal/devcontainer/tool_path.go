@@ -284,14 +284,17 @@ var HomeProfileSeeds = []string{"/etc/skel/.profile", agentHome + "/.profile"}
 
 // HomeProfileGuardScript rewrites exactly the skeleton line in each existing
 // file and leaves every other byte, and every other profile shape, untouched.
-// A symlinked profile is skipped (sed -i would replace the link with a copy).
+// A symlinked profile is skipped: it points at a file this list does not own.
 // It is best effort: an image without sed keeps its profile as documented.
 func HomeProfileGuardScript(files ...string) string {
 	var b strings.Builder
 	for _, file := range files {
 		q := shellQuote(file)
-		b.WriteString("if [ -f " + q + " ] && [ ! -L " + q + " ] && grep -qE " + shellQuote(homeProfileSkeletonPattern) + " " + q + " 2>/dev/null; then sed -i -E " +
-			shellQuote("s|"+homeProfileSkeletonPattern+"|\\1"+homeProfileGuardLine+"|") + " " + q + " 2>/dev/null || true; fi\n")
+		tmp := shellQuote(file + ".crewship-guard")
+		// sed -i differs between GNU and BSD; write through a temp file and
+		// copy back with cat so the original inode, owner and mode are kept.
+		b.WriteString("if [ -f " + q + " ] && [ ! -L " + q + " ] && grep -qE " + shellQuote(homeProfileSkeletonPattern) + " " + q + " 2>/dev/null; then sed -E " +
+			shellQuote("s|"+homeProfileSkeletonPattern+"|\\1"+homeProfileGuardLine+"|") + " " + q + " > " + tmp + " 2>/dev/null && cat " + tmp + " > " + q + "; rm -f " + tmp + "; fi\n")
 	}
 	return b.String()
 }

@@ -51,7 +51,22 @@ func TestHomeProfileGuardKeepsDeclaredPinsFirst(t *testing.T) {
 	if err := os.WriteFile(profile, []byte(debianSkelProfile), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Stat(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
 	runGuard(t, profile, filepath.Join(root, "missing", ".profile"))
+	after, err := os.Stat(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewritten in place: same inode (so owner) and mode, no temp file left.
+	if !os.SameFile(before, after) || before.Mode() != after.Mode() {
+		t.Fatalf("profile replaced instead of rewritten in place: %v -> %v", before.Mode(), after.Mode())
+	}
+	if _, err := os.Stat(profile + ".crewship-guard"); !os.IsNotExist(err) {
+		t.Fatalf("temp file left behind: %v", err)
+	}
 
 	login := func(path string) string {
 		t.Helper()
