@@ -235,6 +235,8 @@ crewship backup create \
 
 `--recipient` and `--passphrase-file` are mutually exclusive. `--no-encrypt` is refused: every new bundle is encrypted.
 
+Restore a `--recipient` bundle with the matching identity file: `crewship backup restore bundle.tar.zst --identity ops.key`. Before #5615 the CLI offered only a passphrase, so a recipient bundle could be restored only through the API.
+
 ## Back up a single crew
 
 ```bash
