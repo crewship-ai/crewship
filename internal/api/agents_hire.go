@@ -504,15 +504,15 @@ func (h *AgentHandler) insertHireAgent(w http.ResponseWriter, r *http.Request, i
 			id, crew_id, workspace_id, name, slug, agent_role, status,
 			cli_adapter, llm_provider, llm_model, tool_profile, memory_enabled,
 			ephemeral, expires_at, parent_lead_id, hire_reason,
-			avatar_seed, avatar_style, created_at, updated_at)
+			avatar_seed, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 'AGENT', ?,
 		        'CLAUDE_CODE', ?, ?, 'CODING', 1,
 		        1, ?, ?, ?,
-		        ?, ?, ?, ?)`,
+		        ?, ?, ?)`,
 		ins.agentID, ins.crewID, ins.workspaceID, ins.name, ins.slug, ins.initialStatus,
 		ins.llmProvider, ins.llmModel,
 		ins.expiresAt, ins.parentLeadID, ins.hireReason,
-		ins.slug, avatarstyle.Default, ins.createdAt, ins.createdAt,
+		avatarstyle.Seed(nil, ins.slug), ins.createdAt, ins.createdAt,
 	); err != nil {
 		replyInternalError(w, h.logger, "hire: insert agent", err)
 		return false

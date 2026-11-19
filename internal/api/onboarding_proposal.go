@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"log/slog"
 	"net/http"
@@ -32,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -623,11 +623,11 @@ func (h *OnboardingProposalHandler) deployStoredOnboardingProposal(ctx context.C
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
 				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy,
-				timeout_seconds, memory_enabled, webhook_secret, avatar_seed, avatar_style, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1800, 1, ?, ?, ?, ?, ?)`,
+				timeout_seconds, memory_enabled, webhook_secret, avatar_seed, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1800, 1, ?, ?, ?, ?)`,
 			agentID, wsID, crewID, agent.Name, agent.Slug, agent.RoleTitle, agent.AgentRole,
 			agent.CLIAdapter, agent.LLMProvider, agent.LLMModel, agent.ToolProfile,
-			agent.SystemPrompt, storedSecret, agent.Slug, avatarstyle.Default, now, now); err != nil {
+			agent.SystemPrompt, storedSecret, avatarstyle.Seed(nil, agent.Slug), now, now); err != nil {
 			return nil, payload, "", fmt.Errorf("create proposal agent %s: %w", agent.Name, err)
 		}
 		agentIDs = append(agentIDs, agentID)

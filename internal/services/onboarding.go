@@ -143,10 +143,10 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 		agentID := s.idFunc()
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO agents (id, crew_id, workspace_id, name, slug, cli_adapter, llm_provider, llm_model,
-				avatar_seed, avatar_style, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				avatar_seed, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, agentID, crewID, p.WorkspaceID, p.AgentName, p.AgentSlug, p.CliAdapter,
-			p.LLMProvider, p.LLMModel, p.AgentSlug, avatarstyle.Default, p.Now, p.Now); err != nil {
+			p.LLMProvider, p.LLMModel, avatarstyle.Seed(nil, p.AgentSlug), p.Now, p.Now); err != nil {
 			s.logger.Error("insert agent", "error", err)
 			return nil, err
 		}

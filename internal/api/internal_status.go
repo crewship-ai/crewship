@@ -566,13 +566,13 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
 			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy, status,
-			timeout_seconds, memory_enabled, webhook_secret, avatar_seed, avatar_style, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			timeout_seconds, memory_enabled, webhook_secret, avatar_seed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, wsID, body.CrewID, body.Name, body.Slug, body.Description,
 		body.RoleTitle, body.AgentRole,
 		body.CLIAdapter, nilIfEmpty(body.LLMProvider), nilIfEmpty(body.LLMModel), body.ToolProfile, body.SystemPrompt,
 		initialStatus,
-		1800, true, webhookSecret, body.Slug, avatarstyle.Default, now, now)
+		1800, true, webhookSecret, avatarstyle.Seed(nil, body.Slug), now, now)
 	if err != nil {
 		h.logger.Error("internal create agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create agent")

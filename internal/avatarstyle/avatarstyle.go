@@ -61,18 +61,15 @@ func Problem(style string) string {
 	return "unknown avatar style " + `"` + style + `"` + " (one of: " + List() + ")"
 }
 
-// WithDefaults fills in what the web create dialog would have sent: the seed
-// is the agent's slug and the style is Default. A blank or missing value is
-// replaced; anything the caller chose is kept. Every path that creates an
-// agent goes through here so none leaves the face unpinned (#3051).
-func WithDefaults(slug string, seed, style *string) (*string, *string) {
-	if seed == nil || strings.TrimSpace(*seed) == "" {
-		s := slug
-		seed = &s
+// Seed is the avatar seed a new agent is stored with: the one the caller
+// chose, else the agent's slug (what the renderer falls back to anyway, so
+// pinning it keeps the face if the slug is later changed). It deliberately
+// does not touch the style: a NULL avatar_style is the documented "follow the
+// crew's style, else Default" state, and crew style changes re-render only
+// agents in that state (#3051). Every INSERT INTO agents goes through here.
+func Seed(chosen *string, slug string) *string {
+	if chosen != nil && strings.TrimSpace(*chosen) != "" {
+		return chosen
 	}
-	if style == nil || *style == "" {
-		d := Default
-		style = &d
-	}
-	return seed, style
+	return &slug
 }

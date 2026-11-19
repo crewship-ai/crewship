@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
-	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -919,8 +918,8 @@ func TestInternalCreateAgent(t *testing.T) {
 		if err := db.QueryRow(`SELECT slug, avatar_seed, avatar_style FROM agents WHERE name = 'Bot'`).Scan(&slug, &seed, &style); err != nil {
 			t.Fatalf("query: %v", err)
 		}
-		if seed.String != slug || style.String != avatarstyle.Default {
-			t.Errorf("avatar = (%q, %q), want (%q, %s)", seed.String, style.String, slug, avatarstyle.Default)
+		if seed.String != slug || style.Valid {
+			t.Errorf("avatar = (%q, %v), want (%q, NULL)", seed.String, style, slug)
 		}
 	})
 

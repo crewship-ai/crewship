@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -116,8 +115,8 @@ func TestOnboardingSetup_Happy(t *testing.T) {
 	// Agent avatar inputs are pinned like the web dialog does (#3051).
 	var avSeed, avStyle sql.NullString
 	if err := db.QueryRow("SELECT avatar_seed, avatar_style FROM agents WHERE id=?", res.AgentID).Scan(&avSeed, &avStyle); err != nil ||
-		avSeed.String != "pilot" || avStyle.String != avatarstyle.Default {
-		t.Errorf("agent avatar = (%q, %q) err=%v, want (pilot, %s)", avSeed.String, avStyle.String, err, avatarstyle.Default)
+		avSeed.String != "pilot" || avStyle.Valid {
+		t.Errorf("agent avatar = (%q, %q) err=%v, want (pilot, NULL)", avSeed.String, avStyle.String, err)
 	}
 	// Credential row exists with type AI_CLI_TOKEN.
 	var ctype string
