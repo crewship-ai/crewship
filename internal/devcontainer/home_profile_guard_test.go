@@ -1,4 +1,9 @@
-//go:build !windows
+//go:build linux
+
+// The guard only ever runs inside a Linux build container (GNU or busybox
+// text tools, both exercised here). BSD sed/grep on a macOS host leave the
+// profile unchanged, which the guard's best-effort contract tolerates, so
+// these executing tests are built for Linux only (#5543).
 
 package devcontainer
 
@@ -7,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,20 +36,8 @@ if [ -d "$HOME/.local/bin" ] ; then
 fi
 `
 
-// requireLinuxGuardTools skips executing the guard where the host's text tools
-// are not the ones it runs with. The guard only ever runs inside a Linux build
-// container (GNU or busybox; both pass here). BSD sed/grep on macOS leave the
-// file unchanged, which the guard's best-effort contract tolerates (#5543).
-func requireLinuxGuardTools(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skip("guard executes only inside Linux build containers")
-	}
-}
-
 func runGuard(t *testing.T, files ...string) {
 	t.Helper()
-	requireLinuxGuardTools(t)
 	if out, err := exec.Command("/bin/sh", "-c", HomeProfileGuardScript(files...)).CombinedOutput(); err != nil {
 		t.Fatalf("guard script: %v: %s", err, out)
 	}
@@ -172,7 +164,6 @@ func TestWriteAggregatedContainerEnvRunsGuardAfterHook(t *testing.T) {
 	if tail != HomeProfileGuardScript(HomeProfileSeeds...)+"}" {
 		t.Fatalf("guard block is not exactly the seed guard:\n%s", tail)
 	}
-	requireLinuxGuardTools(t)
 	profile := filepath.Join(t.TempDir(), ".profile")
 	if err := os.WriteFile(profile, []byte(debianSkelProfile), 0o644); err != nil {
 		t.Fatal(err)
