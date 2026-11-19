@@ -25,7 +25,7 @@ function ordered(docs: MemoryDocument[]) {
 
 function Note({ doc }: { doc: MemoryDocument }) {
   return <li className="rounded-lg border border-border/60 bg-card p-2.5">
-    <p className="mb-1 text-[11px] font-medium text-foreground">{memoryNoteLabel(doc)}</p>
+    <p className="mb-1 text-micro font-medium text-foreground">{memoryNoteLabel(doc)}</p>
     {doc.state === "available"
       ? <MarkdownContent className="max-h-48 overflow-y-auto break-words text-xs text-muted-foreground [overflow-wrap:anywhere] [&_ul]:list-disc [&_ol]:list-decimal">{doc.content || "This note is empty."}</MarkdownContent>
       : <p className="text-xs text-muted-foreground">This note is unavailable right now.</p>}
@@ -56,14 +56,14 @@ export function AgentMemoryTab({ agentId, workspaceId }: { agentId: string; work
     <section aria-label={`What ${name} remembers`} className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="eyebrow">What {name} remembers</h3>
-        {agent?.slug && <Link href={entityHref({ kind: "agent", slug: agent.slug, tab: "memory" })} className="text-[11px] text-primary hover:underline">Manage memory</Link>}
+        {agent?.slug && <Link href={entityHref({ kind: "agent", slug: agent.slug, tab: "memory" })} className="text-micro text-primary hover:underline">Manage memory</Link>}
       </div>
       {inventory.error && !docs ? <p role="alert" className="text-muted-foreground">Memory could not be loaded.</p>
         : !docs ? <p role="status" className="text-muted-foreground">Loading memory…</p>
           : !agentDocs.length && !crewDocs.length ? <p className="flex items-center gap-2 text-muted-foreground"><Brain className="size-4" aria-hidden />{name} has not saved anything yet.</p>
             : <ul className="space-y-1.5">{agentDocs.map((doc) => <Note key={doc.id} doc={doc} />)}</ul>}
       {crewDocs.length > 0 && <>
-        <h4 className="pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Shared with the crew</h4>
+        <h4 className="pt-2 text-micro font-medium uppercase tracking-wider text-muted-foreground">Shared with the crew</h4>
         <ul className="space-y-1.5">{crewDocs.map((doc) => <Note key={doc.id} doc={doc} />)}</ul>
       </>}
     </section>

@@ -77,7 +77,7 @@ function settled<T>(result: PromiseSettledResult<unknown>, pick: (value: unknown
 const queuedReason: Record<string, string> = { agent_busy: "Waits until the agent is free", crew_budget: "Waits for crew budget" }
 
 function NowRow({ icon: Icon, tone, label, title, detail, href }: { icon: typeof Clock; tone: string; label: string; title: string; detail?: string | null; href?: string }) {
-  const body = <><Icon className={cn("mt-0.5 size-3.5 shrink-0", tone)} aria-hidden /><span className="min-w-0 flex-1"><span className="block text-[10px] text-muted-foreground">{label}</span><span className="line-clamp-2 text-[12.5px] font-medium leading-[1.35] text-foreground">{title}</span>{detail && <span className="block text-[10px] text-muted-foreground">{detail}</span>}</span></>
+  const body = <><Icon className={cn("mt-0.5 size-3.5 shrink-0", tone)} aria-hidden /><span className="min-w-0 flex-1"><span className="block text-micro text-muted-foreground">{label}</span><span className="line-clamp-2 text-label font-medium leading-[1.35] text-foreground">{title}</span>{detail && <span className="block text-micro text-muted-foreground">{detail}</span>}</span></>
   const frame = "flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
   return <li>{href ? <Link href={href} className={cn(frame, "transition-colors hover:border-primary/40 hover:bg-accent/50")}>{body}</Link> : <div className={frame}>{body}</div>}</li>
 }
@@ -86,7 +86,7 @@ function NowRow({ icon: Icon, tone, label, title, detail, href }: { icon: typeof
 function WorkNow({ runs, queue, decisions }: Pick<WorkData, "runs" | "queue" | "decisions">) {
   if (!runs?.length && !queue?.length && !decisions?.length) return null
   return <section aria-label="Working now" className="mb-3 space-y-1.5">
-    <p className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Now</p>
+    <p className="px-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">Now</p>
     <ul className="space-y-1.5">
       {runs?.map((run) => <NowRow key={run.id} icon={Loader2} tone="animate-spin text-primary motion-reduce:animate-none" label="Running"
         title={run.mission_identifier ? `Working on ${run.mission_identifier}` : run.trigger_type === "chat" ? "Replying in a chat" : "Working"}
@@ -303,7 +303,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
       {loading && <p role="status" className="py-2 text-muted-foreground">Loading agent work…</p>}
       {error && <div role="alert" className="space-y-2 rounded-lg border border-destructive/25 p-2.5 text-muted-foreground"><p>Work could not be loaded.</p><button type="button" onClick={() => setRevision((n) => n + 1)} className="text-primary hover:underline">Try again</button></div>}
       {!workspaceId && !loading && !error && <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Select a workspace to see agent work.</p>}
-      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} agentId={agentId} workspaceId={workspaceId} />)}{(current?.issueTotal ?? 0) > issues.length && <Link href={`/issues?assignee_id=${encodeURIComponent(agentId)}`} className="px-1 text-[11px] text-primary hover:underline">Show all {current?.issueTotal} open issues</Link>}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No open issues assigned to this agent.</p>)}
+      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} agentId={agentId} workspaceId={workspaceId} />)}{(current?.issueTotal ?? 0) > issues.length && <Link href={`/issues?assignee_id=${encodeURIComponent(agentId)}`} className="px-1 text-micro text-primary hover:underline">Show all {current?.issueTotal} open issues</Link>}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No open issues assigned to this agent.</p>)}
       {workspaceId && !loading && !error && view === "routines" && (current?.routines === null ? <p role="alert" className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Routines could not be loaded.</p> : routines.length ? <ul className="space-y-1.5">{routines.map((routine) => <RoutineCard key={routine.id} routine={routine} agentId={agentId} workspaceId={workspaceId} />)}</ul> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No routines created by this agent.</p>)}
     </div>
   </div>
