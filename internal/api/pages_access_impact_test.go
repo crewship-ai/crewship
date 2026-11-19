@@ -86,7 +86,9 @@ func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
 	want := map[string]pageAccessPermissions{
 		"author": {Read: true, Comment: true, Edit: true},
 		"admin":  {Read: true},
-		"owner":  {Read: true, Comment: true, Edit: true},
+		// Only the custodian comments on private output
+		// (pages_artifact_comment_authority.go, documents_authority.go).
+		"owner": {Read: true, Edit: true},
 	}
 	for _, s := range subjects {
 		if s.EffectivePermissions != want[s.SubjectID] {
@@ -94,6 +96,19 @@ func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
 		}
 		if len(s.Sources) != 1 || s.Sources[0].Permissions != want[s.SubjectID] {
 			t.Errorf("%s: sources %+v", s.SubjectID, s.Sources)
+		}
+	}
+
+	// A private workbook or Project admits its owner alone
+	// (gridcraft_access.go, pages_artifact_project.go): the OWNER reads.
+	for name, typed := range map[string]*pageRecord{
+		"workbook": {PrivateAudience: true, OwnerUserID: "author", HasWorkbook: true},
+		"project":  {PrivateAudience: true, OwnerUserID: "author", HasProject: true},
+	} {
+		owner := []pageAccessSubjectWire{{SubjectType: pageSubjectUser, SubjectID: "owner", Paths: []string{pageReachRole}}}
+		decoratePageAccess(owner, typed, ws, nil)
+		if owner[0].EffectivePermissions != (pageAccessPermissions{Read: true}) {
+			t.Errorf("private %s OWNER: %+v", name, owner[0].EffectivePermissions)
 		}
 	}
 

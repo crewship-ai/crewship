@@ -52,11 +52,17 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 				p.Comment = true
 				p.Edit = true
 			case path == pageReachRole:
+				if !rec.PrivateAudience {
+					p.Comment = true
+					p.Edit = true
+					break
+				}
 				// On private output the role path is the administrator read
-				// rule (#4825/#4839): only the custodian audience (the
-				// workspace OWNER) also comments and edits (#5576).
-				p.Edit = !rec.PrivateAudience || privatePageCustodian(rec, viewers[s.SubjectID])
-				p.Comment = p.Edit
+				// rule (#4825/#4839, #5576). Only the custodian comments, so
+				// the role path never does. The workspace OWNER edits only
+				// where the write is decided by mayEditSpec: a GridCraft
+				// workbook and a Project admit their owner alone.
+				p.Edit = privatePageCustodian(rec, viewers[s.SubjectID]) && !rec.HasWorkbook && !rec.HasProject
 			case path == pageReachGrantPage+pageGrantComment:
 				p.Comment = true
 			case path == pageReachGrantPage+pageGrantPropose:
