@@ -169,14 +169,14 @@ describe("the panel", () => {
     }
   })
 
-  it("All N workspaces… opens the Workspaces view filtered to the watchdog off", async () => {
+  it("All N workspaces… opens the Workspaces view with every workspace", async () => {
     render(<SecurityPage />)
     fireEvent.click(await screen.findByRole("button", { name: /^All 3 workspaces…/ }))
     expect(await screen.findByRole("table", { name: "Workspaces" })).toBeInTheDocument()
     expect(window.location.search).toContain("view=workspaces")
-    expect(window.location.search).toContain("watch=off")
+    expect(window.location.search).not.toContain("watch=")
     const table = screen.getByRole("table", { name: "Workspaces" })
-    expect(within(table).queryByRole("row", { name: "Dess" })).toBeNull()
+    expect(within(table).getByRole("row", { name: "Dess" })).toBeInTheDocument()
     expect(within(table).getByRole("row", { name: "Coolify" })).toBeInTheDocument()
   })
 

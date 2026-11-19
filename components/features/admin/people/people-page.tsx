@@ -64,6 +64,11 @@ function CardToolbar({ title, sub, children }: { title: React.ReactNode; sub?: R
  * or one person's or one workspace's page. Every list is held whole in the
  * browser and paged with "Show more".
  */
+/** "1 person", "12 people". */
+function plural(n: number, one: string, many: string): string {
+  return `${n.toLocaleString("en")} ${n === 1 ? one : many}`
+}
+
 export function PeoplePage() {
   const { workspaceId, loading: workspaceLoading } = useWorkspace()
   const { session } = useAuth()
@@ -173,7 +178,7 @@ export function PeoplePage() {
           <DrillNavItem key={w.id} index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
             icon={<WorkspaceTile id={w.id} name={w.name} size="xs" logoUrl={w.logo_url} />} label={w.name} meta={membersOf(people, w.id).length} />
         ))}
-        {teams.length > 0 && (
+        {teams.length > busiest.length && (
           <DrillNavItem index={busiest.length} onSelect={() => showView("workspaces")}
             label={<span className="text-primary-hover">All {teams.length} workspaces…</span>} />
         )}
@@ -228,11 +233,11 @@ export function PeoplePage() {
 
   const teamAgents = teams.reduce((a, w) => a + (w._count_agents ?? 0), 0)
   const description: string = person || ws ? "" : {
-    people: `${people.length} people · ${teams.length} workspaces · ${personalAll.length} personal accounts`,
+    people: `${plural(people.length, "person", "people")} · ${plural(teams.length, "workspace", "workspaces")} · ${plural(personalAll.length, "personal account", "personal accounts")}`,
     hand: "People who cannot get in, and accounts nobody uses. Most pressing first.",
     admins: "People who run this server: other people, every workspace, limits and backups.",
     suspended: "Accounts that cannot sign in. Their data and memberships are kept.",
-    workspaces: `${teams.length} workspaces · ${people.length} people · ${teamAgents} agents`,
+    workspaces: `${plural(teams.length, "workspace", "workspaces")} · ${plural(people.length, "person", "people")} · ${plural(teamAgents, "agent", "agents")}`,
     accounts: "Made when someone signs up without an invitation. One person each, apart from the workspaces.",
     access: "Click a cell to change a role, or to give or take away access. An only owner stays until the workspace is handed over.",
   }[view]
@@ -312,7 +317,7 @@ export function PeoplePage() {
   } else {
     const noun = view === "admins" ? "instance admins" : view === "suspended" ? "suspended" : "people"
     const title = view === "people"
-      ? (shownPeople.length === base.length ? `${base.length} people` : `${shownPeople.length} of ${base.length} people`)
+      ? (shownPeople.length === base.length ? plural(base.length, "person", "people") : `${shownPeople.length} of ${base.length} people`)
       : `${shownPeople.length} ${noun}`
     const needy = handPeopleCount(groups)
     body = (

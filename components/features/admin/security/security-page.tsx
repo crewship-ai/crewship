@@ -247,8 +247,10 @@ export function SecurityPage() {
               icon={<WorkspaceTile id={r.workspace_id} name={r.workspace_name} logoUrl={r.workspace_logo_url} size="xs" />} label={r.workspace_name}
               meta={<span className="inline-block h-1.5 w-1.5 rounded-full bg-warn" aria-label="Watchdog off" />} />
           ))}
-          <DrillNavItem index={5} selected={false} muted onSelect={() => update({ view: "workspaces", item: null, ws: "", watch: "off" })}
-            label={`All ${rows.length} workspaces…`} />
+          {rows.length > Math.min(5, offShown.length) && (
+            <DrillNavItem index={5} selected={false} muted onSelect={() => update({ view: "workspaces", item: null, ws: "", watch: "" })}
+              label={`All ${rows.length} workspaces…`} />
+          )}
         </DrillNavSection>
       )}
     </>

@@ -180,7 +180,9 @@ export function CrewLinksPage() {
             label={<>{c.name}{dups.has(c.name) && <span className="ml-1.5 font-mono text-micro text-muted-foreground">{c.slug}</span>}</>}
             meta={<span title="Crews it works with">{counts.get(c.id) ?? 0}</span>} />
         ))}
-        <DrillNavItem index={13} tile={Search} onSelect={() => setView("crews")} label={<span className="text-primary-hover">All {shown.length} crews…</span>} />
+        {shown.length > named.length && (
+          <DrillNavItem index={13} tile={Search} onSelect={() => setView("crews")} label={<span className="text-primary-hover">All {shown.length} crews…</span>} />
+        )}
       </DrillNavSection>
     </>
   )
