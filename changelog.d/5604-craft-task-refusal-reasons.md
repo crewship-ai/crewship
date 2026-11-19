@@ -1,0 +1,1 @@
+- **A refused native Craft agent task start says why.** When you can edit the Page, `POST /api/v1/pages/{slug}/craft/tasks` and `crewship craft task start` name the reason, for example `workspace_policy_disabled`, `chat_not_private`, `instruction_not_recorded` or `not_owner_or_delegated`. A caller without Page access still gets the same generic refusal (#5596).
