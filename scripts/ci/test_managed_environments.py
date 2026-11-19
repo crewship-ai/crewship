@@ -10,6 +10,20 @@ spec.loader.exec_module(managed)
 
 
 class ManagedEnvironmentEvidenceTests(unittest.TestCase):
+    def test_explicit_cancelled_capture_requires_its_own_receipt(self):
+        name = 'TestHostRunAgentExplicitStopConfirmsProviderCancelledReceipt'
+        key = (managed.PREFIX + 'internal/orchestrator', name)
+        self.assertIn(key, managed.REQUIRED)
+        missing = [event for event in self.passing()
+                   if (event['Package'], event['Test']) != key]
+        self.assertTrue(managed.failures(missing, 0))
+        skipped = missing + [{'Package': key[0], 'Test': name, 'Action': 'skip'}]
+        self.assertTrue(managed.failures(skipped, 0))
+        commands = managed.host_commands('/fixture-artifacts', '/fixture-home', 999)
+        command = next(c for c in commands
+                       if any(arg.startswith('-test.run=') and name in arg for arg in c))
+        self.assertIn('/fixture-artifacts/internal-orchestrator.test', command)
+
     def test_keeper_runtime_requires_real_crew_sidecar_and_native_cli_receipt(self):
         name = 'TestNativeKeeperRealCrewContainer'
         key = (managed.PREFIX + 'internal/orchestrator', name)
