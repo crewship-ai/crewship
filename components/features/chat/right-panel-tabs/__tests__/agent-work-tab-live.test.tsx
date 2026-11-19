@@ -1,7 +1,7 @@
 import { act } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import { AgentWorkTab } from "../agent-work-tab"
+import { AgentWorkTab, workEventConcernsAgent } from "../agent-work-tab"
 
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
@@ -62,6 +62,63 @@ describe("AgentWorkTab live work", () => {
     expect(statuses).not.toEqual(expect.arrayContaining(["DONE"]))
     expect(statuses.some((s) => ["DONE", "COMPLETED", "CANCELLED", "FAILED", "DUPLICATE"].includes(s))).toBe(false)
     expect(screen.getByRole("tab", { name: /Issues/ })).toHaveTextContent("7")
+    const all = new URL(screen.getByRole("link", { name: "Show all 7 open issues" }).getAttribute("href")!, "http://x")
+    expect(all.pathname).toBe("/issues")
+    expect(all.searchParams.get("assignee_id")).toBe("agent-1")
+    expect(all.searchParams.get("status")!.split(",")).toEqual(statuses)
+  })
+
+  it("decides which events concern this agent", () => {
+    const scope = { agentId: "agent-1", agentSlug: "jamie", issueKeys: new Set(["i1", "COPY-1"]) }
+    expect(workEventConcernsAgent({ run_id: "r", agent_id: "agent-2" }, scope)).toBe(false)
+    expect(workEventConcernsAgent({ run_id: "r", agent_id: "agent-1" }, scope)).toBe(true)
+    expect(workEventConcernsAgent({ id: "a9", status: "RUNNING", target: "other" }, scope)).toBe(false)
+    expect(workEventConcernsAgent({ id: "a9", status: "QUEUED", target: "jamie" }, scope)).toBe(true)
+    // An issue already listed always counts, even when it moved to another agent.
+    expect(workEventConcernsAgent({ id: "i1", assignee_id: "agent-2" }, scope)).toBe(true)
+    expect(workEventConcernsAgent({ id: "i7", assignee_id: "agent-2" }, scope)).toBe(false)
+    // Without an owner field the event may concern anyone.
+    expect(workEventConcernsAgent({ id: "i7" }, scope)).toBe(true)
+    expect(workEventConcernsAgent(undefined, scope)).toBe(true)
+  })
+
+  it("skips other agents' run events and caps the debounce under a steady stream", async () => {
+    render(<AgentWorkTab agentId="agent-1" workspaceId="ws-1" />)
+    await screen.findByRole("link", { name: /^Issue COPY-1/ })
+    const issueCalls = () => urls().filter((url) => url.includes("/issues?")).length
+    const before = issueCalls()
+    vi.useFakeTimers()
+    try {
+      act(() => { for (let i = 0; i < 50; i++) handlers.get("run.completed")!({ type: "run.completed", payload: { run_id: `r${i}`, agent_id: "agent-2" } }) })
+      await act(async () => { vi.advanceTimersByTime(1000) })
+      expect(issueCalls()).toBe(before)
+      // An event every 200 ms never lets a 300 ms trailing debounce settle;
+      // the max wait still refreshes within ~2 s.
+      for (let i = 0; i < 12; i++) {
+        act(() => { handlers.get("run.started")!({ type: "run.started", payload: { run_id: `s${i}`, agent_id: "agent-1" } }) })
+        await act(async () => { vi.advanceTimersByTime(200) })
+      }
+      expect(issueCalls()).toBeGreaterThan(before)
+    } finally { vi.useRealTimers() }
+  })
+
+  it("skips the safety poll while events keep the list fresh", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<AgentWorkTab agentId="agent-1" workspaceId="ws-1" />)
+      await screen.findByRole("link", { name: /^Issue COPY-1/ })
+      const issueCalls = () => urls().filter((url) => url.includes("/issues?")).length
+      const start = issueCalls()
+      // A relevant event every 8 s refreshes the list; the 20 s poll adds nothing on top.
+      for (let i = 0; i < 5; i++) {
+        act(() => { handlers.get("run.started")!({ type: "run.started", payload: { run_id: `p${i}`, agent_id: "agent-1" } }) })
+        await act(async () => { vi.advanceTimersByTime(8000) })
+      }
+      expect(issueCalls() - start).toBe(5)
+      // Quiet for longer than the poll interval: the poll refreshes once more.
+      await act(async () => { vi.advanceTimersByTime(26_000) })
+      expect(issueCalls() - start).toBe(6)
+    } finally { vi.useRealTimers() }
   })
 
   it("shows what the agent is doing now: running work, decisions it waits for and its queue", async () => {

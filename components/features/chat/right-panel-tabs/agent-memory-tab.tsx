@@ -27,7 +27,10 @@ function Note({ doc }: { doc: MemoryDocument }) {
   return <li className="rounded-lg border border-border/60 bg-card p-2.5">
     <p className="mb-1 text-micro font-medium text-foreground">{memoryNoteLabel(doc)}</p>
     {doc.state === "available"
-      ? <MarkdownContent className="max-h-48 overflow-y-auto break-words text-xs text-muted-foreground [overflow-wrap:anywhere] [&_ul]:list-disc [&_ol]:list-decimal">{doc.content || "This note is empty."}</MarkdownContent>
+      // Focusable so a long note scrolls with the keyboard, not only the mouse.
+      ? <div tabIndex={0} role="region" aria-label={`${memoryNoteLabel(doc)} note`} className="max-h-48 overflow-y-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <MarkdownContent className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere] [&_ul]:list-disc [&_ol]:list-decimal">{doc.content || "This note is empty."}</MarkdownContent>
+      </div>
       : <p className="text-xs text-muted-foreground">This note is unavailable right now.</p>}
   </li>
 }
@@ -39,10 +42,15 @@ export function AgentMemoryTab({ agentId, workspaceId }: { agentId: string; work
   const [revision, setRevision] = useState(0)
   // Memory is written during and at the end of a run; there is no memory event.
   const reload = useCallback(() => setRevision((n) => n + 1), [])
-  useRealtimeEventSafe("run.completed", reload)
-  useRealtimeEventSafe("run.failed", reload)
+  // Only this agent's finished run can have written its memory.
+  useRealtimeEventSafe("run.completed", useCallback((event: { payload: Record<string, unknown> }) => { if (event.payload?.agent_id === agentId) reload() }, [agentId, reload]))
   useRealtimeEventSafe("realtime.reconnected", reload)
-  const inventory = useWorkspaceResource<Inventory>(workspaceId ? `/api/v1/agents/${encodeURIComponent(agentId)}/memory?workspace_id=${encodeURIComponent(workspaceId)}` : "", revision)
+  const ws = workspaceId ? encodeURIComponent(workspaceId) : ""
+  const inventory = useWorkspaceResource<Inventory>(ws ? `/api/v1/agents/${encodeURIComponent(agentId)}/memory?workspace_id=${ws}` : "", revision)
+  // "Remember between runs" is a per-agent setting; when it is off the agent
+  // saves nothing, so "has not saved anything yet" would mislead.
+  const settings = useWorkspaceResource<{ memory_enabled?: boolean }>(ws ? `/api/v1/agents/${encodeURIComponent(agentId)}?workspace_id=${ws}` : "")
+  const memoryOff = settings.data?.memory_enabled === false
   // Keep the last good read on screen while a refresh is in flight.
   const [shown, setShown] = useState<{ url: string; docs: MemoryDocument[] } | null>(null)
   const url = workspaceId ? `${agentId}:${workspaceId}` : ""
@@ -60,8 +68,9 @@ export function AgentMemoryTab({ agentId, workspaceId }: { agentId: string; work
       </div>
       {inventory.error && !docs ? <p role="alert" className="text-muted-foreground">Memory could not be loaded.</p>
         : !docs ? <p role="status" className="text-muted-foreground">Loading memory…</p>
-          : !agentDocs.length && !crewDocs.length ? <p className="flex items-center gap-2 text-muted-foreground"><Brain className="size-4" aria-hidden />{name} has not saved anything yet.</p>
-            : <ul className="space-y-1.5">{agentDocs.map((doc) => <Note key={doc.id} doc={doc} />)}</ul>}
+          : memoryOff && !agentDocs.length ? <p className="flex items-center gap-2 text-muted-foreground"><Brain className="size-4" aria-hidden />Memory is off for {name}. Turn on Remember between runs in Manage memory.</p>
+            : !agentDocs.length && !crewDocs.length ? <p className="flex items-center gap-2 text-muted-foreground"><Brain className="size-4" aria-hidden />{name} has not saved anything yet.</p>
+              : agentDocs.length > 0 && <ul className="space-y-1.5">{agentDocs.map((doc) => <Note key={doc.id} doc={doc} />)}</ul>}
       {crewDocs.length > 0 && <>
         <h4 className="pt-2 text-micro font-medium uppercase tracking-wider text-muted-foreground">Shared with the crew</h4>
         <ul className="space-y-1.5">{crewDocs.map((doc) => <Note key={doc.id} doc={doc} />)}</ul>

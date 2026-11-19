@@ -63,6 +63,27 @@ const QUEUED_ASSIGNMENT = new Set(["PENDING", "QUEUED"])
 const ISSUE_PAGE = 50
 // Safety net for dropped frames; realtime events make updates near-instant.
 const WORK_POLL_MS = 20_000
+const WORK_DEBOUNCE_MS = 300
+const WORK_MAX_WAIT_MS = 2_000
+
+/**
+ * Whether a workspace event can change this agent's Work. Events name their
+ * agent in different keys (runs: agent_id; assignments: target slug;
+ * escalations: from_slug). An event about an issue already listed always
+ * counts, so an issue reassigned away still leaves the list. Unknown shapes
+ * count, so a missing field never hides a change.
+ */
+export function workEventConcernsAgent(payload: Record<string, unknown> | undefined, scope: { agentId: string; agentSlug: string | null; issueKeys: Set<string> }): boolean {
+  if (!payload) return true
+  const field = (name: string) => typeof payload[name] === "string" && payload[name] ? payload[name] as string : null
+  const id = field("id"), identifier = field("identifier")
+  if ((id && scope.issueKeys.has(id)) || (identifier && scope.issueKeys.has(identifier))) return true
+  const owner = field("agent_id") ?? field("assignee_id")
+  if (owner) return owner === scope.agentId
+  const slug = field("target") ?? field("from_slug") ?? field("agent_slug")
+  if (slug) return slug === scope.agentSlug
+  return true
+}
 
 async function readJSON(response: Response | undefined): Promise<unknown> {
   if (!response?.ok) throw new Error("unavailable")
@@ -201,11 +222,13 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
   const [data, setData] = useState<WorkData | null>(null)
   const [revision, setRevision] = useState(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastFetch = useRef(0)
   const tabId = useId()
   useEffect(() => { if (source) setView(source.kind === "routine" ? "routines" : "issues") }, [source])
 
   useEffect(() => {
     if (!workspaceId) return
+    lastFetch.current = Date.now()
     const controller = new AbortController()
     const { signal } = controller
     const ws = encodeURIComponent(workspaceId)
@@ -218,6 +241,9 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
         .then(async (res) => ({ rows: await readJSON(res), total: Number(res.headers?.get?.("X-Total-Count") ?? NaN) })),
       apiFetch(`/api/v1/workspaces/${ws}/pipelines?order=recent&limit=100`, { signal }).then(readJSON),
       apiFetch(`/api/v1/runs?workspace_id=${ws}&agent_id=${who}&status=RUNNING&limit=20`, { signal }).then(readJSON),
+      // Known limit: the crew assignments API has no agent or status filter
+      // (assignments.go List), so this reads the crew's 100 newest rows and
+      // filters here. In a very busy crew an older queued row can be missed.
       crew ? apiFetch(`/api/v1/crews/${crew}/assignments?workspace_id=${ws}&limit=100`, { signal }).then(readJSON) : noCrew,
       crew ? apiFetch(`/api/v1/crews/${crew}/escalations?workspace_id=${ws}&status=PENDING&limit=100`, { signal }).then(readJSON) : noCrew,
     ]).then(([issueRes, routineRes, runRes, queueRes, decisionRes]) => {
@@ -248,16 +274,30 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
     return () => controller.abort()
   }, [agentId, workspaceId, crewId, agentSlug, key, revision])
 
-  // Realtime events only invalidate; bursts coalesce into one refetch.
-  const refresh = useCallback(() => {
+  // Realtime events only invalidate. Events for other agents are skipped;
+  // bursts coalesce (trailing debounce, capped so a steady stream still
+  // refreshes), and the safety poll stays quiet while events keep it fresh.
+  const scope = useRef({ agentId, agentSlug, issueKeys: new Set<string>() })
+  useEffect(() => {
+    scope.current = { agentId, agentSlug, issueKeys: new Set((data?.key === key ? data.issues ?? [] : []).flatMap((row) => [row.id, row.identifier ?? ""]).filter(Boolean)) }
+  }, [agentId, agentSlug, data, key])
+  const firstPending = useRef<number | null>(null)
+  const refresh = useCallback((event?: { payload?: Record<string, unknown> }) => {
+    if (event && !workEventConcernsAgent(event.payload, scope.current)) return
+    const now = Date.now()
+    firstPending.current ??= now
     if (debounce.current) clearTimeout(debounce.current)
-    debounce.current = setTimeout(() => { debounce.current = null; setRevision((n) => n + 1) }, 300)
+    const wait = Math.max(0, Math.min(WORK_DEBOUNCE_MS, firstPending.current + WORK_MAX_WAIT_MS - now))
+    debounce.current = setTimeout(() => { debounce.current = null; firstPending.current = null; setRevision((n) => n + 1) }, wait)
   }, [])
   const reload = useCallback(() => setRevision((n) => n + 1), [])
   useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current) }, [])
   useEffect(() => {
     if (!workspaceId) return
-    const timer = setInterval(() => { if (document.visibilityState !== "hidden") setRevision((n) => n + 1) }, WORK_POLL_MS)
+    const timer = setInterval(() => {
+      if (document.visibilityState === "hidden" || Date.now() - lastFetch.current < WORK_POLL_MS) return
+      setRevision((n) => n + 1)
+    }, WORK_POLL_MS / 4)
     return () => clearInterval(timer)
   }, [workspaceId, key])
   useRealtimeEventSafe("issue.created", refresh)
@@ -303,7 +343,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
       {loading && <p role="status" className="py-2 text-muted-foreground">Loading agent work…</p>}
       {error && <div role="alert" className="space-y-2 rounded-lg border border-destructive/25 p-2.5 text-muted-foreground"><p>Work could not be loaded.</p><button type="button" onClick={() => setRevision((n) => n + 1)} className="text-primary hover:underline">Try again</button></div>}
       {!workspaceId && !loading && !error && <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Select a workspace to see agent work.</p>}
-      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} agentId={agentId} workspaceId={workspaceId} />)}{(current?.issueTotal ?? 0) > issues.length && <Link href={`/issues?assignee_id=${encodeURIComponent(agentId)}`} className="px-1 text-micro text-primary hover:underline">Show all {current?.issueTotal} open issues</Link>}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No open issues assigned to this agent.</p>)}
+      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} agentId={agentId} workspaceId={workspaceId} />)}{(current?.issueTotal ?? 0) > issues.length && <Link href={`/issues?assignee_id=${encodeURIComponent(agentId)}&status=${OPEN_ISSUE_STATUSES.join(",")}`} className="px-1 text-micro text-primary hover:underline">Show all {current?.issueTotal} open issues</Link>}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No open issues assigned to this agent.</p>)}
       {workspaceId && !loading && !error && view === "routines" && (current?.routines === null ? <p role="alert" className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Routines could not be loaded.</p> : routines.length ? <ul className="space-y-1.5">{routines.map((routine) => <RoutineCard key={routine.id} routine={routine} agentId={agentId} workspaceId={workspaceId} />)}</ul> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No routines created by this agent.</p>)}
     </div>
   </div>

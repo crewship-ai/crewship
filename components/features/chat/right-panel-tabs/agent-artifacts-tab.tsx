@@ -67,15 +67,14 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
     debounce.current = setTimeout(() => { debounce.current = null; setRevision((n) => n + 1) }, 400)
   }, [])
   useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current) }, [])
-  // The watcher publishes file.event on the crew channel (crew membership is
-  // checked server-side). Only this agent's writes refresh; the listing itself
+  // The watcher publishes file.event on the crew channel; subscribing needs
+  // membership in the crew's workspace (internal/ws/channel_auth.go). Only this agent's writes refresh; the listing itself
   // still goes through the files API and its permission check.
   useRealtimeChannelSafe(workspaceId && crewId ? `crew:${crewId}` : null)
   useRealtimeEventSafe("file.event", useCallback((event: { payload: Record<string, unknown> }) => {
     if (agentSlug && event.payload?.agent === agentSlug) refresh()
   }, [agentSlug, refresh]))
-  useRealtimeEventSafe("run.completed", refresh)
-  useRealtimeEventSafe("run.failed", refresh)
+  useRealtimeEventSafe("run.completed", useCallback((event: { payload: Record<string, unknown> }) => { if (event.payload?.agent_id === agentId) refresh() }, [agentId, refresh]))
   useRealtimeEventSafe("realtime.reconnected", reload)
 
   const current = result?.key === key ? result : null

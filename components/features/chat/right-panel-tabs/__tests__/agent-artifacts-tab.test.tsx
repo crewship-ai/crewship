@@ -62,8 +62,17 @@ describe("AgentArtifactsTab live outputs", () => {
     expect(screen.queryByText("Loading artifacts…")).not.toBeInTheDocument()
     await act(async () => { release() })
     expect(await screen.findByText("after.html")).toBeInTheDocument()
-    expect(handlers.has("run.completed")).toBe(true)
-    expect(handlers.has("run.failed")).toBe(true)
+    expect(handlers.has("run.failed")).toBe(false)
+  })
+
+  it("refreshes when this agent's run completes, not another agent's", async () => {
+    render(<AgentArtifactsTab agentId="agent-1" workspaceId="ws-1" crewId="crew-1" agentSlug="jamie" />)
+    await screen.findByText("intro.html")
+    const before = apiFetch.mock.calls.length
+    await fire("run.completed", { run_id: "r9", agent_id: "agent-2" })
+    expect(apiFetch.mock.calls.length).toBe(before)
+    await fire("run.completed", { run_id: "r1", agent_id: "agent-1" })
+    expect(apiFetch.mock.calls.length).toBe(before + 1)
   })
 
   it("clears the list when switching to another agent", async () => {
