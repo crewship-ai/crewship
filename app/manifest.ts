@@ -16,7 +16,8 @@ export const dynamic = "force-static"
  * Deliberately no service worker. Crewship is a client for a backend it cannot
  * work without — a websocket for realtime, an API for everything else — so
  * caching the shell buys a faster blank screen and costs an invalidation story
- * that would have to be reconciled with the in-app UpdateBanner.
+ * that would have to be reconciled with the in-app update notice (the dot on the
+ * Crewship sail in the top bar).
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {

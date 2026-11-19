@@ -25,6 +25,7 @@ vi.mock("@/lib/store", () => ({
     selector({ breadcrumbs: [], setPageBarSlot: () => {}, secondaryPanel: null, setSecondaryPanelOpen: () => {}, secondaryPanelOpen: false }),
 }))
 vi.mock("@/components/features/inbox/inbox-bell", () => ({ InboxBell: () => null }))
+vi.mock("@/components/layout/crewship-brand", () => ({ CrewshipMenu: () => null }))
 vi.mock("@/components/features/activity/activity-bell", () => ({ ActivityBell: () => null }))
 vi.mock("@/components/command-palette", () => ({ CommandPalette: () => null }))
 vi.mock("../mobile-more-sheet", () => ({ MobileMoreSheet: () => null }))

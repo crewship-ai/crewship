@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
+	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 // APIClient is the contract internal/manifest needs from an HTTP
@@ -444,6 +445,36 @@ func decodeSkillsList(body []byte) ([]SkillResponse, error) {
 		return wrapped.Skills, nil
 	}
 	return nil, fmt.Errorf("decode skills list: unknown shape (first bytes: %q)", firstBytes(body, 80))
+}
+
+// StoredSkill finds a skill by slug and reads its row through GET
+// /skills/{id}. found is false when no skill has the slug or the list cannot
+// be read; stored is nil when the skill exists but its row cannot be read or
+// decoded. Callers treat a nil row as "differs", never as "unchanged".
+func (c *Client) StoredSkill(ctx context.Context, slug string) (stored *skills.StoredSkill, found bool) {
+	all, err := c.ListSkills(ctx)
+	if err != nil {
+		return nil, false
+	}
+	id := ""
+	for _, s := range all {
+		if s.Slug == slug {
+			id = s.ID
+			break
+		}
+	}
+	if id == "" {
+		return nil, false
+	}
+	body, err := c.fetchBody(ctx, "/api/v1/skills/"+url.PathEscape(id))
+	if err != nil {
+		return nil, true
+	}
+	var row skills.StoredSkill
+	if err := json.Unmarshal(body, &row); err != nil {
+		return nil, true
+	}
+	return &row, true
 }
 
 // AddSkillToAgent attaches a skill to an agent. Idempotent on the

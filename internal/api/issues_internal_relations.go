@@ -147,10 +147,14 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 		// into a column every other writer in this package fills with RFC
 		// 3339. That split already exists in older code and is tracked
 		// separately; a brand-new write path has no business widening it.
-		if _, err := h.db.ExecContext(r.Context(),
+		created := map[string]string{
+			"status":        "ok",
+			"relation_type": relationTypeSubIssue,
+			"parent_id":     targetID,
+		}
+		if !h.commitRelationWrite(w, r, created, "set parent issue",
 			`UPDATE missions SET parent_issue_id = ?, updated_at = ? WHERE id = ?`,
-			targetID, time.Now().UTC().Format(time.RFC3339), sourceID); err != nil {
-			internalError(w, r, h.logger, "set parent issue", err)
+			targetID, time.Now().UTC().Format(time.RFC3339), sourceID) {
 			return
 		}
 		h.logActivity(r.Context(), sourceID, actorType, actorID, "parent_changed", req.TargetIdentifier)
@@ -158,11 +162,7 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 		broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, targetID, false)
 		broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated",
 			map[string]string{"id": sourceID, "identifier": ident})
-		writeJSON(w, http.StatusCreated, map[string]string{
-			"status":        "ok",
-			"relation_type": relationTypeSubIssue,
-			"parent_id":     targetID,
-		})
+		writeJSON(w, http.StatusCreated, created)
 		return
 	}
 
@@ -175,14 +175,14 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 	}
 
 	id := generateCUID()
-	if _, err := h.db.ExecContext(r.Context(),
+	created := map[string]string{
+		"id":            id,
+		"status":        "ok",
+		"relation_type": actualType,
+	}
+	if !h.commitRelationWrite(w, r, created, "create relation",
 		`INSERT INTO mission_relations (id, source_id, target_id, relation_type) VALUES (?, ?, ?, ?)`,
-		id, actualSource, actualTarget, actualType); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
-			writeProblem(w, r, http.StatusConflict, "Relation already exists")
-			return
-		}
-		internalError(w, r, h.logger, "create relation", err)
+		id, actualSource, actualTarget, actualType) {
 		return
 	}
 
@@ -193,9 +193,34 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated",
 		map[string]string{"id": sourceID, "identifier": ident})
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"id":            id,
-		"status":        "ok",
-		"relation_type": actualType,
-	})
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// commitRelationWrite runs the relation's one write in a transaction with its
+// routine step-effect row (#5332), so a resumed routine step replays instead
+// of linking twice. It writes the error response and returns false on failure.
+func (h *InternalIssueHandler) commitRelationWrite(w http.ResponseWriter, r *http.Request, created map[string]string, what, query string, args ...any) bool {
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, what, err)
+		return false
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeProblem(w, r, http.StatusConflict, "Relation already exists")
+			return false
+		}
+		internalError(w, r, h.logger, what, err)
+		return false
+	}
+	if err := recordRoutineStepEffectTx(r.Context(), tx, http.StatusCreated, created); err != nil {
+		writeRoutineStepEffectError(w, err)
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, what, err)
+		return false
+	}
+	return true
 }

@@ -585,6 +585,10 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeChatIssueError(w, err)
 		return
 	}
+	if err := recordRoutineStepEffectTx(r.Context(), tx, http.StatusCreated, result); err != nil {
+		writeRoutineStepEffectError(w, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit issue", err)
 		return
@@ -832,7 +836,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// label bug, ten lines below it — and this PR makes the comment the agent's
 	// primary way of reporting progress to a human. "Moved to IN_PROGRESS" with
 	// the explanation silently dropped is worse than the whole call failing.
-	if req.Status != "" || !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" {
+	// A routine step's write always takes the transaction: its step-effect
+	// row must commit with it (#5332).
+	if req.Status != "" || !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" || routineStepEffectFrom(r.Context()) != nil {
 		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w, r, h.logger, "begin issue update tx", err)
@@ -980,6 +986,10 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			writeChatIssueError(w, err)
 			return
 		}
+		if err := recordRoutineStepEffectTx(r.Context(), tx, http.StatusOK, operationResult); err != nil {
+			writeRoutineStepEffectError(w, err)
+			return
+		}
 		if err := tx.Commit(); err != nil {
 			internalError(w, r, h.logger, "commit issue update", err)
 			return
@@ -1111,6 +1121,10 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	}
 	if err := completeChatIssueOperation(r.Context(), tx, op, missionID, result); err != nil {
 		writeChatIssueError(w, err)
+		return
+	}
+	if err := recordRoutineStepEffectTx(r.Context(), tx, http.StatusCreated, result); err != nil {
+		writeRoutineStepEffectError(w, err)
 		return
 	}
 	if err := tx.Commit(); err != nil {

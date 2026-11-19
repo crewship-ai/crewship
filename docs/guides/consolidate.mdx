@@ -10,7 +10,7 @@ tag: Experimental
 
 Two background workers run against the [Crew Journal](/guides/crew-journal). Both start automatically at server boot (`consolidate.StartBackground`) on the cadences below; you can also trigger a consolidation run on demand via the API/CLI.
 
-1. **Consolidator** — runs every 6h. Walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
+1. **Consolidator** — runs every 6h. Walks recent journal entries per crew and produces a set of learned rules appended to `{crewSlug}/topics/learned-YYYY-MM-DD.md` in the crew's shared memory. Emits `memory.consolidated`. Nothing reads these files back into an agent's context -- see [Who reads learned rules](#who-reads-learned-rules).
 2. **Compactor** — runs daily at 03:00 UTC. Rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
 
 Each degrades gracefully when its inputs are absent: no summarizer (auxiliary LLM) configured → the consolidator loop still runs but produces no rules; the compactor always runs its retention sweep.
@@ -37,22 +37,32 @@ Everything else (exec chunks, metrics, broadcast noise) is explicitly excluded s
 
 ## Rules output
 
-Rules land in `{memoryRoot}/{crewSlug}/topics/learned-YYYY-MM-DD.md`. Format:
+Rules land in `{memoryRoot}/{crewSlug}/topics/learned-YYYY-MM-DD.md`, inside the crew's shared memory directory (`/crew/shared/.memory/{crewSlug}/topics/` in the container). Each run appends one block:
 
 ```markdown
-# Learned Rules 2026-04-17
+# Learned rules — 2026-04-17
 
-## Rule: prefer staged deployments for schema changes
-**Source:** peer.escalation j_a1b2..., mission.status_change j_xyz...
-**Confidence:** 0.8
+## Run at 03:00:12
 
-When a migration adds a non-nullable column, roll it out in two steps
-(add nullable, backfill, alter to NOT NULL) to avoid production downtime.
-
-## Rule: ...
+- **Pattern:** prefer staged deployments for schema changes
+  **Action:** roll out non-nullable columns in two steps (add nullable, backfill, alter to NOT NULL)
+  **Confidence:** 0.8
+  **Evidence:** peer.escalation j_a1b2..., mission.status_change j_xyz...
 ```
 
-The [Lead](/guides/first-crew)'s crew memory search (FTS5) picks these up automatically -- see [Memory System](/guides/agent-memory).
+With human-in-the-loop review on, the consolidator stages rules under `.proposed/` and writes the canonical file only when an operator approves -- see [Memory Observability](/guides/memory-observability).
+
+### Who reads learned rules
+
+**No agent receives learned rules today.** The files are written, versioned and audited, but nothing delivers them to a running agent:
+
+- they are not part of the memory block injected at session start;
+- `memory.read` has no `learned` tier, and `memory.search` filters them out of its results;
+- the memory instructions the agent sees point at `/crew/shared/.memory/topics/`, not at the crew-slug directory the files are written to.
+
+What they are used for: the consolidator reads them back to avoid re-proposing a pattern it already landed, operators review and approve them through the inbox and `crewship consolidate proposed`, and a rule with sustained recall can be promoted to a skill proposal. Treat them as an operator-reviewed artefact, not as instructions your agents follow.
+
+What does reach agents is narrower: at session start the **Lead** (only) gets the most recent mission outcomes from the crew's `lessons.md` in its crew memory block. Delivering learned rules to agents is tracked as a post-1.0 feature.
 
 ## Summarizer
 
@@ -174,5 +184,5 @@ Full reference: [`crewship consolidate`](/cli/consolidate).
 
 - [Crew Journal](/guides/crew-journal) -- input stream.
 - [Episodic memory](/guides/episodic-memory) -- the vector index built from the entry types these workers emit.
-- [Memory System](/guides/agent-memory) -- consumes the generated `topics/learned-*.md` files.
+- [Memory System](/guides/agent-memory) -- the tiers agents actually read. It does not consume `topics/learned-*.md`; see [Who reads learned rules](#who-reads-learned-rules).
 - [`crewship consolidate`](/cli/consolidate), [Consolidate API](/api-reference/consolidate).

@@ -62,5 +62,5 @@ export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
   if (!enabled || query.isError || !query.data) return null
   const hold = runHold(query.data)
   if (!hold) return null
-  return <p role="status" className="shrink-0 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-foreground">{hold}</p>
+  return <p role="status" data-testid="run-preflight" className="mx-2 shrink-0 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-foreground">{hold}</p>
 }

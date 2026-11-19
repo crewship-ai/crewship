@@ -10,7 +10,6 @@ import { useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access
 import { useAbilities } from "@/hooks/use-abilities"
 import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
-import { CrewshipBrand } from "@/components/layout/crewship-brand"
 import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf, useFoldedRailGroups, useRailBandEdges } from "@/components/layout/rail"
 import { UserMenu } from "@/components/layout/user-menu"
 import { useAppStore } from "@/lib/store"
@@ -108,10 +107,8 @@ export function AppSidebar() {
         </div>
       </SidebarContent>
 
-      {/* The Crewship sail ends the rail, above the footer's rule. */}
-      <SidebarMenu className="rail-inset shrink-0 pb-1.5">
-        <CrewshipBrand />
-      </SidebarMenu>
+      {/* The Crewship sail used to end the rail here; it is in the top bar,
+          after Activity and Inbox (#5552). The rail ends with its apps. */}
 
       {/* Sidebar mode, Settings and Admin, then who you are. */}
       <SidebarFooter className="rail-inset gap-px border-t border-sidebar-border pb-2 pt-2">
