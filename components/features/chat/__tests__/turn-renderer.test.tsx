@@ -416,24 +416,26 @@ describe("system_init — fields that are not the strings they were typed as", (
       <TurnRenderer
         turn={systemTurn("system_init", "", {
           mcp_servers: [{ name: { id: "crewship-memory" }, status: { state: "connected" } }],
+          mcp_server_errors: [{ name: "github", type: "spawn" }],
         })}
         onCopy={async () => true}
         onFileClick={noop}
       />,
     )
-    expect(screen.getByText(/Session started/)).toBeTruthy()
+    expect(screen.getByText(/1 MCP server skipped/)).toBeTruthy()
     expect(screen.getByText("unknown")).toBeTruthy()
   })
 
   it("omits the model chip when the model is not a string", () => {
     render(
       <TurnRenderer
-        turn={systemTurn("system_init", "", { model: { id: "claude-opus-4-7" } })}
+        turn={systemTurn("system_init", "", { model: { id: "claude-opus-4-7" }, mcp_server_errors: [{ name: "github" }] })}
         onCopy={async () => true}
         onFileClick={noop}
       />,
     )
-    expect(screen.getByText(/Session started/)).toBeTruthy()
+    expect(screen.getByText(/1 MCP server skipped/)).toBeTruthy()
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull()
   })
 
   it("ignores a tool inventory that is not a list", () => {
