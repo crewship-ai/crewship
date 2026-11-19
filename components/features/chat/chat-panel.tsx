@@ -11,6 +11,7 @@ import { AnimatePresence } from "motion/react"
 import {
   Bot,
   Command,
+  Check,
   Link2,
   Users,
   Search,
@@ -1883,10 +1884,18 @@ function CopyLinkButton() {
       }}
       aria-label="Copy link to this conversation"
       title="Copy link to this conversation"
-      className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground"
+      data-state={copied ? "copied" : undefined}
+      // Centred, because a touch screen raises every control to 44 px and a
+      // pill that only grew put its icon off-centre in an empty ring (#3883).
+      // Phones hide the label, so the icon itself says "Copied".
+      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground coarse:min-w-[44px]"
     >
-      <Link2 className="h-3 w-3" aria-hidden="true" />
+      {copied
+        ? <Check className="h-3 w-3 text-success" aria-hidden="true" />
+        : <Link2 className="h-3 w-3" aria-hidden="true" />}
       <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
+      {/* Phones hide the label; say it to a screen reader as well. */}
+      <span className="sr-only" role="status">{copied ? "Link copied" : ""}</span>
     </button>
   )
 }

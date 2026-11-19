@@ -28,6 +28,8 @@ import {
 } from "@/components/features/chat/chat-kind"
 import { SidebarCollapseButton, SIDEBAR_WIDTH_COLLAPSED } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { Segmented } from "@/components/ui/segmented"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
@@ -226,6 +228,9 @@ function ChatClientBody() {
 
   const { workspaceId } = useWorkspace()
   const isMobile = useChatCompactLayout()
+  // The phone bar (below md) is where SubBar takes over the title and the
+  // Crews path gives way; the compact chat layout starts wider, at 900 px.
+  const isPhone = useIsMobile()
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chat")
   useEffect(() => { setMobilePanel("chat") }, [humanConversationId])
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -867,9 +872,26 @@ function ChatClientBody() {
       <div className="grid h-full place-items-center px-6 text-center">
         <div className="max-w-sm">
           <p className="text-body text-foreground">Pick a conversation</p>
+          {/* The list is a closed drawer on a phone and a folded column on
+              a desktop: point at it only while it is on screen, and open it
+              otherwise (#3869). */}
           <p className="mt-1 text-label text-muted-foreground">
-            Or start one with an agent from the list on the left.
+            {isMobile || leftCollapsed
+              ? "Or start one with an agent."
+              : "Or start one with an agent from the list on the left."}
           </p>
+          {(isMobile || leftCollapsed) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              data-testid="chat-empty-show-list"
+              onClick={() => (isMobile ? setDrawerOpen(true) : setLeftCollapsed(false))}
+            >
+              Open conversation list
+            </Button>
+          )}
 
         </div>
       </div>
@@ -881,7 +903,9 @@ function ChatClientBody() {
     : Object.values(threadsByAgent).reduce((sum, threads) => sum + threads.length, 0)
   const subbar = <SubBar
     icon={MessageSquare}
-    title="Chat"
+    // On a phone the Crews path gives way to this title, so it names who
+    // you are talking to (#3871); the desktop keeps the path above it.
+    title={isPhone && agent ? agent.name : "Chat"}
     description={`${agents?.length ?? 0} agents · ${sharedConversations} conversations · ${allSessions} sessions`}
     ariaLabel="Chat"
     leading={isMobile ? <button type="button" onClick={() => setDrawerOpen(true)} aria-label="Show conversations" className="rounded p-1.5 text-muted-foreground hover:text-foreground"><Menu className="size-4" /></button> : undefined}
