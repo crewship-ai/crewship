@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { entityHref } from "@/lib/entity-links"
 
-import { AgentStrip, agentStatusPill } from "../agent-strip"
+import { AgentStrip, agentStatusPill, withRunStatus } from "../agent-strip"
 
 vi.mock("@/components/ui/agent-avatar", () => ({
   AgentAvatar: ({ seed }: { seed: string }) => <span data-testid="avatar">{seed}</span>,
@@ -55,5 +55,21 @@ describe("agentStatusPill", () => {
     expect(agentStatusPill("PENDING_REVIEW")).toMatchObject({ label: "Pending review", tone: "warn", live: false })
     expect(agentStatusPill("PAUSED")).toMatchObject({ label: "Paused", tone: "warn" })
     expect(agentStatusPill(undefined)).toMatchObject({ label: "Idle" })
+  })
+})
+
+// The header said "Idle" for the whole run: the roster row is read once. A
+// reply streaming in this conversation is proof enough that the agent works.
+describe("withRunStatus", () => {
+  const agent = { id: "a", name: "Jamie", slug: "jamie", status: "IDLE" }
+  it("shows the agent as running while this conversation streams", () => {
+    expect(agentStatusPill(withRunStatus(agent, true).status).label).toBe("Running")
+  })
+  it("falls back to the agent's own status otherwise", () => {
+    expect(withRunStatus(agent, false)).toBe(agent)
+    expect(withRunStatus({ ...agent, status: "PAUSED" }, false).status).toBe("PAUSED")
+  })
+  it("keeps a more specific live status while streaming", () => {
+    expect(withRunStatus({ ...agent, status: "PENDING_REVIEW" }, true).status).toBe("PENDING_REVIEW")
   })
 })

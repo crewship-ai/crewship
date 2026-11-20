@@ -272,8 +272,13 @@ func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read conversation: %v", err)
 	}
-	if len(msgs) != 0 {
-		t.Errorf("user message must not be persisted when build hasn't run; got %d", len(msgs))
+	// #5559: the send is queued on the build and runs afterwards, so the human
+	// turn is saved and acknowledged now — a reload during the build keeps it.
+	if len(msgs) != 1 || msgs[0].Content != "hello" {
+		t.Errorf("queued user message must be saved before the build runs; got %+v", msgs)
+	}
+	if !enq.attachMsg.Opts.UserMessagePersisted {
+		t.Error("deferred send must tell its resume that the turn is already saved")
 	}
 }
 

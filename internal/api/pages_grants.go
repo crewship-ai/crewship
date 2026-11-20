@@ -640,8 +640,7 @@ func (h *PageHandler) mayDelegateAgentEdit(ctx context.Context, wsID, userID str
 // A deleted crew owns nothing it can hand an agent. The SQL twins are
 // agentEditIssuerNotOwnerSQL and the triggers of migration 20261109132621.
 // isPageOwner, pageGrantIssuerCurrent and the issuer_standing arm of the view
-// page_grant_verdicts, which other owner checks use, still count a deleted
-// crew's members (#5259).
+// page_grant_verdicts (migration 20261119163553) read the same rule (#5259).
 func (h *PageHandler) pageOwnerForDelegation(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
 	if userID == "" {
 		return false

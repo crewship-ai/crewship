@@ -19,5 +19,10 @@
     "pngjs": "7.0.0",
     "pptxgenjs": "4.0.1",
     "@xmldom/xmldom": "0.9.12"
+  },
+  "pnpm": {
+    "overrides": {
+      "image-size": "2.0.3"
+    }
   }
 }

@@ -134,6 +134,20 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(screen.queryByText(/Reconnecting|Connection lost/)).toBeNull()
   })
 
+  it("opens the Crewship sail and About without a request outside the allowlist (#5552)", async () => {
+    mount()
+    expect(await screen.findByTestId("page")).toBeInTheDocument()
+    // No bells, so only the sail's own rule divides the bar.
+    const bar = screen.getByRole("banner")
+    expect(bar.querySelectorAll("span.h-5.w-px")).toHaveLength(1)
+    fireEvent.click(await within(bar).findByTestId("crewship-trigger"))
+    fireEvent.click(await screen.findByRole("button", { name: "About Crewship" }))
+    expect(await screen.findByRole("dialog", { name: "About Crewship" })).toBeInTheDocument()
+    await settle(50)
+    expect(forbidden()).toEqual([])
+    expect(requests.some((r) => r.includes("/system/version") || r.includes("/system/license"))).toBe(false)
+  })
+
   it("keeps the mounted draft unavailable through an empty directory and failed Retry", async () => {
     function Draft() {
       const [value,setValue]=useState("")

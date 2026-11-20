@@ -351,9 +351,28 @@ export function formatGate(r) {
   return [head, ...r.problems.map((p) => `  ${p.kind.padEnd(8)} ${p.id}: ${p.detail}`)].join("\n")
 }
 
+/** The UTF-8 contents of p when it is a regular file, null when it is a directory. @param {string} p */
+function readIfFile(p) {
+  let fd
+  try {
+    fd = fs.openSync(p, "r")
+  } catch (err) {
+    if (err?.code === "EISDIR") return null
+    throw err
+  }
+  try {
+    return fs.fstatSync(fd).isFile() ? fs.readFileSync(fd, "utf8") : null
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
 /** Reads rows from a run directory, a summary.json or a rows/ directory. @param {string} p */
 export function readRunRows(p) {
-  if (fs.statSync(p).isFile()) return JSON.parse(fs.readFileSync(p, "utf8")).rows ?? []
+  // Check and read through one descriptor, so the file parsed is the file
+  // that was checked (code-scanning js/file-system-race, #1510).
+  const file = readIfFile(p)
+  if (file !== null) return JSON.parse(file).rows ?? []
   const summary = path.join(p, "summary.json")
   if (fs.existsSync(summary)) return JSON.parse(fs.readFileSync(summary, "utf8")).rows ?? []
   return readRows(fs.existsSync(path.join(p, "rows")) ? path.join(p, "rows") : p)

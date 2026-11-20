@@ -911,6 +911,25 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			"crew_slug": info.CrewSlug,
 			"status":    status,
 		}
+		// The build is queued and this send will run once it finishes, so the
+		// human turn is saved and acknowledged NOW (#5559): the sender's
+		// composer already shows it as sent, and a reload, another viewer or a
+		// server restart during a long first build must find it in the
+		// transcript. Sends whose purpose is re-validated on resume (Ask
+		// submission, Page context, document and artifact-project intents)
+		// keep their save-on-run contract: their resume may still refuse them.
+		// A resume that is deferred again was saved by its first attempt.
+		if enqErr == nil && !msgOpt.UserMessagePersisted && askEnvelope == nil && pageContext == nil &&
+			documentCreation == nil && documentIteration == nil && artifactProject == nil {
+			if err := persistUserMsg(); err != nil {
+				b.logger.Error("failed to persist deferred user message", "error", err, "chat_id", chatID)
+				streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
+				return fmt.Errorf("persist user message: %w", err)
+			}
+			broadcastUserMsg()
+			msgOpt.UserMessagePersisted = true
+		}
+
 		var evtContent string
 		if enqErr != nil {
 			evtMeta["error"] = enqErr.Error()
@@ -1043,8 +1062,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	// Agent IS responding (private chat, or @mentioned in a group) and this
 	// send owns the run slot. Persist + broadcast the human turn now that
-	// provisioning has cleared.
-	if err := persistUserMsg(); err != nil {
+	// provisioning has cleared — unless the deferral above already saved and
+	// acknowledged this exact turn before the build ran (#5559).
+	alreadySaved := msgOpt.HumanResume && msgOpt.UserMessagePersisted && msgOpt.OriginalTriggerMessageID == triggerMessageID
+	var persistErr error
+	if !alreadySaved {
+		persistErr = persistUserMsg()
+	}
+	if err := persistErr; err != nil {
 		var accepted *conversation.DocumentCreationAlreadyAccepted
 		if errors.As(err, &accepted) || errors.Is(err, conversation.ErrDocumentCreationSubmissionConflict) {
 			return err
@@ -1062,7 +1087,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
 	}
-	broadcastUserMsg()
+	if !alreadySaved {
+		broadcastUserMsg()
+	}
 
 	// Auto-title: use first user message (truncated) as session title
 	title := content

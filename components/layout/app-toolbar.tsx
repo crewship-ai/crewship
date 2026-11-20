@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
+import { CrewshipMenu } from "@/components/layout/crewship-brand"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 
@@ -149,8 +150,10 @@ export function AppToolbar() {
       const path = breadcrumbs.length > 0
         ? breadcrumbs
         : [{ label: "Crews", href: "/crews" }, ...(chatAgentSlug.startsWith("_") ? [] : [{ label: chatAgentSlug, href: `/crews?agent=${encodeURIComponent(chatAgentSlug)}` }])]
+      // Marked as the area crumb, so on a phone it gives way to the page's
+      // own back control and title like every other area's does (#3871).
       return (
-        <>
+        <div className="flex min-w-0 items-center gap-1.5" data-slot="area-crumb">
           {path.map((item, i) => (
             <span key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
               {item.href ? (
@@ -164,7 +167,7 @@ export function AppToolbar() {
             </span>
           ))}
           <span className="text-sm font-semibold">Chat</span>
-        </>
+        </div>
       )
     }
 
@@ -264,23 +267,31 @@ export function AppToolbar() {
           * handler, routes, CLI group and the table itself — followed in
           * #1751.
           *
-          * System-wide messages (new version, degraded runtime, lost
-          * realtime) are banners — UpdateBanner / RuntimeBanner /
-          * RealtimeStatusBanner — because a notice nobody can afford to miss
-          * does not belong behind a closed dropdown. */}
-        {trusted && (
-          <div className="flex items-center gap-0.5">
-            {/* The strip reads in two halves: the page's actions and search,
-                then the two bells. The rule marks where one ends. On a phone
-                it is the activity bell only: Inbox is a tab, and the account
-                is a row in the More sheet. */}
-            <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />
-            <ActivityBell />
+          * Degraded runtime and lost realtime are banners — RuntimeBanner /
+          * RealtimeStatusBanner — because a notice you have to act on does
+          * not belong behind a closed dropdown. A new Crewship version is
+          * not one of those: it was a banner on every page until the owner
+          * moved it onto the Crewship sail (#5552), the third mark here. */}
+        <div className="flex items-center gap-0.5">
+          {/* The strip reads in two halves: the page's actions and search,
+              then Activity, Inbox and the Crewship sail. The rule marks where
+              one ends. On a phone it is Activity and the sail: Inbox is a
+              tab, and the account is a row in the More sheet. */}
+          {/* Restricted sessions have no bells, so the sail's own rule is
+              the only one. */}
+          {trusted && <span className="mx-1 hidden h-5 w-px bg-foreground/[0.1] md:block" aria-hidden />}
+          {trusted && <ActivityBell />}
+          {trusted && (
             <div className="hidden md:flex">
               <InboxBell />
             </div>
-          </div>
-        )}
+          )}
+          {/* The sail is the product's mark, not a third bell: the same rule
+              that ends the page's actions sets it apart from Activity and
+              Inbox, on phones too (owner, 19 Nov). */}
+          <span className="mx-1.5 h-5 w-px bg-foreground/[0.1]" aria-hidden data-slot="crewship-sail-rule" />
+          <CrewshipMenu />
+        </div>
       </div>
 
       {/* Mobile: the More sheet (v67 pop-more) */}

@@ -4,6 +4,7 @@ import { AgentWorkTab } from "../agent-work-tab"
 
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: () => {} }))
 
 const issues = [
   { id: "backlog", identifier: "COPY-3", title: "Plan launch", status: "BACKLOG", updated_at: "2026-09-20T00:00:00Z" },

@@ -1,0 +1,126 @@
+package chatbridge
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/ws"
+)
+
+// A send that arrives while the crew's image still has to be built is queued
+// on the build and run by the server afterwards. The sender's composer shows
+// it as sent at once, so the server must save and acknowledge the human turn
+// at once too — exactly one time across the deferral, any re-deferral and the
+// resumed run (#5559).
+func TestDeferredSendIsPersistedOnceBeforeTheBuild(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// redefers: the first resume finds the image unusable again and is
+		// deferred to another build before the second resume runs.
+		redefers   bool
+		enqueueErr error
+		wantSaved  int
+		wantAcks   int
+		wantResume bool
+	}{
+		{name: "queued then resumed", wantSaved: 1, wantAcks: 1, wantResume: true},
+		{name: "queued, deferred again, resumed", redefers: true, wantSaved: 1, wantAcks: 1, wantResume: true},
+		// The build never started: nothing will run the message, so it is
+		// not recorded and the sender gets the error instead.
+		{name: "build could not be queued", enqueueErr: errors.New("rate limited"), wantSaved: 0, wantAcks: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			info := &ChatInfo{
+				HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1},
+				AgentID:        "a1",
+				AgentSlug:      "alice",
+				CrewID:         "crew-1",
+				CrewSlug:       "engineering",
+				WorkspaceID:    "ws-1",
+				CLIAdapter:     "CLAUDE_CODE",
+				ToolProfile:    "CODING",
+				TimeoutSecs:    30,
+				Visibility:     "private",
+				CachedImage:    "", // first build still running
+			}
+			b := testBridgeWithContainer(t, &mockResolver{info: info}, &failContainer{})
+			enq := &stubEnqueuer{resRunning: true, returnError: tc.enqueueErr}
+			b.SetProvisioningEnqueuer(enq)
+
+			acks := 0
+			stream := func(e ws.ChatEvent) {
+				if e.Type == "user_message" {
+					acks++
+				}
+			}
+			saved := func() int {
+				t.Helper()
+				msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+				if err != nil {
+					t.Fatalf("read conversation: %v", err)
+				}
+				n := 0
+				for _, m := range msgs {
+					if m.Content == "files from d1" {
+						n++
+					}
+				}
+				return n
+			}
+
+			err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "files from d1", stream)
+			if tc.enqueueErr != nil {
+				if err == nil || errors.Is(err, ws.ErrCrewProvisioning) {
+					t.Fatalf("enqueue failure must surface as an error, got %v", err)
+				}
+			} else if !errors.Is(err, ws.ErrCrewProvisioning) || !enq.attachCalled {
+				t.Fatalf("send was not deferred to the build: err=%v attached=%v", err, enq.attachCalled)
+			}
+			// Saved before the build finishes: a reload now must show it.
+			if got := saved(); got != tc.wantSaved {
+				t.Fatalf("saved while building = %d, want %d", got, tc.wantSaved)
+			}
+			if !tc.wantResume {
+				if acks != tc.wantAcks {
+					t.Fatalf("acks = %d, want %d", acks, tc.wantAcks)
+				}
+				return
+			}
+
+			resume := func() error {
+				pending := enq.attachMsg
+				pending.Opts.HumanResume = true
+				enq.attachCalled = false
+				return b.HandleChatMessage(context.Background(), pending.UserID, pending.ChatID, pending.Content, stream, pending.Opts)
+			}
+			if tc.redefers {
+				// The completed build's image is still unusable: deferred again.
+				if err := resume(); !errors.Is(err, ws.ErrCrewProvisioning) || !enq.attachCalled {
+					t.Fatalf("resume was not deferred again: err=%v attached=%v", err, enq.attachCalled)
+				}
+			}
+			info.CachedImage = "crewship-cache:ready"
+			info.CachedRequirements = &devcontainer.AggregatedRequirements{
+				AdapterBinaries:      []string{"claude"},
+				AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"}),
+			}
+			// The resumed run reaches the runtime (the fake container refuses
+			// to start); the human turn must not be saved a second time.
+			if err := resume(); err == nil || errors.Is(err, ws.ErrCrewProvisioning) {
+				t.Fatalf("resume did not reach the runtime: %v", err)
+			}
+			if got := saved(); got != tc.wantSaved {
+				t.Fatalf("saved after resume = %d, want %d", got, tc.wantSaved)
+			}
+			if acks != tc.wantAcks {
+				t.Fatalf("acks = %d, want %d", acks, tc.wantAcks)
+			}
+		})
+	}
+}

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { InlineRunImages, loadRunImages, runImageFiles } from "../inline-run-images"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { readArtifactSnapshot, readArtifactVersion } from "../artifact-file-io"
 
 const sessionState = vi.hoisted(() => ({ id: "human" as string | undefined }))
@@ -137,4 +138,29 @@ it("does not carry a previous viewer's measured output space into another viewer
   rerender(<QueryClientProvider client={client}><InlineRunImages agentId="a" workspaceId="w" chatId="chat" runId="run-1" /></QueryClientProvider>)
   expect(container.firstElementChild).toHaveStyle({ minHeight: "1px" })
   expect(apiFetch).toHaveBeenCalledTimes(requests)
+})
+
+it("ignores a burst of other agents' and other runs' file events, and coalesces its own into one recheck", async () => {
+  const handler = (type: string) => {
+    const calls = vi.mocked(useRealtimeEventSafe).mock.calls.filter(([t]) => t === type)
+    return calls[calls.length - 1][1] as (event: { type: string; payload: Record<string, unknown>; timestamp: Date }) => void
+  }
+  const fire = (type: string, payload: Record<string, unknown>) => handler(type)({ type, payload, timestamp: new Date() })
+  mount()
+  await screen.findByRole("img", { name: "chart.png" })
+  const before = vi.mocked(apiFetch).mock.calls.length
+  act(() => {
+    for (let i = 0; i < 200; i++) fire("file.event", { event: "write", agent: `other-${i % 5}`, path: `other-${i % 5}/runs/run-1/f${i}.png` })
+    for (let i = 0; i < 20; i++) fire("file.event", { event: "write", agent: "agent", path: `agent/runs/run-2/f${i}.png` })
+    fire("run.completed", { run_id: "run-9", agent_id: "someone-else" })
+  })
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)) })
+  expect(vi.mocked(apiFetch).mock.calls.length).toBe(before)
+  act(() => {
+    for (let i = 0; i < 30; i++) fire("file.event", { event: "write", agent: "agent", path: `agent/runs/run-1/f${i}.png` })
+  })
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBeGreaterThan(before))
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)) })
+  // One recheck: the execution-profile read plus one run listing.
+  expect(vi.mocked(apiFetch).mock.calls.length - before).toBe(2)
 })

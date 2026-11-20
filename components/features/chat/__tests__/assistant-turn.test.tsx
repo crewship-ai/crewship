@@ -18,8 +18,8 @@ vi.mock("@/components/ai-elements/message", () => ({
   MessageResponse: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="message-response">{children}</div>
   ),
-  MessageActions: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="message-actions">{children}</div>
+  MessageActions: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div data-testid="message-actions" className={className}>{children}</div>
   ),
   MessageAction: ({ children, tooltip, onClick }: {
     children: React.ReactNode
@@ -230,6 +230,13 @@ describe("AssistantTurn dispatch", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Copied to clipboard")
     expect(screen.getByTestId("action-copied")).toBeInTheDocument()
   })
+  it("always shows the reply actions on a touch screen, which has no hover (#3874)", () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={onCopy} onFileClick={onFileClick} />)
+    const row = screen.getByTestId("action-copy").closest(".opacity-0") as HTMLElement
+    expect(row).not.toBeNull()
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(["pointer-coarse:opacity-100", "focus-within:opacity-100"]))
+  })
+
   it("says the copy failed instead of pretending it worked", async () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "Answer" })])} onCopy={() => Promise.resolve(false)} onFileClick={onFileClick} />)
     await act(async () => { fireEvent.click(screen.getByTestId("action-copy")) })

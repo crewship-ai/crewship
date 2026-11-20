@@ -122,10 +122,8 @@ export function MissionTimelineClient() {
           <Link href="/activity" className="hover:text-foreground transition-colors shrink-0">
             Activity
           </Link>
-          <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
-          <Link href={`/missions/${missionId}`} className="hover:text-foreground transition-colors shrink-0">
-            Missions
-          </Link>
+          {/* There was a "Missions" step here, to /missions/<id>: the
+              Missions UI is retired and that page never existed (#3361). */}
           <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
           <Map className="h-3 w-3 text-foreground/60 shrink-0" />
           <span className="text-foreground/80 font-medium truncate">Timeline</span>

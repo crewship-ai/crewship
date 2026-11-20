@@ -147,6 +147,14 @@ func keeperAgentRequest(cmd *cobra.Command, operation, argument string) error {
 		if operation == "execute" || resp.StatusCode >= 500 {
 			detail = "Keeper outcome unavailable; inspect request state before retrying"
 		}
+		if operation == "execute" {
+			// 400/404/409 are returned before any decision, approval
+			// consumption or execution (#5548): the outcome is known, so say
+			// how to correct the call. Fixed text only, never the body.
+			if known, ok := keeperExecutePreExecutionRefusals[resp.StatusCode]; ok {
+				return cli.WithExitCode(fmt.Errorf("%s (HTTP %d)", known, resp.StatusCode), code)
+			}
+		}
 		if resp.StatusCode >= 500 {
 			code = cli.ExitGeneric
 		}
@@ -206,6 +214,14 @@ func keeperAgentRequest(cmd *cobra.Command, operation, argument string) error {
 		return cli.WithExitCode(fmt.Errorf("Keeper command exited with code %d", *reply.ExitCode), code)
 	}
 	return nil
+}
+
+// keeperExecutePreExecutionRefusals maps the statuses the sidecar and server
+// return before anything runs to fixed, body-free explanations.
+var keeperExecutePreExecutionRefusals = map[int]string{
+	http.StatusBadRequest: "Keeper refused the command before execution: one line, no shell operators",
+	http.StatusNotFound:   "credential not granted to this agent or grant expired; nothing executed",
+	http.StatusConflict:   "duplicate request or approval already used; nothing executed by this call",
 }
 
 func keeperAgentResponseFailure(operation, detail string) error {

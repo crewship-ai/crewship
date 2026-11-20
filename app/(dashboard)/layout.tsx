@@ -16,7 +16,6 @@ import { BareNotFound, NotFoundInShell, useUnknownAppPath } from "@/components/l
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
 import { RuntimeBanner } from "@/components/layout/runtime-banner"
-import { UpdateBanner } from "@/components/layout/update-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
@@ -155,10 +154,10 @@ export default function DashboardLayout({
             {/* One banner at a time (app-banners.tsx): each asks the queue
                 for the slot, highest priority first. */}
             <RealtimeStatusBanner />
-            {/* /system/runtime and /system/version are not on the
-                restricted allowlist. */}
+            {/* /system/runtime is not on the restricted allowlist. A new
+                version is the dot on the Crewship sail in the top bar, not a
+                banner (#5552). */}
             {trusted && <RuntimeBanner />}
-            {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
               <WorkspaceAvailabilityBoundary enabled={!independentPage}>
               {unknownPath

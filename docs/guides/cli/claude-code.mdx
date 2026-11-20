@@ -150,7 +150,7 @@ Parsing a field is not the same as being able to reach it, so each of these has 
 | --- | --- | --- |
 | **Run record** — `crewship run get <id>` | `cli_version`, `api_key_source`, `permission_mode`, `session_id`, `mcp_server_errors`, `permission_denials` | Durable. Written on **every** terminal status, not just `COMPLETED` — a failed run is the one you need it for. |
 | **Journal** — `crewship journal --type run.session_init` | The full session inventory as counts, plus MCP server names and statuses. Severity escalates to `error` when a server was skipped. | Durable, hash-chained. Emitted at session start, so a degraded session is visible while the run is still going. |
-| **Chat** — the "Session started" card | Everything, including each skipped server's error message | Live stream only. Session events are never persisted as conversation parts, so this card is gone on a refresh. |
+| **Chat** — the "MCP servers skipped" line | Shown only when a server was skipped; its card carries model, CLI version, tool count and each skipped server's error message. A healthy start shows nothing in the transcript. | Live stream only. Session events are never persisted as conversation parts, so this line is gone on a refresh. |
 | **Log** — `agent model resolved` | `cli_version`, `api_key_source` | One greppable line per run. |
 
 Two deliberate asymmetries in what gets stored:

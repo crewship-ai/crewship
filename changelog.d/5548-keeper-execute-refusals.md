@@ -1,0 +1,1 @@
+- **`keeper execute` reports known pre-execution refusals (#5548).** HTTP 400, 404 and 409 now print a fixed definite refusal (nothing executed) with exit 2, 3 and 5 instead of "outcome unavailable"; 5xx, other statuses and transport errors keep the ambiguous message. The server body is still never echoed. `agent stop -f json` (#3049) was already fixed on main.

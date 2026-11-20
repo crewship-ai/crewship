@@ -1,0 +1,1 @@
+- **Restoring a stopped schedule's artifact access is an OWNER/ADMIN adoption (#5411).** Changing a schedule stays ADMIN or higher, so a MANAGER creator whose access was revoked cannot restore it by re-saving. The schedules tab, CLI reference and spec now say so instead of promising the creator a restore; a MANAGER can create a new schedule.

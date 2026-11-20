@@ -259,7 +259,7 @@ var TableCategory = map[string]string{
 	"pipelines":         CategoryRoutines, "routine_folders": CategoryRoutines, "routine_folder_members": CategoryRoutines, "routine_templates": CategoryRoutines, "routine_test_results": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
 	"pipeline_schedules": CategoryRoutines, "pipeline_webhooks": CategoryRoutines, "pipeline_runs": CategoryRoutines,
 	"pipeline_step_executions": CategoryRoutines, "pipeline_run_artifacts": CategoryRoutines,
-	"pipeline_run_step_outputs": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,
+	"pipeline_run_step_outputs": CategoryRoutines, "routine_step_effects": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,
 	"pending_runs": CategoryRoutines, "pipeline_tags": CategoryRoutines, "pipeline_waitpoints": CategoryRoutines,
 	"waitpoint_trust_grants": CategoryRoutines, "run_tags": CategoryRoutines, "routine_step_overrides": CategoryRoutines,
 	"scheduled_jobs": CategoryRoutines, "recurring_issues": CategoryRoutines, "workflow_templates": CategoryRoutines,

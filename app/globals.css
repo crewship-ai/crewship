@@ -1230,16 +1230,31 @@ body {
      is a circle. The workspace wears the style's colour; the sail does not. */
   .rail-tile.rail-ws { border-radius: 8px; }
   .rail-tile.rail-ws > img { width: 100%; height: 100%; border-radius: inherit; }
-  /* The Crewship sail at the foot of the rail (owner, 19 Oct): the brand's
-     own blue tile, lit, the same in every style, theme and accent. */
-  .rail-tile.rail-brand,
-  .rail-row:hover .rail-tile.rail-brand {
-    border-radius: 8px;
+  /* The Crewship sail in the top bar (owner, 19 Nov; #5552; it was at the
+     foot of the rail from 19 Oct): the brand's own blue tile, lit, the same
+     in every style, theme and accent, and the only coloured mark in the
+     strip. A newer release puts a dot on its corner. */
+  .bar-brand {
+    display: inline-grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
     background: linear-gradient(180deg, #1B75FE, #2B90FF);
     color: #fff;
     box-shadow: 0 0 0 1px rgb(43 144 255 / 0.45), 0 0 12px 1px rgb(27 117 254 / 0.5);
   }
-  .rail-tile.rail-brand > svg { width: 16px; height: auto; }
+  .bar-brand > svg { width: 13px; height: auto; }
+  .bar-brand-dot {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--primary);
+    box-shadow: 0 0 0 2px var(--background);
+  }
   /* A count: an accent pill at the end of the open row; in the rail, the same
      pill on the icon's corner. */
   .rail-count {

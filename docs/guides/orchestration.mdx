@@ -471,7 +471,11 @@ chain already is and how much that run already has out**.
 | `delegation.max_fanout` | `8` | Sub-tasks one run may have out. For a delegated run that is every task it dispatched; for a lead working a chat it is the ones still in flight, so a long conversation is not capped on lifetime output. |
 
 Both are instance settings, read live — a change applies to the next dispatch,
-not the next restart:
+not the next restart. They are **per instance, not per agent**: an agent has no
+delegation limit of its own, and the `delegation_timeout_s`,
+`max_delegation_depth` and `max_parallel_delegates` columns on the agents table
+are unused (nothing reads or writes them). How long one agent's own run may take
+is the separate `timeout_seconds` on the agent.
 
 ```bash
 crewship instance settings set delegation.max_depth 3

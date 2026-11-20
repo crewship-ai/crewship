@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -260,55 +259,24 @@ func (imp *Importer) upsertEnriched(
 	if sourceType == "" {
 		sourceType = "CUSTOM"
 	}
-	slug := parsed.Meta.Name
-	displayName := parsed.Meta.DisplayName
-	if displayName == "" {
-		displayName = slug
+	// Row values come from deriveImportFields, the same function `crewship
+	// apply` uses to plan an unchanged skill as unchanged (#5334).
+	fields, err := deriveImportFields(parsed, vendor, spdx, scan)
+	if err != nil {
+		return nil, err
 	}
-	version := parsed.Meta.Version
-	if version == "" {
-		version = "1.0.0"
-	}
-	category := parsed.Meta.Category
-	if category == "" {
-		category = "CUSTOM"
-	}
-
-	credReqJSON := "[]"
-	if len(parsed.Meta.CredentialRequirements) > 0 {
-		b, err := json.Marshal(parsed.Meta.CredentialRequirements)
-		if err != nil {
-			return nil, fmt.Errorf("marshal credential_requirements: %w", err)
-		}
-		credReqJSON = string(b)
-	}
-
-	tagsJSON := "[]"
-	if len(parsed.Meta.Tags) > 0 {
-		b, err := json.Marshal(parsed.Meta.Tags)
-		if err != nil {
-			return nil, fmt.Errorf("marshal tags: %w", err)
-		}
-		tagsJSON = string(b)
-	}
-
+	slug := fields.Slug
+	displayName := fields.DisplayName
+	version := fields.Version
+	category := fields.Category
+	credReqJSON := fields.CredentialRequirements
+	tagsJSON := fields.Tags
+	scanStatus := fields.ScanStatus
+	descQuality := fields.DescriptionQuality
 	now := time.Now().UTC().Format(time.RFC3339)
-	scanStatus := scan.Status
-	if scanStatus == "" {
-		scanStatus = "UNSCANNED"
-	}
-
-	descQuality := parsed.DescriptionQuality
-	if scan.Status == "FLAGGED" {
-		// Reuse description_quality column for the scan reason — keeps
-		// the schema slim and the UI surface single. If a skill has
-		// both a poor description AND an injection flag, the injection
-		// reason wins because it's the safety-relevant one.
-		descQuality = scan.Reason
-	}
 
 	var existingID, existingSource string
-	err := imp.db.QueryRowContext(ctx,
+	err = imp.db.QueryRowContext(ctx,
 		"SELECT id, source FROM skills WHERE slug = ?", slug).Scan(&existingID, &existingSource)
 
 	// BUNDLED skills are the curated set we ship in the binary
@@ -348,11 +316,11 @@ func (imp *Importer) upsertEnriched(
 			// pre-fix code did) caused the column to silently diverge
 			// between create and edit flows.
 			newID, displayName, slug, displayName,
-			nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
-			category, sourceType, nullableStr(parsed.Meta.Icon),
-			credReqJSON, tagsJSON, parsed.Content,
-			nullableStr(vendor), nullableStr(homepage), nullableStr(spdx), scanStatus,
-			nullableStr(descQuality), nullableStr(parsed.Meta.License),
+			nullableStr(fields.Description), version, nullableStr(fields.Author),
+			category, sourceType, nullableStr(fields.Icon),
+			credReqJSON, tagsJSON, fields.Content,
+			nullableStr(fields.Vendor), nullableStr(homepage), nullableStr(fields.SPDXLicense), scanStatus,
+			nullableStr(descQuality), nullableStr(fields.License),
 			now, now,
 		)
 		if insertErr != nil {
@@ -392,11 +360,11 @@ func (imp *Importer) upsertEnriched(
 			updated_at = ?
 		WHERE id = ? AND locked = 0`,
 		displayName, displayName,
-		nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
-		category, nullableStr(parsed.Meta.Icon),
-		credReqJSON, tagsJSON, parsed.Content,
-		nullableStr(vendor), nullableStr(homepage), nullableStr(spdx), scanStatus,
-		nullableStr(descQuality), nullableStr(parsed.Meta.License),
+		nullableStr(fields.Description), version, nullableStr(fields.Author),
+		category, nullableStr(fields.Icon),
+		credReqJSON, tagsJSON, fields.Content,
+		nullableStr(fields.Vendor), nullableStr(homepage), nullableStr(fields.SPDXLicense), scanStatus,
+		nullableStr(descQuality), nullableStr(fields.License),
 		now, existingID,
 	)
 	if updateErr != nil {

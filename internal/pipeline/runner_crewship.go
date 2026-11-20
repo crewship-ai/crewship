@@ -116,9 +116,10 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 //
 // Like any crewship step, a crash after the route wrote but before the step
 // output is persisted re-runs the step on resume, and the still-approved
-// waitpoint lets it through again: only a route that dedupes on the
-// operation key (chat-origin issue writes) makes that a replay rather than a
-// second write.
+// waitpoint lets it through again. Every verb that can wait here is a route
+// that records the operation key with its write (#5332, routine step effects
+// in internal/api), so that second call is answered from the first write and
+// one approval authorises at most one write.
 func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunInput, runID string, depth int, req CrewshipRequest, held *CrewshipApprovalRequired, stepStart time.Time) (string, float64, int64, error) {
 	elapsed := func() int64 { return time.Since(stepStart).Milliseconds() }
 	if e.waitpoints == nil || runID == "" {

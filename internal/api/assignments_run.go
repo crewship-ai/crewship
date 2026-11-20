@@ -546,6 +546,14 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	created := map[string]string{
+		"assignment_id": assignmentID,
+		"status":        "PENDING",
+	}
+	if err := recordRoutineStepEffectTx(r.Context(), tx, http.StatusCreated, created); err != nil {
+		writeRoutineStepEffectError(w, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit assignment admission", err)
 		return
@@ -671,10 +679,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.runAssignment(context.Background(), assignmentID, body, target)
 	}()
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"assignment_id": assignmentID,
-		"status":        "PENDING",
-	})
+	writeJSON(w, http.StatusCreated, created)
 }
 
 // targetAgentInfo holds the agent fields needed to run an assignment.
