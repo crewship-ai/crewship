@@ -176,6 +176,34 @@ func TestOldestWorkspaceID(t *testing.T) {
 			why:  "an incomparable row must not be displaced by a guess",
 		},
 		{
+			name: "invited first, own workspace created later (#4876)",
+			list: []workspaceRef{
+				{ID: "ws_own", CreatedAt: "2026-08-01T00:00:00Z", Role: "OWNER"},
+				{ID: "ws_shared", CreatedAt: "2026-01-01T00:00:00Z", Role: "MEMBER"},
+			},
+			want: "ws_own",
+			why:  "onboarding targets the oldest workspace the user owns, never an older shared one",
+		},
+		{
+			name: "owned workspaces: oldest owned wins",
+			list: []workspaceRef{
+				{ID: "ws_shared", CreatedAt: "2025-01-01T00:00:00Z", Role: "ADMIN"},
+				{ID: "ws_own_new", CreatedAt: "2026-08-01T00:00:00Z", Role: "OWNER"},
+				{ID: "ws_own_old", CreatedAt: "2026-02-01T00:00:00Z", Role: "OWNER"},
+			},
+			want: "ws_own_old",
+			why:  "same ordering as the backend's onboardingTarget",
+		},
+		{
+			name: "owns none: oldest of all, as before",
+			list: []workspaceRef{
+				{ID: "ws_new", CreatedAt: "2026-08-01T00:00:00Z", Role: "MEMBER"},
+				{ID: "ws_old", CreatedAt: "2026-01-01T00:00:00Z", Role: "ADMIN"},
+			},
+			want: "ws_old",
+			why:  "no owned workspace: keep the old pick (the backend refuses onboarding writes anyway)",
+		},
+		{
 			name: "empty list",
 			list: nil,
 			want: "",

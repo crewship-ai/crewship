@@ -23,6 +23,11 @@ type CraftNativeAgentInspect func(context.Context, CraftNativeDocumentProfile, [
 
 var errCraftNativeAgentDenied = errors.New("native Craft agent mandate denied")
 
+// errCraftNativeAgentProposalRequired refuses a direct agent write that Q16
+// leaves to a proposal. It wraps the mandate denial, so every existing refusal
+// check still treats it as a definite refusal, never an uncertain outcome.
+var errCraftNativeAgentProposalRequired = fmt.Errorf("%w: this task may only propose a change", errCraftNativeAgentDenied)
+
 const craftNativeAgentDomain = "craft_native_task"
 
 // The whole-document scope is explicit, never inferred from instruction text.
@@ -32,13 +37,45 @@ type craftNativeAgentTaskRequest struct {
 	ChatID        string `json:"chat_id"`
 	MessageID     string `json:"message_id"`
 	WholeDocument bool   `json:"whole_document"`
+	// Mode is the human's explicit choice for this task (Q16): "propose" or
+	// "apply". Omitted means the default for where the document lives.
+	Mode string `json:"mode,omitempty"`
+}
+
+// Q16 (owner decision 2026-10-19): a targeted instruction from the current
+// author is the mandate. In the author's personal space the agent changes the
+// document directly; anywhere shared it proposes, unless the human explicitly
+// chose apply for this task.
+const (
+	craftNativeAgentModePropose = "propose"
+	craftNativeAgentModeApply   = "apply"
+)
+
+// craftNativePersonalSpace is the same personal-space test the Docs iteration
+// path applies (documents_iteration.go).
+func craftNativePersonalSpace(rec *pageRecord, userID string) bool {
+	return rec != nil && userID != "" && rec.PrivateAudience && rec.FolderID == "" && rec.OwnerCrewID == "" && rec.OwnerUserID == userID
+}
+
+// craftNativeAgentMode resolves the task's mode at admission. explicit reports
+// that the human chose it, which is what a later direct write in a shared
+// location requires.
+func craftNativeAgentMode(requested string, personal bool) (mode string, explicit bool) {
+	switch requested {
+	case craftNativeAgentModePropose, craftNativeAgentModeApply:
+		return requested, true
+	}
+	if personal {
+		return craftNativeAgentModeApply, false
+	}
+	return craftNativeAgentModePropose, false
 }
 
 func parseCraftNativeAgentTask(raw []byte) (craftNativeAgentTaskRequest, error) {
 	var input craftNativeAgentTaskRequest
 	canonical, err := mooring.CanonicalJSON(raw)
 	var fields map[string]json.RawMessage
-	if err != nil || json.Unmarshal(canonical, &fields) != nil || len(fields) != 3 {
+	if err != nil || json.Unmarshal(canonical, &fields) != nil || len(fields) < 3 || len(fields) > 4 || (len(fields) == 4 && fields["mode"] == nil) {
 		return input, errCraftNativeAgentDenied
 	}
 	for _, name := range []string{"chat_id", "message_id", "whole_document"} {
@@ -47,6 +84,9 @@ func parseCraftNativeAgentTask(raw []byte) (craftNativeAgentTaskRequest, error) 
 		}
 	}
 	if json.Unmarshal(canonical, &input) != nil || string(fields["whole_document"]) != "true" || !mooring.ValidWireIdentifier(input.ChatID) || !mooring.ValidWireIdentifier(input.MessageID) {
+		return input, errCraftNativeAgentDenied
+	}
+	if fields["mode"] != nil && input.Mode != craftNativeAgentModePropose && input.Mode != craftNativeAgentModeApply {
 		return input, errCraftNativeAgentDenied
 	}
 	return input, nil
@@ -68,6 +108,9 @@ type craftNativeAgentGrant struct {
 	Boot        string
 	Deadline    time.Duration
 	Instruction string
+	// Mode and ModeExplicit come from craftNativeAgentMode at admission.
+	Mode         string
+	ModeExplicit bool
 }
 
 type craftNativeAgentEntry struct {

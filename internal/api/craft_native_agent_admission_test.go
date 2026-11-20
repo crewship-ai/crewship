@@ -17,12 +17,21 @@ func TestCraftNativeAgentExplicitWholeDocumentRequest(t *testing.T) {
 	if _, err := parseCraftNativeAgentTask([]byte(`{"chat_id":"chat","message_id":"message","whole_document":true}`)); err != nil {
 		t.Fatal(err)
 	}
+	for _, mode := range []string{"propose", "apply"} {
+		input, err := parseCraftNativeAgentTask([]byte(`{"chat_id":"chat","message_id":"message","whole_document":true,"mode":"` + mode + `"}`))
+		if err != nil || input.Mode != mode {
+			t.Fatalf("explicit mode %q: %+v %v", mode, input, err)
+		}
+	}
 	for _, raw := range []string{
 		`{"chat_id":"chat","message_id":"message"}`,
 		`{"chat_id":"chat","message_id":"message","whole_document":false}`,
 		`{"chat_id":"chat","message_id":"message","whole_document":true,"run_id":"claimed"}`,
 		`{"chat_id":"chat","message_id":"message","whole_document":true,"agent_id":"claimed"}`,
 		`{"chat_id":"chat","message_id":"message","whole_document":true,"whole_document":true}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"mode":"direct"}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"mode":""}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"mode":"apply","run_id":"claimed"}`,
 	} {
 		if _, err := parseCraftNativeAgentTask([]byte(raw)); err == nil {
 			t.Fatalf("unqualified consent accepted: %s", raw)
@@ -61,7 +70,7 @@ func TestCraftNativeAgentTaskRefusedOutsideWorkspaceArtifactPolicy(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			f, m, ctx := nativeAgentAdmissionFixture(t)
 			mustExec(t, f.rig.db, tc.sql)
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
 			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
 				t.Fatalf("task admitted outside the artifact policy: receipt=%+v err=%v", accepted, err)
 			}
@@ -82,7 +91,7 @@ func TestCraftNativeAgentRecheckRefusesCrewExcludedAfterAdmission(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, m, ctx := nativeAgentAdmissionFixture(t)
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
 			if err != nil {
 				t.Fatal("admission inside the policy", err)
 			}
@@ -110,7 +119,7 @@ func TestCraftNativeAgentRecheckRefusesCrewExcludedAfterAdmission(t *testing.T) 
 
 func TestCraftNativeAgentTaskCapturesNativeConsentWithoutD1Subject(t *testing.T) {
 	f, m, ctx := nativeAgentAdmissionFixture(t)
-	input := craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true}
+	input := craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply}
 	accepted, err := m.produceTask(ctx, "@native-agent-page", input)
 	if err != nil || accepted.WorkID == "" {
 		t.Fatalf("actual original human native consent not accepted: receipt=%+v err=%v", accepted, err)
@@ -148,7 +157,7 @@ func TestCraftNativeAgentTaskAdmittedWhileHumanHoldsLease(t *testing.T) {
 	if held := craftNativeLeaseCall(m.human, human, session.Token, "@native-agent-page", "acquire", `{}`); held.Code != 200 {
 		t.Fatal("human acquire", held.Code, held.Body)
 	}
-	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 	if err != nil || accepted.WorkID == "" {
 		t.Fatalf("task refused on a held document: receipt=%+v err=%v", accepted, err)
 	}
@@ -164,7 +173,7 @@ func TestCraftNativeAgentTaskRefusesMessageItsCallerDidNotAuthor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f, m, ctx := nativeAgentAdmissionFixture(t)
 			mustExec(t, f.rig.db, sql, f.a.MessageID)
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
 				t.Fatalf("task bound a message the caller did not author: receipt=%+v err=%v", accepted, err)
 			}
@@ -183,7 +192,7 @@ func TestCraftNativeAgentTaskBindsOnlyAPrivateInstruction(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f, m, ctx := nativeAgentAdmissionFixture(t)
 			mustExec(t, f.rig.db, sql, f.a.MessageID)
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
 				t.Fatalf("task bound a message outside a private instruction: receipt=%+v err=%v", accepted, err)
 			}
@@ -197,7 +206,7 @@ func TestCraftNativeAgentTaskBindsOnlyAPrivateInstruction(t *testing.T) {
 
 func TestCraftNativeAgentCapturedGrantNeverRefreshesChangedEpochOrRegistry(t *testing.T) {
 	f, m, ctx := nativeAgentAdmissionFixture(t)
-	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +235,7 @@ func TestCraftNativeAgentCapturedGrantNeverRefreshesChangedEpochOrRegistry(t *te
 
 func TestCraftNativeAgentTaskRejectsSourceProjectionAndPartialConsent(t *testing.T) {
 	f, m, ctx := nativeAgentAdmissionFixture(t)
-	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true}
+	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply}
 	projected := context.WithValue(ctx, artifactRunKey{}, &artifactRunAuthority{RunID: "not-human"})
 	if _, err := m.produceTask(projected, "@native-agent-page", input); err == nil {
 		t.Fatal("projected agent became human consent")
@@ -254,7 +263,7 @@ func TestCraftNativeAgentTaskRejectsReadOnlyOriginalCredentialBeforeAccept(t *te
 	if _, err := validateOriginalHumanCredential(readOnly, f.rig.db, *source, "pages:read"); err != nil {
 		t.Fatal("reader positive calibration", err)
 	}
-	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true}
+	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply}
 	if _, err := m.produceTask(readOnly, "@native-agent-page", input); err == nil {
 		t.Fatal("read-only original credential accepted edit task")
 	}

@@ -38,7 +38,7 @@ func TestCraftNativeAgentTaskNeedsOwnerOrOwnerDelegation(t *testing.T) {
 			if strings.HasPrefix(tc.name, "private") {
 				mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='native-agent-page'`)
 			}
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
 			if tc.admitted {
 				if err != nil || accepted.WorkID == "" {
 					t.Fatalf("owner-delegated agent task refused: %+v %v", accepted, err)
@@ -63,7 +63,7 @@ func TestCraftNativeAgentTaskNeedsOwnerOrOwnerDelegation(t *testing.T) {
 // an Edit grant.
 func TestCraftNativeAgentRecheckStopsWhenAuthorNoLongerOwns(t *testing.T) {
 	f, m, ctx := nativeAgentAdmissionFixture(t)
-	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
 	if err != nil {
 		t.Fatal("owner admission", err)
 	}

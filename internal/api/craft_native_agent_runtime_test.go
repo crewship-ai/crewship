@@ -125,7 +125,7 @@ func TestCraftNativeAgentNormalDispatcherPublishesOnlyConfirmedMandateAndQualifi
 			f.rig.db.SetMaxOpenConns(1)
 			mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
 			f.pages.artifactMasterToken = "unit-native-dispatch-master"
-			accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+			accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true, craftNativeAgentModeApply})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -25,16 +25,17 @@ import (
 // guide always fits an agent context and a tool response.
 const MaxGuideBytes = 16 * 1024
 
-// ErrUnknownKind is returned for a kind without a guide, including the Craft
-// kinds (word, sheet), which follow the crewship-craft playbook instead.
+// ErrUnknownKind is returned for a kind without a guide.
 var ErrUnknownKind = errors.New("unknown artifact kind")
 
 //go:embed guides/*.md
 var files embed.FS
 
-// order is the served order: the Artifact family as the UI lists it, with
-// Library (a Design whose content is a design system) after Design.
-var order = []string{"docs", "slides", "design", "library", "dashboard", "app"}
+// order is the served order as the UI lists it: the Artifact family, with
+// Library (a Design whose content is a design system) after Design, then the
+// native Craft kinds. Word and Sheet are single-editor files an agent cannot
+// create; their guides summarise the crewship-craft task tools (#5597).
+var order = []string{"docs", "slides", "design", "library", "dashboard", "app", "word", "sheet"}
 
 // aliases maps storage and UI words agents meet to a guide kind.
 var aliases = map[string]string{
@@ -42,6 +43,7 @@ var aliases = map[string]string{
 	"deck": "slides", "slide": "slides",
 	"design-system": "library", "design_system": "library",
 	"project": "app", "application": "app",
+	"wordcraft": "word", "gridcraft": "sheet",
 }
 
 // Guide is one kind's served guide.

@@ -47,7 +47,7 @@ func candidateNames(candidates []containerProviderCandidate) []string {
 // exist on the Docker path only, so on a host with both runtimes installed
 // `auto` has to land on the hardened one (#1647).
 func TestAutoContainerCandidates_DockerBeforeApple(t *testing.T) {
-	t.Parallel()
+	// Docker configuration calls Cobra Find on the shared CLI command tree.
 
 	cfg := &config.Config{}
 	cfg.Container.Provider = "auto"
@@ -69,7 +69,7 @@ func TestAutoContainerCandidates_DockerBeforeApple(t *testing.T) {
 // order test relies on: building the candidate list must not touch a container
 // runtime, otherwise probing order and construction order could diverge.
 func TestAutoContainerCandidates_ConstructorsAreLazy(t *testing.T) {
-	t.Parallel()
+	// Docker configuration calls Cobra Find on the shared CLI command tree.
 
 	cfg := &config.Config{}
 	logger, buf := orderCaptureLogger()
@@ -229,7 +229,7 @@ func assertAppleIsolationWarning(t *testing.T, out string) {
 // implemented order from drifting apart — the exact failure #1647 reports,
 // where the docs promised Docker first while the code tried Apple first.
 func TestProvidersDocMatchesAutoDetectionOrder(t *testing.T) {
-	t.Parallel()
+	// Docker configuration calls Cobra Find on the shared CLI command tree.
 
 	raw, err := os.ReadFile("../../docs/configuration/providers.mdx")
 	if err != nil {

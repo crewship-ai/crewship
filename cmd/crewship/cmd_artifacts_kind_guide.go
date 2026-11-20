@@ -46,12 +46,15 @@ func newArtifactsKindGuideCommand() *cobra.Command {
 		Use:   "kind-guide [kind]",
 		Short: "Show the versioned agent guide for an artifact kind, or list the guides",
 		Long: `Without a kind, list every artifact kind guide with its version and digest.
-With a kind (docs, slides, design, library, dashboard, app; aliases such as
-design-system and project are accepted), print that guide: the data shapes and
-limits, write order, version check, conflict rule, agent modes and
-verification rule agents follow for that kind. Agents receive the same text.`,
+With a kind (docs, slides, design, library, dashboard, app, and the native
+Craft kinds word and sheet; aliases such as design-system, project, wordcraft
+and gridcraft are accepted), print that guide: the data shapes and limits,
+write order, version check, conflict rule, agent modes and verification rule
+agents follow for that kind. Agents receive the same text. An agent cannot
+create a Word or Sheet; it works on one only inside a confirmed Craft task.`,
 		Example: `  crewship artifacts kind-guide
   crewship artifacts kind-guide docs
+  crewship artifacts kind-guide sheet
   crewship artifacts kind-guide design-system --format json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

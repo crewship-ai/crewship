@@ -278,7 +278,7 @@ func TestCraftNativeAgentHTTPOriginalCLIQualification(t *testing.T) {
 				var accepted struct {
 					WorkID string `json:"work_id"`
 				}
-				if json.Unmarshal(call("POST", "tasks", "", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: message, WholeDocument: true}, 202), &accepted) != nil || accepted.WorkID == "" {
+				if json.Unmarshal(call("POST", "tasks", "", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: message, WholeDocument: true, Mode: craftNativeAgentModeApply}, 202), &accepted) != nil || accepted.WorkID == "" {
 					t.Fatal("actual HTTP task absent")
 				}
 				resolver.original = m.entries[accepted.WorkID].grant.Original
