@@ -244,9 +244,11 @@ const (
 // was created with an "automatic" UID — 1001 only when the base image
 // already had a user at 1000 (node, vscode), and 1000 on a slim image, where
 // the runtime's UID 1001 then had no account ("sudo: you do not exist").
-var accountOptionKeys = []string{"username", "userUid", "userGid", "uid", "gid"}
-
 var legacyCommonUtilsKeys = map[string]string{"uid": "userUid", "gid": "userGid"}
+
+// accountOptionKeys are the common-utils account options whose case variants
+// are refused (#5338).
+var accountOptionKeys = []string{"username", "userUid", "userGid", "uid", "gid"}
 
 // ErrAgentAccountConflict is returned when a declared common-utils feature
 // would create the runtime account under another name or UID.

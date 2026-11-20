@@ -85,4 +85,9 @@ func TestDecisionValueMapsKeepKeyPattern(t *testing.T) {
 	if err := loaded.Components.Schemas["ChatDecisionAnswer"].Value.Validate(context.Background()); err != nil {
 		t.Fatalf("ChatDecisionAnswer is not valid OpenAPI 3.0: %v", err)
 	}
+	// The whole document, not only the schema #4630 named, so another
+	// 3.0-invalid construct cannot slip past the keyword denylist above.
+	if err := loaded.Validate(context.Background()); err != nil {
+		t.Fatalf("generated document is not valid OpenAPI 3.0: %v", err)
+	}
 }
