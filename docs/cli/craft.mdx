@@ -319,6 +319,22 @@ answers `403` and nothing is queued. Removing the crew or disabling the policy
 stops a running task at its next step: any agent tool call (including reads),
 dispatch or confirmation.
 
+`--mode` says whether the agent may change the document or only propose a
+change:
+
+| Mode | What the agent does |
+|---|---|
+| omitted | `apply` when the document is in your personal space (private, not in a folder, owned by you); `propose` anywhere shared |
+| `propose` | Reads the document and calls `craft_propose`. The document stays unchanged until a person accepts the proposal. |
+| `apply` | Saves the change directly. On a shared document, this explicit choice is the mandate. |
+
+The server checks the mode on every agent write, even when nobody else holds
+the editor. A task without `apply` answers `409` with `reason:
+proposal_required` to `craft_apply` and to lease acquisition. An implicit
+`apply` lasts only while the document stays in your personal space. Moving the
+document, or changing who it is shared with, stops the running task; start a
+new one from the new location.
+
 ### crewship craft task status
 
 ```sh
