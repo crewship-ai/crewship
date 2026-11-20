@@ -99,9 +99,13 @@ func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
 		}
 	}
 
-	// The workspace OWNER's Edit follows the type's real write path. Records
-	// are shaped the way each creation path leaves them: an artifact Project
-	// carries only its version head, so it has none of these flags.
+	// The workspace OWNER's Edit is the `write` verb that PATCH and rollback
+	// enforce: mayEditSpec admits the custodian on private output, and
+	// workbookPageOwnerOnly then keeps a workbook to its author. Content-only
+	// author rules (Mooring, schema-1 Slides, artifact Projects) do not stop
+	// the arrangement write, so they still report Edit. Records are shaped the
+	// way each creation path leaves them: an artifact Project carries only its
+	// version head, so it has none of these flags.
 	for name, tc := range map[string]struct {
 		rec  *pageRecord
 		edit bool
@@ -109,11 +113,11 @@ func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
 		"native sheet":           {&pageRecord{NativeCraftApplication: "gridcraft"}, true},
 		"docs document":          {&pageRecord{HasDocument: true}, true},
 		"collaboration document": {&pageRecord{HasCollaboration: true}, true},
-		"artifact project":       {&pageRecord{ArtifactContentType: "artifact_project"}, false},
-		"artifact slides":        {&pageRecord{ArtifactContentType: "artifact_slides"}, false},
+		"artifact project":       {&pageRecord{ArtifactContentType: "artifact_project"}, true},
+		"artifact slides":        {&pageRecord{ArtifactContentType: "artifact_slides"}, true},
 		"gridcraft workbook":     {&pageRecord{HasWorkbook: true}, false},
-		"mooring document":       {&pageRecord{HasMooring: true}, false},
-		"schema-1 slides":        {&pageRecord{HasSlides: true, SlidesSchema: 1}, false},
+		"mooring document":       {&pageRecord{HasMooring: true}, true},
+		"schema-1 slides":        {&pageRecord{HasSlides: true, SlidesSchema: 1}, true},
 	} {
 		tc.rec.PrivateAudience, tc.rec.OwnerUserID = true, "author"
 		owner := []pageAccessSubjectWire{{SubjectType: pageSubjectUser, SubjectID: "owner", Paths: []string{pageReachRole}}}

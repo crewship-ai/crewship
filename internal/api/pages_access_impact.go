@@ -59,9 +59,12 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 				}
 				// On private output the role path is the administrator read
 				// rule (#4825/#4839, #5576). Only the custodian comments, so
-				// the role path never does. The workspace OWNER edits only
-				// where mayEditSpec decides the write.
-				p.Edit = privatePageCustodian(rec, viewers[s.SubjectID]) && privateOutputCustodianEdits(rec)
+				// the role path never does. Edit is the `write` verb, which
+				// PATCH and rollback gate with mayEditSpec (the custodian on
+				// private output) and then workbookPageOwnerOnly. So the
+				// workspace OWNER edits every private type except a workbook,
+				// and an ADMIN never does.
+				p.Edit = privatePageCustodian(rec, viewers[s.SubjectID]) && workbookPageOwnerOnly(rec, s.SubjectID)
 			case path == pageReachGrantPage+pageGrantComment:
 				p.Comment = true
 			case path == pageReachGrantPage+pageGrantPropose:
@@ -88,19 +91,6 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 			s.EffectivePermissions.include(p)
 		}
 	}
-}
-
-// privateOutputCustodianEdits lists the private artifact types whose writes
-// are decided by mayEditSpec, so the workspace OWNER (a custodian) may edit
-// them: native Word/Sheet (craft_native_authority.go), Docs documents
-// (documents_authority.go) and collaboration documents
-// (mooring_collab_human_authority.go). Every other private type admits its
-// owner alone: artifact Projects, Slides and Dashboards
-// (pages_artifact_project.go), GridCraft workbooks (gridcraft_access.go),
-// Mooring documents (mooring.go) and schema-1 Slides (slides_human.go). It is
-// an allowlist so that a new type reads as read-only until it is reviewed.
-func privateOutputCustodianEdits(rec *pageRecord) bool {
-	return rec.NativeCraftApplication != "" || rec.HasDocument || rec.HasCollaboration
 }
 
 type pageAccessImpactSnapshot struct {
