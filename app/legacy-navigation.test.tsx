@@ -15,8 +15,8 @@ import MissionPage, { generateStaticParams as missionParams } from "./(dashboard
 import OrchestrationPage from "./(dashboard)/orchestration/page"
 import WorkPage from "./(dashboard)/work/page"
 import InboxPage from "./(dashboard)/inbox-v2/page"
-import RunsPage from "./(dashboard)/runs/page"
-import PaymasterPage from "./(dashboard)/paymaster/page"
+import RunsPage from "./(legacy)/runs/page"
+import PaymasterPage from "./(legacy)/paymaster/page"
 
 beforeEach(() => { navigation.router.replace.mockClear(); navigation.redirect.mockClear(); window.history.replaceState({}, "", "/") })
 afterEach(() => { cleanup(); window.history.replaceState({}, "", "/") })
@@ -80,12 +80,15 @@ describe("bookmarks after navigation migration", () => {
   expect(navigation.router.replace).toHaveBeenCalledWith("/inbox?workspace_id=team&filter=unread#event-42")
   expect(screen.getByRole("link", { name: "Open Inbox" })).toHaveAttribute("href", "/inbox")
  })
- it("redirects retired runs to the fleet runs ledger in Activity before rendering", () => {
-  expect(() => RunsPage()).toThrow("REDIRECT /activity?section=runs")
-  expect(navigation.redirect).toHaveBeenCalledWith("/activity?section=runs")
- })
- it("sends a /paymaster bookmark to Activity's Spend view (#3618)", () => {
-  expect(() => PaymasterPage()).toThrow("REDIRECT /activity?mode=spend")
-  expect(navigation.redirect).toHaveBeenCalledWith("/activity?mode=spend")
+ // #3361: a server redirect() never runs in the static export, so both are
+ // client redirects in (legacy) with a noscript fallback, like /audit.
+ it.each([
+  ["runs", RunsPage, "/activity?section=runs"],
+  ["paymaster", PaymasterPage, "/activity?mode=spend"],
+ ] as const)("sends a /%s bookmark on from the static export", (_name, Page, target) => {
+  expect(renderToString(<Page />)).toContain(`url=${target.replace(/&/g, "&amp;")}`)
+  render(<Page />)
+  expect(navigation.router.replace).toHaveBeenLastCalledWith(target)
+  expect(navigation.redirect).not.toHaveBeenCalled()
  })
 })

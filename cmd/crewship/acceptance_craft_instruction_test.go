@@ -57,9 +57,14 @@ func craftInstructionServer(t *testing.T, busy bool) (*httptest.Server, func() [
 		var task struct {
 			ChatID    string `json:"chat_id"`
 			MessageID string `json:"message_id"`
+			Mode      string `json:"mode"`
 		}
 		if json.Unmarshal(raw, &task) != nil || task.ChatID != "chat-new" || task.MessageID != "saved-instruction" {
 			reply(w, 403, `{"error":"native Craft agent task denied"}`)
+			return
+		}
+		if task.Mode == "propose" {
+			reply(w, 202, `{"work_id":"accepted-proposal-work","status":"queued"}`)
 			return
 		}
 		reply(w, 202, `{"work_id":"accepted-work","status":"queued"}`)
@@ -122,6 +127,10 @@ func TestAcceptance_CraftTaskInstructionThenStart(t *testing.T) {
 	}
 	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "saved-instruction", "--whole-document"); code != 0 || !strings.Contains(out, "accepted-work") {
 		t.Fatalf("start exit %d: %s", code, out)
+	}
+	// Q16 (#5579): the binary sends the chosen mode.
+	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "saved-instruction", "--whole-document", "--mode", "propose"); code != 0 || !strings.Contains(out, "accepted-proposal-work") {
+		t.Fatalf("start --mode propose exit %d: %s", code, out)
 	}
 	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "ordinary-turn", "--whole-document"); code == 0 || !strings.Contains(out, "native HTTP 403") {
 		t.Fatalf("an ordinary turn started a task: exit %d: %s", code, out)

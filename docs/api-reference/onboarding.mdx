@@ -68,20 +68,24 @@ returns the same agent and the same chat, so history survives a reload.
 
 **Request body:** none.
 
-**Response:** `201 Created`
+**Response:** `200 OK`
 
 ```json
 {
   "agent_id": "agt_01hx…",
-  "agent_slug": "_crewship-setup-guide",
-  "chat_id": "cht_01hx…",
-  "crew_id": "crw_01hx…",
+  "session_id": "cht_01hx…",
   "workspace_id": "wsp_01hx…"
 }
 ```
 
-**Status:** `201` created or already present, `401` unauthenticated, `403` no
-workspace membership, `500` the Guide could not be provisioned.
+The Guide is created only in a workspace the caller **owns** (their oldest
+one). Someone who only belongs to workspaces other people set up gets `403`
+and nothing is created; a user who was invited first and later created a
+workspace of their own gets the Guide in that workspace, never the shared one.
+
+**Status:** `200` created or already present, `400` no workspace membership,
+`401` unauthenticated, `403` the caller owns no workspace, `428` the workspace
+has no model credential yet, `500` the Guide could not be provisioned.
 
 ## Create a proposal
 

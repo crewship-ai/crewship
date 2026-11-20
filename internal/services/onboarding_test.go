@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -110,6 +111,12 @@ func TestOnboardingSetup_Happy(t *testing.T) {
 	var agSlug string
 	if err := db.QueryRow("SELECT slug FROM agents WHERE id=?", res.AgentID).Scan(&agSlug); err != nil || agSlug != "pilot" {
 		t.Errorf("agent missing/wrong: %q err=%v", agSlug, err)
+	}
+	// Agent avatar inputs are pinned like the web dialog does (#3051).
+	var avSeed, avStyle sql.NullString
+	if err := db.QueryRow("SELECT avatar_seed, avatar_style FROM agents WHERE id=?", res.AgentID).Scan(&avSeed, &avStyle); err != nil ||
+		avSeed.String != "pilot" || avStyle.Valid {
+		t.Errorf("agent avatar = (%q, %q) err=%v, want (pilot, NULL)", avSeed.String, avStyle.String, err)
 	}
 	// Credential row exists with type AI_CLI_TOKEN.
 	var ctype string

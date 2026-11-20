@@ -208,7 +208,10 @@ func drillKeys(kit *RecoveryKit, useEnv bool) (keys map[string][]byte, source, c
 
 func drillAttachments(ctx context.Context, db *sql.DB, outputDir string) DrillCheck {
 	c := DrillCheck{Name: DrillCheckAttachments}
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, sha256 FROM attachments`)
+	// A chat attachment is read back from storage_key in the output store;
+	// every other owner from the content-addressed tree (#5588).
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, sha256,
+		CASE WHEN owner_type = ? THEN COALESCE(storage_key, '') ELSE '' END FROM attachments`, attachmentOwnerChat)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
 			c.Status, c.Detail = DrillStatusOK, "no attachments"
@@ -220,8 +223,8 @@ func drillAttachments(ctx context.Context, db *sql.DB, outputDir string) DrillCh
 	defer func() { _ = rows.Close() }()
 	var bad []string
 	for rows.Next() {
-		var ws, sha string
-		if err := rows.Scan(&ws, &sha); err != nil {
+		var ws, sha, chatKey string
+		if err := rows.Scan(&ws, &sha, &chatKey); err != nil {
 			c.Status, c.Detail = DrillStatusFailed, err.Error()
 			return c
 		}
@@ -230,7 +233,18 @@ func drillAttachments(ctx context.Context, db *sql.DB, outputDir string) DrillCh
 			c.Failed++
 			continue
 		}
-		got, err := fileSHA(filepath.Join(outputDir, "attachments", ws, sha[:2], sha))
+		p := filepath.Join(outputDir, "attachments", ws, sha[:2], sha)
+		if chatKey != "" {
+			var ok bool
+			if p, ok = chatAttachmentKeyPath(outputDir, chatKey); !ok {
+				c.Failed++
+				if len(bad) < 5 {
+					bad = append(bad, sha[:12])
+				}
+				continue
+			}
+		}
+		got, err := fileSHA(p)
 		if err != nil || got != sha {
 			c.Failed++
 			if len(bad) < 5 {

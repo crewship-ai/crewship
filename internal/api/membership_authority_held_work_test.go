@@ -432,7 +432,7 @@ func TestStoredAuthorityDoesNotReviveAcrossMembershipChange(t *testing.T) {
 				test.seed(t, h)
 			}
 			ctx := craftNativeFreshRequestContext(t, f.rig, f.a.HumanUserID, "original-session")
-			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true, Mode: craftNativeAgentModeApply})
 			if err != nil {
 				t.Fatal(err)
 			}

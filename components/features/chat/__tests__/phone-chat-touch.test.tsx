@@ -28,16 +28,16 @@ describe("#3874 Edit & resend on touch and keyboard", () => {
 })
 
 describe("#3883 run preflight on a phone", () => {
-  it("keeps the composer's gutter and centres its summary in the 44 px touch row", async () => {
-    const base: ChatRunPreflight = { scope: "configured_chat_agent", agent_id: "a", model: "m", payer: { state: "ready", category: "connected_provider_account", label: "Payer" }, budgets: [], gate: { configured_mode: "sync", predicted_mode: "none", rule_matches: false, blocking: false, reason: "" }, estimate_usd: null, estimate_state: "unknown", constraints: [] }
+  // The preflight is a plain notice now (#5573): it appears only when a run
+  // would be held, so there is no disclosure to open on a phone.
+  it("keeps the composer's gutter for a hold notice", async () => {
+    const base: ChatRunPreflight = { scope: "configured_chat_agent", agent_id: "a", model: "m", payer: { state: "ready", category: "connected_provider_account", label: "Payer" }, budgets: [], gate: { configured_mode: "sync", predicted_mode: "sync", rule_matches: true, blocking: true, reason: "" }, estimate_usd: null, estimate_state: "unknown", constraints: [] }
     fetch.mockResolvedValue(new Response(JSON.stringify(base)))
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
     render(<QueryClientProvider client={client}><RunPreflight chatId="c" workspaceId="w" userId="u" enabled /></QueryClientProvider>)
     const box = await screen.findByTestId("run-preflight")
     expect(classes(box)).toContain("mx-2")
-    expect(classes(box.querySelector("summary"))).toEqual(expect.arrayContaining(["flex", "items-center", "coarse:min-h-[44px]"]))
-    // A flex summary has no ::marker; it must still read as something that opens.
-    expect(box.querySelector("summary [data-testid=run-preflight-chevron]")).not.toBeNull()
+    expect(box.querySelector("summary, details")).toBeNull()
   })
 })
 

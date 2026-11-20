@@ -111,9 +111,10 @@ func (t *droppedColumnTally) result() (int, []DroppedColumn) {
 //
 // keys must already be sorted; the caller sorts them anyway to keep the
 // generated SQL deterministic.
-func tallyDroppedColumns(t *droppedColumnTally, table string, keys []string, allowed map[string]bool) {
+func tallyDroppedColumns(t *droppedColumnTally, table string, keys []string, allowed, generated map[string]bool) {
 	for _, k := range keys {
-		if !allowed[k] {
+		// A generated column is recomputed by the target, not lost.
+		if !allowed[k] && !generated[k] {
 			t.record(table, k)
 		}
 	}
@@ -172,6 +173,10 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 		if err != nil {
 			return 0, nil, 0, fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
+		generated, err := tableGeneratedColumns(ctx, tx, table)
+		if err != nil {
+			return 0, nil, 0, fmt.Errorf("backup: generated columns of %s: %w", table, err)
+		}
 		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
 			// Dry run only reports IssueCountersMigrated (the operator
 			// message) — the collapsed count feeds rows_inserted_shortfalls,
@@ -189,7 +194,7 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 				keys = append(keys, k)
 			}
 			sortStrings(keys)
-			tallyDroppedColumns(&tally, table, keys, allowed)
+			tallyDroppedColumns(&tally, table, keys, allowed, generated)
 		}
 	}
 	total, dropped := tally.result()

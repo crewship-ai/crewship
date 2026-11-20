@@ -11,26 +11,52 @@ function setup(enabled = true) {
  return render(<QueryClientProvider client={client}><RunPreflight chatId="chat" workspaceId="workspace" userId="viewer" enabled={enabled} /></QueryClientProvider>)
 }
 afterEach(() => { cleanup(); fetch.mockReset() })
-it("shows payer, remaining budget and actual prediction without inventing price", async () => {
+// The composer stays quiet unless a run would actually be held: a predicted
+// approval or a hard budget that is used up. Advisory facts (payer, model,
+// unknown price, nonblocking review) are not the customer's concern in Chat.
+it("shows nothing for a run that will not be held", async () => {
  fetch.mockResolvedValue(new Response(JSON.stringify(base)))
- setup()
- await screen.findByText(/nonblocking review predicted/)
- expect(screen.getByText(/Workspace payer/)).toBeInTheDocument()
- expect(screen.getByText(/60.00.*remaining/)).toBeInTheDocument()
- expect(screen.getByText(/Price before the run is unknown/)).toBeInTheDocument()
+ const view = setup()
+ await waitFor(() => expect(fetch).toHaveBeenCalled())
+ await new Promise((r) => setTimeout(r, 0))
+ expect(view.container).toBeEmptyDOMElement()
  expect(fetch.mock.calls[0][0]).toContain("workspace_id=workspace")
 })
-it("drops protected facts on revoked access and hides disabled surfaces", async () => {
- fetch.mockResolvedValueOnce(new Response(JSON.stringify(base))).mockResolvedValueOnce(new Response("{}", { status: 404 }))
+it("says plainly when the run will wait for approval", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, gate: { ...base.gate, blocking: true, predicted_mode: "sync" } })))
  setup()
- await screen.findByText(/Workspace payer/)
- fireEvent.click(screen.getByRole("button", { name: "Refresh budget and gate" }))
- await waitFor(() => expect(screen.queryByText(/Workspace payer/)).not.toBeInTheDocument())
- cleanup(); fetch.mockClear(); setup(false)
- expect(fetch).not.toHaveBeenCalled()
+ expect(await screen.findByRole("status")).toHaveTextContent("Runs in this chat wait for approval before they start.")
+ expect(screen.queryByText(/price|payer|configured model/i)).toBeNull()
 })
-it("reports unknown budget on an outage without a stale spending promise", async () => {
- fetch.mockRejectedValue(new Error("offline")); setup()
- expect(await screen.findByRole("status")).toHaveTextContent("budget and gate are unavailable")
- expect(screen.queryByText(/Workspace payer/)).not.toBeInTheDocument()
+it("says plainly when a hard budget is used up", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, budgets: [{ ...base.budgets[0], remaining_usd: 0, state: "exceeded" }] })))
+ setup()
+ expect(await screen.findByRole("status")).toHaveTextContent("A budget this agent runs under is used up. New runs are blocked until it resets.")
+})
+it("says plainly when the agent has no model credential", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, payer: { ...base.payer, state: "missing", label: "" } })))
+ setup()
+ expect(await screen.findByRole("status")).toHaveTextContent("This agent has no model credential, so it cannot run.")
+})
+it("does not warn about a soft budget that is over", async () => {
+ fetch.mockResolvedValue(new Response(JSON.stringify({ ...base, budgets: [{ ...base.budgets[0], mode: "soft", state: "exceeded" }] })))
+ const view = setup()
+ await waitFor(() => expect(fetch).toHaveBeenCalled())
+ await new Promise((r) => setTimeout(r, 0))
+ expect(view.container).toBeEmptyDOMElement()
+})
+it("hides disabled surfaces and stays silent on denial or outage", async () => {
+ setup(false)
+ expect(fetch).not.toHaveBeenCalled()
+ cleanup()
+ fetch.mockResolvedValueOnce(new Response("{}", { status: 404 }))
+ const denied = setup()
+ await waitFor(() => expect(fetch).toHaveBeenCalled())
+ expect(denied.container).toBeEmptyDOMElement()
+ cleanup(); fetch.mockReset()
+ fetch.mockRejectedValue(new Error("offline"))
+ const outage = setup()
+ await waitFor(() => expect(fetch).toHaveBeenCalled())
+ await new Promise((r) => setTimeout(r, 0))
+ expect(outage.container).toBeEmptyDOMElement()
 })

@@ -403,7 +403,21 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
-	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, callerUserID, "delete", agentID, map[string]any{"previous": previous})
+	// The agent's explicit credential grants go with it, in this transaction
+	// and audited per credential (#5529). Left behind they kept counting in
+	// `credential list` and nothing could remove them: every agent lookup
+	// answers "agent not found" for a tombstoned agent.
+	revokedGrants, err := revokeDeletedAgentCredentialGrantsTx(r.Context(), tx, workspaceID,
+		agentGrantScopeAgent, agentID, grantRevokeReasonAgentDeleted, clientIP(r))
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke deleted agent credential grants", err)
+		return
+	}
+	auditMeta := map[string]any{"previous": previous}
+	if len(revokedGrants) > 0 {
+		auditMeta["revoked_credential_grants"] = revokedGrants
+	}
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, callerUserID, "delete", agentID, auditMeta)
 	if err != nil {
 		replyInternalError(w, h.logger, "audit agent delete", err)
 		return

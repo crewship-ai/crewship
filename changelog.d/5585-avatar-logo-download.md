@@ -1,0 +1,1 @@
+- **`crewship auth avatar-get` and `crewship workspace logo get` download a stored avatar or the workspace logo (#5585).** The image is written to `--output` only after a complete download of at most 2 MiB; a refused request leaves an existing file untouched.
