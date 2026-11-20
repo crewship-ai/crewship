@@ -2,8 +2,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
-import { isCostShown } from "@/lib/cost-visibility"
-import { ChevronRight } from "lucide-react"
 
 export interface ChatRunPreflight {
   scope: "configured_chat_agent"
@@ -38,26 +36,31 @@ export function useChatRunPreflight({ chatId, workspaceId, userId, enabled }: {
   })
 }
 
+/**
+ * What, if anything, will hold the next run in this chat. Only two facts are
+ * worth the reader's attention: the run will wait for an approval, or a hard
+ * budget is used up. Everything else the snapshot carries (payer, configured
+ * model, unknown price, a nonblocking review) is advisory and stays out of
+ * Chat — models and budgets are managed in Crews.
+ */
+export function runHold(data: ChatRunPreflight): string | null {
+  // A run without a payer cannot start at all; say so before the send, not after.
+  if (data.payer.state === "missing") return "This agent has no model credential, so it cannot run. Add one in the agent's settings in Crews."
+  if (data.gate.blocking) return "Runs in this chat wait for approval before they start."
+  if (data.budgets.some((budget) => budget.mode === "hard" && budget.state === "exceeded")) {
+    return "A budget this agent runs under is used up. New runs are blocked until it resets."
+  }
+  return null
+}
+
 export function RunPreflight({ chatId, workspaceId, userId, enabled }: {
   chatId: string; workspaceId: string; userId: string; enabled: boolean
 }) {
   const query = useChatRunPreflight({ chatId, workspaceId, userId, enabled })
-  if (!enabled || (query.isError && query.error.message === "denied")) return null
-  if (!query.data || query.isError) return <p role="status" className="text-xs text-muted-foreground">Current budget and gate are unavailable. Price is unknown.</p>
-  const data = query.data
-  const money = (value: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value)
-  return <details className="group mx-2 shrink-0 rounded-md border px-3 py-2 text-xs" aria-label="Before work starts" data-testid="run-preflight">
-    {/* The same gutter as the model picker under it, and the summary
-        centred in its 44 px touch row (#3883). A flex summary loses the
-        browser's disclosure triangle, so it draws its own. */}
-    <summary className="flex cursor-pointer list-none items-center gap-1 coarse:min-h-[44px] [&::-webkit-details-marker]:hidden">
-      <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" aria-hidden data-testid="run-preflight-chevron" />Configured model · price unknown · {data.gate.blocking ? "approval predicted" : data.gate.predicted_mode === "async" && data.gate.rule_matches ? "nonblocking review predicted" : "no blocking gate predicted"}</summary>
-    <div className="max-h-40 space-y-2 overflow-y-auto overscroll-contain pt-2 md:max-h-56" tabIndex={0} aria-label="Configured model budget details">
-      <p>Payer: {data.payer.label || "Payer unknown"} ({data.payer.state}). Configured model: {data.model || "unknown"}.</p>
-      {data.budgets.length ? <ul className="list-disc pl-4">{data.budgets.map(budget => <li key={budget.id}>{budget.scope} · {isCostShown(budget.remaining_usd) && isCostShown(budget.limit_usd) ? `${money(budget.remaining_usd)} remaining / ${money(budget.limit_usd)} per ${budget.window}` : `budget per ${budget.window}`} · {budget.mode} · {budget.state}</li>)}</ul> : <p>No configured budget cap was found.</p>}
-      <p>Price before the run is unknown. Gate prediction: {data.gate.rule_matches && data.gate.predicted_mode !== "none" ? `${data.gate.predicted_mode} review` : "no matching whole-run gate"}. Actual approval appears separately if the run waits.</p>
-      <ul className="list-disc pl-4">{data.constraints.map(constraint => <li key={constraint}>{constraint}</li>)}</ul>
-      <button type="button" className="underline coarse:min-h-[44px]" disabled={query.isFetching} onClick={() => void query.refetch()}>Refresh budget and gate</button>
-    </div>
-  </details>
+  // Denied, unavailable or not yet read: say nothing. The launch keeps its own
+  // live checks, so silence here never lets a run through that should wait.
+  if (!enabled || query.isError || !query.data) return null
+  const hold = runHold(query.data)
+  if (!hold) return null
+  return <p role="status" data-testid="run-preflight" className="mx-2 shrink-0 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-foreground">{hold}</p>
 }

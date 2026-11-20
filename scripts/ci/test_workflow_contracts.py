@@ -460,8 +460,7 @@ class WorkflowContracts(unittest.TestCase):
         bucket = re.search(r'^  THROWAWAY_SPECS: >-\n((?:    [^\n]+\n)+)', text, re.M)
         self.assertIsNotNone(bucket, 'isolated chat suites need an executable bucket')
         self.assertEqual(set(bucket.group(1).split()), {
-            'e2e/chat-attachment-queue.spec.ts', 'e2e/chat-search.spec.ts',
-            'e2e/chat-model-picker.spec.ts'})
+            'e2e/chat-attachment-queue.spec.ts', 'e2e/chat-search.spec.ts'})
         lane = self.job(text, 'e2e-gate')
         for requirement in ('for spec in $THROWAWAY_SPECS',
                             'scripts/throwaway-server.sh run', '--binary "$PWD/crewship"',

@@ -191,6 +191,11 @@ func softDeleteWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, now str
 		"UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
 		return nil, fmt.Errorf("cascade soft-delete agents: %w", err)
 	}
+	// No credential grant outlives its agent (#5529), here as in agent delete.
+	if _, err := revokeDeletedAgentCredentialGrantsTx(ctx, tx, workspaceID,
+		agentGrantScopeWorkspace, workspaceID, grantRevokeReasonWorkspaceDeleted, ""); err != nil {
+		return nil, fmt.Errorf("cascade revoke agent credential grants: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", workspaceID); err != nil {
 		return nil, fmt.Errorf("cascade delete crew_members: %w", err)
