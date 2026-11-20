@@ -181,8 +181,6 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	if password == "" {
 		password = devDefaultPassword
-		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
-		fmt.Fprintln(os.Stderr, "  (override with --password for production)")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -533,7 +531,6 @@ func runSeed(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
-	fmt.Fprintln(os.Stderr, "Login: demo@crewship.ai / "+password)
 
 	// ── Phase 12: Smoke test (optional) ──
 	if smokeTest {

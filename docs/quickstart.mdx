@@ -136,6 +136,8 @@ For pinned versions, custom install directories, and air-gapped install paths se
   </Step>
 
   <Step title="Log in via CLI">
+    On an initialized self-hosted instance, public registration is typically disabled. A workspace owner can issue a one-time setup link with `crewship workspace member invite <email> --create-only`. Open that link to set your password, then sign in to the same server.
+
     ```bash
     crewship login
     ```

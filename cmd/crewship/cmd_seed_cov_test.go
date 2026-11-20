@@ -504,9 +504,9 @@ func TestRunSeedCov_HappyPathFreshBootstrap(t *testing.T) {
 		t.Fatalf("runSeed: %v\noutput:\n%s", err, out)
 	}
 
-	// Default dev password is announced and sent in the bootstrap body.
-	if !strings.Contains(out, "Using dev default admin password: password123") {
-		t.Errorf("missing default-password notice:\n%s", out)
+	// Bootstrap receives the default password without printing it.
+	if strings.Contains(out, devDefaultPassword) {
+		t.Error("seed output contains the bootstrap password")
 	}
 	if !strings.Contains(out, "Seed complete:") {
 		t.Errorf("missing summary line:\n%s", out)
@@ -552,6 +552,30 @@ func TestRunSeedCov_HappyPathFreshBootstrap(t *testing.T) {
 	}
 }
 
+func TestRunSeedCov_ExistingAuthDoesNotAdvertiseBootstrapCredentials(t *testing.T) {
+	s := covSeedStub(t)
+	s.OnPost("/api/v1/bootstrap", clitest.ErrorResponse(http.StatusConflict, "already initialized"))
+	s.OnGet("/api/v1/auth/cli-token/validate", clitest.JSONResponse(200, map[string]string{"user_id": covSeedUserID}))
+	covSetupRunSeed(t, s)
+	t.Setenv("CREWSHIP_TOKEN", "existing-account-token")
+	flagWorkspace = covSeedWSID
+	covSetFlag(t, seedCmd, "skip-issues", "true")
+	covSetFlag(t, seedCmd, "password", "unused-bootstrap-password")
+
+	out, err := covCaptureStdout(t, func() error {
+		return seedCmd.RunE(seedCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runSeed: %v", err)
+	}
+	if !strings.Contains(out, "Using existing auth") || !strings.Contains(out, "Seed complete:") {
+		t.Fatal("seed did not complete with existing auth")
+	}
+	if strings.Contains(out, "unused-bootstrap-password") || strings.Contains(out, "Login: demo@crewship.ai") {
+		t.Fatal("seed advertised bootstrap credentials for an initialized server")
+	}
+}
+
 func TestRunSeedCov_CustomPasswordAndBootstrapFailure(t *testing.T) {
 	s := clitest.NewStubServer()
 	t.Cleanup(s.Close)
@@ -565,8 +589,8 @@ func TestRunSeedCov_CustomPasswordAndBootstrapFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "bootstrap failed: HTTP 500") {
 		t.Fatalf("want bootstrap failure; got %v", err)
 	}
-	if strings.Contains(out, "Using dev default admin password") {
-		t.Errorf("--password must suppress the default-password notice:\n%s", out)
+	if strings.Contains(out, "supersecret") || strings.Contains(out, devDefaultPassword) {
+		t.Error("seed output contains a bootstrap password")
 	}
 	body := covJSONBody(t, s.CallsFor("POST", "/api/v1/bootstrap")[0].Body)
 	if body["password"] != "supersecret" {

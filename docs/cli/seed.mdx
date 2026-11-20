@@ -133,8 +133,6 @@ integration-kind Inbox item; the demo must not present one as real.
 ```bash
 crewship seed
 # Bootstrapping...
-#   Using dev default admin password: password123
-#   (override with --password for production)
 #   Bootstrapped admin: demo@crewship.ai
 #   Workspace: w_abc123
 # …
@@ -143,10 +141,9 @@ crewship seed
 #   Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)
 #
 # ✓ Seed complete: 3 crews, 9 agents
-# Login: demo@crewship.ai / password123
 ```
 
-The token + workspace are saved to `~/.crewship/cli-config.yaml`, so any follow-up command picks up the demo session.
+The token + workspace are saved to `~/.crewship/cli-config.yaml`, so any follow-up command picks up the demo session. On a fresh development database, seed bootstraps `demo@crewship.ai` with the password supplied via `--password`, or the documented development default when the flag is omitted. Seed on an initialized server uses the existing authenticated account and leaves its password unchanged. For a fresh login to a shared seeded environment, use the credentials supplied by its operator.
 
 ### Reset and reseed
 
