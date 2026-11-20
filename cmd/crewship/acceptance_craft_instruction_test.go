@@ -72,6 +72,10 @@ func craftInstructionServer(t *testing.T, busy bool) (*httptest.Server, func() [
 			reply(w, 202, `{"work_id":"accepted-proposal-work","status":"queued"}`)
 			return
 		}
+		if task.Mode == "propose" {
+			reply(w, 202, `{"work_id":"accepted-proposal-work","status":"queued"}`)
+			return
+		}
 		reply(w, 202, `{"work_id":"accepted-work","status":"queued"}`)
 	})
 	mux.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {

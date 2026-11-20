@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { useDrawerStore } from "@/stores/drawer-store"
 import { useChatAgent } from "./chat-agent-context"
 import { AgentArtifactsTab } from "./right-panel-tabs/agent-artifacts-tab"
-import { PreferencesTab } from "./right-panel-tabs/preferences-tab"
+import { AgentMemoryTab } from "./right-panel-tabs/agent-memory-tab"
 import { AgentWorkTab } from "./right-panel-tabs/agent-work-tab"
 import type { FileEntry } from "./chat-tree-row"
 import type { EditorScope } from "./hooks/use-file-editor"
@@ -47,7 +47,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   const [activeTab, setActiveTab] = useState<PanelTab>(() => validTab(initialTab))
   useEffect(() => { setActiveTab(validTab(initialTab)) }, [initialTab])
   const agentName = chatAgent?.name || "this agent"
-  const subtitle = activeTab === "memory" ? `Your preferences for ${agentName}` : activeTab === "artifacts" ? `Documents and outputs for ${agentName}` : `Issues and routines connected to ${agentName}`
+  const subtitle = activeTab === "memory" ? `What ${agentName} remembers` : activeTab === "artifacts" ? `Documents and outputs for ${agentName}` : `What ${agentName} is working on`
 
   return <div className="flex min-h-0 flex-col overflow-hidden bg-accent/30" style={style}>
     <header className="shrink-0 border-b px-3 py-3">
@@ -62,7 +62,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       </button>)}
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {activeTab === "memory" ? <PreferencesTab agentId={agentId} workspaceId={workspaceId} /> : activeTab === "artifacts" ? <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} crewId={chatAgent?.crewId} agentSlug={chatAgent?.slug} />
+      {activeTab === "memory" ? <AgentMemoryTab agentId={agentId} workspaceId={workspaceId} /> : activeTab === "artifacts" ? <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} crewId={chatAgent?.crewId} agentSlug={chatAgent?.slug} />
         : <>{workHeader && <div className="p-3">{workHeader}</div>}<AgentWorkTab agentId={agentId} workspaceId={workspaceId} /></>}
     </div>
   </div>

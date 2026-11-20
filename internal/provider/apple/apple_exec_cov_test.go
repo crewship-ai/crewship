@@ -91,7 +91,7 @@ exit 0`)
 		t.Errorf("exit code = %d, want 0", code)
 	}
 
-	want := "exec --env FOO=bar --workdir /w --user 1001 cid-1 echo hi"
+	want := "exec --env-file /dev/fd/3 --workdir /w --user 1001 cid-1 echo hi"
 	if !fake.hasCall(t, want) {
 		t.Errorf("expected CLI call %q, got %v", want, fake.calls(t))
 	}
@@ -200,7 +200,7 @@ exit 0`)
 		t.Fatalf("conn close: %v", err)
 	}
 
-	want := "exec --tty --env A=b --workdir /ws --user 1001:1001 cid-2 sh"
+	want := "exec --tty --env-file /dev/fd/3 --workdir /ws --user 1001:1001 cid-2 sh"
 	if !fake.hasCall(t, want) {
 		t.Errorf("expected CLI call %q, got %v", want, fake.calls(t))
 	}

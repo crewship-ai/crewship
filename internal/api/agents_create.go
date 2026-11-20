@@ -226,6 +226,10 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, avatarstyle.Problem(*req.AvatarStyle))
 		return
 	}
+	// The web dialog always sends a seed; an agent created without one (CLI,
+	// API) gets its slug. The style stays NULL unless chosen: NULL follows the
+	// crew (#3051).
+	req.AvatarSeed = avatarstyle.Seed(req.AvatarSeed, req.Slug)
 	if req.TimeoutSeconds == 0 {
 		req.TimeoutSeconds = 1800
 	}

@@ -1105,7 +1105,11 @@ func (m missingByWorkspace) items(kind, detail string) []IncompleteItem {
 // staged storage root and those referenced but absent, per workspace.
 func checkStagedAttachments(ctx context.Context, db *sql.DB, out *stagedStore) (int, missingByWorkspace, error) {
 	missing := missingByWorkspace{}
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, sha256 FROM attachments`)
+	// A chat attachment lives at storage_key in the output store, not in the
+	// content-addressed tree (#5588). It is checked there and, being part of
+	// the output store rather than a separate blob, not counted in included.
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT workspace_id, sha256,
+		CASE WHEN owner_type = ? THEN COALESCE(storage_key, '') ELSE '' END FROM attachments`, attachmentOwnerChat)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
 			return 0, missing, nil
@@ -1116,8 +1120,19 @@ func checkStagedAttachments(ctx context.Context, db *sql.DB, out *stagedStore) (
 	included := 0
 	for rows.Next() {
 		var ws, sha sql.NullString
-		if err := rows.Scan(&ws, &sha); err != nil {
+		var chatKey string
+		if err := rows.Scan(&ws, &sha, &chatKey); err != nil {
 			return 0, nil, err
+		}
+		if chatKey != "" {
+			if !validChatAttachmentKey(chatKey) || out == nil {
+				missing[ws.String]++
+				continue
+			}
+			if e, ok := out.byPath[chatKey]; !ok || e.SHA256 != sha.String {
+				missing[ws.String]++
+			}
+			continue
 		}
 		if !validSha256Hex(sha.String) {
 			missing[ws.String]++

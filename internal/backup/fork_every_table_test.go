@@ -575,6 +575,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	}
 
 	before := countBackupTableRows(t, source)
+	sourceOwnedBefore := workspaceOwnedRowCounts(t, source, workspaceID)
 
 	const passphrase = "fork-every-table-pass-123"
 	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
@@ -604,6 +605,9 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	}
 
 	assertNoFKViolations(t, source, "after every-table --as-workspace fork")
+	// Integrity and row counts cannot tell which workspace a new row landed
+	// in (#5575); ownership is its own assertion.
+	assertSourceUntouched(t, sourceOwnedBefore, workspaceOwnedRowCounts(t, source, workspaceID))
 	assertForkedSlidesFixture(t, source, workspaceID, res.RestoredWorkspaceID)
 
 	after := countBackupTableRows(t, source)

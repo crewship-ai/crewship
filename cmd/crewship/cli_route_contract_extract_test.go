@@ -54,6 +54,27 @@ func renderedSitesIn(t *testing.T, src string) []string {
 	return renderedSites(t, src)
 }
 
+func TestExtractorResolvesDynamicMethodWrappers(t *testing.T) {
+	got := renderedSites(t, `package main
+func target() {
+ chatRoomRequest(http.MethodPost, "/api/v1/conversations/direct", nil)
+ projectCLIRequest(cmd, "POST", "/api/v1/pages/"+slug+"/project/publish", nil)
+}`)
+	want := []string{"POST /api/v1/conversations/direct", "POST /api/v1/pages/{}/project/publish"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestExtractorResolvesBackupRoute(t *testing.T) {
+	got := renderedSites(t, `package main
+func target() { client.Get(backupRoute("/api/v1/admin/backups/verify?path=" + p)) }
+`)
+	if strings.Join(got, "|") != "GET /api/v1/admin/backups/verify" {
+		t.Fatalf("got %v", got)
+	}
+}
+
 // A path helper that takes the last segment as a PARAMETER is the shape
 // `proposedPath(id, "approve")` uses, and it is common: one helper, one
 // registered route per verb, the verb fixed at each call site.

@@ -1,7 +1,7 @@
 ---
 name: crewship-craft
 display_name: Crewship Craft
-version: 1.0.1
+version: 1.0.2
 category: WRITING
 license: Apache-2.0
 runtime: INSTRUCTIONS
@@ -13,7 +13,8 @@ description: Edit a native Craft Word or Sheet document during a whole-document 
 Use this playbook when your run is a native Craft task: a person asked you in
 their chat to change one Word or Sheet document, then confirmed a
 whole-document task for it. In that run the `crewship-craft` tool server offers
-`craft_read`, `craft_acquire`, `craft_renew`, `craft_apply` and `craft_release`.
+`craft_read`, `craft_acquire`, `craft_renew`, `craft_apply`, `craft_propose` and
+`craft_release`.
 
 Use another playbook for other kinds of work:
 
@@ -49,6 +50,7 @@ write the document.
 | `craft_acquire` | none | `generation`, `expires_at`, `holder_kind` |
 | `craft_renew` | `generation` (required) | new `expires_at` for the same `generation` |
 | `craft_apply` | `generation`, `base_version`, `request_id`, `commands` (all required) | save receipt with the new `version` |
+| `craft_propose` | `base_version`, `request_id`, `commands` (required), `summary` (optional, at most 500 characters) | `proposal_id`; the document does not change until a person accepts it |
 | `craft_release` | `generation` (required) | `{"released": true}` |
 
 `generation`, `base_version` and `version` are decimal strings such as

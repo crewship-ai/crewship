@@ -231,3 +231,76 @@ func TestRestore_AttachmentBlobNeverOverwritesADifferentFile(t *testing.T) {
 		t.Fatalf("attachments_conflicts = %d, want 1", res.AttachmentsConflicts)
 	}
 }
+
+// seedChatAttachment plants a chat attachment the way the chat upload path
+// stores it: a row with owner_type 'chat' whose bytes sit in the output store
+// at storage_key (<crew>/<agent>/attachments/<chat>/<id>/<file>), not under
+// the content-addressed attachments/<workspace>/<sha> tree.
+func seedChatAttachment(t *testing.T, db *sql.DB, outputRoot, workspaceID, id, content string) string {
+	t.Helper()
+	ctx := context.Background()
+	sum := sha256.Sum256([]byte(content))
+	sha := hex.EncodeToString(sum[:])
+	chatID := "chat_" + id
+	if _, err := db.ExecContext(ctx, `INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES(?,?,'a_alice','u_admin')`, chatID, workspaceID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+	key := "c_alpha/alice/attachments/" + chatID + "/" + id + "/shot.txt"
+	if _, err := db.ExecContext(ctx, `INSERT INTO attachments
+		(id, workspace_id, owner_type, chat_id, filename, content_type, size_bytes, sha256, storage_key, uploaded_by_user_id)
+		VALUES (?, ?, 'chat', ?, 'shot.txt', 'text/plain', ?, ?, ?, 'u_admin')`,
+		id, workspaceID, chatID, len(content), sha, key); err != nil {
+		t.Fatalf("seed chat attachment: %v", err)
+	}
+	if outputRoot != "" {
+		p := filepath.Join(outputRoot, filepath.FromSlash(key))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sha
+}
+
+// A chat attachment's bytes ride in the crew's /output section, not in
+// attachment-blobs/ (#5588). When that section is not in the bundle (here:
+// no container), the attachment must be reported missing, not dropped in
+// silence, and it must never count as an included blob.
+func TestBackup_ChatAttachmentWithoutOutputIsReportedMissing(t *testing.T) {
+	ctx := context.Background()
+	source := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, source)
+	sourceRoot := filepath.Join(t.TempDir(), "source-storage")
+	seedAttachment(t, source, sourceRoot, workspaceID, "att_issue", "an issue attachment")
+	seedChatAttachment(t, source, sourceRoot, workspaceID, "att_chat", "a chat attachment")
+	// The same file sent in a second chat: one distinct sha, counted once.
+	seedChatAttachment(t, source, sourceRoot, workspaceID, "att_chat_again", "a chat attachment")
+
+	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:          backup.ScopeWorkspace,
+		WorkspaceID:    workspaceID,
+		OutputDir:      t.TempDir(),
+		Actor:          backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:     "chat-attachment-passphrase-123",
+		AttachmentRoot: sourceRoot,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	c := created.Manifest.Contents
+	if c.AttachmentsIncluded != 1 || c.AttachmentsMissing != 1 {
+		t.Errorf("attachments included=%d missing=%d, want 1/1: the issue blob is carried, the chat file has no captured output tree",
+			c.AttachmentsIncluded, c.AttachmentsMissing)
+	}
+	found := false
+	for _, it := range c.Incomplete {
+		if it.Kind == backup.IncompleteAttachmentMissing {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("bundle without the chat attachment's bytes is not marked incomplete: %+v", c.Incomplete)
+	}
+}

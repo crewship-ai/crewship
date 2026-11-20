@@ -24,29 +24,39 @@ type craftNativeVersionAuthorResponse struct {
 	Kind        string `json:"kind"`
 	DisplayName string `json:"displayName"`
 }
+
+// craftNativeVersionProposalResponse marks a version a person saved by
+// accepting an agent proposal: the version's author is that person (the
+// approver and writer), the proposal's author is the agent.
+type craftNativeVersionProposalResponse struct {
+	ID     string                           `json:"id"`
+	Author craftNativeVersionAuthorResponse `json:"author"`
+}
 type craftNativeVersionResponse struct {
-	Version      string                           `json:"version"`
-	CreatedAt    string                           `json:"createdAt"`
-	Author       craftNativeVersionAuthorResponse `json:"author"`
-	RestoredFrom string                           `json:"restoredFrom,omitempty"`
-	Current      bool                             `json:"current"`
+	Version      string                              `json:"version"`
+	CreatedAt    string                              `json:"createdAt"`
+	Author       craftNativeVersionAuthorResponse    `json:"author"`
+	RestoredFrom string                              `json:"restoredFrom,omitempty"`
+	Proposal     *craftNativeVersionProposalResponse `json:"proposal,omitempty"`
+	Current      bool                                `json:"current"`
 }
 
 // craftNativeVersionDocumentResponse is one historical native version with
 // its bytes: the same profile fields as the whole document read, so a client
 // can render it read-only in the qualified editor bundle, plus its metadata.
 type craftNativeVersionDocumentResponse struct {
-	Version        string                           `json:"version"`
-	CurrentVersion string                           `json:"currentVersion"`
-	Current        bool                             `json:"current"`
-	CreatedAt      string                           `json:"createdAt"`
-	Author         craftNativeVersionAuthorResponse `json:"author"`
-	RestoredFrom   string                           `json:"restoredFrom,omitempty"`
-	ApplicationID  string                           `json:"applicationId"`
-	EnginePin      string                           `json:"enginePin"`
-	EditorBundle   string                           `json:"editorBundle"`
-	EditorURL      string                           `json:"editorURL"`
-	Bytes          []byte                           `json:"bytes"`
+	Version        string                              `json:"version"`
+	CurrentVersion string                              `json:"currentVersion"`
+	Current        bool                                `json:"current"`
+	CreatedAt      string                              `json:"createdAt"`
+	Author         craftNativeVersionAuthorResponse    `json:"author"`
+	RestoredFrom   string                              `json:"restoredFrom,omitempty"`
+	Proposal       *craftNativeVersionProposalResponse `json:"proposal,omitempty"`
+	ApplicationID  string                              `json:"applicationId"`
+	EnginePin      string                              `json:"enginePin"`
+	EditorBundle   string                              `json:"editorBundle"`
+	EditorURL      string                              `json:"editorURL"`
+	Bytes          []byte                              `json:"bytes"`
 }
 type craftNativeVersionsResponse struct {
 	CurrentVersion string                       `json:"currentVersion"`
@@ -72,6 +82,18 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 		craftNativeDocumentError(w, err)
 		return
 	}
+	listed := make([]int64, 0, len(versions))
+	for _, v := range versions {
+		listed = append(listed, v.Version)
+	}
+	// Provenance of accepted agent proposals is read under the same live read
+	// authority as the listing itself, and before the audit, so a refusal
+	// releases nothing.
+	origins, err := s.AcceptedProposalOrigins(r.Context(), entry.scope, listed)
+	if err != nil {
+		craftNativeDocumentError(w, err)
+		return
+	}
 	// PRD §5: history (times, authors) is content of the artifact; an
 	// administrator's read of someone else's document is audited exactly like
 	// the document read, and a failed audit releases nothing.
@@ -80,15 +102,21 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 	}
 	out := craftNativeVersionsResponse{Versions: make([]craftNativeVersionResponse, 0, len(versions)), Truncated: truncated}
 	names := map[string]craftNativeVersionAuthorResponse{}
-	for i, v := range versions {
-		author, ok := names[v.Actor]
+	name := func(actor string) craftNativeVersionAuthorResponse {
+		author, ok := names[actor]
 		if !ok {
-			author = d.versionAuthor(r, entry.scope.WorkspaceID, v.Actor)
-			names[v.Actor] = author
+			author = d.versionAuthor(r, entry.scope.WorkspaceID, actor)
+			names[actor] = author
 		}
-		item := craftNativeVersionResponse{Version: strconv.FormatInt(v.Version, 10), CreatedAt: v.CreatedAt, Author: author, Current: i == 0}
+		return author
+	}
+	for i, v := range versions {
+		item := craftNativeVersionResponse{Version: strconv.FormatInt(v.Version, 10), CreatedAt: v.CreatedAt, Author: name(v.Actor), Current: i == 0}
 		if v.RestoredFrom > 0 {
 			item.RestoredFrom = strconv.FormatInt(v.RestoredFrom, 10)
+		}
+		if o, ok := origins[v.Version]; ok {
+			item.Proposal = &craftNativeVersionProposalResponse{ID: o.ID, Author: name(o.AuthorActorID)}
 		}
 		if i == 0 {
 			out.CurrentVersion = item.Version
@@ -163,6 +191,11 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 		craftNativeDocumentError(w, err)
 		return
 	}
+	origins, err := s.AcceptedProposalOrigins(r.Context(), entry.scope, []int64{m.Version})
+	if err != nil {
+		craftNativeDocumentError(w, err)
+		return
+	}
 	if !d.auditRead(w, r, entry) {
 		return
 	}
@@ -174,6 +207,9 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content}
 	if m.RestoredFrom > 0 {
 		out.RestoredFrom = strconv.FormatInt(m.RestoredFrom, 10)
+	}
+	if o, ok := origins[m.Version]; ok {
+		out.Proposal = &craftNativeVersionProposalResponse{ID: o.ID, Author: d.versionAuthor(r, entry.scope.WorkspaceID, o.AuthorActorID)}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, out)

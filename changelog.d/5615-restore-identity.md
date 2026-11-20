@@ -1,0 +1,1 @@
+- **`crewship backup restore --identity <file>` restores a bundle sealed with `backup create --recipient`.** The CLI offered only a passphrase, so such a bundle could be restored only through the API. The file must hold exactly one X25519 identity; restore now also runs the transport check before a passphrase or identity is sent (#5615).

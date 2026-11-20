@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -214,6 +215,9 @@ func (o *Orchestrator) setupTmuxExecAt(ctx context.Context, containerID string, 
 	fifo := privateDir + "/output.fifo"
 	exitFile := privateDir + "/exit"
 	envFile := privateDir + "/env"
+	// Outside privateDir, which the wrapper removes when it ends: the pane
+	// identity must outlive the wrapper for the hold's later probes.
+	paneFile := path.Dir(privateDir) + "/" + tmuxPaneIdentityName
 
 	// One setup exec writes the args, fresh environment and inner script.
 
@@ -266,14 +270,15 @@ trap 'EC=$?; /bin/rm -f "%s" "%s"; printf "%%s\n" "$EC" > "%s.tmp"; /bin/mv -f "
 trap 'exit 143' TERM
 trap 'exit 130' INT
 trap 'exit 129' HUP
-if [ "${1:-}" != direct ]; then exec > '%s' 2>&1; fi
+if [ "${1:-}" != direct ]; then %s
+exec > '%s' 2>&1; fi
 . '%s'
 rm -f '%s'
 EX=0
 xargs -0 stdbuf -oL < '%s' || EX=$?
 rm -f '%s'
 exit "$EX"
-`, envFile, argsFile, exitFile, exitFile, exitFile, fifo, envFile, envFile, argsFile, argsFile)
+`, envFile, argsFile, exitFile, exitFile, exitFile, tmuxPaneIdentityWriter(paneFile), fifo, envFile, envFile, argsFile, argsFile)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
 
 	// Refuse an existing directory instead of reusing a file or following a
@@ -321,7 +326,7 @@ exit "$EX"
 	// An unavailable client (127) can fall back directly; an ambiguous client
 	// error must not start a duplicate producer. UNKNOWN keeps the wrapper live
 	// for the existing lifecycle stop/hold authority instead of cleaning HOME.
-	wrapper := fmt.Sprintf(`umask 077
+	wrapper := "rm -f '" + paneFile + "'\n" + fmt.Sprintf(`umask 077
 tmux kill-session -t '=%[1]s' 2>/dev/null
 rm -f '%[4]s' '%[3]s'
 mkfifo '%[4]s' || exit 1
@@ -368,7 +373,7 @@ case "$EC" in ''|*[!0-9]*) EC=1;; esac
 [ "$EC" -le 255 ] 2>/dev/null || EC=1
 rm -rf -- '%[5]s'
 exit "$EC"
-`, session, scriptFile, exitFile, fifo, privateDir, tmuxSessionProbe(session), strings.Join(quotedReader, " "), managedDirectRunProbeAt(readerPIDFile, true), readerReady, managedDirectRunProbeAt(readerPIDFile, false))
+`, session, scriptFile, exitFile, fifo, privateDir, tmuxSessionProbeAt(session, paneFile, "/proc"), strings.Join(quotedReader, " "), managedDirectRunProbeAt(readerPIDFile, true), readerReady, managedDirectRunProbeAt(readerPIDFile, false))
 	return []string{"sh", "-c", wrapper}, nil
 }
 
@@ -381,8 +386,22 @@ func tmuxExecDir(agentSlug, runID string) string {
 // must confirm that this exact session is missing; otherwise retain UNKNOWN.
 // Callers supply only names built from validated agent slugs and run IDs.
 // The leading = disables tmux target prefix matching against neighboring runs.
-func tmuxSessionProbe(session string) string {
-	return fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
+//
+// One failure is answerable (#5510): tmux exits its server with the last
+// session, so after a run's own session ends the client reports that no
+// server exists. That alone proves nothing about the run's processes: a
+// removed socket gives the same message while the server lives, and a pane
+// child that ignores SIGHUP outlives a killed server. ABSENT therefore
+// requires all three: the client found no server, the container's complete
+// process table holds no tmux process, and the pane's own process group —
+// recorded by the pane at launch with its kernel start time — is empty. A
+// missing or unusable identity file stays UNKNOWN.
+//
+// tmuxSessionProbeAt takes the pane identity file and the process-table root
+// explicitly so tests can supply fixtures. An empty paneFile never proves
+// absence through the no-server branch.
+func tmuxSessionProbeAt(session, paneFile, procRoot string) string {
+	return tmuxPaneProbeFunc(paneFile) + fmt.Sprintf(`if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX;
 elif tmux has-session -t '=%[1]s' 2>/dev/null; then echo PRESENT;
 elif crewship_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null); then
  case "
@@ -390,5 +409,64 @@ $crewship_sessions
 " in *'
 %[1]s
 '*) echo PRESENT;; *) echo ABSENT;; esac
-else echo UNKNOWN; fi`, session)
+else %[2]s
+fi`, session, tmuxNoServerProbe(paneFile, procRoot))
+}
+
+// tmuxPaneIdentityName is the pane's process-group identity inside the run
+// HOME, written only by a pane that leads its own process group.
+const tmuxPaneIdentityName = ".crewship-tmux-pane"
+
+func tmuxPaneIdentityFile(agentSlug, runID string) string {
+	return agentHomeDir(agentSlug, runID) + "/" + tmuxPaneIdentityName
+}
+
+// tmuxPaneIdentityWriter records "pid starttime" like the direct-exec
+// protocol, but only when the pane shell leads its own process group (tmux
+// starts each pane with setsid). Background children stay in that group, so
+// the group probe still sees them after the pane shell exits.
+func tmuxPaneIdentityWriter(paneFile string) string {
+	return fmt.Sprintf(`crewship_pane_stat=$(cat /proc/$$/stat 2>/dev/null) && crewship_pane_group=$(printf '%%s\n' "$crewship_pane_stat" | awk '{print $5}') && crewship_pane_stamp=$(printf '%%s\n' "$crewship_pane_stat" | awk '{print $22}') && [ "$crewship_pane_group" = "$$" ] && [ -n "$crewship_pane_stamp" ] && (set -C; printf '%%s %%s\n' "$$" "$crewship_pane_stamp" > '%s') 2>/dev/null`, paneFile)
+}
+
+// tmuxPaneProbeFunc defines the pane group probe as a function at the top
+// level of the script. Its case statements must not sit textually inside a
+// $( ) command substitution: bash 3.2 (macOS /bin/sh) cannot parse that, and a
+// parse error fails the WHOLE probe with exit 2, including the managed and
+// legacy paths that never reach tmux. Only the call is substituted.
+func tmuxPaneProbeFunc(paneFile string) string {
+	if paneFile == "" {
+		return ""
+	}
+	return "crewship_pane_probe() {\n" + managedDirectRunProbeAt(paneFile, false) + "echo UNKNOWN\n}\n"
+}
+
+// tmuxNoServerProbe prints ABSENT only when the client found no server AND
+// no tmux process is visible in a process table that hides nothing.
+func tmuxNoServerProbe(paneFile, procRoot string) string {
+	pane := "crewship_tmux_state=UNKNOWN"
+	if paneFile != "" {
+		pane = fmt.Sprintf(`if [ -f '%s' ]; then crewship_pane_state=$(crewship_pane_probe); [ "$crewship_pane_state" = ABSENT ] || crewship_tmux_state=UNKNOWN; else crewship_tmux_state=UNKNOWN; fi`, paneFile)
+	}
+	return fmt.Sprintf(`crewship_tmux_err=$(LC_ALL=C tmux list-sessions 2>&1 >/dev/null) && crewship_tmux_err=''
+ case "$crewship_tmux_err" in
+ 'no server running on '*|'error connecting to '*' (No such file or directory)'|'error connecting to '*' (Connection refused)')
+  crewship_tmux_state=ABSENT
+  if ! [ -r '%[1]s/self/mountinfo' ] || ! [ -r '%[1]s/1/comm' ]; then crewship_tmux_state=UNKNOWN; else
+   while IFS= read -r crewship_line; do
+    case "$crewship_line" in *' - proc '*hidepid=[!0]*|*' - proc '*subset=*) crewship_tmux_state=UNKNOWN;; esac
+   done < '%[1]s/self/mountinfo'
+  fi
+  if [ "$crewship_tmux_state" = ABSENT ]; then
+   for crewship_comm in '%[1]s'/[0-9]*/comm; do
+    [ -e "$crewship_comm" ] || continue
+    if IFS= read -r crewship_name < "$crewship_comm"; then
+     case "$crewship_name" in tmux*) crewship_tmux_state=UNKNOWN; break;; esac
+    elif [ -e "$crewship_comm" ]; then crewship_tmux_state=UNKNOWN; break; fi
+   done 2>/dev/null
+  fi
+  if [ "$crewship_tmux_state" = ABSENT ]; then %[2]s; fi
+  echo "$crewship_tmux_state";;
+ *) echo UNKNOWN;;
+ esac`, procRoot, pane)
 }
