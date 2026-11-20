@@ -114,19 +114,24 @@ func shareLockFile(f *os.File, shared bool) {
 	if !shared {
 		return
 	}
-	if fi, err := f.Stat(); err == nil && fi.Mode().Perm() == memoryLockPerm {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() != 0 || fi.Mode().Perm() == memoryLockPerm {
 		return
 	}
 	_ = f.Chmod(memoryLockPerm)
 }
 
-// MkdirAllShared is os.MkdirAll(dir, 0o775) for the memory tree. It
+// MkdirAllShared is os.MkdirAll(dir, 0o755) for the memory tree. It
 // creates one level at a time. Each directory this call creates under a
 // setgid parent gets sharedDirTarget's mode (02775 under a 0022 umask),
 // set through a descriptor opened on that directory. A directory that
 // already exists, or that another writer creates concurrently, is left
-// alone. Outside the shared tree it behaves like os.MkdirAll(dir, 0o775).
+// alone. Outside the shared tree it behaves like os.MkdirAll(dir, 0o755).
 func MkdirAllShared(dir string) error {
+	return mkdirAllShared(dir, 0o755)
+}
+
+func mkdirAllShared(dir string, perm os.FileMode) error {
 	dir = filepath.Clean(dir)
 	if strings.Contains(dir, "..") {
 		return fmt.Errorf("%w: %s", errDotDotPath, dir)
@@ -139,11 +144,11 @@ func MkdirAllShared(dir string) error {
 	}
 	parent := filepath.Dir(dir)
 	if parent != dir {
-		if err := MkdirAllShared(parent); err != nil {
+		if err := mkdirAllShared(parent, perm); err != nil {
 			return err
 		}
 	}
-	if err := os.Mkdir(dir, 0o775); err != nil {
+	if err := os.Mkdir(dir, perm); err != nil {
 		// Another writer won the race; it applies the contract itself.
 		if fi, statErr := os.Stat(dir); statErr == nil && fi.IsDir() {
 			return nil

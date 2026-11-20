@@ -23,7 +23,7 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 	if storageRoot == "" {
 		// Trusted in-process/legacy callers retain their existing path contract.
 		if create {
-			if err := MkdirAllShared(filepath.Dir(path)); err != nil {
+			if err := mkdirAllShared(filepath.Dir(path), 0o775); err != nil {
 				return nil, fmt.Errorf("mkdir parent: %w", err)
 			}
 		}
@@ -62,10 +62,12 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 		if part == "." {
 			continue
 		}
+		created := false
 		info, err := root.Lstat(part)
 		if errors.Is(err, os.ErrNotExist) && create {
 			err = root.Mkdir(part, 0o775)
 			if err == nil {
+				created = true
 				parent, syncErr := root.Open(".")
 				if syncErr == nil {
 					syncErr = parent.Sync()
@@ -75,9 +77,6 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 					_ = root.Close()
 					return nil, syncErr
 				}
-			}
-			if err == nil {
-				err = shareRootedChild(root, part)
 			}
 			if err == nil || errors.Is(err, os.ErrExist) {
 				info, err = root.Lstat(part)
@@ -96,14 +95,23 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 			return nil, os.ErrPermission
 		}
 		next, err := root.OpenRoot(part)
-		_ = root.Close()
 		if err != nil {
+			_ = root.Close()
 			return nil, err
 		}
 		opened, err := next.Stat(".")
 		if err != nil || !os.SameFile(info, opened) {
 			_ = next.Close()
+			_ = root.Close()
 			return nil, os.ErrPermission
+		}
+		if created {
+			err = shareRootedChild(root, next, opened)
+		}
+		_ = root.Close()
+		if err != nil {
+			_ = next.Close()
+			return nil, err
 		}
 		root = next
 	}
@@ -163,25 +171,14 @@ func (f *mutationFile) lock() interface {
 	return NewRootFileLock(f.root, f.name+".lock")
 }
 
-// shareRootedChild applies sharedDirTarget to part, a directory just
-// created beneath root, when root is in the shared memory tree (#4777). The
-// chmod goes through a root opened on part, so it stays confined to that
-// directory.
-func shareRootedChild(root *os.Root, part string) error {
-	parent, err := root.Stat(".")
-	if err != nil || !isSharedDir(parent) {
+// shareRootedChild updates only a directory already verified and pinned by
+// openRootedMutationFile.
+func shareRootedChild(parent, child *os.Root, info os.FileInfo) error {
+	parentInfo, err := parent.Stat(".")
+	if err != nil || !isSharedDir(parentInfo) {
 		return err
 	}
-	child, err := root.OpenRoot(part)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = child.Close() }()
-	fi, err := child.Stat(".")
-	if err != nil {
-		return err
-	}
-	if mode, ok := sharedDirTarget(fi); ok {
+	if mode, ok := sharedDirTarget(info); ok {
 		return child.Chmod(".", mode)
 	}
 	return nil

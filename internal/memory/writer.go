@@ -178,7 +178,7 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	// the other out of it until the next root perms prep.
 	// The umask strips that group write, so MkdirAllShared sets 02775
 	// explicitly on what it creates in the shared tree (#4777).
-	if err := MkdirAllShared(filepath.Dir(path)); err != nil {
+	if err := mkdirAllShared(filepath.Dir(path), 0o775); err != nil {
 		return WriteResult{}, fmt.Errorf("mkdir parent: %w", err)
 	}
 

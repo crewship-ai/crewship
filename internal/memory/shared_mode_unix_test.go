@@ -271,7 +271,7 @@ func TestSharedTreeWritersAreGroupWritable(t *testing.T) {
 // Outside a setgid tree nothing changes: a host-only directory keeps the
 // private 0600 lock and the umask-shaped file mode it always had.
 func TestNonSharedTreeWritersKeepPrivateModes(t *testing.T) {
-	old := syscallUmask(0o022)
+	old := syscallUmask(0o002)
 	t.Cleanup(func() { syscallUmask(old) })
 
 	dir := t.TempDir()
@@ -294,6 +294,21 @@ func TestNonSharedTreeWritersKeepPrivateModes(t *testing.T) {
 		if got := fi.Mode() & (os.ModePerm | os.ModeSetgid); got != want {
 			t.Errorf("%s: mode %v, want %v", rel, got, want)
 		}
+	}
+}
+
+func TestSharedLockDoesNotWidenModeOfNonemptyFile(t *testing.T) {
+	path := filepath.Join(newSharedTree(t), "data.lock")
+	if err := os.WriteFile(path, []byte("sample data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lockAndRelease(t, NewFileLock(path))
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("nonempty file mode = %o, want 600", got)
 	}
 }
 
