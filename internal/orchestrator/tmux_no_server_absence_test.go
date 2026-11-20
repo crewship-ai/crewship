@@ -82,10 +82,14 @@ const plainMounts = "25 29 0:23 / /proc rw,nosuid,nodev,noexec,relatime shared:1
 // child in the group, and returns the identity file once the leader exited.
 func startPane(t *testing.T, survivingChild bool) (paneFile string, pgid int) {
 	t.Helper()
-	paneFile = filepath.Join(t.TempDir(), tmuxPaneIdentityName)
+	dir := t.TempDir()
+	paneFile = filepath.Join(dir, tmuxPaneIdentityName)
+	ready := filepath.Join(dir, "child.ready")
 	script := tmuxPaneIdentityWriter(paneFile)
 	if survivingChild {
-		script += "\n(trap '' HUP; exec sleep 60) </dev/null >/dev/null 2>&1 &"
+		// The child marks itself ready only after it ignores SIGHUP; until
+		// then a hangup would kill it and leave the group truly empty.
+		script += "\n(trap '' HUP; : > '" + ready + "'; exec sleep 60) </dev/null >/dev/null 2>&1 &"
 	}
 	cmd := exec.Command("sh", "-c", script+"\nexit 0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -95,6 +99,16 @@ func startPane(t *testing.T, survivingChild bool) (paneFile string, pgid int) {
 	pgid = cmd.Process.Pid
 	if survivingChild {
 		t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if _, err := os.Stat(ready); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("pane child never became ready")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 	if _, err := os.Stat(paneFile); err != nil {
 		t.Fatalf("pane leader recorded no identity: %v", err)
