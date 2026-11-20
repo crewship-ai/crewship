@@ -2078,7 +2078,7 @@ body {
      layered utilities whatever the specificity: `min-w-[112px]` on a button
      computes to 44px here. A control that needs a LARGER floor than 44px
      writes it as important (`min-w-[112px]!`), which
-     lib/__tests__/coarse-floor-important.test.ts enforces. */
+     components/__tests__/touch-layout-guards.test.ts enforces. */
   :where(
     a[href],
     button,
