@@ -8,6 +8,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/moby/api/types/container"
@@ -262,5 +263,41 @@ func TestImageReferencesRetainUnlabelledLegacySelectionsWithoutClaimingOwnership
 	}
 	if len(f.images[id].Config.Labels) != 0 {
 		t.Fatal("reference changed source image provenance")
+	}
+}
+
+func TestImageReferencesReuseExistingPodmanReference(t *testing.T) {
+	f, id := referenceFixture(t)
+	p := NewImageReferences(f, referenceBorrower)
+	containerID := strings.Repeat("c", 64)
+	var existing client.ContainerInspectResult
+	existing.Container.ID = containerID
+	existing.Container.Name = imageReferenceName(referenceBorrower, id)
+	existing.Container.Image = strings.TrimPrefix(id, "sha256:")
+	existing.Container.Config = &container.Config{
+		Image: "localhost/crewship-cache:existing",
+		Labels: map[string]string{
+			imageReferenceOwnerLabel: referenceBorrower,
+			imageReferenceIDLabel:    id,
+		},
+	}
+	existing.Container.State = &container.State{Status: "created"}
+	f.containers[containerID] = existing
+
+	refs := []resourcelifecycle.ImageReference{{Ref: id, Required: true}}
+	for range 2 {
+		resolved, err := p.Preserve(t.Context(), refs)
+		if err != nil || resolved[id] != id {
+			t.Fatalf("reuse existing reference: %v %v", resolved, err)
+		}
+	}
+	if len(f.creates) != 0 || len(f.removed) != 0 {
+		t.Fatal("existing reference was mutated")
+	}
+
+	existing.Container.Config.Labels[imageReferenceOwnerLabel] = referenceOwner
+	_, err := p.Preserve(t.Context(), refs)
+	if !errors.Is(err, provider.ErrImageReferenceConflict) || len(f.removed) != 0 {
+		t.Fatalf("foreign reference should be rejected and preserved; err=%v", err)
 	}
 }

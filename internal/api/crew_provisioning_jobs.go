@@ -41,6 +41,7 @@ type ProvisionJob struct {
 	StartedAt       time.Time
 	CompletedAt     *time.Time
 	Error           string
+	failure         error // preserves the error type for synchronous callers
 	CachedImage     string
 	ConfigHash      string
 	adapters        []string             // adapter snapshot used by this build; guarded by mu
@@ -1452,6 +1453,7 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID strin
 	job.Status = "failed"
 	job.CompletedAt = &now
 	job.Error = err.Error()
+	job.failure = err
 	pending := job.Pending
 	job.Pending = nil
 	h.mu.Unlock()

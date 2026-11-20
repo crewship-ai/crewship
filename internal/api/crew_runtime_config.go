@@ -409,14 +409,18 @@ func (h *ProvisioningHandler) EnsureProvisioned(ctx context.Context, crewID, wor
 		case <-ticker.C:
 			h.mu.Lock()
 			var status, jobErr string
+			var failure error
 			if job := h.jobs[crewID]; job != nil {
-				status, jobErr = job.Status, job.Error
+				status, jobErr, failure = job.Status, job.Error, job.failure
 			}
 			h.mu.Unlock()
 			switch status {
 			case "completed":
 				return nil
 			case "failed":
+				if failure != nil {
+					return fmt.Errorf("provisioning crew %s failed: %w", crewID, failure)
+				}
 				if jobErr == "" {
 					jobErr = "unknown error"
 				}

@@ -412,3 +412,16 @@ func TestContainerStart_TolerantOfAnUninformativeStatusProbe(t *testing.T) {
 			rec.Code, rec.Body.String())
 	}
 }
+
+func TestContainerStart_ImageReferenceConflict(t *testing.T) {
+	cp := &startFakeProvider{}
+	h, wsID, crewID := startTestHandler(t, cp)
+	h.SetProvisioner(&startFakeProvisioner{ensureErr: provider.ErrImageReferenceConflict})
+
+	rec := httptest.NewRecorder()
+	h.ContainerStart(rec, startRequest(crewID, wsID, "OWNER"))
+
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "environment_image_reference_conflict") || cp.calls != 0 {
+		t.Fatalf("status=%d starts=%d body=%s", rec.Code, cp.calls, rec.Body.String())
+	}
+}

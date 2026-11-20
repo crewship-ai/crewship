@@ -109,6 +109,9 @@ func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...clie
 	if m.inspectErr != nil {
 		return client.ImageInspectResult{}, m.inspectErr
 	}
+	if ref == fixtureImageID && len(m.committedIDs) > 0 {
+		return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: fixtureImageID}}, nil
+	}
 	for _, tag := range m.existingImages {
 		if tag == ref {
 			return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: fixtureImageID, RepoDigests: m.inspectDigests[ref]}}, nil

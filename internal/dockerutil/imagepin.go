@@ -17,6 +17,19 @@ func IsLocalImageID(ref string) bool {
 	return err == nil && ref == strings.ToLower(ref)
 }
 
+// NormalizeDaemonImageID converts a full image configuration ID returned by
+// the engine to its canonical form. Use it for daemon responses, not references
+// supplied by users.
+func NormalizeDaemonImageID(id string) string {
+	if len(id) == 64 {
+		id = "sha256:" + id
+	}
+	if !IsLocalImageID(id) {
+		return ""
+	}
+	return id
+}
+
 // PinnedRef rewrites a (possibly tagged) image reference into an immutable
 // digest reference — "<registry>/<repo>@sha256:<hex>" — so the pull that
 // follows can only ever land the manifest we resolved, never whatever the tag

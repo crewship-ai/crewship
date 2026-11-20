@@ -31,7 +31,19 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+func replyCrewStartError(w http.ResponseWriter, err error, operation string) {
+	if errors.Is(err, provider.ErrImageReferenceConflict) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"code":  "environment_image_reference_conflict",
+			"error": "The runtime image reference could not be verified. Ask the server operator to inspect the preserved reference.",
+		})
+		return
+	}
+	replyError(w, http.StatusBadGateway, operation+": "+err.Error())
+}
 
 // ContainerStart brings a crew's runtime container up and returns once
 // it is running. POST /api/v1/crews/{crewId}/container-start.
@@ -98,7 +110,7 @@ func (h *CrewHandler) ContainerStart(w http.ResponseWriter, r *http.Request) {
 	if h.provisioner != nil {
 		if err := h.provisioner.EnsureProvisioned(ctx, crewID, workspaceID, 0); err != nil {
 			h.logger.Error("container start: ensure provisioned", "error", err, "crew_id", crewID)
-			replyError(w, http.StatusBadGateway, "preparing the crew container image failed: "+err.Error())
+			replyCrewStartError(w, err, "preparing the crew container image failed")
 			return
 		}
 	}
@@ -125,7 +137,7 @@ func (h *CrewHandler) ContainerStart(w http.ResponseWriter, r *http.Request) {
 		})
 	if err != nil {
 		h.logger.Error("container start", "error", err, "crew_id", crewID, "slug", slug)
-		replyError(w, http.StatusBadGateway, "starting the crew container failed: "+err.Error())
+		replyCrewStartError(w, err, "starting the crew container failed")
 		return
 	}
 

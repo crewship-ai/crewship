@@ -87,21 +87,22 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		return "", fmt.Errorf("selected environment %q unavailable; restore its image or explicitly rebuild: %w", ref.Ref, err)
 	}
-	if !dockerutil.IsLocalImageID(img.ID) || img.Config == nil {
+	imageID := dockerutil.NormalizeDaemonImageID(img.ID)
+	if imageID == "" || img.Config == nil || (dockerutil.IsLocalImageID(ref.Ref) && ref.Ref != imageID) {
 		return "", fmt.Errorf("image %q has incomplete immutable identity/configuration", ref.Ref)
 	}
 	labels := img.Config.Labels
 	if ref.BuildInput && devcontainer.ImageNamespace(labels[devcontainer.ImageInstanceLabel]) != "" &&
-		labels[devcontainer.ImageInstanceLabel] != p.owner && ref.Ref != img.ID && !strings.Contains(ref.Ref, "@sha256:") {
+		labels[devcontainer.ImageInstanceLabel] != p.owner && ref.Ref != imageID && !strings.Contains(ref.Ref, "@sha256:") {
 		return "", fmt.Errorf("cross-installation build input %q is mutable; use an immutable image ID or registry digest", ref.Ref)
 	}
 	// A reference proves this installation needs bytes, not that it owns
 	// their provenance. Retain exact legacy/unlabelled selections as well.
 
-	name := imageReferenceName(p.owner, img.ID)
+	name := imageReferenceName(p.owner, imageID)
 	existing, err := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err == nil {
-		return img.ID, p.validate(existing, img.ID)
+		return imageID, p.validate(existing, imageID)
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect environment reference: %w", err)
@@ -119,11 +120,11 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: name,
 		Config: &container.Config{
-			Image: img.ID, Entrypoint: []string{"/bin/false"}, Cmd: []string{"crewship-image-reference"},
+			Image: imageID, Entrypoint: []string{"/bin/false"}, Cmd: []string{"crewship-image-reference"},
 			User: "1001:1001", NetworkDisabled: true,
 			Healthcheck: &container.HealthConfig{Test: []string{"NONE"}},
 			Labels: map[string]string{
-				imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
+				imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: imageID,
 				resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
 				devcontainer.TempContainerLabelKey: "",
 			},
@@ -138,29 +139,31 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		// immutable labels/ID/state, not the name alone, establish ownership.
 		existing, inspectErr := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 		if inspectErr != nil {
-			return "", fmt.Errorf("retain exact environment %s: %w", img.ID, err)
+			return "", fmt.Errorf("retain exact environment %s: %w", imageID, err)
 		}
-		return img.ID, p.validate(existing, img.ID)
+		return imageID, p.validate(existing, imageID)
 	}
 	existing, err = p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("confirm environment reference: %w", err)
 	}
-	return img.ID, p.validate(existing, img.ID)
+	return imageID, p.validate(existing, imageID)
 }
 
 func (p *ImageReferences) validate(result client.ContainerInspectResult, id string) error {
 	c := result.Container
+	// Config.Image records the create-time reference and may be a name. The
+	// engine-reported image ID and the reference labels prove identity.
 	raw, idErr := hex.DecodeString(c.ID)
-	if idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
-		c.Image != id || c.Config.Image != id ||
+	if id == "" || idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
+		dockerutil.NormalizeDaemonImageID(c.Image) != id ||
 		c.Config.Labels[imageReferenceOwnerLabel] != p.owner || c.Config.Labels[imageReferenceIDLabel] != id ||
 		strings.TrimPrefix(c.Name, "/") != imageReferenceName(p.owner, id) {
-		return fmt.Errorf("environment reference identity/state mismatch for %q; retaining conflicting container", c.ID)
+		return fmt.Errorf("%w: container %q failed identity or state validation; it was preserved", provider.ErrImageReferenceConflict, c.ID)
 	}
 	for _, m := range c.Mounts {
 		if m.Type == "volume" || m.Type == "bind" {
-			return fmt.Errorf("environment reference unexpectedly allocated persistent storage")
+			return fmt.Errorf("%w: container %q has persistent storage; it was preserved", provider.ErrImageReferenceConflict, c.ID)
 		}
 	}
 	return nil
@@ -214,7 +217,7 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	if err != nil {
 		return err
 	}
-	id := c.Container.Image
+	id := dockerutil.NormalizeDaemonImageID(c.Container.Image)
 	if err := p.validate(c, id); err != nil {
 		return err
 	}
@@ -222,8 +225,8 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	if err != nil {
 		return err
 	}
-	if img.Config == nil {
-		return fmt.Errorf("image reference has incomplete image configuration")
+	if dockerutil.NormalizeDaemonImageID(img.ID) != id || img.Config == nil {
+		return fmt.Errorf("image reference has incomplete image identity or configuration")
 	}
 	aliases := append([]string{id, devcontainer.ImageAcquisitionRef(img.Config.Labels)}, img.RepoTags...)
 	releaseImage, idle := gate.TryCollectImages(aliases...)

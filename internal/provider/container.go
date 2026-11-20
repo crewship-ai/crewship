@@ -785,6 +785,9 @@ func CrewNetworkName(base, crewID string) string {
 // container. Transport, permission and daemon errors must not wrap this value.
 var ErrContainerNotFound = errors.New("container not found")
 
+// ErrImageReferenceConflict identifies a runtime reference that cannot safely be reused.
+var ErrImageReferenceConflict = errors.New("environment image reference conflicts with the selected image")
+
 // ImageReferenceAcquirer binds daemon-visible image protection to an existing
 // runtime's application database without coupling the provider to SQL.
 type ImageReferenceAcquirer interface {

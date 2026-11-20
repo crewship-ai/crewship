@@ -12,6 +12,8 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 // EnvironmentOps is the Docker access a complete container environment needs
@@ -237,7 +239,7 @@ func (m *MobyDockerOps) CommitContainer(ctx context.Context, containerID, ref st
 	if err != nil {
 		return "", fmt.Errorf("backup: docker commit %s: %w", containerID, err)
 	}
-	return res.ID, nil
+	return dockerutil.VerifyDaemonImageID(ctx, m.Client, res.ID)
 }
 
 // ImagePlatform implements EnvironmentOps.

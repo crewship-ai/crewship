@@ -530,7 +530,8 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if err != nil {
 			return fail(ProvStepStart, fmt.Errorf("resolve cached artifact: %w", err))
 		}
-		if !dockerutil.IsLocalImageID(inspected.ID) {
+		imageID := dockerutil.NormalizeDaemonImageID(inspected.ID)
+		if imageID == "" {
 			return fail(ProvStepStart, fmt.Errorf("cached artifact has no valid immutable image identity"))
 		}
 		p.logger.Info("using cached image", "tag", tag)
@@ -548,9 +549,9 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if err != nil {
 			return fail(ProvStepResolveFeatures, err)
 		}
-		req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
+		req.Toolchain = p.inspectToolchain(ctx, imageID, o.requiredBinaries)
 		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
-		return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
+		return &ProvisionResult{CachedImage: imageID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
@@ -784,13 +785,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))
 	}
-	if !dockerutil.IsLocalImageID(committed.ID) {
-		return fail("commit", fmt.Errorf("committed artifact has no valid immutable image identity"))
+	imageID, err := dockerutil.VerifyDaemonImageID(ctx, p.docker, committed.ID)
+	if err != nil {
+		return fail("commit", fmt.Errorf("verify committed artifact identity: %w", err))
 	}
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
 
-	requirements.Toolchain = p.inspectToolchain(ctx, committed.ID, o.requiredBinaries)
+	requirements.Toolchain = p.inspectToolchain(ctx, imageID, o.requiredBinaries)
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
 		"privileged", requirements.Privileged,
@@ -799,7 +801,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	)
 	emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 	return &ProvisionResult{
-		CachedImage:  committed.ID,
+		CachedImage:  imageID,
 		ConfigHash:   hash,
 		Requirements: requirements,
 		Features:     featureRecords(resolvedFeatures),
