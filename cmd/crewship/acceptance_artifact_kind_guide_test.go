@@ -128,8 +128,20 @@ func TestAcceptance_ArtifactKindGuideBinary(t *testing.T) {
 		t.Fatalf("human guide: %v %s", err, out)
 	}
 
-	if out, err := run(signedIn, "word"); err == nil {
-		t.Fatalf("Craft kind served a guide: %s", out)
+	// Native Craft kinds are listed and served (#5597); the human view says an
+	// agent cannot create one.
+	for _, kind := range []string{"word", "sheet"} {
+		out, err = run(signedIn, "--format", "table", kind)
+		if err != nil || !strings.Contains(string(out), "native Craft") || !strings.Contains(string(out), "You cannot create") {
+			t.Fatalf("%s guide: %v %s", kind, err, out)
+		}
+	}
+	out, err = run(signedIn, "--format", "table")
+	if err != nil || !strings.Contains(string(out), "Sheet (native Craft)") || !strings.Contains(string(out), "Word (native Craft)") {
+		t.Fatalf("list lacks the Craft kinds: %v %s", err, out)
+	}
+	if out, err := run(signedIn, "craft"); err == nil {
+		t.Fatalf("unknown kind served a guide: %s", out)
 	}
 	if out, err := run(signedOut, "docs"); err == nil {
 		t.Fatalf("invalid token read a guide: %s", out)

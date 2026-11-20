@@ -916,14 +916,25 @@ verify. The guides are built into the server; they describe supported product pa
 
 Without a kind, list the guides with their version, shared-rules version and
 SHA-256 digest. With a kind (`docs`, `slides`, `design`, `library`,
-`dashboard`, `app`; `design-system` and `project` are accepted as aliases),
-print that guide. Word and Sheet are Craft documents and have no artifact
-guide (`404`).
+`dashboard`, `app`, and the native Craft kinds `word` and `sheet`;
+`design-system`, `project`, `wordcraft` and `gridcraft` are accepted as
+aliases), print that guide.
+
+Word (application `wordcraft`) and Sheet (application `gridcraft`) are
+native Craft files with one editor at a time, not Docs or Artifacts. An agent
+cannot create one: only the Page's owner initializes an empty Page with
+[`crewship craft initialize`](/cli/craft). An agent reads, proposes or edits
+one only inside a native Craft task a person confirmed (it needs the owner,
+or an owner grant for that agent), with the `crewship-craft` tools. The task
+sets the mode: Edit by default in the author's personal space, Propose on a
+shared document unless the task was started with `--mode apply`; their guides declare `ask`, `propose` and `edit`, and
+`create` and `comment` as unsupported.
 
 ```bash
 crewship artifacts kind-guide -f json
 crewship artifacts kind-guide docs
 crewship artifacts kind-guide design-system -f json
+crewship artifacts kind-guide sheet
 ```
 
 ```json

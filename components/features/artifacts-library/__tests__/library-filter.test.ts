@@ -176,7 +176,7 @@ describe("serverCatalogParams", () => {
   })
 
   it("keeps Design out of the server request while Design is off, as the browser list does", () => {
-    expect(serverCatalogParams(all, "updated", { design: false })?.get("kind")).toBe("project,dashboard,page,word,sheet,slides")
+    expect(serverCatalogParams(all, "updated", { design: false })?.get("kind")).toBe("docs,project,dashboard,page,word,sheet,slides")
   })
 
   // #5152: the server's kind is storage; UI kinds are derived once, in the browser.
