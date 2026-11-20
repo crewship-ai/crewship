@@ -127,19 +127,21 @@ describe("routine comparison with cost withheld", () => {
 })
 
 describe("chat run preflight with budget amounts withheld", () => {
-  it("lists the budget state without dollar figures", async () => {
+  // Chat lists no budgets any more (#5573); a used-up hard budget is a plain
+  // notice, and it still carries no dollar figure.
+  it("holds for a used-up budget without dollar figures", async () => {
     const body: ChatRunPreflight = {
       scope: "configured_chat_agent", agent_id: "a", model: "m",
       payer: { state: "ready", category: "connected_provider_account", label: "Workspace payer" },
-      budgets: [{ id: "b", scope: "crew", window: "month", mode: "hard", state: "ok" }],
+      budgets: [{ id: "b", scope: "crew", window: "month", mode: "hard", state: "exceeded" }],
       gate: { configured_mode: "sync", predicted_mode: "none", rule_matches: false, blocking: false, reason: "" },
       estimate_usd: null, estimate_state: "unknown", constraints: [],
     }
     h.fetch.mockResolvedValue(new Response(JSON.stringify(body)))
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
     render(<QueryClientProvider client={client}><RunPreflight chatId="c" workspaceId="ws" userId="u" enabled /></QueryClientProvider>)
-    const item = await screen.findByText(/budget per month/)
-    expect(item).toHaveTextContent("crew · budget per month · hard · ok")
+    const item = await screen.findByRole("status")
+    expect(item).toHaveTextContent("A budget this agent runs under is used up.")
     noMoney(item.textContent)
   })
 })

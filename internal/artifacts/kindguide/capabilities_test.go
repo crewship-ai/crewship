@@ -40,9 +40,15 @@ func TestEveryKindDeclaresModesAndCapabilities(t *testing.T) {
 		if !slices.Contains(g.Modes, "propose") && !slices.Contains(g.Capabilities.Unsupported, "propose") {
 			t.Errorf("%s: no propose path but propose is not declared unsupported", g.Kind)
 		}
-		// Comment never implies Propose: comment must be its own mode.
-		if !slices.Contains(g.Modes, "comment") {
+		// Comment never implies Propose: comment is its own mode. Only the
+		// native Craft kinds, which have no comment tool, may instead declare
+		// it unsupported by name.
+		craft := g.Kind == "word" || g.Kind == "sheet"
+		if !slices.Contains(g.Modes, "comment") && (!craft || !slices.Contains(g.Capabilities.Unsupported, "comment")) {
 			t.Errorf("%s: comment mode missing", g.Kind)
+		}
+		if slices.Contains(g.Modes, "comment") && slices.Contains(g.Capabilities.Unsupported, "comment") {
+			t.Errorf("%s: comment is both a mode and unsupported", g.Kind)
 		}
 	}
 }

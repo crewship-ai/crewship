@@ -98,7 +98,8 @@ crewship onboarding setup-agent start
 ```
 
 Idempotent — repeated calls return the same agent and the same chat, so the
-conversation history survives. Useful for opening the Guide's chat from the CLI,
+conversation history survives. Works only in a workspace you own; someone
+invited into another person's workspace gets `403` and nothing is created. Useful for opening the Guide's chat from the CLI,
 or for confirming the reserved crew was provisioned on a fresh install.
 
 ## See also

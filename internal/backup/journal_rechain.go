@@ -86,6 +86,64 @@ type resignProvenance struct {
 	// checkpoint's signature can be checked against.
 	CheckpointSourceWorkspaces []string
 	CheckpointSourceIDs        []string
+	// CrewExtract is set for a crew-scope bundle. DumpCrew selects the
+	// journal entries whose crew_id is the crew, so their seq numbers are a
+	// SUBSET of the workspace chain and the gaps between them are expected,
+	// not deleted rows (#5578). The re-sign renumbers such an extract into
+	// a contiguous chain and records the source seq range in its notice.
+	CrewExtract bool
+}
+
+// isCrewJournalExtract reports whether a dump's journal is a crew extract
+// whose seq gaps are expected (#5578). It is decided from the decrypted
+// payload, before RemapIDs, never from the manifest alone: the manifest is a
+// plaintext tar member nothing authenticates, and flipping its scope to
+// "crew" must not turn a workspace bundle's real gaps (deleted rows) into
+// renumbered, clean-verifying history.
+//
+// All of these must hold:
+//   - the manifest says crew scope and names exactly one crew;
+//   - the encrypted dump names that crew (DBDump.CrewID, written by
+//     DumpCrew). A bundle older than that marker must instead carry rows
+//     only in DumpCrew's tables and exactly that one crews row;
+//   - it carries no compaction checkpoints (DumpCrew never selects them);
+//   - every chained journal row names that crew.
+func isCrewJournalExtract(manifest *Manifest, dump *DBDump) bool {
+	if manifest == nil || dump == nil || manifest.Scope != ScopeCrew || len(manifest.Contents.Crews) != 1 {
+		return false
+	}
+	crewID := dump.CrewID
+	if crewID == "" {
+		// A bundle written before DumpCrew recorded its crew: fall back
+		// to the payload's shape. Only DumpCrew's tables carry rows, and
+		// the one crews row is the crew.
+		for table, rows := range dump.Tables {
+			if len(rows) > 0 && !crewDumpTables[table] {
+				return false
+			}
+		}
+		crews := dump.Tables["crews"]
+		if len(crews) != 1 {
+			return false
+		}
+		crewID = rowString(crews[0], "id")
+	}
+	if crewID == "" || crewID != manifest.Contents.Crews[0].ID {
+		return false
+	}
+	if len(dump.Tables[journalCheckpointsTable]) > 0 {
+		return false
+	}
+	for _, row := range dump.Tables[journalEntriesTable] {
+		seq, err := rowInt64(row, "seq")
+		if err != nil {
+			return false
+		}
+		if seq > 0 && rowString(row, "crew_id") != crewID {
+			return false
+		}
+	}
+	return true
 }
 
 // journalRechainStats reports what the re-sign touched, so the caller can put
@@ -141,7 +199,7 @@ func rechainForkedJournalWithKeys(ctx context.Context, db *sql.DB, dump *DBDump,
 	stats.CheckpointsUnverified = unverified
 
 	// 2. Re-chain the entries, workspace by workspace, in seq order.
-	touched, err := resignEntries(entries, nil, removedByWorkspace, checkpointsByWorkspace, hasEmitColumn, keys)
+	touched, err := resignEntries(entries, nil, removedByWorkspace, checkpointsByWorkspace, hasEmitColumn, prov.CrewExtract, keys)
 	if err != nil {
 		return stats, err
 	}
@@ -176,6 +234,11 @@ type chainTail struct {
 	// checkpoints counts the compaction checkpoint ROWS re-signed into this
 	// workspace, so the notice entry can report them.
 	checkpoints int
+	// renumbered is set when the walk renumbered a crew extract;
+	// sourceSeqFirst/Last are the bundle's seq range it came from.
+	renumbered     bool
+	sourceSeqFirst int64
+	sourceSeqLast  int64
 }
 
 // resignCheckpointsWithKeys re-signs every compaction checkpoint in the dump under the
@@ -260,7 +323,14 @@ func resignCheckpointsWithKeys(rows []map[string]any, keys *journal.SigningKeys,
 // attestation this instance never made, and VerifyChain already reports them
 // for what they are. A source workspace that carried such rows forks into one
 // that carries them too — no better, and no worse.
-func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int64]string, checkpointCounts map[string]int, hasEmitColumn bool, snapshots ...*journal.SigningKeys) (map[string]*chainTail, error) {
+//
+// renumber is set for a crew extract (resignProvenance.CrewExtract): the
+// rows' seq values are rewritten to 1..n in their original order, so the
+// subset becomes a contiguous chain instead of one gap per sibling-crew entry.
+// The original range is kept on the tail for the notice. A crew bundle carries
+// no compaction checkpoints (DumpCrew does not select them), so the gap walk
+// has nothing to bridge and is skipped.
+func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int64]string, checkpointCounts map[string]int, hasEmitColumn bool, renumber bool, snapshots ...*journal.SigningKeys) (map[string]*chainTail, error) {
 	byWorkspace := map[string][]map[string]any{}
 	for _, row := range rows {
 		ws := rowString(row, "workspace_id")
@@ -302,6 +372,14 @@ func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int
 			if seq <= 0 {
 				continue // unchained legacy row — see the doc comment
 			}
+			if renumber {
+				if !tail.renumbered {
+					tail.renumbered, tail.sourceSeqFirst = true, seq
+				}
+				tail.sourceSeqLast = seq
+				seq = expectedSeq
+				row["seq"] = seq
+			}
 			// Walk any compacted gap the way VerifyChain does: each
 			// missing seq covered by a checkpoint advances the link to
 			// the removed row's recorded hash. An UNCOVERED gap leaves
@@ -312,7 +390,7 @@ func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int
 			// the size of the gap: a bundle claiming seq 2^62 must not
 			// spin here. The first UNCOVERED missing seq stops the walk
 			// and leaves the link where it is.
-			for expectedSeq < seq {
+			for !renumber && expectedSeq < seq {
 				h, ok := removed[ws][expectedSeq]
 				if !ok {
 					break
@@ -343,7 +421,7 @@ func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int
 		// appended below sits after them, so it must chain onto the last
 		// removed row's recorded hash, and it must not reuse a seq the
 		// checkpoint already records as removed.
-		for {
+		for !renumber {
 			h, ok := removed[ws][expectedSeq]
 			if !ok {
 				break
@@ -439,6 +517,11 @@ func resignNoticeRow(workspaceID string, tail *chainTail, key []byte, hasEmitCol
 		"bundle_path":           prov.BundlePath,
 		"bundle_sha256":         prov.BundleSHA256,
 		"chain_genesis":         "this instance",
+	}
+	if tail.renumbered {
+		payload["crew_extract_renumbered"] = true
+		payload["source_seq_first"] = tail.sourceSeqFirst
+		payload["source_seq_last"] = tail.sourceSeqLast
 	}
 	for k, v := range payload {
 		if s, ok := v.(string); ok && s == "" {

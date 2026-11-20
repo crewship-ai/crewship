@@ -8,7 +8,7 @@ tag: Experimental
 
 # Artifacts configuration
 
-Every Artifacts surface beyond the classic Page list is **off by default**. A
+The Artifacts library is on in the default production build; other experimental surfaces are **off by default**. A
 surface appears only when each layer it depends on is switched on:
 
 | Layer | Where it is set | When it takes effect | Scope |
@@ -322,7 +322,7 @@ only when its value is exactly `true`.
 
 | Variable | Default | Shows |
 |---|---|---|
-| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | off | The Artifacts library at `/artifacts`. The **Artifacts** sidebar link is always shown; with this variable it opens `/artifacts` instead of `/pages`. |
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | on in `.env.production` | The Artifacts library at `/artifacts`. The **Artifacts** sidebar link is always shown; with this variable it opens `/artifacts` instead of `/pages`. |
 | `NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG` | off | Pages the library's All view on the server (search, kind, privacy, version and folder filters, sort and paging of `GET /api/v1/pages`). Views and owner filters the server cannot express stay in the browser. Needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | off (`false` in `.env.production`) | Artifact project cards and the side viewer in chat |
 | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | off (`false` in `.env.production`) | The Craft edit lease bar and local draft recovery in chat |
@@ -341,10 +341,9 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_STATIC_APP_PREVIEW` | off | Development only. Leave off. |
 | `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK` | off | Development only: runs library sharing against an in-browser mock. Never enable in a deployment. |
 
-The repository's `.env.production` sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`
-and `NEXT_PUBLIC_CHAT_CRAFT_LEASE` to `false` explicitly, and none of the
-other variables. A default production build therefore hides every screen in the
-matrix above that needs a build-time variable.
+The repository’s `.env.production` enables `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and
+sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` and `NEXT_PUBLIC_CHAT_CRAFT_LEASE`
+to `false`. The other variables in the table are unset by default.
 
 The build-profile line of that file names the profile, and the tests in
 `lib/__tests__/build-profile.test.ts` and `lib/__tests__/feature-flags.test.ts`

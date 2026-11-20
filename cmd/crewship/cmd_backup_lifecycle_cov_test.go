@@ -216,6 +216,7 @@ func covResetBackupRestoreFlags(t *testing.T) {
 	covSetFlagCli5(t, backupRestoreCmd, "dry-run", "false")
 	covSetFlagCli5(t, backupRestoreCmd, "replace", "false")
 	covSetFlagCli5(t, backupRestoreCmd, "discard-workbooks", "false")
+	covSetFlagCli5(t, backupRestoreCmd, "identity", "")
 }
 
 func TestBackupRestoreRunE_HappyPath(t *testing.T) {

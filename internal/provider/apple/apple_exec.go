@@ -83,9 +83,12 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 		args = append(args, "-i")
 	}
 
-	for _, env := range cfg.Env {
-		args = append(args, "--env", env)
+	// Values travel off argv (#5497); see execEnv.
+	env, err := p.execEnvFor(cfg.Env)
+	if err != nil {
+		return nil, err
 	}
+	args = append(args, env.args...)
 	if cfg.WorkingDir != "" {
 		args = append(args, "--workdir", cfg.WorkingDir)
 	}
@@ -95,6 +98,10 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	args = append(args, cfg.Cmd...)
 
 	cmd := newExecCmd(ctx, args)
+	start, err := env.attach(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	// Attach stdin when supplied so oversized agent prompts (too large to pass
 	// as an argv element) reach the CLI. nil leaves stdin unset — the historic
@@ -110,7 +117,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	cmd.Stdout = spool
 	cmd.Stderr = spool
 
-	if err := cmd.Start(); err != nil {
+	if err := start(); err != nil {
 		return nil, fmt.Errorf("exec start: %w", err)
 	}
 
@@ -243,9 +250,12 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 
 	args := []string{"exec", "--tty"}
 
-	for _, env := range cfg.Env {
-		args = append(args, "--env", env)
+	// Values travel off argv (#5497); see execEnv.
+	env, err := p.execEnvFor(cfg.Env)
+	if err != nil {
+		return nil, err
 	}
+	args = append(args, env.args...)
 	if cfg.WorkingDir != "" {
 		args = append(args, "--workdir", cfg.WorkingDir)
 	}
@@ -255,6 +265,10 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 	args = append(args, cfg.Cmd...)
 
 	cmd := newExecCmd(ctx, args)
+	start, err := env.attach(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	// Stdin stays a pipe (the terminal writes into it); stdout is spooled for
 	// the same reason as in Exec — a session whose reader goes away must still
@@ -266,7 +280,7 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 	cmd.Stdout = stdout
 	cmd.Stderr = stdout
 
-	if err := cmd.Start(); err != nil {
+	if err := start(); err != nil {
 		stdinR.Close()
 		stdinW.Close()
 		return nil, fmt.Errorf("exec interactive start: %w", err)

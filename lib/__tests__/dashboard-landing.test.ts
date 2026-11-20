@@ -16,4 +16,19 @@ describe("dashboardLanding", () => {
   ])("%o → %s", (input, want) => {
     expect(dashboardLanding(input)).toBe(want)
   })
+
+  // #4876: someone invited into a workspace another person set up has
+  // nothing to set up there — the wizard is the owner's.
+  it.each([
+    ["MEMBER", null],
+    ["VIEWER", null],
+    ["MANAGER", null],
+    ["ADMIN", null],
+    ["OWNER", "/onboarding"],
+    [null, "/onboarding"],
+  ] as const)("role %s in a workspace, onboarding not completed → %s", (role, want) => {
+    expect(
+      dashboardLanding({ workspaceId: "ws", workspaceLoading: false, instanceAdmin: false, onboardingCompleted: false, role }),
+    ).toBe(want)
+  })
 })

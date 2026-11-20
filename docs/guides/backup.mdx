@@ -156,6 +156,16 @@ checked before it is put in place. A file already at that path is never
 overwritten: identical bytes count as already present, different bytes are
 left alone and reported as a conflict.
 
+Chat attachments are the exception. A file attached in a chat is stored in the
+agent's output tree at the row's `storage_key`
+(`<crew>/<agent>/attachments/<chat>/<id>/<file>`), not in the content-addressed
+tree. It travels with the crew's `/output` files, not in `attachment-blobs/`,
+and it does not count towards `attachments_included`. An instance backup checks
+it at its `storage_key` in the output store, and `crewship backup drill` opens
+it there. Before #5588 both looked in the content-addressed tree: every chat
+attachment was reported as `attachment_missing`, and the drill failed
+`attachments_open` although the file had been restored.
+
 Nothing a bundle lacks is silent. When a file the rows reference is not on disk
 at backup time (or attachment storage is not configured), the backup still
 completes, and the manifest records it: `contents.attachments_included`,
@@ -234,6 +244,8 @@ crewship backup create \
 ```
 
 `--recipient` and `--passphrase-file` are mutually exclusive. `--no-encrypt` is refused: every new bundle is encrypted.
+
+Restore a `--recipient` bundle with the matching identity file: `crewship backup restore bundle.tar.zst --identity ops.key`. Before #5615 the CLI offered only a passphrase, so a recipient bundle could be restored only through the API.
 
 ## Back up a single crew
 
@@ -400,6 +412,8 @@ Restoring under the ORIGINAL identity (same workspace, or a genuinely empty inst
 
 A fork regenerates **identity**, not merely primary keys: alongside every row's id it also mints a fresh value for the columns that have to be unique across the whole instance rather than within a workspace — a mission's `trace_id` is the one that exists today. Without that the fork's row would collide with the source row still holding the value and be dropped in silence, taking its children down with it (#2260). Columns that are unique only *within* a workspace are left alone on purpose: an issue identifier like `ENG-14` is scoped by the workspace id the fork already remapped, so the fork keeps the identifiers your team knows.
 
+A fork also leaves its **source untouched**. Besides declared foreign keys, the remap follows a listed set of references that the schema stores as plain text. They include the `workspace_id` of notification channels, notification preferences, automations, routine and run tags and routine step overrides. They also include an agent's MCP binding (to a workspace or a crew integration), the agent assignee of issues, recurring issues and triage rules, crew, agent, issue and agent budgets, an ephemeral agent's parent lead, and the crew, agent, issue and activity a journal entry names. Before #5575 those rows kept the source's ids. A fork then added a duplicate notification channel or automation to the *source* workspace, the forked agent lost its integration, and a recurring issue in the fork kept assigning work to the source's agent. A value that names a row the bundle does not carry, such as a deleted agent in an old journal entry, is left as it was. Automations and notification channels land **enabled** in the fork, so a fork beside its live source delivers each of them twice until you disable one copy.
+
 ### A fork does not inherit live capabilities
 
 Workspace invitations, port exposures, pipeline webhooks, page public links and page webhooks are authorised by a **capability token** — a secret whose knowledge is the whole of the check. A fork re-keys every one of them (#2274): the token and its digest are minted fresh, together, through the same digest primitive the auth layer verifies with, so **no secret that worked against the source works against the fork**. Anyone who ever learned a source URL — including from a leaked database file — holds nothing on the copy.
@@ -431,6 +445,8 @@ What that means in practice:
 - Signed compaction checkpoints follow the fork and are re-signed under the new workspace id, so a journal that was legitimately compacted before the backup does not read as a malicious mid-chain delete afterwards. They are no longer duplicated into the source workspace's checkpoint set.
 
 A restore that cannot re-sign the chain **fails** rather than landing a fork whose journal would report as tampered. The failure happens before any row is written, so nothing is half-applied.
+
+A **crew** bundle carries only that crew's journal entries, but their sequence numbers come from the whole workspace's chain, so the extract has a gap wherever another crew wrote an entry. A crew-scope fork therefore renumbers the extract into a contiguous chain before re-signing it. The `backup.chain_resigned` entry records `crew_extract_renumbered: true` and the source range (`source_seq_first`, `source_seq_last`). Before #5578 the gaps were kept, and `crewship journal verify` on an `--as-crew` copy reported a sequence gap straight after the restore. The decision is taken from the encrypted payload, not from the manifest: the dump must hold only the tables a crew backup selects, exactly the one crew the manifest names, no compaction checkpoints, and only that crew's chained entries. A workspace bundle whose plaintext manifest was relabelled as crew scope is therefore not renumbered. A workspace fork never renumbers: a gap there is a real missing row, and the fork keeps reporting it exactly as the source does. The price of renumbering is that a crew extract cannot show a deletion of one of the crew's own entries in the source. Verify the source workspace when you need that proof.
 
 Rows that predate the hash chain (schema v152) were never signed; a fork carries them across exactly as they are, no better and no worse than the source.
 
@@ -526,6 +542,8 @@ crewship backup restore old-bundle.tar.zst
 #   those columns to satisfy a NOT NULL or a primary key did NOT land, and the
 #   restore could not report them individually.
 ```
+
+A generated column on the target (for example `journal_entries.run_id`) is not counted: the bundle carries its value because `SELECT *` returns it, but SQLite recomputes it on insert, so nothing is lost (#5612).
 
 Why it is worth a warning rather than a shrug: dropping a column is harmless when the row still makes sense without it, and it is *silent data loss* when it does not. If the dropped column was part of the row's primary key or a `NOT NULL`, the insert violates a constraint, `INSERT OR IGNORE` discards the whole row, and nothing errors — the bundle verifies, the restore reports success, and the rows are simply not there. `rows_inserted` cannot show you the difference, because a row that never landed is not counted anywhere.
 

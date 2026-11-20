@@ -676,6 +676,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// primary key and rewrite every FK so INSERT OR IGNORE does
 		// not drop the whole bundle on PK collision.
 		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			// Decided before RemapIDs rewrites the crew id it compares.
+			crewJournalExtract := isCrewJournalExtract(manifest, extracted.DBDump)
 			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
 				return nil, err
 			}
@@ -692,7 +694,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 			// RemapIDs just rewrote identity columns the journal's
 			// keyed hash commits to (the entry's own id, and every FK
-			// column SQLite reports — workspace_id on today's schema)
+			// column SQLite reports or virtualForeignKeys lists)
 			// while seq/prev_hash/entry_hash rode through verbatim, so
 			// every restored row now carries a signature over values it
 			// no longer holds. Left alone, the restore
@@ -714,6 +716,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			chainProv.Actor = opts.Actor
 			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
 			chainProv.CheckpointSourceIDs = checkpointSourceIDs
+			chainProv.CrewExtract = crewJournalExtract
 			auditKeys, keyErr := journal.SigningKeysForContext(ctx)
 			if keyErr != nil {
 				return nil, keyErr

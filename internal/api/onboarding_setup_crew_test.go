@@ -27,6 +27,7 @@ func TestEnsureOnboardingSetupCrew_NewCrewGetsCurrentAutonomyLevel(t *testing.T)
 	if err != nil {
 		t.Fatalf("ensureOnboardingSetupCrew: %v", err)
 	}
+	assertAgentsFollowCrewStyle(t, db) // #3051: the setup LEAD agent too
 	var autonomy string
 	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
 		t.Fatalf("read autonomy_level: %v", err)
