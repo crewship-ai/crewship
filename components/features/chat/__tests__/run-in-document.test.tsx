@@ -83,3 +83,16 @@ it("clears protected picker metadata while hidden and rechecks before showing it
   fireEvent(document, new Event("visibilitychange")); await settle()
   expect(screen.queryByText(row.title)).toBeNull()
 })
+
+// It used to sit above every message as a bold heading. It is a message
+// action now: quiet until hover, and always reachable by keyboard and touch.
+it("is a quiet message action that keyboard focus and touch still reveal", () => {
+  render(<RunInDocument {...props} />)
+  const button = screen.getByRole("button", { name: "Run in this Doc" })
+  const reveal = button.closest('[data-slot="message-action"]')
+  expect(reveal).toBeTruthy()
+  expect(reveal!.className).toMatch(/opacity-0/)
+  expect(reveal!.className).toMatch(/group-hover:opacity-100/)
+  expect(reveal!.className).toMatch(/focus-within:opacity-100/)
+  expect(reveal!.className).toMatch(/coarse:opacity-100/)
+})

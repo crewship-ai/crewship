@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { FileCode2, FileImage, FileSpreadsheet, FileText, RefreshCw } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRealtimeChannelSafe, useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -36,31 +37,50 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
   chatId?: string | null
   viewerId?: string | null
 }) {
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
+  const key = JSON.stringify([workspaceId, agentId])
+  // One result per agent+workspace. A background refresh keeps the current
+  // list on screen; a result for a previous agent is never painted.
+  const [result, setResult] = useState<{ key: string; files: FileEntry[] | null } | null>(null)
   const [revision, setRevision] = useState(0)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const openArtifact = useArtifactStore((s) => s.openFile)
   const activeId = useArtifactStore((s) => s.activeId)
 
   useEffect(() => {
     if (!workspaceId) return
     const controller = new AbortController()
-    setFiles([])
-    setLoading(true)
-    setError(false)
     void apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/files?workspace_id=${encodeURIComponent(workspaceId)}&recursive=true`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Files ${res.status}`)
         return res.json() as Promise<FileEntry[]>
       })
       .then((rows) => {
-        if (!controller.signal.aborted) setFiles(Array.isArray(rows) ? rows : [])
+        if (!controller.signal.aborted) setResult({ key, files: Array.isArray(rows) ? rows : [] })
       })
-      .catch(() => { if (!controller.signal.aborted) setError(true) })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+      .catch(() => { if (!controller.signal.aborted) setResult({ key, files: null }) })
     return () => controller.abort()
-  }, [agentId, workspaceId, revision])
+  }, [agentId, workspaceId, key, revision])
+
+  const reload = useCallback(() => setRevision((n) => n + 1), [])
+  const refresh = useCallback(() => {
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => { debounce.current = null; setRevision((n) => n + 1) }, 400)
+  }, [])
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current) }, [])
+  // The watcher publishes file.event on the crew channel; subscribing needs
+  // membership in the crew's workspace (internal/ws/channel_auth.go). Only this agent's writes refresh; the listing itself
+  // still goes through the files API and its permission check.
+  useRealtimeChannelSafe(workspaceId && crewId ? `crew:${crewId}` : null)
+  useRealtimeEventSafe("file.event", useCallback((event: { payload: Record<string, unknown> }) => {
+    if (agentSlug && event.payload?.agent === agentSlug) refresh()
+  }, [agentSlug, refresh]))
+  useRealtimeEventSafe("run.completed", useCallback((event: { payload: Record<string, unknown> }) => { if (event.payload?.agent_id === agentId) refresh() }, [agentId, refresh]))
+  useRealtimeEventSafe("realtime.reconnected", reload)
+
+  const current = result?.key === key ? result : null
+  const loading = !!workspaceId && !current
+  const error = !!current && current.files === null
+  const files = current?.files ?? []
 
   const artifacts = [...new Map(files.filter((file) => !file.is_dir
     && isClientArtifactPath(relativeToAgent(file.path, crewId, agentSlug)))
@@ -70,7 +90,7 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
     {workspaceId && chatId && viewerId && <ChatDocumentAccess workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} />}
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="eyebrow">Output files <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
-      <button type="button" onClick={() => setRevision((n) => n + 1)} aria-label="Refresh artifacts" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
+      <button type="button" onClick={reload} aria-label="Refresh artifacts" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
     </div>
     {loading ? <p role="status" className="py-3 text-muted-foreground">Loading artifacts…</p>
       : error ? <p role="alert" className="py-3 text-muted-foreground">Artifacts could not be loaded. Try refresh.</p>
