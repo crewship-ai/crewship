@@ -42,17 +42,21 @@ type NativeProposal struct {
 	ID, PageID, AuthorActorID, RequestID, Summary, ContentHash, State string
 	BaseVersion, ResultVersion                                        int64
 	CreatedAt                                                         string
-	Content                                                           []byte
+	// DecidedBy and DecidedAt are empty while the proposal is open. DecidedBy
+	// is the deciding user:<id>, or system:superseded for a stale proposal no
+	// person decided.
+	DecidedBy, DecidedAt string
+	Content              []byte
 	// Replayed is set by Propose when the request ID returned an earlier
 	// proposal instead of recording one. It is never stored.
 	Replayed bool
 }
 
-const nativeProposalColumns = `id,page_id,author_actor_id,request_id,summary,content_hash,state,base_version,COALESCE(result_version,0),created_at`
+const nativeProposalColumns = `id,page_id,author_actor_id,request_id,summary,content_hash,state,base_version,COALESCE(result_version,0),created_at,COALESCE(decided_by,''),COALESCE(decided_at,'')`
 
 func scanNativeProposal(row interface{ Scan(...any) error }) (NativeProposal, error) {
 	var p NativeProposal
-	err := row.Scan(&p.ID, &p.PageID, &p.AuthorActorID, &p.RequestID, &p.Summary, &p.ContentHash, &p.State, &p.BaseVersion, &p.ResultVersion, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.PageID, &p.AuthorActorID, &p.RequestID, &p.Summary, &p.ContentHash, &p.State, &p.BaseVersion, &p.ResultVersion, &p.CreatedAt, &p.DecidedBy, &p.DecidedAt)
 	return p, err
 }
 
@@ -313,6 +317,12 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 			if n, _ := res.RowsAffected(); n != 1 {
 				return "", ErrNativeProposalDecided
 			}
+			// Return the recorded decision (decider and time) as committed.
+			decision, err := s.loadProposal(ctx, tx, l.Scope, id)
+			if err != nil {
+				return "", err
+			}
+			p.DecidedBy, p.DecidedAt = decision.DecidedBy, decision.DecidedAt
 			return actor, nil
 		})
 		if errors.Is(err, artifacts.ErrVersionConflict) {
@@ -324,8 +334,14 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 			}
 			// The document content changed after the agent's base. Record that
 			// the proposal no longer applies; never rebase it.
-			if staleErr := s.decideProposal(ctx, l.Scope, &l, id, "stale"); staleErr != nil && !errors.Is(staleErr, ErrNativeProposalDecided) {
+			// The decision fields of a rolled-back accept never leak into it.
+			p.DecidedBy, p.DecidedAt = "", ""
+			decision, staleErr := s.decideProposal(ctx, l.Scope, &l, id, "stale")
+			if staleErr != nil && !errors.Is(staleErr, ErrNativeProposalDecided) {
 				return NativeProposal{}, NativeSaveReceipt{}, staleErr
+			}
+			if staleErr == nil {
+				p.DecidedBy, p.DecidedAt = decision.DecidedBy, decision.DecidedAt
 			}
 			p.State = "stale"
 			return p, NativeSaveReceipt{}, artifacts.ErrVersionConflict
@@ -372,7 +388,7 @@ func (s *NativeStore) RejectProposal(ctx context.Context, k EditLeaseScope, id s
 	if err := s.ready(); err != nil {
 		return NativeProposal{}, err
 	}
-	if err := s.decideProposal(ctx, k, nil, id, "rejected"); err != nil {
+	if _, err := s.decideProposal(ctx, k, nil, id, "rejected"); err != nil {
 		return NativeProposal{}, err
 	}
 	var out NativeProposal
@@ -386,9 +402,12 @@ func (s *NativeStore) RejectProposal(ctx context.Context, k EditLeaseScope, id s
 	return out, err
 }
 
-func (s *NativeStore) decideProposal(ctx context.Context, k EditLeaseScope, l *EditLease, id, state string) error {
+// decideProposal records state for an open proposal and returns the committed
+// decision (decider and time) read back inside the same transaction.
+func (s *NativeStore) decideProposal(ctx context.Context, k EditLeaseScope, l *EditLease, id, state string) (NativeProposal, error) {
 	write := s.authority(k, l, "write")
 	decided := false
+	var out NativeProposal
 	_, err := s.versions.Quota(ctx, nativeVersionKey(k), func(ctx context.Context, tx *sql.Tx) (string, error) {
 		actor, err := write(ctx, tx)
 		if err != nil || decided {
@@ -408,7 +427,67 @@ func (s *NativeStore) decideProposal(ctx context.Context, k EditLeaseScope, l *E
 		if n, _ := res.RowsAffected(); n != 1 {
 			return "", ErrNativeProposalDecided
 		}
-		return actor, nil
+		out, err = s.loadProposal(ctx, tx, k, id)
+		return actor, err
 	})
-	return err
+	if err != nil {
+		return NativeProposal{}, err
+	}
+	return out, nil
+}
+
+// NativeProposalOrigin is the accepted agent proposal a saved version came
+// from: the version's own actor is the person who accepted and wrote it.
+type NativeProposalOrigin struct {
+	ID, AuthorActorID string
+}
+
+// AcceptedProposalOrigins maps the given versions to the accepted proposals
+// they were saved from, under current read authority: the same authority the
+// version history itself needs. A version counts only when its recorded writer
+// is the proposal's decider, so a plain save is never attributed to an agent.
+// Nothing is written and no candidate bytes are read.
+func (s *NativeStore) AcceptedProposalOrigins(ctx context.Context, k EditLeaseScope, versions []int64) (map[int64]NativeProposalOrigin, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	out := map[int64]NativeProposalOrigin{}
+	if len(versions) == 0 {
+		return out, nil
+	}
+	low, high := versions[0], versions[0]
+	wanted := make(map[int64]bool, len(versions))
+	for _, v := range versions {
+		low, high = min(low, v), max(high, v)
+		wanted[v] = true
+	}
+	authorize := s.authority(k, nil, "read")
+	listed := false
+	_, err := s.versions.Quota(ctx, nativeVersionKey(k), func(ctx context.Context, tx *sql.Tx) (string, error) {
+		actor, err := authorize(ctx, tx)
+		if err != nil || listed {
+			return actor, err
+		}
+		listed = true
+		rows, err := tx.QueryContext(ctx, `SELECT p.result_version,p.id,p.author_actor_id FROM craft_native_proposals p JOIN artifact_versions v ON v.workspace_id=p.workspace_id AND v.page_id=p.page_id AND v.version=p.result_version AND v.actor=p.decided_by WHERE p.page_id=? AND p.workspace_id=? AND p.state='accepted' AND p.result_version BETWEEN ? AND ?`, k.ArtifactID, k.WorkspaceID, low, high)
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var version int64
+			var o NativeProposalOrigin
+			if err := rows.Scan(&version, &o.ID, &o.AuthorActorID); err != nil {
+				return "", err
+			}
+			if wanted[version] {
+				out[version] = o
+			}
+		}
+		return actor, rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
