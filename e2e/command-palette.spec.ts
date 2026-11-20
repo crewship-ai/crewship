@@ -220,17 +220,23 @@ test.describe("⌘K — every row opens the thing it names", () => {
         }),
       })
       if (!response.ok) throw new Error(`page fixture failed: ${response.status} ${await response.text()}`)
-      return { slug, name, workspace }
+      const created = await response.json() as { id?: string }
+      if (!created.id) throw new Error("page fixture answered without an id")
+      return { slug, name, workspace, id: created.id }
     })
+    // Saved work opens in Artifacts in every build; Pages is never a
+    // destination (owner, 8 Nov 2026; #5132). The row links the slug, and the
+    // library moves to the item's immutable ID address once it resolves.
+    const rowHref = `/artifacts?${new URLSearchParams({ item: fixture.slug })}`
     try {
       const input = await openPalette(page)
       await input.fill(fixture.name)
-      const row = page.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)
+      const row = page.locator(`[cmdk-item][data-href="${rowHref}"]`)
       await expect(row).toBeVisible({ timeout: TIMEOUT })
       // The page's own glyph, not a generic icon.
       await expect(row.locator('[data-slot="page-glyph"]')).toHaveCount(1)
       await row.click()
-      await expect(page).toHaveURL(new RegExp(`/pages/${fixture.slug}$`), { timeout: TIMEOUT })
+      await expect(page).toHaveURL((u) => u.pathname === `/artifacts/${encodeURIComponent(fixture.id)}`, { timeout: TIMEOUT })
       // THAT page, not the overview: its name is on the page.
       await expect(page.locator("main")).toContainText(fixture.name, { timeout: TIMEOUT })
 
@@ -239,7 +245,7 @@ test.describe("⌘K — every row opens the thing it names", () => {
       await page.keyboard.press("ControlOrMeta+k")
       await expect(page.locator("[cmdk-input]")).toBeVisible({ timeout: TIMEOUT })
       const recent = page.locator("[cmdk-group]", { hasText: /^Recent/ })
-      await expect(recent.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)).toBeVisible({ timeout: TIMEOUT })
+      await expect(recent.locator(`[cmdk-item][data-href="${rowHref}"]`)).toBeVisible({ timeout: TIMEOUT })
       await page.keyboard.press("Escape")
     } finally {
       const cleaned = await page.evaluate(async ({ slug, workspace }) => {
@@ -255,9 +261,9 @@ test.describe("⌘K — every row opens the thing it names", () => {
     // the authorised list on every open, never trusted on its own.
     const again = await openPalette(page)
     await again.fill(fixture.name)
-    // Nothing else carries that name: not the Pages group, not Recent.
+    // Nothing else carries that name: not the Artifacts group, not Recent.
     await expect(page.getByText("No results found.")).toBeVisible({ timeout: TIMEOUT })
-    await expect(page.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)).toHaveCount(0)
+    await expect(page.locator(`[cmdk-item][data-href="${rowHref}"]`)).toHaveCount(0)
   })
 
   test("a person opens that person's panel on the Members page", async ({ page }) => {

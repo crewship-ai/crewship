@@ -64,7 +64,7 @@ The same rule holds on every surface: the chat card, the `run.session_init` jour
 
 Fields are omitted entirely when unknown (older runs, and non-Claude adapters, which report none of this) — absence means "never reported", not "empty".
 
-The same provenance is recorded twice more: as a `run.session_init` journal entry at session start (`crewship journal --type run.session_init`, severity `error` when a server was skipped), and on the chat's "Session started" card while the run is live. The journal entry and the run record are the durable copies — the chat card is live-stream only.
+The same provenance is recorded twice more: as a `run.session_init` journal entry at session start (`crewship journal --type run.session_init`, severity `error` when a server was skipped), and, only when an MCP server was skipped, on a warning line in the chat while the run is live (its card carries the start details). The journal entry and the run record are the durable copies — the chat line is live-stream only.
 
 ## Update one existing Document
 

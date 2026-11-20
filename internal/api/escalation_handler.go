@@ -321,7 +321,33 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		metadataVal = body.Metadata
 	}
 
-	err = h.insertEscalationSource(r.Context(), body.WorkspaceID, escalationID, escalationType == "TEXT" && body.SourceRunID != "", `
+	created := map[string]any{
+		"escalation_id": escalationID,
+		"status":        escalationStatusPending,
+		// The contract the sidecar bounds its long poll on. Publishing both
+		// the absolute instant and the window means a caller with a skewed
+		// clock can still use the duration, and one without can use the
+		// instant — but neither has to guess, which is what the old hardcoded
+		// 300 s amounted to.
+		"deadline_at":     deadlineAt,
+		"timeout_seconds": int(escalationAgentWait.Seconds()),
+		// The human's clock, published for the console and the CLI rather than
+		// for the sidecar — an operator looking at an inbox item needs to know
+		// how long it stays actionable, and the number they must NOT be shown is
+		// the agent's poll window.
+		"answer_deadline_at": answerDeadlineAt,
+	}
+	// The name the agent will be able to use the credential by, so it can say
+	// so in its report before the human has even answered. Never a value.
+	if cid, ok := credentialID.(string); ok && cid != "" {
+		created["credential_id"] = cid
+		created["credential_name"] = credentialName
+		created["credential_requested"] = credentialRequested
+	}
+
+	// created is final before the insert: a routine step records it with the
+	// row (#5332), so a resumed step is answered with exactly this.
+	err = h.insertEscalationSource(r.Context(), body.WorkspaceID, escalationID, escalationType == "TEXT" && body.SourceRunID != "", created, `
 		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at, source_run_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, NULLIF(?, ''))
 	`, []any{escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt, body.SourceRunID})
@@ -336,6 +362,10 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 				now, now, cid, body.WorkspaceID); delErr != nil {
 				h.logger.Error("rollback orphaned pending credential", "error", delErr, "credential_id", cid)
 			}
+		}
+		if errors.Is(err, errRoutineStepEffectConflict) {
+			writeRoutineStepEffectError(w, err)
+			return
 		}
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -499,29 +529,6 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		"crew_id", body.CrewID,
 	)
 
-	created := map[string]any{
-		"escalation_id": escalationID,
-		"status":        escalationStatusPending,
-		// The contract the sidecar bounds its long poll on. Publishing both
-		// the absolute instant and the window means a caller with a skewed
-		// clock can still use the duration, and one without can use the
-		// instant — but neither has to guess, which is what the old hardcoded
-		// 300 s amounted to.
-		"deadline_at":     deadlineAt,
-		"timeout_seconds": int(escalationAgentWait.Seconds()),
-		// The human's clock, published for the console and the CLI rather than
-		// for the sidecar — an operator looking at an inbox item needs to know
-		// how long it stays actionable, and the number they must NOT be shown is
-		// the agent's poll window.
-		"answer_deadline_at": answerDeadlineAt,
-	}
-	// The name the agent will be able to use the credential by, so it can say
-	// so in its report before the human has even answered. Never a value.
-	if cid, ok := credentialID.(string); ok && cid != "" {
-		created["credential_id"] = cid
-		created["credential_name"] = credentialName
-		created["credential_requested"] = credentialRequested
-	}
 	writeJSON(w, http.StatusCreated, created)
 }
 

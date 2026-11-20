@@ -5,11 +5,10 @@ import { AppBannerProvider, pickBanner } from "../app-banners"
 import { OfflineBanner } from "../page-state"
 import { RealtimeStatusBanner } from "../realtime-status-banner"
 import { RuntimeBanner } from "../runtime-banner"
-import { DISMISS_KEY_PREFIX, UpdateBanner } from "../update-banner"
 import { apiFetch } from "@/lib/api-fetch"
 
-// Harbor 2 G09: the app has three banners — realtime, runtime, update — and
-// shows at most one at a time, highest priority first. A page's own offline
+// Harbor 2 G09: the app has two banners — realtime and runtime — and shows
+// at most one at a time, highest priority first. A page's own offline
 // banner joins the same queue so "Reconnecting…" is never said twice. The
 // realtime states themselves (#3783) are in realtime-reconnect-banners.test.tsx.
 
@@ -49,7 +48,6 @@ function Shell({ page }: { page?: React.ReactNode }) {
     <AppBannerProvider>
       <RealtimeStatusBanner />
       <RuntimeBanner />
-      <UpdateBanner />
       {page}
     </AppBannerProvider>
   )
@@ -60,7 +58,7 @@ const shown = () => screen.queryAllByRole("status").map((el) => el.getAttribute(
 describe("app banner queue", () => {
   it("picks the highest priority, then the earliest claim", () => {
     expect(pickBanner([])).toBeNull()
-    expect(pickBanner([{ id: "u", kind: "update", order: 0 }, { id: "r", kind: "runtime", order: 1 }])).toBe("r")
+    expect(pickBanner([{ id: "p", kind: "offline", order: 1 }, { id: "r", kind: "runtime", order: 0 }])).toBe("p")
     expect(pickBanner([{ id: "p", kind: "offline", order: 0 }, { id: "rt", kind: "realtime", order: 1 }])).toBe("rt")
     expect(pickBanner([{ id: "a", kind: "offline", order: 2 }, { id: "b", kind: "offline", order: 1 }])).toBe("b")
   })
@@ -89,26 +87,11 @@ describe("app banner queue", () => {
     expect(shown()).toEqual(["runtime"])
   })
 
-  it("the update notice waits for nothing else and is dismissed per version", async () => {
-    const { unmount } = render(<Shell />)
-    await flush()
-    expect(shown()).toEqual(["update"])
-    expect(screen.getByText(/0\.9\.0/).closest("[role=status]")).toHaveTextContent("Crewship 0.9.0 is available. You have 0.8.0.")
-    expect(screen.getByRole("link", { name: "Release notes" })).toHaveAttribute("href", "https://example.test/notes")
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-    expect(shown()).toEqual([])
-    expect(localStorage.getItem(DISMISS_KEY_PREFIX + "0.9.0")).toBe("1")
-    unmount()
-
+  it("a newer version is not a banner: it is the dot on the Crewship sail (#5552)", async () => {
     render(<Shell />)
     await flush()
     expect(shown()).toEqual([])
-    cleanup()
-
-    version = { current: "0.8.0", latest: "0.10.0", newer: true, url: null }
-    render(<Shell />)
-    await flush()
-    expect(shown()).toEqual(["update"])
+    expect(screen.queryByText(/is available/)).toBeNull()
   })
 
   it("a page's own offline banner steps aside while the app says the same", async () => {

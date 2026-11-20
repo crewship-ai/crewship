@@ -1470,14 +1470,29 @@ steps:
   `crewship approvals approve` needs for the agent path's holds — and the
   role is checked again when the call executes; the token's public callback
   cannot decide it, so the card carries no `callback_url`. A crash after the
-  write but before the step finished re-runs the step on resume, as for any
-  `crewship` step, and only chat-origin issue writes dedupe that replay.
+  write but before the step finished re-runs the step on resume, and the
+  route answers that call from the first write (see **Exactly one write per
+  step** below), so one approval authorises at most one write.
   `issue.create`, `issue.update`, `issue.comment`, `issue.link`,
   `assignment.create` and `escalation.create` can wait; `page.create` and
   `page.write` stage their own approval on the route and are still refused
   when held. Rejected and blocked decisions are refusals; raise the level with
   `crewship policy set`. The full per-level table, and the reasoning for each cell, is in
   [Autonomy → what a routine may do to the board](/guides/autonomy-and-self-learning#what-a-routine-may-do-to-the-board).
+- **Exactly one write per step.** The executor saves a step's output after
+  the route has written. A crash between the two re-runs the step when the run
+  resumes. For `issue.create`, `issue.update`, `issue.comment`, `issue.link`,
+  `assignment.create` and `escalation.create`, the dispatcher sends the step's
+  operation key (run, `foreach` item and step) as `X-Crewship-Step-Key`. The
+  route records it in the same transaction as its write. A resumed or retried
+  call with that key gets the first answer back, with the header
+  `X-Crewship-Step-Replayed: true`, and nothing is written again. This holds
+  for every run, not only chat-origin ones. If the arguments render
+  differently on resume, the key no longer matches its request: the step
+  fails with `409 step_key_conflict` and nothing is written. The record is
+  deleted with its run. A step inside a nested routine (`call_pipeline`) is
+  not covered: the nested run has no run record of its own, and a resumed
+  parent re-runs the whole call.
 - **Escalation volume.** `escalation.create` is allowed at *every* autonomy
   level, because an approval to authorise an interrupt is itself the interrupt.
   What bounds it is a backlog instead: a routine may not escalate while the crew

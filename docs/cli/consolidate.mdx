@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship consolidate
 
-Trigger the [Consolidate](/guides/consolidate) worker -- the background process that compacts recent agent/crew journal activity into semantic rules appended to `.memory/topics/learned-*.md`. Normally runs on a 6h schedule; this command forces an immediate pass.
+Trigger the [Consolidate](/guides/consolidate) worker -- the background process that compacts recent agent/crew journal activity into semantic rules appended to `{crewSlug}/topics/learned-*.md` in the crew's shared memory. Operators review those files; agents do not read them back (see [Who reads learned rules](/guides/consolidate#who-reads-learned-rules)). Normally runs on a 6h schedule; this command forces an immediate pass.
 
 ```bash
 crewship consolidate <subcommand> [flags]

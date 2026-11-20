@@ -317,6 +317,9 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 	if req.ChatOriginID != "" {
 		httpReq.Header.Set("X-Crewship-Chat-Origin", req.ChatOriginID)
 	}
+	if routineStepKeyApplies(req, body) {
+		httpReq.Header.Set(routineStepKeyHeader, req.OperationKey)
+	}
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
@@ -334,6 +337,25 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 			req.Verb, method, path, resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return string(respBody), nil
+}
+
+// routineStepKeyApplies reports whether this call carries the step's
+// operation key as a step-effect key (#5332): every routine write route that
+// records one, for a run with a key. The issue writes that already dedupe on
+// the body's operation_key (chat-origin runs, an explicitly keyed legacy step)
+// keep that ledger alone, so a replay still binds its chat card the same way.
+//
+// This is also what makes one approval authorise at most one write: the
+// approval's binding includes the same operation key, and the route answers a
+// second presentation of it from the recorded effect.
+func routineStepKeyApplies(req pipeline.CrewshipRequest, body map[string]any) bool {
+	if req.RunID == "" || req.OperationKey == "" || !routineStepEffectVerbs[req.Verb] {
+		return false
+	}
+	if _, keyed := body["operation_key"]; keyed && strings.HasPrefix(req.Verb, "issue.") && req.Verb != "issue.link" {
+		return false
+	}
+	return true
 }
 
 // fenceTenancy proves every identity this call will act under belongs to the

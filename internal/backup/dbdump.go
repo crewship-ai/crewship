@@ -235,6 +235,7 @@ var BackupTables = []string{
 	"pipeline_step_executions",
 	"pipeline_run_artifacts",
 	"pipeline_run_step_outputs", // normalized per-step outputs (v159) — run-detail waterfall; FK run_id
+	"routine_step_effects",      // committed routine step writes (#5332) — resume replays them; FK run_id
 	"pipeline_routine_state",    // cross-run "since last run" watermarks (v155) — FK pipeline_id
 	"pending_runs",              // deferred/debounced triggers — durable queued work
 	"pipeline_tags",             // routine-definition discovery tags (v125)

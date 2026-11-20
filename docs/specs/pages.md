@@ -355,7 +355,11 @@ read and write to others.
 1. **A page has exactly one owner, and it is either a user or a crew.** `owner_user_id` xor
    `owner_crew_id`. An agent-created page records the authorising human as owner and the agent as
    `created_by_agent_id`; an agent never owns permissions, it acts under one. A crew-owned page is
-   the natural home for a crew's own status board and needs no personal owner at all.
+   the natural home for a crew's own status board and needs no personal owner at all. A crew owns
+   a page only while the crew is not deleted and belongs to the page's workspace: a deleted crew's
+   members hold no owner right on its pages (edit, grants, folders, webhooks, public links), even
+   where a `crew_members` row outlived the crew, and the grants they issued as owner are retired
+   (#5259). Restoring the crew restores ownership but not those grants.
 1b. **When a user owner leaves the workspace, a regular panel page transfers to a crew, it is not deleted.**
    Target crew, in order: the crew that owns the most panels on that page, else the crew the
    departing user belonged to. The transfer emits a journal entry and notifies workspace
@@ -797,7 +801,12 @@ owner on 2026-11-13.
    value, or changed in effect), overwrites the creator, so an agent's change
    to a person's schedule takes its access away. Enabling, disabling,
    renaming it or changing its failure limit, `catchup_policy` or
-   `spread_seconds` keeps the creator: an admin re-enabling an agent's schedule after its circuit
+   `spread_seconds` keeps the creator. Changing a schedule at all is the
+   OWNER/ADMIN tier (`PATCH .../pipeline-schedules/{id}`), so restoring a
+   stopped schedule is an administrator adopting it as its new creator; a
+   MANAGER, its creator included, cannot re-vouch for it by saving it again
+   and creates a new schedule instead (#5411). Keeping the creator on the
+   other changes means an admin re-enabling an agent's schedule after its circuit
    breaker tripped does not vouch for it. A GDPR erasure of the creator
    clears the whole creator, so the schedule vouches for nothing. A delayed or
    debounced start (its trigger defaults to schedule), a schedule occurrence
@@ -1876,7 +1885,7 @@ are not required to build, test or use the product.
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
 
-A grant ends when its issuer loses the authority needed to issue it. Restoring the role does not revive the old grant; a new grant is a new operation (#5069). Retirement is recorded in `page_grants.retired_at` in the transaction of the change that removed the standing, whether that is a role, membership, access mode, suspension, crew membership or Page ownership change, so no read is needed between a loss and a return. Standing is one definition, the view `page_grant_verdicts`, read by both the authorization path and the retirement triggers. A change that keeps standing, such as ADMIN to OWNER, or a demotion of a Page owner who keeps the Page, retires nothing. A retired grant stays in the grants list, inactive, and revoke removes it; issuing it again clears the marker and journals like any other grant. Comment grants and workbook editor grants are Page grants and follow the same rule. Folder ACLs do not: `set_by_user_id` is audit, not authority. Retirement also closes the editor sessions of a workbook grant in the same transaction, so a reissue cannot revive a session opened on the old grant. A restore keeps the marker, and the target remembers each retired issuance in `page_grant_retired_issuances`, which survives revoke and reissue and is excluded from backups: a replacing restore of an earlier bundle does not bring back an issuance retired on that target, while a new issuance is unaffected: its `granted_at` is moved to the first second no retired issuance of that page, subject, level and issuer holds. Every imported grant is judged on arrival against the target's standing, whether or not the bundle carries memberships; an issuer unknown on the target retires it. Erasure and deletion of a person remove what names them.
+A grant ends when its issuer loses the authority needed to issue it. Restoring the role does not revive the old grant; a new grant is a new operation (#5069). Retirement is recorded in `page_grants.retired_at` in the transaction of the change that removed the standing, whether that is a role, membership, access mode, suspension, crew membership, deletion of the owning crew or Page ownership change, so no read is needed between a loss and a return. Standing is one definition, the view `page_grant_verdicts`, read by both the authorization path and the retirement triggers. A change that keeps standing, such as ADMIN to OWNER, or a demotion of a Page owner who keeps the Page, retires nothing. A retired grant stays in the grants list, inactive, and revoke removes it; issuing it again clears the marker and journals like any other grant. Comment grants and workbook editor grants are Page grants and follow the same rule. Folder ACLs do not: `set_by_user_id` is audit, not authority. Retirement also closes the editor sessions of a workbook grant in the same transaction, so a reissue cannot revive a session opened on the old grant. A restore keeps the marker, and the target remembers each retired issuance in `page_grant_retired_issuances`, which survives revoke and reissue and is excluded from backups: a replacing restore of an earlier bundle does not bring back an issuance retired on that target, while a new issuance is unaffected: its `granted_at` is moved to the first second no retired issuance of that page, subject, level and issuer holds. Every imported grant is judged on arrival against the target's standing, whether or not the bundle carries memberships; an issuer unknown on the target retires it. Erasure and deletion of a person remove what names them.
 
 
 ### Folder membership event privacy

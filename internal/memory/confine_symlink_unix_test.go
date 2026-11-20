@@ -96,3 +96,45 @@ func TestReadFileNoFollow_RefusesSymlink(t *testing.T) {
 		t.Errorf("content = %q, want %q", got, "body")
 	}
 }
+
+// os.Root follows a final-component symlink whose target stays inside the
+// root, even with O_NOFOLLOW. The documented contract is that any
+// final-component symlink is refused (#4893).
+func TestOpenRootNoFollow_RefusesInRootFinalSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".proposed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".proposed", "sib.md"), []byte("sibling"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, "sib.md", filepath.Join(dir, ".proposed", "a.md"))
+	mustSymlink(t, filepath.Join(".proposed", "sib.md"), filepath.Join(dir, "top.md"))
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	for _, name := range []string{filepath.Join(".proposed", "a.md"), "top.md"} {
+		f, err := OpenRootNoFollow(root, name)
+		if err == nil {
+			_ = f.Close()
+			t.Fatalf("OpenRootNoFollow followed in-root symlink %s", name)
+		}
+		if f, err := OpenFileNoFollowRoot(dir, filepath.Join(dir, name)); err == nil {
+			_ = f.Close()
+			t.Fatalf("OpenFileNoFollowRoot followed in-root symlink %s", name)
+		}
+	}
+
+	// A regular file and a missing name keep their behaviour.
+	f, err := OpenRootNoFollow(root, filepath.Join(".proposed", "sib.md"))
+	if err != nil {
+		t.Fatalf("regular file refused: %v", err)
+	}
+	_ = f.Close()
+	if _, err := OpenRootNoFollow(root, "missing.md"); !os.IsNotExist(err) {
+		t.Fatalf("missing file error = %v, want not-exist", err)
+	}
+}
