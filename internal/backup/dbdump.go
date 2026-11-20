@@ -968,6 +968,28 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 	return out, rows.Err()
 }
 
+// tableGeneratedColumns returns the target table's generated columns. PRAGMA
+// table_info leaves them out, so tableColumns does not allow them and the
+// insert skips them, which is right: SQLite computes them. A dump's SELECT *
+// still returns them, so the dropped-column report must not count them as
+// values the restore lost.
+func tableGeneratedColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM pragma_table_xinfo(?) WHERE hidden IN (2, 3)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
 // quoteIdent applies SQLite's double-quote identifier escaping so the
 // identifier survives restore-time concatenation into SQL. Any embedded
 // double quote is doubled per the SQLite spec.
@@ -1256,6 +1278,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
+		generated, err := tableGeneratedColumns(ctx, tx, table)
+		if err != nil {
+			return stats, fmt.Errorf("backup: generated columns of %s: %w", table, err)
+		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
 		if !allowed["chat_origin_id"] {
@@ -1392,7 +1418,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				keys = append(keys, k)
 			}
 			sortStrings(keys)
-			tallyDroppedColumns(&dropped, table, keys, allowed)
+			tallyDroppedColumns(&dropped, table, keys, allowed, generated)
 			for _, k := range keys {
 				// Sequence is an installation-local scan position, not event identity.
 				// Let SQLite allocate it so imports cannot collide with another tenant.
