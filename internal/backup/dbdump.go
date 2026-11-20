@@ -1130,6 +1130,49 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	return RestoreDumpTxHooks(ctx, db, dump, &RestoreDumpHooks{PreCommit: preCommit})
 }
 
+// restoreTargetPreflightsIn runs the checks that decide whether the TARGET
+// database may receive dump at all. They only read, and they run before any
+// hook or insert, so RestoreDumpTxHooks and a dry run (dryRunRestorePreflight)
+// share them: a dry run that skipped them reported success for a restore the
+// real run then refused.
+func restoreTargetPreflightsIn(ctx context.Context, tx *sql.Tx, dump *DBDump, legacySourceVersions []int) error {
+	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, legacySourceVersions); err != nil {
+		return err
+	}
+	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
+		return err
+	}
+	return rejectMooringDeliveryRestoreTarget(ctx, tx, dump)
+}
+
+// dryRunRestorePreflight runs the refusals RestoreDumpTxHooks applies before
+// its first write, against db, without writing: the pre-transaction collision
+// and input checks, then restoreTargetPreflightsIn inside a read-only
+// transaction that is always rolled back. The checks the --replace wipe repeats
+// inside PreInsert (ReplaceWorkspaceContentsWithOptions) already ran in
+// RestoreBackup before the dry-run branch (rejectPrivateArtifactWorkspaceReplacement
+// and runAdmissionBundlePreflight).
+func dryRunRestorePreflight(ctx context.Context, db *sql.DB, dump *DBDump, legacySourceVersions []int) error {
+	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
+		return err
+	}
+	if err := rejectGridCraftHistoryCollision(ctx, db, dump); err != nil {
+		return err
+	}
+	if err := rejectRunAdmissionInput(dump, false); err != nil {
+		return err
+	}
+	if err := validatePrivateArtifactContextDump(dump, legacySourceVersions); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("backup: begin dry-run preflight tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	return restoreTargetPreflightsIn(ctx, tx, dump, legacySourceVersions)
+}
+
 // RestoreDumpHooks carries optional tx-bound callbacks that run at
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
@@ -1230,13 +1273,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
-	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
-		return stats, err
-	}
-	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
-		return stats, err
-	}
-	if err := rejectMooringDeliveryRestoreTarget(ctx, tx, dump); err != nil {
+	if err := restoreTargetPreflightsIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
 		return stats, err
 	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
