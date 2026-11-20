@@ -168,7 +168,7 @@ func craftAgentStartResponse(cmd *cobra.Command, r *http.Response, err error) er
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		_ = r.Body.Close()
 		var body struct {
-			Reason string `json:"reason"`
+			Reason string `json:"reason" yaml:"reason"`
 		}
 		if json.Unmarshal(raw, &body) != nil || craftAgentRefusalHints[body.Reason] == "" {
 			body.Reason = ""
