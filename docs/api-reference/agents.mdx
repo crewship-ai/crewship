@@ -1323,8 +1323,12 @@ header. Rebuilding the URL by hand and dropping that parameter yields a
   and a crew created from a template. Viewing an agent never stores anything —
   a render is a write, and a read must not cause one.
 
-  Agents created elsewhere (the CLI, the API, Captain) and agents that predate
-  this start with `avatar_url: null`. Store theirs with the explicit backfill:
+  Agents created elsewhere (the CLI, the API, onboarding, Captain) store their
+  slug as `avatar_seed` and follow the crew's avatar style, but get a stored
+  render only after someone edits them in the dashboard (the agent editor or
+  avatar picker) or runs **Store missing avatars**; merely viewing an agent
+  stores nothing. This is intended: the server cannot draw one. Until then,
+  and for agents that predate this, `avatar_url` is `null`. Store theirs with the explicit backfill:
   **Settings › General › Agent avatars › Store missing avatars** for the whole
   workspace (admins), or the same button beside **Avatar style** in a crew's
   **Settings** tab for that crew (managers and up). It calls the `PUT` below

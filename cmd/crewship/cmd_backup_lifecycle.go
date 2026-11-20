@@ -8,10 +8,12 @@ import (
 	"sort"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/backup/convert"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -238,6 +240,11 @@ var backupRestoreCmd = &cobra.Command{
 		asCrew, _ := cmd.Flags().GetString("as-crew")
 		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
 		useKeyring, _ := cmd.Flags().GetBool("use-keyring")
+		identityFile, _ := cmd.Flags().GetString("identity")
+		identity, err := readRestoreIdentity(identityFile, passphraseFile, useKeyring)
+		if err != nil {
+			return err
+		}
 
 		// In a non-interactive environment without --passphrase-file we
 		// let the caller through with an empty passphrase so unencrypted
@@ -250,7 +257,7 @@ var backupRestoreCmd = &cobra.Command{
 		// only silent fallback is ErrKeyringEntryNotFound; every other
 		// failure aborts so the admin sees the real cause instead of a
 		// later "decryption failed" that's hard to diagnose.
-		if useKeyring && passphraseFile == "" && ws != "" {
+		if identity == "" && useKeyring && passphraseFile == "" && ws != "" {
 			kr, err := backup.DefaultKeyring(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("open backup keyring: %w", err)
@@ -265,7 +272,7 @@ var backupRestoreCmd = &cobra.Command{
 				return fmt.Errorf("read backup keyring: %w", err)
 			}
 		}
-		if passphrase == "" {
+		if passphrase == "" && identity == "" {
 			if passphraseFile == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
 				passphrase = ""
 			} else {
@@ -300,6 +307,17 @@ var backupRestoreCmd = &cobra.Command{
 		}
 		if discardWorkbooks {
 			body["discard_workbooks"] = true
+		}
+		if identity != "" {
+			body["identity"] = identity
+		}
+		// The same transport pre-flight create runs before a secret rides
+		// the wire: refuse a broken --server, warn on plaintext HTTP to a
+		// non-loopback host.
+		if passphrase != "" || identity != "" {
+			if err := preflightServerURL(cmd.ErrOrStderr(), cli.EffectiveServer(flagServer, flagProfile, cliCfg)); err != nil {
+				return err
+			}
 		}
 		client := newAPIClient()
 		resp, err := client.Post(backupRoute("/api/v1/admin/backups/restore"), body)
@@ -603,4 +621,30 @@ var backupDeleteCmd = &cobra.Command{
 		cli.PrintSuccess("Backup deleted: " + args[0])
 		return nil
 	},
+}
+
+// readRestoreIdentity reads the age identity `backup restore --identity`
+// sends to the server. The file is parsed with the same reader the offline
+// commands use (recover, drill), and must hold exactly one X25519 identity:
+// the API takes one key, and silently picking one of several would decrypt
+// with a key the operator did not choose. Empty file name → no identity.
+func readRestoreIdentity(file, passphraseFile string, useKeyring bool) (string, error) {
+	if file == "" {
+		return "", nil
+	}
+	if passphraseFile != "" || useKeyring {
+		return "", errors.New("supply only one of --identity or --passphrase-file / --use-keyring")
+	}
+	ids, err := convert.ParseIdentityFile(file)
+	if err != nil {
+		return "", fmt.Errorf("--identity: %w", err)
+	}
+	if len(ids) != 1 {
+		return "", fmt.Errorf("--identity: %s holds %d identities; the server takes exactly one", file, len(ids))
+	}
+	x, ok := ids[0].(*age.X25519Identity)
+	if !ok {
+		return "", fmt.Errorf("--identity: %s does not hold an X25519 identity (AGE-SECRET-KEY-1…)", file)
+	}
+	return x.String(), nil
 }

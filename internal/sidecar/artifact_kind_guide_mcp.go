@@ -15,12 +15,12 @@ const artifactKindGuideTool = "artifact_kind_guide"
 func artifactKindGuideMCPCatalog() []memoryMCPToolDescriptor {
 	schema, _ := json.Marshal(map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"kind"},
-		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kindguide.Kinds(), "description": "The artifact kind named in the Page context, or docs, slides, design, library, dashboard or app."}},
+		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kindguide.Kinds(), "description": "The artifact kind named in the Page context, or docs, slides, design, library, dashboard, app, word or sheet (native Craft)."}},
 	})
 	return []memoryMCPToolDescriptor{{
 		Name: artifactKindGuideTool,
 		Description: "Read the versioned agent guide for an artifact kind before you change an artifact of that kind: exact data shapes and limits, " +
-			"write order, the version check, the conflict rule (stop after the third refusal and report), agent modes and when not to verify. " +
+			"write order, the version check, tool-specific conflict rules, agent modes and when not to verify. " +
 			"Comment is not Propose, and only the artifact's Owner delegates Edit. The guide is static product text: it grants nothing and " +
 			"changes nothing; the server still checks every write.",
 		InputSchema: schema,

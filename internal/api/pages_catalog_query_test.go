@@ -76,8 +76,13 @@ func TestPageCatalogQueryProjectionAndStablePaging(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"kind=word&kind=sheet&version=unversioned", []string{"legacy-sheet", "legacy-word"}},
+		{"kind=word&kind=sheet&version=unversioned", []string{"legacy-sheet"}},
 		{"kind=word,sheet&version=shared&owner=me", []string{"native-word"}},
+		// A structured Docs document is docs and native Word alone is word,
+		// as the library shows them (kinds.ts, #5597).
+		{"kind=word", []string{"native-word"}},
+		{"kind=docs", []string{"legacy-word"}},
+		{"kind=docs,word", []string{"legacy-word", "native-word"}},
 		{"version=unshared&kind=project", []string{"project"}},
 		{"owner=crew/ops&owner=user/other", []string{"legacy-sheet"}},
 		{"sort=kind", []string{"project", "legacy-empty", "panels", "legacy-word", "native-word", "legacy-sheet", "design"}},

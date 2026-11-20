@@ -180,3 +180,52 @@ func TestCraftCLIVersionsUsesBoundSessionAndNeverPrintsIt(t *testing.T) {
 		t.Fatal("listing wrote")
 	}
 }
+
+// #5599: the CLI prints proposal provenance unchanged: a version saved by
+// accepting an agent proposal names the proposal and its agent author, and a
+// decided proposal names who decided it.
+func TestCraftCLIPrintsAcceptedProposalProvenance(t *testing.T) {
+	stub := pageStub(t)
+	base := "/api/v1/pages/health/craft"
+	secret := strings.Repeat("e", 64)
+	id := "ncp_0123456789abcdef01234567"
+	stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
+		return 201, []byte(`{"session_token":"` + secret + `","session_id":"public-history-session","application_id":"wordcraft"}`), "application/json"
+	})
+	stub.OnGet(base+"/document/versions", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"currentVersion":"2","truncated":false,"versions":[{"version":"2","createdAt":"2026-10-31T10:00:00Z","author":{"actorId":"user:u","kind":"human","displayName":"Pavel"},"proposal":{"id":"` + id + `","author":{"actorId":"agent:a","kind":"agent","displayName":"Drafting Agent"}},"current":true}]}`), "application/json"
+	})
+	stub.OnGet(base+"/proposals", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"proposals":[{"id":"` + id + `","author":{"actor_id":"agent:a","display_name":"Drafting Agent","kind":"agent","agent_id":"a"},"base_version":1,"summary":"s","created_at":"2026-10-31T09:00:00Z","state":"accepted","result_version":2,"decided_by":{"actor_id":"user:u","display_name":"Pavel","kind":"human"},"decided_at":"2026-10-31T10:00:00Z"}]}`), "application/json"
+	})
+	out, err := runPageCLI(t, "", "craft", "versions", "health", "--format", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listing struct {
+		Versions []struct {
+			Author   struct{ Kind string } `json:"author"`
+			Proposal *struct {
+				ID     string `json:"id"`
+				Author struct {
+					ActorID string `json:"actorId"`
+					Kind    string `json:"kind"`
+				} `json:"author"`
+			} `json:"proposal"`
+		} `json:"versions"`
+	}
+	if err = json.Unmarshal([]byte(out), &listing); err != nil || len(listing.Versions) != 1 {
+		t.Fatalf("versions output %q: %v", out, err)
+	}
+	v := listing.Versions[0]
+	if v.Author.Kind != "human" || v.Proposal == nil || v.Proposal.ID != id || v.Proposal.Author.Kind != "agent" || v.Proposal.Author.ActorID != "agent:a" {
+		t.Fatalf("version provenance lost: %s", out)
+	}
+	out, err = runPageCLI(t, `{"action":"proposals"}`+"\n", "craft", "connect", "health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"decided_by"`) || !strings.Contains(out, `"decided_at"`) || !strings.Contains(out, "user:u") || strings.Contains(out, secret) {
+		t.Fatalf("proposal decision lost: %s", out)
+	}
+}

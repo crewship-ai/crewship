@@ -13,8 +13,11 @@ func TestCraftNativeAgentContractKeepsExplicitConsentSeparateFromHumanAdmission(
 		t.Fatal("consent admits source/run authority selectors")
 	}
 	props := consent["properties"].(map[string]any)
-	if len(props) != 3 || props["whole_document"].(map[string]any)["type"] != "boolean" {
+	if len(props) != 4 || props["whole_document"].(map[string]any)["type"] != "boolean" {
 		t.Fatal("explicit whole-document consent missing")
+	}
+	if mode, ok := props["mode"].(map[string]any); !ok || len(mode["enum"].([]string)) != 2 || len(consent["required"].([]string)) != 3 {
+		t.Fatal("Q16 mode must be an optional propose|apply choice")
 	}
 	available := schemas["NativeCraftAvailability"].(map[string]any)["properties"].(map[string]any)
 	if available["can_edit"] == nil {

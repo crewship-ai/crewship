@@ -154,6 +154,79 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 	// alongside every other FK, so migrateIssueCounterRows resolves the row
 	// through the bundle's own remapped crews table like everything else.
 	"issue_counters": {{column: "crew_id", refTable: "crews", refColumn: "id"}},
+
+	// Bare TEXT workspace_id (#5575). (chat_proposal_operations has the same
+	// shape but remapChatProposals already rewrites it.) Each of these tables is in
+	// BackupTables and owns its rows by workspace_id, but the schema never
+	// declared the FK. Pass 1 gave every row a new id and pass 2 left
+	// workspace_id alone, so a fork INSERTed brand-new rows into the SOURCE
+	// workspace: the source grew a duplicate notification channel (or a
+	// second live automation) and the fork got none.
+	"automations":             {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	"notification_channels":   {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	"user_notification_prefs": {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	"pipeline_tags":           {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	"run_tags":                {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	"routine_step_overrides":  {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+
+	// agent_mcp_bindings.mcp_server_id is polymorphic: mcp_server_scope says
+	// whether it names a workspace_mcp_servers or a crew_mcp_servers row, and
+	// a trigger (not an FK) validates it. Both edges are listed; pass 2
+	// rewrites a value only when it is a key of that table's id map, and ids
+	// are instance-unique, so exactly one edge can ever match. Without this the
+	// forked agent kept the SOURCE server id and integration resolve in the
+	// fork no longer saw its workspace integration (#5575).
+	"agent_mcp_bindings": {
+		{column: "mcp_server_id", refTable: "workspace_mcp_servers", refColumn: "id"},
+		{column: "mcp_server_id", refTable: "crew_mcp_servers", refColumn: "id"},
+	},
+	// Polymorphic agent-or-user columns (assignee_type, author_type,
+	// actor_type). Users are in nonRemappablePKTables, so a user id has no
+	// id-map entry and only an agent value is rewritten. A recurring issue or
+	// triage rule left naming the SOURCE agent would keep filing work in the
+	// fork assigned to an agent of another workspace.
+	"missions": {
+		{column: "assignee_id", refTable: "agents", refColumn: "id"},
+		{column: "author_agent_id", refTable: "agents", refColumn: "id"},
+		{column: "planning_assignment_id", refTable: "assignments", refColumn: "id"},
+	},
+	"recurring_issues": {{column: "assignee_id", refTable: "agents", refColumn: "id"}},
+	"triage_rules":     {{column: "assignee_id", refTable: "agents", refColumn: "id"}},
+	"mission_comments": {{column: "author_id", refTable: "agents", refColumn: "id"}},
+	"mission_activity": {{column: "actor_id", refTable: "agents", refColumn: "id"}},
+	"mission_tasks":    {{column: "completion_assignment_id", refTable: "assignments", refColumn: "id"}},
+	"assignments":      {{column: "author_agent_id", refTable: "agents", refColumn: "id"}},
+	"projects":         {{column: "lead_id", refTable: "agents", refColumn: "id"}},
+	// budget_limits.scope_id names a workspace, crew, mission or agent by
+	// scope_kind. A fork's crew or agent budget that still named the source
+	// row capped nothing in the fork.
+	"budget_limits": {
+		{column: "scope_id", refTable: "workspaces", refColumn: "id"},
+		{column: "scope_id", refTable: "crews", refColumn: "id"},
+		{column: "scope_id", refTable: "missions", refColumn: "id"},
+		{column: "scope_id", refTable: "agents", refColumn: "id"},
+	},
+	// Bare TEXT single-target references added by later migrations.
+	"agents":             {{column: "parent_lead_id", refTable: "agents", refColumn: "id"}},
+	"credentials":        {{column: "keeper_crew_id", refTable: "crews", refColumn: "id"}},
+	"pipeline_schedules": {{column: "wake_pipeline_id", refTable: "pipelines", refColumn: "id"}},
+	"composio_settings":  {{column: "default_mcp_server_id", refTable: "workspace_mcp_servers", refColumn: "id"}},
+	"page_panel_alerts":  {{column: "crew_id", refTable: "crews", refColumn: "id"}},
+	// journal_entries crew_id / agent_id / mission_id became plain TEXT in
+	// v167 so deleting a crew cannot cascade away its audit trail. That is a
+	// reason to leave a value naming a row the bundle does NOT carry, which
+	// pass 2 already does (no id-map entry). It is not a reason to leave a
+	// fork's entry naming the SOURCE's live agent. rechainForkedJournal
+	// re-signs every forked row after RemapIDs, so rewriting hashed columns
+	// here is safe. span_id names a mission_activity row when it names
+	// anything the bundle owns.
+	"journal_entries": {
+		{column: "crew_id", refTable: "crews", refColumn: "id"},
+		{column: "agent_id", refTable: "agents", refColumn: "id"},
+		{column: "mission_id", refTable: "missions", refColumn: "id"},
+		{column: "span_id", refTable: "mission_activity", refColumn: "id"},
+		{column: "actor_id", refTable: "agents", refColumn: "id"},
+	},
 }
 
 // forkRegeneratedColumns names columns a forked restore must give a NEW value
@@ -293,8 +366,8 @@ func introspectForeignKeys(ctx context.Context, db *sql.DB, table string) ([]for
 //   - PKs: regenerate the "id" column on every row in BackupTables.
 //     Tables that lack an id column (none in the current MVP schema
 //     but safe to tolerate) pass through unchanged.
-//   - FKs: rewrite any column whose SQLite foreign_key_list names a
-//     table we have already remapped. Unknown FK targets are left
+//   - FKs: rewrite any column whose SQLite foreign_key_list, or
+//     virtualForeignKeys, names a table we have already remapped. Unknown FK targets are left
 //     alone so a row referencing users.id (we do not remap users)
 //     still points at the original user.
 //
@@ -321,9 +394,13 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 		// since grown a real REFERENCES clause for — a future
 		// migration that adds the FK must not produce a duplicate
 		// edge here.
+		// Compare against the schema's own edges only: a polymorphic
+		// column (agent_mcp_bindings.mcp_server_id) lists one virtual
+		// edge per target table, and the first must not hide the second.
+		schemaEdges := edges
 		for _, v := range virtualForeignKeys[table] {
 			declared := false
-			for _, e := range edges {
+			for _, e := range schemaEdges {
 				if e.column == v.column {
 					declared = true
 					break

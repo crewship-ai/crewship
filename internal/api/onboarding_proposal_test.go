@@ -379,6 +379,7 @@ func TestOnboardingProposalCreate_CustomAgentsWithoutAnyTemplate(t *testing.T) {
 	if applyRR.Code != http.StatusCreated {
 		t.Fatalf("apply status = %d, body = %s", applyRR.Code, applyRR.Body.String())
 	}
+	assertAgentsFollowCrewStyle(t, h.db) // #3051
 }
 
 func TestOnboardingProposalCreate_NoTemplateAndNoAgents_Rejected(t *testing.T) {
