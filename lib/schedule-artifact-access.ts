@@ -15,7 +15,10 @@ export interface ScheduleArtifactAccess {
   reason: string
 }
 
-const restore = "A change to what it runs (its time, inputs or routine) by someone in good standing who may edit schedules restores it."
+// Changing a schedule is the OWNER/ADMIN tier (PATCH is roleManage), so a
+// restore is an administrator adopting the schedule as its new creator. A
+// MANAGER, its creator included, can only create a new one (#5411).
+const restore = "A workspace OWNER or ADMIN in good standing restores it by changing what it runs (its time, inputs or routine), and becomes its creator. A MANAGER cannot change it, but can create a new schedule."
 
 // A routine an agent authored reaches nothing whoever schedules it; only
 // pointing the schedule at a person's routine helps.

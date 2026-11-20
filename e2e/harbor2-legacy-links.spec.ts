@@ -102,3 +102,15 @@ test.describe("/approvals by role", () => {
     expect((await queue).status()).not.toBe(403)
   })
 })
+
+// #3361: /runs and /paymaster were server redirects that the static export
+// never ran; they are client redirects in (legacy) now.
+test.describe("retired routes", () => {
+  for (const [from, to] of [["/runs", /\/activity\?section=runs$/], ["/paymaster", /\/activity\?mode=spend$/]] as const) {
+    test(`${from} lands on Activity`, async ({ page }) => {
+      await seed(page)
+      await page.goto(from)
+      await page.waitForURL(to, { timeout: 10_000 })
+    })
+  }
+})

@@ -91,7 +91,8 @@ func (h *PageHandler) pageGrantIssuerCurrent(ctx context.Context, workspace, use
 		return nil
 	}
 	var owner bool
-	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM crew_members WHERE crew_id=? AND user_id=?)`, rec.OwnerCrewID, user).Scan(&owner); err != nil {
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM crew_members cm JOIN crews c ON c.id=cm.crew_id
+		WHERE cm.crew_id=? AND cm.user_id=? AND c.workspace_id=? AND c.deleted_at IS NULL)`, rec.OwnerCrewID, user, workspace).Scan(&owner); err != nil {
 		return err
 	}
 	if !owner {

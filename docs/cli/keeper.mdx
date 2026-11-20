@@ -65,7 +65,11 @@ request/execute command; polling does not execute it.
 
 All three agent commands emit JSON. DENY exits 4; ESCALATE or PENDING exits 5.
 An allowed execution propagates its command exit code (zero is omitted by the
-existing server API and normalized to `exit_code: 0` by the CLI). A lost or
+existing server API and normalized to `exit_code: 0` by the CLI). `execute`
+reports HTTP 400, 404 and 409 as definite refusals, since nothing ran: 400
+(command must be one line without shell operators) exits 2, 404 (credential not
+granted or grant expired) exits 3, 409 (duplicate request or approval already
+used) exits 5. The server body is never echoed. A lost or
 cancelled response has an unknown outcome: inspect before retrying. The CLI
 does not automatically repeat an execution. Requests are bounded to five
 minutes; the server's command timeout still applies.

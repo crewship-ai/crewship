@@ -370,7 +370,12 @@ moment its process would start. The response reports the outcome as `runs`:
 | `stopped` | Every live run was confirmed gone. |
 | `pending` | At least one run could not be confirmed stopped yet. The server keeps retrying in the background, including after a restart. |
 
-The agent's memory, chats and attachments are kept.
+The agent's memory, chats and attachments are kept. Its explicit credential
+grants (`crewship credential assign`, leases included) are revoked in the same
+transaction and recorded as `REVOKE` events on each credential's audit
+timeline (`crewship credential audit`). The credentials themselves are not
+deleted and other agents' grants are not affected. Deleting a crew or a
+workspace revokes the grants of every agent it deletes the same way.
 
 With `--format json|yaml|ndjson` the command prints the server's response —
 the `runs` outcome above included — instead of the `Agent deleted.` receipt.

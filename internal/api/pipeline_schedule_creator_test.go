@@ -394,8 +394,9 @@ func TestScheduleContentChanged(t *testing.T) {
 // A schedule whose creator no longer vouches says so (owner decision for
 // #5356): artifact_access "stopped" with the reason. The person-standing
 // reason is shown only to the creator and to workspace OWNER/ADMIN; others
-// see the generic one. A content change by the creator in good standing
-// restores it. With the flag off nothing is shown.
+// see the generic one. A content change by an OWNER/ADMIN in good standing
+// restores it and makes them its creator (PATCH is the manage tier; a MANAGER
+// creator cannot, #5411). With the flag off nothing is shown.
 func TestScheduleCreator_ListShowsWhyAScheduleIsStopped(t *testing.T) {
 	h, db, ownerID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_stop", "stop-routine")
