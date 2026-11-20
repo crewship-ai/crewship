@@ -168,7 +168,7 @@ func writeBlobIfMissing(blobPath string, content []byte) (bool, error) {
 	if _, err := os.Stat(blobPath); err == nil {
 		return true, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
+	if err := MkdirAllShared(filepath.Dir(blobPath)); err != nil {
 		return false, err
 	}
 	// writeFileDurable already does tempfile-in-same-dir + fsync +
