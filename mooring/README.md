@@ -1,7 +1,13 @@
 # Mooring Rust workspace
 
-Application-independent collaboration code. This workspace is currently unused
-by Crewship, so it does not start a service or change the deployed application.
+Application-independent collaboration code. Crewship runs it only behind the
+default-off `CREWSHIP_MOORING_ENABLED` session profile: a release build embeds the
+`mooring-collab` runtime (`scripts/build-mooring-runtime.py`,
+`internal/mooringassets`) which `internal/server/mooring.go` verifies and unpacks; the API starts one
+process per collaboration session.
+Ordinary Go builds embed only an unavailable marker, and with the flag off no Rust
+service starts. Native Word/Sheet (`crewship craft`, `internal/api/craft_native_*`)
+and the GridCraft workbook have their own contracts and do not start this runtime.
 The Go host remains the authority for permissions, fencing, durable writes and
 receipts. Draining a Rust batch never means the changes have been saved.
 

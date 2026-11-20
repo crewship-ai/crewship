@@ -615,6 +615,9 @@ type Orchestrator struct {
 	// RunAgent returns ErrDetachedStillRunning.
 	detachedWaitBudget   time.Duration
 	detachedPollInterval time.Duration
+	// tmuxProbePaths overrides the pane identity file and process-table root
+	// the tmux probes read. Tests only; nil means the container's real paths.
+	tmuxProbePaths func(RunLocation) (paneFile, procRoot string)
 	// detached holds one entry per run that returned the sentinel
 	// with a stop that could not be confirmed: the process may still be
 	// alive, so the agent's admission is refused and the departed run's

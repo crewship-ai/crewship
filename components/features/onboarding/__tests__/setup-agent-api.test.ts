@@ -56,6 +56,27 @@ describe("resolveOnboardingWorkspaceId", () => {
 
     await expect(resolveOnboardingWorkspaceId()).resolves.toBe("ws_first")
   })
+
+  // #4876: the backend onboards the oldest workspace the user OWNS, so an
+  // invited-then-own user must not have the wizard write to the older
+  // shared workspace.
+  it.each(["MEMBER", "ADMIN"])("prefers the user's own workspace over an older shared one (%s there)", async (role) => {
+    mockedApiFetch.mockResolvedValueOnce(jsonResponse(200, [
+      { id: "ws_own", created_at: "2026-08-22T12:00:00Z", currentUserRole: "OWNER" },
+      { id: "ws_shared", created_at: "2026-08-20T12:00:00Z", currentUserRole: role },
+    ]))
+
+    await expect(resolveOnboardingWorkspaceId()).resolves.toBe("ws_own")
+  })
+
+  it("falls back to the oldest workspace when the user owns none", async () => {
+    mockedApiFetch.mockResolvedValueOnce(jsonResponse(200, [
+      { id: "ws_new", created_at: "2026-08-22T12:00:00Z", currentUserRole: "MEMBER" },
+      { id: "ws_old", created_at: "2026-08-20T12:00:00Z", currentUserRole: "ADMIN" },
+    ]))
+
+    await expect(resolveOnboardingWorkspaceId()).resolves.toBe("ws_old")
+  })
 })
 
 describe("onboarding credential persistence", () => {
@@ -172,6 +193,20 @@ describe("onboarding resume", () => {
       },
     })
     expect(mockedApiFetch.mock.calls[1][0]).toBe("/api/v1/credentials?workspace_id=ws_old")
+  })
+
+  it("resumes in the user's own workspace, not an older shared one (#4876)", async () => {
+    mockedApiFetch
+      .mockResolvedValueOnce(jsonResponse(200, [
+        { id: "ws_own", name: "Own", created_at: "2026-08-22T12:00:00Z", currentUserRole: "OWNER" },
+        { id: "ws_shared", name: "Shared", created_at: "2026-08-20T12:00:00Z", currentUserRole: "MEMBER" },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(200, []))
+
+    const outcome = await loadOnboardingResumeState()
+    expect(outcome.ok && outcome.state.workspaceId).toBe("ws_own")
+    expect(outcome.ok && outcome.state.workspaceName).toBe("Own")
+    expect(mockedApiFetch.mock.calls[1][0]).toBe("/api/v1/credentials?workspace_id=ws_own")
   })
 
   it("fails closed when credential state cannot be restored", async () => {

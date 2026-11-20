@@ -1907,7 +1907,9 @@
               "design",
               "library",
               "dashboard",
-              "app"
+              "app",
+              "word",
+              "sheet"
             ],
             "type": "string"
           },
@@ -1983,7 +1985,9 @@
               "design",
               "library",
               "dashboard",
-              "app"
+              "app",
+              "word",
+              "sheet"
             ],
             "type": "string"
           },
@@ -16231,6 +16235,14 @@
           "message_id": {
             "type": "string"
           },
+          "mode": {
+            "description": "Q16: omitted means apply in the author's personal space and propose anywhere shared; apply on a shared document is the explicit direct mandate.",
+            "enum": [
+              "propose",
+              "apply"
+            ],
+            "type": "string"
+          },
           "whole_document": {
             "enum": [
               true
@@ -16400,6 +16412,31 @@
           "can_edit",
           "preview_enabled",
           "agents_enabled"
+        ],
+        "type": "object"
+      },
+      "NativeCraftDecider": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "description": "Recorded decider, `user:\u003cid\u003e` or `system:superseded`.",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "system"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "display_name",
+          "kind"
         ],
         "type": "object"
       },
@@ -16770,6 +16807,19 @@
           },
           "created_at": {
             "type": "string"
+          },
+          "decided_at": {
+            "description": "When the proposal was decided. Absent while open.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftDecider"
+              }
+            ],
+            "description": "Who decided a non-open proposal. kind human: the person who accepted or rejected it, or whose accept found the document content changed and recorded it stale. kind system (system:superseded): only when a newer proposal's sweep marked it stale before anyone decided. Absent while open."
           },
           "id": {
             "pattern": "^ncp_[a-f0-9]{24}$",
@@ -17408,6 +17458,14 @@
             "description": "True only for the newest version, the one the editor opens.",
             "type": "boolean"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17498,6 +17556,14 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "proposal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NativeCraftVersionProposal"
+              }
+            ],
+            "description": "Present when a person saved this version by accepting an agent proposal: the version's author is that person (approver and writer), proposal.author is the agent."
+          },
           "restoredFrom": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -17551,6 +17617,23 @@
           "currentVersion",
           "versions",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "NativeCraftVersionProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/NativeCraftVersionAuthor"
+          },
+          "id": {
+            "pattern": "^ncp_[a-f0-9]{24}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author"
         ],
         "type": "object"
       },
@@ -137660,7 +137743,7 @@
             }
           },
           {
-            "description": "Caller-visible kind, derived from the same selected metadata as the index row. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "description": "Caller-visible kind, derived from the same selected metadata as the index row. docs is a structured Docs document (has_document without a typed kind); word is native Word only (artifact_kind word). Repeat the parameter or separate values with commas; values are ORed within this facet.",
             "explode": true,
             "in": "query",
             "name": "kind",
@@ -137671,6 +137754,7 @@
                   "project",
                   "dashboard",
                   "page",
+                  "docs",
                   "word",
                   "sheet",
                   "slides",

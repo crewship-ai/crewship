@@ -32,6 +32,8 @@ func TestCraftAgentCLIStartRequiresExplicitWholeDocumentConsent(t *testing.T) {
 		{"task", "start", "health", "--chat-id", "chat\x00bad", "--message-id", "message", "--whole-document"},
 		{"task", "start", "health", "--chat-id", strings.Repeat("界", 201), "--message-id", "message", "--whole-document"},
 		{"task", "start", "..", "--chat-id", "chat", "--message-id", "message", "--whole-document"},
+		{"task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", "direct"},
+		{"task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", ""},
 		{"task", "status", "health", ""}, {"task", "status", "health", "bad\x00work"}, {"task", "stop", ""},
 	} {
 		if _, err := runCraftAgentCLI(t, args...); err == nil {
@@ -61,6 +63,24 @@ func TestCraftAgentCLIStartUsesOnlyHumanAuthAndExactConsentBody(t *testing.T) {
 	}
 	if len(stub.CallsFor("POST", path)) != 1 || len(stub.Calls()) != 1 {
 		t.Fatal("start retried, admitted human editor or used wrong API")
+	}
+}
+
+// Q16 (#5579): --mode is sent only when given, exactly as chosen.
+func TestCraftAgentCLIStartSendsExplicitMode(t *testing.T) {
+	for _, mode := range []string{"propose", "apply"} {
+		stub := pageStub(t)
+		path := "/api/v1/pages/health/craft/tasks"
+		stub.OnPost(path, func(_ *http.Request, body []byte) (int, []byte, string) {
+			var v map[string]any
+			if json.Unmarshal(body, &v) != nil || len(v) != 4 || v["mode"] != mode || v["whole_document"] != true {
+				t.Errorf("wrong mode body: %s", body)
+			}
+			return 202, []byte(`{"work_id":"accepted-work","status":"queued"}`), "application/json"
+		})
+		if out, err := runCraftAgentCLI(t, "task", "start", "health", "--chat-id", "chat", "--message-id", "message", "--whole-document", "--mode", mode); err != nil || !strings.Contains(out, "accepted-work") {
+			t.Fatalf("start --mode %s: %v %s", mode, err, out)
+		}
 	}
 }
 func TestCraftAgentCLIStatusAndStopUseScopedEscapedPathsWithoutSession(t *testing.T) {

@@ -431,15 +431,20 @@ export async function startSetupAgentSession(): Promise<SetupAgentStartOutcome> 
  * response would ever hand one over. Every workspace exists by
  * signup/bootstrap time (see this file's own doc comment above), so a
  * user reaching this wizard always has at least one row to resolve; the
- * first one is the same "oldest membership wins" workspace the backend's
- * own onboarding handlers (`firstWorkspaceID`) resolve to.
+ * pick is the same one the backend's onboarding handlers resolve to
+ * (`onboardingTarget`): the oldest workspace the user OWNS, so an invited
+ * user who later created their own is never onboarded into the older shared
+ * one (#4876). Only when they own none does it fall back to the oldest of
+ * all (the backend then refuses onboarding writes anyway).
  *
  * Returns null on any failure (network, non-2xx, empty list, malformed
  * body) — callers surface their own message rather than propagate a raw
  * parsing exception into the wizard.
  */
 function oldestWorkspaceFromWire(data: unknown): Record<string, unknown> | null {
-  const list = (Array.isArray(data) ? data : []) as Record<string, unknown>[]
+  const all = (Array.isArray(data) ? data : []) as Record<string, unknown>[]
+  const owned = all.filter((workspace) => workspace.currentUserRole === "OWNER")
+  const list = owned.length > 0 ? owned : all
   return list
     .map((workspace, index) => ({ workspace, index }))
     .sort((a, b) => {
@@ -456,7 +461,7 @@ export async function resolveOnboardingWorkspaceId(): Promise<string | null> {
     if (!res.ok) return null
     const data = await res.json().catch(() => null)
     // The workspace API lists newest first, while every onboarding backend
-    // handler deliberately uses the user's oldest membership. Sort rows that
+    // handler uses the user's oldest OWNED workspace. Sort rows that
     // carry timestamps so credential persistence, setup-agent start and chat
     // history all target the same workspace. Preserve server order as a
     // fallback for legacy responses without created_at.

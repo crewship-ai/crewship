@@ -285,6 +285,7 @@ crewship backup restore bundle.tar.zst --as-workspace acme-dr
 crewship backup restore bundle.tar.zst -w ws_new123 --files-only
 crewship backup restore bundle.tar.zst --dry-run
 crewship backup restore bundle.tar.zst --use-keyring
+crewship backup restore bundle.tar.zst --identity ops.key   # a --recipient bundle
 ```
 
 | Flag | Type | Default | Description |
@@ -294,6 +295,7 @@ crewship backup restore bundle.tar.zst --use-keyring
 | `--files-only` | `bool` | `false` | Land ONLY per-crew container state (workspace, memory tree, named volumes, `/var/lib`) into crews that already exist. Changes no database rows. Permitted only for a workspace this instance created by restoring **this** bundle — see below. Mutually exclusive with `--as-workspace` / `--as-crew` / `--replace`. |
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
+| `--identity` | `string` | | age identity file (`AGE-SECRET-KEY-1…`) for a bundle sealed with `backup create --recipient`. The file must hold exactly one X25519 identity. The key is sent to the server, which decrypts with it, so the same transport check as a passphrase applies. Mutually exclusive with `--passphrase-file` and `--use-keyring`. |
 | `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
 | `--discard-workbooks` | `bool` | `false` | With `--replace` only. Backups never contain workbooks, so `--replace` refuses (`409`) a target workspace that holds any workbook and names the workbook page IDs. This flag acknowledges that they are destroyed. API: `discard_workbooks`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |

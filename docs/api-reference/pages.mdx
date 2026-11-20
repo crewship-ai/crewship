@@ -2899,7 +2899,9 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
 The same index supports literal case-insensitive `q` search over names and slugs;
-`kind=project|dashboard|page|word|sheet|slides|design`, `access=private|open`,
+`kind=project|dashboard|page|docs|word|sheet|slides|design` (`docs` is a structured
+Docs document, `has_document` without an `artifact_kind`; `word` is native Word
+only, `artifact_kind: word`), `access=private|open`,
 `version=shared|unshared|unversioned`, and canonical `owner=user/ID|crew/slug|me`
 facets. Repeat a facet or separate values with commas for OR; different facets
 are combined with AND. `folder` selects an exact slug or `~unfiled`. `empty=exclude|only|include`
@@ -3308,8 +3310,9 @@ account and run IDs are omitted for every reader, including owners.
 Owners may select retained code versions. Other readers must select the current
 shared pin and can read only collections declared there. Pin selection,
 declaration and current ACL are checked together in the data transaction and
-again before commit. Writes require the current human owner or an admitted
-original signed agent run with the exact Page mandate and `pages:write` scope.
+again before commit. Writes require the owner, a human with a current Edit share or inherited folder
+write access, or an admitted owner-consented agent run with the exact Page
+mandate. Scoped CLI credentials also require `pages:write`.
 The supplied `base_version` must still be the latest code version. Clients
 cannot set attribution or timestamps.
 

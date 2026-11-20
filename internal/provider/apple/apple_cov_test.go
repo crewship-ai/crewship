@@ -75,10 +75,11 @@ func (f *fakeCLI) hasCall(t *testing.T, prefix string) bool {
 // in when the caller left them unset — see withTestSidecarArtefacts.
 func newTestProvider(cfg Config) *Provider {
 	return &Provider{
-		cfg:    withTestSidecarArtefacts(cfg),
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		execs:  make(map[string]*execEntry),
-		done:   make(chan struct{}),
+		cfg:        withTestSidecarArtefacts(cfg),
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cliVersion: "1.7.1", // newest release the exec env transport was checked against
+		execs:      make(map[string]*execEntry),
+		done:       make(chan struct{}),
 	}
 }
 

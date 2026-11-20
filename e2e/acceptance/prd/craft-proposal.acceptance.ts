@@ -490,8 +490,8 @@ class AgentFlow {
 
   /**
    * Asks the agent for a whole-document change while the person holds the
-   * editor and returns the new open proposal. Asserts the 409 → proposal path
-   * and that the document did not change.
+   * editor and returns the new open proposal. Asserts that the agent proposed
+   * without taking the editor and that the document did not change.
    */
   async propose(instruction: string, label: string): Promise<Proposed> {
     const before = await this.doc.head()
@@ -535,10 +535,13 @@ class AgentFlow {
         : null,
     }
     await this.prd.evidence(`${this.app}-${label}-agent.json`, redact(summary))
+    // Q16 (#5579): on a shared document without an explicit apply the task
+    // only proposes. The agent may skip the editor entirely; if it tries, the
+    // lease is refused (409) either way, so it never holds the editor.
     expect(
-      events.some((e) => e.operation === "acquire" && e.status === 409),
-      `the agent's acquire got 409 (events ${JSON.stringify(events)})`,
-    ).toBe(true)
+      events.some((e) => e.operation === "acquire" && e.status === 200),
+      `the agent must not take the editor (events ${JSON.stringify(events)})`,
+    ).toBe(false)
     expect(
       events.some((e) => e.operation === "apply" && e.status === 200),
       "the agent must not write while the person holds the editor",

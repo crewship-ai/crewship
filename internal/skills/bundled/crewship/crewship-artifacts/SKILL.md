@@ -210,12 +210,16 @@ Then call `design_apply` with 1–500
 `{"op":"delete","id":"cart"}` removes a node; `{"op":"reorder","order":[...]}`
 replaces the whole order and may name only existing nodes. Node fields are
 limited to `id`, `type` (`frame`, `rect`, `text`, `image`), `name`, `x`, `y`,
-`width`, `height`, `fill`, `parentId`, `text` and `src`; any other field is
+`width`, `height`, plus `name`, `fill`, `parentId`, `text`, `src`, `linkTo`, `fontFamily`, `fontWeight`, `fontSize`, `lineHeight`, `textAlign`, `textWrap`, `overflow`, `hidden`, `locked`, `radius`, `stroke` and `strokeWidth`; any other field is
 rejected. An upsert of an existing ID changes only the supplied fields; a new
 node needs `type` and numeric geometry. Geometry is finite with absolute value
 at most 1,000,000 and non-negative size. Keep existing node IDs when changing
 color, text or geometry. A canvas holds at most 2000 nodes and 4 MiB of
 encoded state; arguments are bounded to 1 MiB.
+
+Leave text style fields out unless asked to change the look. Change `hidden`
+or `locked` only when asked to hide or lock a layer; change `radius`, `stroke`
+or `strokeWidth` only when asked for corners or a border.
 
 `design_apply` changes the live Yjs document seen by live-authorized people, also without an
 open browser, and each successful call publishes a new retained version

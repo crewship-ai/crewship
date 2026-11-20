@@ -1006,7 +1006,7 @@ func init() {
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)
 
 	pageListCmd.Flags().StringP("query", "q", "", "Plain substring search in Page name and slug")
-	pageListCmd.Flags().StringSlice("kind", nil, "Artifact kinds: project,dashboard,page,word,sheet,slides,design (repeatable or comma-separated)")
+	pageListCmd.Flags().StringSlice("kind", nil, "Artifact kinds: project,dashboard,page,docs,word,sheet,slides,design; docs is a Docs document, word native Word only (repeatable or comma-separated)")
 	pageListCmd.Flags().StringSlice("access", nil, "Access state: private,open (repeatable or comma-separated)")
 	pageListCmd.Flags().StringSlice("version-state", nil, "Version state: shared,unshared,unversioned (repeatable or comma-separated)")
 	pageListCmd.Flags().StringSlice("owner", nil, "Canonical owner: me,user/<id>,crew/<slug> (repeatable or comma-separated)")

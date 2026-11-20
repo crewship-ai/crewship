@@ -25,6 +25,8 @@ type craftNativeAgentWorkInput struct {
 	Original       chataudience.Receipt `json:"original_human"`
 	Epochs         [6]string            `json:"epochs"`
 	WorkspaceEpoch string               `json:"workspace_epoch"`
+	Mode           string               `json:"mode"`
+	ModeExplicit   bool                 `json:"mode_explicit"`
 }
 
 func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, input craftNativeAgentTaskRequest) (work.Receipt, error) {
@@ -105,11 +107,12 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 		return zero, errCraftNativeAgentDenied
 	}
 	g := craftNativeAgentGrant{Scope: scope, Application: proof.application, Source: source, Original: *original, MessageID: input.MessageID, AgentID: original.AgentID, CrewID: crew, Proof: proof, Boot: boot, Deadline: now + ttl, Instruction: instruction}
+	g.Mode, g.ModeExplicit = craftNativeAgentMode(input.Mode, craftNativePersonalSpace(rec, source.UserID))
 	g.Epochs, err = craftNativeAgentEpochs(ctx, tx, g, true)
 	if err != nil {
 		return zero, err
 	}
-	raw, err := json.Marshal(craftNativeAgentWorkInput{g.Application, rec.ID, input.ChatID, input.MessageID, true, instruction, *original, g.Epochs, proof.workspaceEpoch})
+	raw, err := json.Marshal(craftNativeAgentWorkInput{g.Application, rec.ID, input.ChatID, input.MessageID, true, instruction, *original, g.Epochs, proof.workspaceEpoch, g.Mode, g.ModeExplicit})
 	if err != nil || len(raw) > mooring.MaxRPCFrame {
 		return zero, errCraftNativeAgentDenied
 	}

@@ -1,11 +1,11 @@
 ---
 kind: design
 title: Design
-version: 1.0.0
+version: 1.1.0
 modes: [ask, comment, edit]
 capabilities:
-  supported: [node.frame, node.rect, node.text, node.image, op.upsert, op.delete, op.reorder, versions, restore]
-  unsupported: [pages, notes, prototypes, components, typed.properties, propose]
+  supported: [node.frame, node.rect, node.text, node.image, op.upsert, op.delete, op.reorder, versions, restore, prototype.links, text.style, shape.style]
+  unsupported: [pages, notes, components, propose]
 ---
 # Design agent guide
 
@@ -18,9 +18,8 @@ cannot create a Design: a person creates it and connects your chat to it.
 ## Data shape
 
 `design_get` returns `nodes`, `order`, `can_edit`, `version`,
-`latest_version` and `shared_version`. A node has only these fields: `id`,
-`type` (`frame`, `rect`, `text` or `image`), `name`, `x`, `y`, `width`,
-`height`, `fill`, `parentId`, `text` and `src`. `design_apply` takes 1 to 500
+`latest_version` and `shared_version`. A node has `id`, `type` (`frame`, `rect`, `text` or `image`), `x`, `y`,
+`width` and `height`. Optional fields are `name`, `fill`, `parentId`, `text`, `src`, `linkTo`, `fontFamily`, `fontWeight`, `fontSize`, `lineHeight`, `textAlign`, `textWrap`, `overflow`, `hidden`, `locked`, `radius`, `stroke` and `strokeWidth`. `design_apply` takes 1 to 500
 operations:
 
 - `{"op":"upsert","node":{...}}` changes only the supplied fields of an
@@ -29,13 +28,18 @@ operations:
 - `{"op":"reorder","order":[...]}` replaces the whole order and may name only
   existing nodes.
 
+Leave text style fields out unless asked to change the look. Change `hidden`
+or `locked` only when asked to hide or lock a layer; change `radius`, `stroke`
+or `strokeWidth` only when asked for corners or a border.
+
 ## Limits
 
 - At most 2000 nodes and 4 MiB of encoded canvas state.
 - Arguments at most 1 MiB; 1 to 500 operations per call.
 - Geometry is finite, absolute value at most 1,000,000, size not negative.
-- Any other node field is refused. Pages, notes, prototypes, components and
-  typed properties are not part of the agent profile yet.
+- Any other node field is refused. Pages, notes and components are not part of the agent profile yet.
+  Prototype links and style fields are accepted by the server; their UI controls
+  may require separate build-time flags.
 
 ## Write order
 
@@ -62,7 +66,7 @@ you retry.
 It needs current Edit authority (`can_edit`) and the Owner's permission for
 this exact run. Each successful apply is a retained version that
 `design_restore` can return to; restore creates a new version and keeps
-history. Without Edit, comment or ask.
+history. Without Edit, ask; Design agent tools do not create comments.
 
 ## Verification
 
