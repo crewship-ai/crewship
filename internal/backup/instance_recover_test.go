@@ -99,6 +99,10 @@ func newInstanceFixture(t *testing.T) *instanceFixture {
 	}
 	_ = jw.Close()
 	f.attSHA = seedAttachment(t, db, f.paths.Output, ws1, "att_inst", "the incident timeline")
+	// A chat attachment is NOT content-addressed: its bytes live in the
+	// output store at storage_key and travel with the crew's /output section
+	// (#5588). Backup and drill must look for it there.
+	seedChatAttachment(t, db, f.paths.Output, ws1, "att_chat", "a screenshot of the error")
 
 	// A memory version and its content-addressed blob.
 	content := []byte("# what the crew learned\n")
@@ -416,7 +420,7 @@ func TestInstanceDrillAndContentsCheck(t *testing.T) {
 	if c := byName[backup.DrillCheckCredentials]; c.Checked != 2 || c.Failed != 0 {
 		t.Fatalf("credentials check = %+v", c)
 	}
-	if c := byName[backup.DrillCheckAttachments]; c.Checked != 1 || c.Failed != 0 {
+	if c := byName[backup.DrillCheckAttachments]; c.Checked != 2 || c.Failed != 0 {
 		t.Fatalf("attachments check = %+v", c)
 	}
 	if c := byName[backup.DrillCheckJournal]; c.Status != backup.DrillStatusOK || c.Checked != 3 || !strings.Contains(c.Detail, "3 entries") {
