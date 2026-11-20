@@ -20,7 +20,7 @@ func artifactKindGuideMCPCatalog() []memoryMCPToolDescriptor {
 	return []memoryMCPToolDescriptor{{
 		Name: artifactKindGuideTool,
 		Description: "Read the versioned agent guide for an artifact kind before you change an artifact of that kind: exact data shapes and limits, " +
-			"write order, the version check, the conflict rule (stop after the third refusal and report), agent modes and when not to verify. " +
+			"write order, the version check, tool-specific conflict rules, agent modes and when not to verify. " +
 			"Comment is not Propose, and only the artifact's Owner delegates Edit. The guide is static product text: it grants nothing and " +
 			"changes nothing; the server still checks every write.",
 		InputSchema: schema,

@@ -19,8 +19,10 @@ Request and response bodies for each operation are in the
 [OpenAPI document](/api-reference/openapi) (tag `pages`).
 
 <Note>
-Every Artifacts route lives under `/api/v1/pages/...` and uses the `pages:read`
-and `pages:write` credential scopes. The path prefix is a compatibility name:
+Artifact-specific routes generally live under `/api/v1/pages/...` and use the
+`pages:read` and `pages:write` credential scopes. The authenticated
+`/api/v1/artifact-kind-guides` routes are an exception: they serve static
+guides without a workspace or Pages scope. The path prefix is a compatibility name:
 an artifact is stored as a Page row, so `{slug}` is the artifact's slug, or
 `@<id>` for its ID. Pages as a product surface is being retired; Artifacts is
 the place to build on.
@@ -63,7 +65,7 @@ Each variable must equal `true` at build time.
 
 ## Authentication and scopes
 
-All routes need a signed-in human session or a CLI credential, plus a workspace
+Except for the static kind-guide routes, routes need a signed-in human session or a CLI credential, plus a workspace
 (`X-Workspace-ID` header or `workspace_id` query). Workspace membership alone is
 not enough: each handler checks the caller's current access to that one
 artifact inside the same transaction that reads or writes it.
@@ -78,13 +80,13 @@ comments.
 |---|---|---|---|
 | All | Create a project or Design | `OWNER`, `ADMIN`, `MANAGER`, or a member holding the `page.create` capability | `pages:write` |
 | Project, Dashboard, Slides | Read | Anyone the artifact is shared with. The owner and people with write access read the latest version; other readers only the shared version | `pages:read` |
-| Project | Version history | The owner only | `pages:read` |
+| Project | Version history | The owner, or a workspace owner or admin through the audited administrative read path | `pages:read` |
 | Project | Publish a new version | The owner, or someone with write access | `pages:write` |
 | Project | Restore a version | The owner only | `pages:write` |
 | Project | Change the shared version | The owner only; an agent run can never share | `pages:write` |
 | Project | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Project | Reply to a comment | The owner only | `pages:write` |
-| Dashboard | Write data | The owner only | `pages:write` |
+| Dashboard | Write data | The owner, an admitted owner-consented agent run, or a human with Edit or inherited folder write access | `pages:write` |
 | Design | Read and version history | Shared-only readers receive the shared snapshot and only that retained version. Live reads and full retained history require Edit authority or the separately audited administrative read path | `pages:read` |
 | Design | Apply changes, save a snapshot, restore | The owner, or someone with write access | `pages:write` |
 | Design | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |

@@ -907,8 +907,8 @@ crewship page artifact unarchive quarterly-review --dry-run --pages-version 1
 Each artifact kind ships a versioned guide that agents follow when they work
 on an artifact of that kind: the exact data shapes and size limits, the write
 order (on create the index first; on revise the data first and the index
-last), the read-before-write version check, the conflict rule (stop after the
-third refusal and report), the agent modes (Ask, Comment, Propose, Edit; only
+last), the read-before-write version check, tool-specific conflict rules (for Project version conflicts, keep the candidate
+and wait for a new request), the agent modes (Ask, Comment, Propose, Edit; only
 the Owner delegates Edit, and a comment is never a proposal) and when not to
 verify. The guides are built into the server; they describe supported product paths and required policy and grant nothing.
 
@@ -1013,6 +1013,14 @@ A stale `--base-version` returns `409 stale_policy`; a crew from another
 workspace or a deleted crew returns `400`. Each change is recorded in the
 workspace audit log. See also [Workspace Commands](/cli/workspace).
 
+To give a person or agent access, use `crewship page grant` or a folder grant;
+`crewship page artifact share` instead selects the shared version. See
+[Sharing and access](/guides/artifacts/sharing-and-access).
+
+For recovery after a lost publish response, see `crewship page artifact reconcile`
+in [Page commands](/cli/page). Dashboard producer-run commands are also
+described there.
+
 ## Inside an agent run
 
 When `CREWSHIP_AGENT_TOKEN` holds a run capability (`agtv2.…`), the artifact
@@ -1030,6 +1038,7 @@ instead, on behalf of the person who authorized the run:
 | `data collections`, `data get`, `data batch` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
 | `slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
 
+Only the commands in the table above have agent tool mappings. For example,
 `share`, `comment` and `availability` are not available to an agent and fail
 with `artifact or Design operation unavailable to an agent run`. `archive` and
 `unarchive` do not use the run capability: they send the saved profile's
