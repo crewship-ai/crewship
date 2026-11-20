@@ -1105,8 +1105,10 @@ func restoreTargetPreflightsIn(ctx context.Context, tx *sql.Tx, dump *DBDump, le
 // dryRunRestorePreflight runs the refusals RestoreDumpTxHooks applies before
 // its first write, against db, without writing: the pre-transaction collision
 // and input checks, then restoreTargetPreflightsIn inside a read-only
-// transaction that is always rolled back. It does not cover the checks the
-// --replace wipe makes inside PreInsert (ReplaceWorkspaceContentsWithOptions).
+// transaction that is always rolled back. The checks the --replace wipe repeats
+// inside PreInsert (ReplaceWorkspaceContentsWithOptions) already ran in
+// RestoreBackup before the dry-run branch (rejectPrivateArtifactWorkspaceReplacement
+// and runAdmissionBundlePreflight).
 func dryRunRestorePreflight(ctx context.Context, db *sql.DB, dump *DBDump, legacySourceVersions []int) error {
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return err
