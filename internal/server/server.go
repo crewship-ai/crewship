@@ -63,8 +63,11 @@ type Server struct {
 	mooringAssets       *mooringassets.Prepared
 	containerCleanup    *resourcelifecycle.Controller
 
-	recoveredStopsMu        sync.Mutex
-	recoveredStopsCursor    string
+	recoveredStopsMu     sync.Mutex
+	recoveredStopsCursor string
+	// deletedOrphanCursor resumes the deleted-agent orphan scan after the
+	// last trace it visited, so blocked candidates cannot starve the rest.
+	deletedOrphanCursor     string
 	recoveredRuntimesMu     sync.Mutex
 	recoveredRuntimes       map[string]orchestrator.RunState
 	recoveredRuntimesCursor string

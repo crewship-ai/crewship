@@ -272,6 +272,30 @@ row.
 
 Use `--format json` for piping (`crewship run list --format json | jq '.[] | select(.status=="FAILED")'`).
 
+#### When a `RUNNING` row ends without a result
+
+A run stays `RUNNING` while its process may still be alive. The server ends it
+on its own, with the reason in the terminal entry's `reason`, once nothing can
+be executing it any more:
+
+| Reason | Status | When |
+|---|---|---|
+| `detached_exec_confirmed_gone` | `FAILED` | The agent outlived its step or run timeout, ignored the stop, and the server later confirmed its runtime gone. No exit result survived, so the run is failed rather than completed. The agent is admitted again at the same moment. |
+| `confirmed_runtime_stop` | `CANCELLED` | The run was stopped (agent stop, caller cancellation) and its runtime took longer to end than the stop waited; the server recorded it once the runtime was confirmed gone. |
+| `agent_deleted` | `CANCELLED` | The run's agent was deleted, the run started more than 10 minutes ago, and no runtime record of that agent is still open or waiting for its own history. Checked every 5 minutes. |
+| `recovered_runtime_absent` / `server_restart` | `CANCELLED` | A recovered run whose runtime vanished, or a server restart (unchanged). |
+
+A run owned by durable work (an assignment, webhook or schedule attempt) keeps
+its own outcome; these passes never overwrite it. Its `agent.run.*` audit row
+still records how the runtime ended, which can differ from the outcome the work
+ledger settles. When the server cannot tell
+whether a runtime is gone, the run stays `RUNNING` and the agent stays busy
+rather than reporting an outcome nobody confirmed. For a tmux run whose server
+has exited, "gone" needs no tmux process in the container and an empty process
+group for the run's pane, so a background child that ignored the hangup keeps
+the run open. A tmux client failing for another reason, a `/proc` that hides
+other users' processes, or a missing pane identity also keep it open.
+
 ### Fleet-ops insights
 
 ```bash
