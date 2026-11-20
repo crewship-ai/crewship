@@ -48,6 +48,19 @@ export function agentStatusPill(status: string | null | undefined): { label: str
   return { label: meta.label, tone: meta.tone, live: raw.toUpperCase() === "RUNNING" }
 }
 
+/**
+ * The agent as the header should show it while this conversation's reply is
+ * streaming: running. The roster row is read once per page and the live
+ * `agent.status` event can land late; the stream in front of the reader is
+ * the most direct evidence there is.
+ */
+export function withRunStatus<T extends { status?: string | null }>(agent: T, streaming: boolean): T {
+  // Only a stale idle row is corrected; a pause, review or error the live
+  // status reports is more specific than "running" and stays.
+  const current = (agent.status ?? "").trim().toUpperCase()
+  return streaming && (current === "" || current === "IDLE") ? { ...agent, status: "RUNNING" } : agent
+}
+
 export function AgentStrip({
   agent, size = "md", className, trailing,
 }: {

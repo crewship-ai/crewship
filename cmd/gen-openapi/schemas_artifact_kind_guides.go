@@ -7,7 +7,7 @@ func artifactKindGuideSchemaCatalog() (map[string]DomainSchema, map[string]any) 
 		return map[string]any{"type": "string", "description": description}
 	}
 	summary := map[string]any{
-		"kind":          map[string]any{"type": "string", "enum": []string{"docs", "slides", "design", "library", "dashboard", "app"}},
+		"kind":          map[string]any{"type": "string", "enum": []string{"docs", "slides", "design", "library", "dashboard", "app", "word", "sheet"}},
 		"title":         text("Display name of the kind."),
 		"version":       text("Semantic version of this kind's guide."),
 		"rules_version": text("Semantic version of the shared rules appended to every guide."),

@@ -213,9 +213,14 @@ func firstWorkspaceID(client *cli.Client) (string, error) {
 type workspaceRef struct {
 	ID        string `json:"id" yaml:"id"`
 	CreatedAt string `json:"created_at" yaml:"created_at"`
+	Role      string `json:"currentUserRole" yaml:"currentUserRole"`
 }
 
-// oldestWorkspaceID picks the workspace the onboarding BACKEND would pick.
+// oldestWorkspaceID picks the workspace the onboarding BACKEND would pick:
+// the oldest one the user OWNS (onboardingTarget, #4876), so a user invited
+// into an older shared workspace does not get their token stored there. Only
+// when they own none does it fall back to the oldest of all, the old pick
+// (the backend then refuses onboarding writes anyway).
 //
 // This is not a tie-break detail, it is the difference between the token
 // landing where the crew will look for it and landing nowhere. GET
@@ -232,6 +237,15 @@ type workspaceRef struct {
 // components/features/onboarding/setup-agent-api.ts); this is its CLI twin,
 // down to preserving server order for legacy rows that carry no created_at.
 func oldestWorkspaceID(list []workspaceRef) string {
+	var owned []workspaceRef
+	for _, ws := range list {
+		if ws.Role == "OWNER" {
+			owned = append(owned, ws)
+		}
+	}
+	if len(owned) > 0 {
+		list = owned
+	}
 	oldest := -1
 	for i, ws := range list {
 		if ws.ID == "" {

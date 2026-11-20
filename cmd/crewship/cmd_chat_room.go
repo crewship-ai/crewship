@@ -189,13 +189,13 @@ output preserves the API envelopes, including pagination cursors.`}
 		m := membership
 		group := &cobra.Command{Use: m.name, Short: "Manage room " + m.name}
 		group.AddCommand(&cobra.Command{Use: "list <room-id>", Short: "List joined " + m.name, Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, a []string) error {
-			return chatRoomRequest(http.MethodGet, chatRoomPath(a[0])+"/"+m.name, nil)
+			return chatRoomRequest(http.MethodGet, chatRoomMembershipPath(a[0], m.name), nil)
 		}})
 		group.AddCommand(&cobra.Command{Use: "add <room-id> <" + m.entity + "-id>", Short: "Add a " + m.entity + " (subject to room access rules)", Args: cobra.ExactArgs(2), RunE: func(_ *cobra.Command, a []string) error {
-			return chatRoomRequest(http.MethodPost, chatRoomPath(a[0])+"/"+m.name, map[string]string{m.field: a[1]})
+			return chatRoomRequest(http.MethodPost, chatRoomMembershipPath(a[0], m.name), map[string]string{m.field: a[1]})
 		}})
 		group.AddCommand(&cobra.Command{Use: "remove <room-id> <" + m.entity + "-id>", Aliases: []string{"rm"}, Short: "Remove a " + m.entity, Args: cobra.ExactArgs(2), RunE: func(_ *cobra.Command, a []string) error {
-			return chatRoomRequest(http.MethodDelete, chatRoomPath(a[0])+"/"+m.name+"/"+url.PathEscape(a[1]), nil)
+			return chatRoomRequest(http.MethodDelete, chatRoomMembershipPath(a[0], m.name)+"/"+url.PathEscape(a[1]), nil)
 		}})
 		root.AddCommand(group)
 	}
@@ -203,6 +203,13 @@ output preserves the API envelopes, including pagination cursors.`}
 }
 
 func chatRoomPath(id string) string { return chatRoomBase + "/" + url.PathEscape(id) }
+
+func chatRoomMembershipPath(id, kind string) string {
+	if kind == "agents" {
+		return chatRoomBase + "/" + url.PathEscape(id) + "/agents"
+	}
+	return chatRoomBase + "/" + url.PathEscape(id) + "/participants"
+}
 
 func chatRoomRequest(method, path string, input any) error {
 	client, err := requireAuthAndWorkspace()

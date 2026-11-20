@@ -28,6 +28,24 @@ func craftNativeProposalCall(d *craftNativeDocumentsHTTP, ctx context.Context, t
 	return w
 }
 
+func craftNativeProposalVersionsCall(d *craftNativeDocumentsHTTP, ctx context.Context, token, version string) *httptest.ResponseRecorder {
+	path := "/api/v1/pages/@native-agent-page/craft/document/versions"
+	if version != "" {
+		path += "/" + version
+	}
+	r := httptest.NewRequest("GET", path, nil).WithContext(ctx)
+	r.SetPathValue("slug", "@native-agent-page")
+	r.Header.Set("X-Craft-Session", token)
+	w := httptest.NewRecorder()
+	if version == "" {
+		d.listVersions(w, r)
+	} else {
+		r.SetPathValue("version", version)
+		d.readVersion(w, r)
+	}
+	return w
+}
+
 // #4480: while a human holds the lease the agent prepares a separate proposal
 // over the version it read; only the human's own fenced accept changes the
 // document. A bare 409 is not a proposal.
@@ -97,6 +115,39 @@ func TestCraftNativeAgentProposalWhileHumanHoldsLeaseAcceptedByHuman(t *testing.
 	if err := f.rig.db.QueryRow(`SELECT actor FROM artifact_versions WHERE page_id='native-agent-page' AND version=2`).Scan(&actor); err != nil || actor != "user:"+f.a.HumanUserID {
 		t.Fatal("accepted version must be the human's own write", actor, err)
 	}
+	// #5599: the agent stays the proposal's author; the human is recorded as
+	// the one who decided it, and the version history says where version 2
+	// came from.
+	var acceptBody craftNativeProposalAcceptResponse
+	if err := json.Unmarshal(accepted.Body.Bytes(), &acceptBody); err != nil {
+		t.Fatal(err)
+	}
+	if by := acceptBody.Proposal.DecidedBy; by == nil || by.ActorID != "user:"+f.a.HumanUserID || by.Kind != "human" || by.DisplayName == "" || acceptBody.Proposal.DecidedAt == "" || acceptBody.Proposal.Author.Kind != "agent" {
+		t.Fatal("accepted proposal must name its human decider", accepted.Body)
+	}
+	craftNativeEnableVersionHistory(t, f.rig.db, true)
+	history := craftNativeProposalVersionsCall(d, human, session.Token, "")
+	var versions struct {
+		Versions []craftNativeVersionResponse `json:"versions"`
+	}
+	if history.Code != 200 || json.Unmarshal(history.Body.Bytes(), &versions) != nil || len(versions.Versions) != 2 {
+		t.Fatal("version history", history.Code, history.Body)
+	}
+	v2, v1 := versions.Versions[0], versions.Versions[1]
+	if v2.Version != "2" || v2.Author.Kind != "human" || v2.Author.ActorID != "user:"+f.a.HumanUserID || v2.Proposal == nil || v2.Proposal.ID != created.ID || v2.Proposal.Author.Kind != "agent" || v2.Proposal.Author.ActorID != listed.Proposals[0].Author.ActorID {
+		t.Fatal("accepted version must carry its proposal's agent author", history.Body)
+	}
+	if v1.Proposal != nil {
+		t.Fatal("a plain save claims a proposal", history.Body)
+	}
+	one := craftNativeProposalVersionsCall(d, human, session.Token, "2")
+	var single craftNativeVersionDocumentResponse
+	if one.Code != 200 || json.Unmarshal(one.Body.Bytes(), &single) != nil || single.Proposal == nil || single.Proposal.ID != created.ID || single.Proposal.Author.Kind != "agent" {
+		t.Fatal("single version read must carry its proposal", one.Code, one.Body)
+	}
+	if foreign := craftNativeProposalVersionsCall(d, human, "not-an-admission", ""); foreign.Code == 200 || strings.Contains(foreign.Body.String(), created.ID) {
+		t.Fatal("history provenance served without admission", foreign.Code, foreign.Body)
+	}
 	if twice := craftNativeProposalCall(d, human, session.Token, "POST", "/"+created.ID+"/accept", created.ID, fmt.Sprintf(`{"sessionId":%q,"generation":%q}`, session.ID, humanLease.Generation)); twice.Code != 409 {
 		t.Fatal("proposal accepted twice", twice.Code, twice.Body)
 	}
@@ -117,6 +168,10 @@ func TestCraftNativeAgentProposalWhileHumanHoldsLeaseAcceptedByHuman(t *testing.
 	rejected := craftNativeProposalCall(d, human, session.Token, "POST", "/"+second.ID+"/reject", second.ID, `{}`)
 	if rejected.Code != 200 || !strings.Contains(rejected.Body.String(), `"state":"rejected"`) {
 		t.Fatal("human reject", rejected.Code, rejected.Body)
+	}
+	var rejectedView craftNativeProposalResponse
+	if err := json.Unmarshal(rejected.Body.Bytes(), &rejectedView); err != nil || rejectedView.DecidedBy == nil || rejectedView.DecidedBy.Kind != "human" || rejectedView.DecidedAt == "" {
+		t.Fatal("rejected proposal must name its human decider", rejected.Body)
 	}
 	if err := f.rig.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE page_id='native-agent-page'`).Scan(&head); err != nil || head != 2 {
 		t.Fatal("reject changed the document", head, err)

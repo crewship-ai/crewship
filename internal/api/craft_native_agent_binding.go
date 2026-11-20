@@ -129,7 +129,41 @@ func (m *craftNativeAgentManager) authorize(ctx context.Context, tx *sql.Tx, sco
 	if err := m.checkRun(ctx, tx, c.entry); err != nil {
 		return mooring.EditLeasePrincipal{}, err
 	}
+	// A direct save is authorized against the document's current location in
+	// the publishing transaction itself, so a move out of the personal space
+	// cannot slip between the check and the write (Q15/Q16).
+	if intent == "write" && ctx.Value(craftNativeAgentDirectWriteKey{}) != nil {
+		if err := m.checkDirectMandate(ctx, tx, c.entry); err != nil {
+			return mooring.EditLeasePrincipal{}, err
+		}
+	}
 	return craftNativeAgentPrincipal(c.entry), nil
+}
+
+// craftNativeAgentDirectWriteKey marks the apply path's publication; a
+// proposal authorizes "write" too, but never changes the document.
+type craftNativeAgentDirectWriteKey struct{}
+
+// checkDirectMandate is Q16 at use time: apply needs the apply mode, and an
+// implicit apply holds only while the document stays in the author's personal
+// space. Moving it to a shared folder turns the rest of the run into proposals.
+func (m *craftNativeAgentManager) checkDirectMandate(ctx context.Context, tx *sql.Tx, e *craftNativeAgentEntry) error {
+	g := e.grant
+	if g.Mode != craftNativeAgentModeApply {
+		return errCraftNativeAgentProposalRequired
+	}
+	if g.ModeExplicit {
+		return nil
+	}
+	rec := &pageRecord{}
+	err := tx.QueryRowContext(ctx, `SELECT private_audience, COALESCE(folder_id,''), COALESCE(owner_crew_id,''), COALESCE(owner_user_id,'') FROM pages WHERE id=? AND workspace_id=?`, g.Scope.ArtifactID, g.Scope.WorkspaceID).Scan(&rec.PrivateAudience, &rec.FolderID, &rec.OwnerCrewID, &rec.OwnerUserID)
+	if err != nil {
+		return errCraftNativeAgentDenied
+	}
+	if !craftNativePersonalSpace(rec, g.Source.UserID) {
+		return errCraftNativeAgentProposalRequired
+	}
+	return nil
 }
 
 func (m *craftNativeAgentManager) authorizeLease(ctx context.Context, tx *sql.Tx, a mooring.EditLeaseAccess) error {

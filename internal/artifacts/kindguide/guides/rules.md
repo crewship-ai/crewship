@@ -1,7 +1,7 @@
 ---
 kind: rules
 title: Rules for every kind
-version: 1.1.0
+version: 1.2.0
 ---
 ## Rules for every kind
 
@@ -17,10 +17,12 @@ a live read/write grant. Follow the actual tool refusal and current run scope.
 2. Version check. Before any change, read the current version first and keep
    its version number, revision or hash. Send it with the write. Never
    replace it with a newer number you did not read.
-3. Conflicts. A refused write means someone else saved first: their edit
-   wins. Read again, redo only your change on top of what they saved, and send
-   it once. After the third refusal for the same change, stop, keep your
-   candidate and tell the person what conflicted. Never force a write.
+3. Conflicts. Follow the specific tool’s conflict instructions. For a Project
+   version conflict, keep your candidate, read the versions, tell the person
+   what differs and wait for a new request; never retry with a newer base version.
+   For other writes, read again and reconcile only if the tool permits it;
+   after the third refusal for the same change, stop, keep your candidate and
+   tell the person what conflicted. Never force a write.
 4. Uncertain outcomes. A timeout or an unavailable answer may have saved. Read
    before you retry, or retry with the exact same request and mutation ID.
 5. Agent modes. Use only the mode explicitly delegated for this artifact and

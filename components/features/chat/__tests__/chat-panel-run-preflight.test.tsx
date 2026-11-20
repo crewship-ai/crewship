@@ -23,7 +23,7 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => state.mobile }))
 import { ChatPanel } from "../chat-panel"
 
 
-const snapshot = { scope: "configured_chat_agent", model: "configured-model", payer: { label: "Safe payer", state: "ready" }, budgets: [{ id: "b", scope: "crew", remaining_usd: 60, limit_usd: 100, window: "month", mode: "hard", state: "ok" }], gate: { blocking: false, predicted_mode: "none", rule_matches: false }, constraints: [], estimate_usd: null }
+const snapshot = { scope: "configured_chat_agent", model: "configured-model", payer: { label: "Safe payer", state: "ready" }, budgets: [{ id: "b", scope: "crew", remaining_usd: 60, limit_usd: 100, window: "month", mode: "hard", state: "ok" }], gate: { blocking: true, predicted_mode: "sync", rule_matches: true }, constraints: [], estimate_usd: null }
 function panel(chat = "chat1") {
  return <ChatPanel agentId="agent" sessionId={chat} agentName="Native" agentSlug="native" mobilePanel={state.mobile ? "chat" : undefined} />
 }
@@ -46,14 +46,13 @@ beforeEach(() => {
 describe("mounted configured-run preflight", () => {
  it.each([false, true])("reads verified scoped API above the composer (mobile=%s)", async mobile => {
   state.mobile = mobile; setup()
-  const summary = await screen.findByText(/Configured model · price unknown/)
+  const notice = await screen.findByText(/wait for approval before they start/)
   expect(preflightCalls()).toHaveLength(1)
   expect(preflightCalls()[0][0]).toBe("/api/v1/chats/chat1/run-preflight?workspace_id=w1")
-  const details = summary.closest("details")!
-  expect(details.open).toBe(false)
-  expect(details.compareDocumentPosition(screen.getByRole("button", { name: "Send fixture message" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect(screen.getByLabelText("Configured model budget details")).toHaveAttribute("tabindex", "0")
-  expect(screen.getByText(/Safe payer/)).toBeInTheDocument()
+  expect(notice.compareDocumentPosition(screen.getByRole("button", { name: "Send fixture message" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  // Models are chosen in Crews: the composer neither shows nor reads one.
+  expect(screen.queryByText(/configured-model|Safe payer|price unknown/)).toBeNull()
+  expect(state.fetch.mock.calls.some(([url]) => /\/chats\/[^/]+\/model\b|\/api\/v1\/models/.test(String(url)))).toBe(false)
  })
  it.each(["pending", "restricted", "account-restricted"])("does not read preflight for %s", async mode => {
   state.pending = mode === "pending"; state.mode = mode === "restricted" ? "restricted" : "trusted"; state.access = mode === "account-restricted" ? "restricted" : "trusted"
@@ -63,18 +62,18 @@ describe("mounted configured-run preflight", () => {
   expect(e2Calls()).toHaveLength(0)
  })
  it("clears old identity facts and waits for a fresh profile after scope changes", async () => {
-  const view = setup(); await screen.findByText(/Safe payer/)
+  const view = setup(); await screen.findByText(/wait for approval/)
   const oldEntityCalls = entityCalls().length
   const oldE2Calls = e2Calls().length
   expect(oldE2Calls).toBe(2)
   state.user = "h2"; state.workspace = "w2"; state.pending = true
   view.rerender(panel("chat2"))
-  await waitFor(() => expect(screen.queryByText(/Safe payer/)).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.queryByText(/wait for approval/)).not.toBeInTheDocument())
   expect(preflightCalls()).toHaveLength(1)
   expect(entityCalls()).toHaveLength(oldEntityCalls)
   expect(e2Calls()).toHaveLength(oldE2Calls)
   await act(async () => state.resolveProfile())
-  await screen.findByText(/Safe payer/)
+  await screen.findByText(/wait for approval/)
   expect(preflightCalls()).toHaveLength(2)
   await waitFor(() => expect(e2Calls()).toHaveLength(oldE2Calls + 2))
   expect(preflightCalls()[1][0]).toBe("/api/v1/chats/chat2/run-preflight?workspace_id=w2")

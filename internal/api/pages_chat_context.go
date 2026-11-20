@@ -101,8 +101,9 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 
 // pageChatKind names a guide from the catalog's already selected, bounded
 // metadata. Versioned storage wins over legacy flags, and the profile never
-// reads an owner's private latest on behalf of another reader. Native Craft,
-// panel Pages and boards deliberately have no guide in this registry.
+// reads an owner's private latest on behalf of another reader. Panel Pages and
+// boards have no guide. Native Craft has one, but a chat attachment is not a
+// Craft task: its tools exist only in a confirmed task, so no Kind line here.
 func pageChatKind(hasDocument, hasSlides bool, storage, profile string) string {
 	switch storage {
 	case "word", "sheet":

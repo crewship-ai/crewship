@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/avatarstyle"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -243,11 +244,11 @@ func ensureOnboardingSetupCrew(ctx context.Context, db *sql.DB, logger *slog.Log
 		INSERT OR IGNORE INTO agents
 			(id, workspace_id, crew_id, name, slug, role_title, agent_role, cli_adapter,
 			 llm_provider, llm_model, tool_profile, system_prompt_legacy,
-			 timeout_seconds, memory_enabled, suggested_prompts, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'LEAD', ?, ?, ?, ?, ?, 1800, 1, ?, ?, ?)`,
+			 timeout_seconds, memory_enabled, suggested_prompts, avatar_seed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'LEAD', ?, ?, ?, ?, ?, 1800, 1, ?, ?, ?, ?)`,
 		newAgentID, workspaceID, crewID, setupAgentName, setupAgentSlug, setupAgentRoleTitle,
 		runtime.CLIAdapter, runtime.Provider, runtime.Model, setupAgentToolProfile, prompt,
-		setupAgentSuggestedPrompts, now, now,
+		setupAgentSuggestedPrompts, avatarstyle.Seed(nil, setupAgentSlug), now, now,
 	); err != nil {
 		return nil, fmt.Errorf("insert setup agent: %w", err)
 	}

@@ -43,7 +43,7 @@ try {
   const css = await postcss([tailwindcss()]).process(await readFile("app/globals.css", "utf8"), { from: "app/globals.css" })
   await build({
     entryPoints: ["e2e/chat-artifact-project.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
-    alias: { "@": process.cwd() }, logLevel: "error",
+    alias: { "@": process.cwd() }, logLevel: "error", external: ["/fonts/*"],
     define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
       b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^next\/navigation$|\/reactions\/turn-reactions$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))

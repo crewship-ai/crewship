@@ -63,7 +63,8 @@ admission or persistence evidence.
 `mooring_protocol::negotiate` initially accepts only an exact tuple of protocol,
 model and engine versions. Unsupported versions return `version_mismatch` before
 any document content. Minor/patch compatibility needs shared evidence before
-widening this policy. The Rust library is currently unused by deployed services.
+widening this policy. The `mooring-protocol` crate is linked into the `mooring-collab` runtime, which
+the server starts only behind the default-off `CREWSHIP_MOORING_ENABLED` profile.
 
 
 `conformance-fixtures.json` contains positive/negative JSON Schema Draft2020-12

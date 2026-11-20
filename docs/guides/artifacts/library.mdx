@@ -13,7 +13,7 @@ artifacts, preview one without leaving the list, and open it to see its
 content, versions and history.
 
 <Note>
-The library is off by default. Each part of it is switched on separately:
+The library is on in the default production build. Each part is switched on separately:
 
 | What | Needs |
 |---|---|
@@ -24,7 +24,7 @@ The library is off by default. Each part of it is switched on separately:
 | Designs: listing, creating and the canvas | build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`, and the workspace flag `artifacts_design` (or `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`) |
 | The Craft lease bar for Word in the detail view | build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` |
 
-The default production build sets none of these to `true`. Enable a workspace
+The default production build sets `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`; the other switches above are off. Enable a workspace
 flag with `crewship feature-flag enable <key>`; see
 [feature-flag](/cli/feature-flag). With `NEXT_PUBLIC_ARTIFACTS_LIBRARY`
 unset, `/artifacts` sends you to `/pages`. `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`

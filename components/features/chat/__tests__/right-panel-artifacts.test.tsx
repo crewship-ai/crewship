@@ -11,7 +11,7 @@ vi.mock("@/hooks/use-workspace", () => ({
 }))
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
-vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: () => {} }))
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: () => {}, useRealtimeChannelSafe: () => {} }))
 
 const outputs = [
   { path: "crew-1/marena/report.pdf", name: "report.pdf", is_dir: false },

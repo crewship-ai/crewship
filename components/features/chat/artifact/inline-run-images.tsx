@@ -13,6 +13,15 @@ import { isClientArtifactPath } from "./artifact-scope"
 import { artifactDownloadUrl, readArtifactSnapshot, readArtifactVersion } from "./artifact-file-io"
 import type { FileEntry } from "../chat-tree-row"
 
+const RUN_IMAGE_DEBOUNCE_MS = 500
+
+/** A crew file.event for this agent's run directory (watcher paths start at the agent slug). */
+export function isRunFileEvent(payload: Record<string, unknown> | undefined, slug: string | null | undefined, runId: string): boolean {
+  if (!payload || !slug || payload.agent !== slug || typeof payload.path !== "string") return false
+  const relative = payload.path.replaceAll("\\", "/").replace(/^\/+/, "")
+  return relative.startsWith(`${slug}/runs/${runId}/`) || relative.startsWith(`runs/${runId}/`)
+}
+
 /** Run identity and authorized listing are the only source of image paths. */
 export function runImageFiles(rows: FileEntry[], runId: string, crewId?: string | null, slug?: string | null): FileEntry[] {
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(runId)) return []
@@ -65,8 +74,17 @@ function VisibleRunImages({ agentId, workspaceId, chatId, runId }: { agentId: st
     refetchInterval: 60_000, refetchIntervalInBackground: false,
   })
   const refresh = () => { if (viewer && chatId && /^[A-Za-z0-9_-]{1,80}$/.test(runId)) void query.refetch() }
-  useRealtimeEventSafe("file.event", refresh)
-  useRealtimeEventSafe("run.completed", refresh)
+  // Realtime events are dispatched by type, whatever their channel, so a crew
+  // file.event arrives here for every agent's write. Only this run's files
+  // matter, and a burst of writes coalesces into one recheck.
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current) }, [])
+  const refreshSoon = () => {
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => { debounce.current = null; refresh() }, RUN_IMAGE_DEBOUNCE_MS)
+  }
+  useRealtimeEventSafe("file.event", (event) => { if (isRunFileEvent(event.payload, agent?.slug, runId)) refreshSoon() })
+  useRealtimeEventSafe("run.completed", (event) => { if (event.payload?.run_id === runId || (!event.payload?.run_id && event.payload?.agent_id === agentId)) refreshSoon() })
   useRealtimeEventSafe("realtime.reconnected", refresh)
   if (!viewer) return null
   // Never retain cached bytes/titles after a failed permission recheck.

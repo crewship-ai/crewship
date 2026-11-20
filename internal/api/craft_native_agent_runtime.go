@@ -202,7 +202,7 @@ func (rt *craftNativeAgentRuntime) Run(ctx context.Context, a dispatch.Assignmen
 	if err = rt.h.resolver.CreateRun(runCtx, a.RunID, g.AgentID, g.Original.ChatID, g.Scope.WorkspaceID, "CHAT", map[string]interface{}{"native_craft_task": true}); err != nil {
 		return err
 	}
-	prompt := "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if a human holds it, never steal or retry: read the current version and call craft_propose with the requested edit over that exact base_version, then report the proposal for the human to review. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
+	prompt := craftNativeAgentPrompt(g)
 	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{ChatID: g.Original.ChatID, ContainerID: use.ContainerID(), UserMessage: prompt, LLMModel: info.LLMModel, TimeoutSecs: info.TimeoutSecs, MemoryMB: info.MemoryMB, CPUs: info.CPUs, MaxTurns: orchestrator.RoutineMaxTurns}).WithStrictContentPrivacy()
 	req.RunID, req.RuntimeUse = a.RunID, use
 	req, err = req.WithNativeCraftTools()
@@ -397,3 +397,13 @@ func (m *craftNativeAgentManager) finishStoppedRun(ctx context.Context, e *craft
 }
 
 var _ dispatch.Runtime = (*craftNativeAgentRuntime)(nil)
+
+// craftNativeAgentPrompt tells the agent which mode the human gave this task
+// (Q16). The server enforces the mode on every write; the prompt only keeps
+// the agent from wasting a turn on a refused apply.
+func craftNativeAgentPrompt(g craftNativeAgentGrant) string {
+	if g.Mode == craftNativeAgentModeApply {
+		return "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if a human holds it, never steal or retry: read the current version and call craft_propose with the requested edit over that exact base_version, then report the proposal for the human to review. If craft_apply answers proposal_required, call craft_propose over the same base_version instead. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
+	}
+	return "Use only the provided native Craft tools for this explicit whole-document task. This document is shared, and the person asked for a proposal: never call craft_apply. Read the current version, call craft_propose with the requested edit over that exact base_version, and report the proposal for the person to review. Retain the original request_id for uncertain results. Never claim Saved; the document stays unchanged until a person accepts the proposal.\n\n" + g.Instruction
+}
