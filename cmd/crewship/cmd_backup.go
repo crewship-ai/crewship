@@ -287,6 +287,7 @@ func init() {
 			"Permitted only for a workspace that was created by restoring this same bundle.")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupRestoreCmd.Flags().Bool("use-keyring", false, "Read the passphrase from the local backup keyring before prompting")
+	backupRestoreCmd.Flags().String("identity", "", "age identity file (AGE-SECRET-KEY-1…) for a bundle sealed with `backup create --recipient`; the key is sent to the server, which decrypts with it. Mutually exclusive with --passphrase-file and --use-keyring")
 	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
 	backupRestoreCmd.Flags().Bool("replace", false, "Wipe existing target rows matching the bundle's workspace (by id OR slug) BEFORE restore. Canonical disaster-recovery path: lands bundle data with original IDs after `dev.sh nuke` or a fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with --as-workspace / --as-crew.")
 	backupRestoreCmd.Flags().Bool("discard-workbooks", false, "With --replace only: acknowledge that the target workspace's workbooks are destroyed. Backups never contain workbooks, so --replace refuses a target holding any workbook unless this is set.")
