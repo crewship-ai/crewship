@@ -305,7 +305,6 @@ func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (
 		}
 		return o.probeHostRun(ctx, run, false)
 	}
-	session := TmuxSessionName(agentSlug, runID)
 	// PRESENT / ABSENT are distinct tokens, and anything else — including an
 	// empty read — is not an answer.
 	directProbe, err := o.managedRunProbeFromState(location, run, stateErr, false)
@@ -316,7 +315,7 @@ func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (
 		}
 		return false, errors.Join(err, inspectErr)
 	}
-	probe := directProbe + tmuxSessionProbe(session)
+	probe := directProbe + o.runTmuxSessionProbe(location)
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		return false, fmt.Errorf("probe run %s: %w", runID, err)
@@ -388,7 +387,7 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 		}
 		return false, errors.Join(err, inspectErr)
 	}
-	probe := directProbe + "tmux kill-session -t '=" + session + "' >/dev/null 2>&1; " + tmuxSessionProbe(session)
+	probe := directProbe + "tmux kill-session -t '=" + session + "' >/dev/null 2>&1; " + o.runTmuxSessionProbe(location)
 	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		// Exec cannot enter a removed/stopped container. Confirm that
@@ -445,4 +444,13 @@ func (o *Orchestrator) containerRuntimeAbsent(ctx context.Context, id string) (b
 	// Docker reports non-running OOM/dead containers as error. Unknown
 	// provider vocabulary (including an empty state) is not absence evidence.
 	return status != nil && (status.State == "stopped" || status.State == "error"), nil
+}
+
+// runTmuxSessionProbe probes a run's exact session with its pane identity.
+func (o *Orchestrator) runTmuxSessionProbe(location RunLocation) string {
+	paneFile, procRoot := tmuxPaneIdentityFile(location.AgentSlug, location.RunID), "/proc"
+	if o.tmuxProbePaths != nil {
+		paneFile, procRoot = o.tmuxProbePaths(location)
+	}
+	return tmuxSessionProbeAt(TmuxSessionName(location.AgentSlug, location.RunID), paneFile, procRoot)
 }

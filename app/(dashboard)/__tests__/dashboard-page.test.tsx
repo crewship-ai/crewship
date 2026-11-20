@@ -90,6 +90,8 @@ afterEach(() => { cleanup(); act(() => useAppStore.getState().setPageBarSlot(nul
 async function loaded() { await screen.findByRole("button", { name: "Retry results" }) }
 
 it("holds dashboard queries until onboarding answers", async () => {
+  // Only an OWNER waits on onboarding; any other role stays put (#4876).
+  state.workspace.role = "OWNER"
   let resolve!: (value: Response) => void
   state.fetch.mockReturnValue(new Promise<Response>((done) => { resolve = done }))
   render(<DashboardPage />)
@@ -364,7 +366,7 @@ it("uses the saved first agent and tolerates unavailable storage", async () => {
 it.each(["admin", "onboarding"])("redirects the %s landing without enabling dashboard reads", async (destination) => {
   const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {})
   if (destination === "admin") { state.workspace.workspaceId = null; state.admin = true }
-  else state.fetch.mockResolvedValue(json({ completed: false }))
+  else { state.workspace.role = "OWNER"; state.fetch.mockResolvedValue(json({ completed: false })) }
   const view = render(<DashboardPage />)
   await waitFor(() => expect(assign).toHaveBeenCalledWith(`/${destination}`))
   expect(state.agentCalls).toHaveBeenLastCalledWith(state.workspace.workspaceId, { enabled: false })

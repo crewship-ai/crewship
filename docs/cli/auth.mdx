@@ -23,6 +23,7 @@ crewship auth <subcommand>
 | Command | Purpose |
 | --- | --- |
 | `auth passwd` | Change your own account password. |
+| `auth avatar-get <user-id> --output <path>` | Download a stored user avatar, atomically replacing the destination after success. |
 | `auth avatar` | Upload or clear your profile picture. |
 | `auth profile` | Update your display name. |
 
@@ -157,3 +158,8 @@ expired`, non-zero exit), or the `--timeout` budget runs out while it is
 still pending (also non-zero exit — a timeout is never reported as
 success). `--format json` reports `code`, `expires_at`, `status`, `paired`,
 and `waited`, so a script can branch on `status` without parsing prose.
+
+## `crewship auth avatar-get`
+
+Downloads a user's stored avatar to `--output`. The file is replaced only after
+a complete download (at most 2 MiB); a refused request leaves it untouched.

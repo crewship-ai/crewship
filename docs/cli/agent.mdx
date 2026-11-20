@@ -113,7 +113,7 @@ crewship agent create --name "Viktor" --crew backend-team --role LEAD
 | `--memory` | `bool` | `false` | Enable memory. |
 | `--lead-mode` | `string` | | Lead mode: `active` or `passive`. |
 | `--timeout` | `int` | `0` | Timeout in seconds. |
-| `--avatar-seed` | `string` | _(agent name)_ | Avatar seed for avatar generation. |
+| `--avatar-seed` | `string` | _(the agent slug)_ | Avatar seed for avatar generation. |
 | `--avatar-style` | `string` | _(the crew's, else `voxel-bot`)_ | Avatar style, one of the [avatar styles](/api-reference/agents#avatar-styles), for example `voxel-bot`, `voxel-art`, `bottts-neutral`, `pixel-art`. An unknown slug fails before anything is sent. |
 
 <Tip>
@@ -607,7 +607,9 @@ that exact image is served instead and the face stops moving.
 
 An agent with no stored render is in the normal, pre-persistence state, not
 a broken one. The CLI cannot draw a render (the generator runs in the
-browser), so agents created with `crewship agent create` start without one.
+browser), so agents created with `crewship agent create` store their slug as the
+avatar seed and follow the crew's avatar style, but start without a stored
+render (`avatar_url` is `null`). This is intended.
 The dashboard stores renders when an agent is created or edited there, and
 its **Store missing avatars** action fills in the rest — see
 [Agent avatars](/api-reference/agents#agent-avatars). Viewing an agent never

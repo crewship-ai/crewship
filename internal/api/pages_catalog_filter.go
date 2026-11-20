@@ -78,7 +78,7 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 	query := r.URL.Query()
 	facets := make(map[string]map[string]bool)
 	allowed := map[string]string{
-		"kind":    "project,dashboard,page,word,sheet,slides,design",
+		"kind":    "project,dashboard,page,docs,word,sheet,slides,design",
 		"access":  "private,open",
 		"version": "shared,unshared,unversioned",
 	}
@@ -142,7 +142,9 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 			case rec.HasSlides:
 				kind = "slides"
 			case rec.HasDocument:
-				kind = "word"
+				// A structured Docs document, never native Word: only a
+				// wordcraft version head is word, as the library maps them (#5597).
+				kind = "docs"
 			default:
 				kind = "page"
 			}
@@ -179,8 +181,9 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 		}
 		selected = append(selected, selectedRow{row: row, kind: kind, name: strings.ToLower(rec.Name)})
 	}
-	// Matches LIBRARY_KINDS order in components/features/artifacts-library/library-items.ts.
-	rank := map[string]int{"project": 0, "dashboard": 1, "page": 2, "word": 3, "sheet": 4, "slides": 5, "design": 6}
+	// Matches LIBRARY_KINDS order in components/features/artifacts-library/library-items.ts,
+	// with Docs (stored there as word without a version head) before Word.
+	rank := map[string]int{"project": 0, "dashboard": 1, "page": 2, "docs": 3, "word": 4, "sheet": 5, "slides": 6, "design": 7}
 	// loadPageIndex already orders by updated_at DESC, slug ASC in SQL, so a
 	// stable sort keeps that order for "updated" and as the tie-break for name
 	// and kind. Re-parsing updated_at here would misorder datetime('now') rows.

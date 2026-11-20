@@ -1,0 +1,1 @@
+- Align artifact agent guidance with current design fields, library formats, access rules and conflict handling.

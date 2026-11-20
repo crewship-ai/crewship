@@ -608,6 +608,7 @@ func TestCovPSTDeploy_ExplicitSlugAndAutoAssign(t *testing.T) {
 	if dep.AgentCount != 1 {
 		t.Fatalf("expected 1 agent; got %d", dep.AgentCount)
 	}
+	assertAgentsFollowCrewStyle(t, db) // #3051
 
 	// Auto-assign should have linked the Anthropic key to the new agent.
 	var cnt int

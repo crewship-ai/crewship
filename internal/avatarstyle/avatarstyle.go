@@ -60,3 +60,16 @@ func List() string {
 func Problem(style string) string {
 	return "unknown avatar style " + `"` + style + `"` + " (one of: " + List() + ")"
 }
+
+// Seed is the avatar seed a new agent is stored with: the one the caller
+// chose, else the agent's slug (what the renderer falls back to anyway, so
+// pinning it keeps the face if the slug is later changed). It deliberately
+// does not touch the style: a NULL avatar_style is the documented "follow the
+// crew's style, else Default" state, and crew style changes re-render only
+// agents in that state (#3051). Every INSERT INTO agents goes through here.
+func Seed(chosen *string, slug string) *string {
+	if chosen != nil && strings.TrimSpace(*chosen) != "" {
+		return chosen
+	}
+	return &slug
+}
