@@ -1,6 +1,9 @@
 # WordCraft native model adapter
 
-This default-off crate is not connected to Crewship routes or the runtime. It
+This crate is linked into the `mooring-collab` runtime, which Crewship starts only
+behind the default-off `CREWSHIP_MOORING_ENABLED` session profile
+([session transport](../../../docs/specs/mooring-session-transport.md)). It is not
+used by native Word/Sheet under `crewship craft`. It
 imports complete native WordCraft 0.10.0 JSON into Yrs 0.28.0, projects it back,
 and restores the same native data and stable paragraph IDs from a full CRDT
 checkpoint. Export and checkpoint bytes are candidates, never Saved receipts.
@@ -91,7 +94,7 @@ Inventory includes all paragraph IDs plus the disjoint reserved targets
 read-only documents. Text operations conservatively advance only the paragraph
 content revision (also for a semantic no-op), never paragraph existence, order or
 document metadata. Application checkpoints contain no authoritative host revision
-ledger. The default-off crate is still not wired into any production route.
+ledger. Outside the default-off Mooring session profile, no route reaches the crate.
 
 Native reads can project an already authenticated immutable checkpoint through
 `read::header` and `read::page`. The header retains every document field except
