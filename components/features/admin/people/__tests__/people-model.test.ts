@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
-  isPersonal, workspaceMatches, facetMatches, isLastOwner, personMatches, personStatus, sortPeople, sortWorkspaces, busiestWorkspaces, handGroups, handPeopleCount, peopleCsv, workspacesCsv, daysUntil, type Person,
+  isPersonal, workspaceMatches, facetMatches, isLastOwner, personMatches, personStatus, sortPeople, sortWorkspaces, busiestWorkspaces, handGroups, handPeopleCount, peopleCsv, workspacesCsv, daysUntil, isGuest, rolesFor, type Person,
 } from "../people-model"
 
 const NOW = Date.parse("2026-09-29T12:00:00Z")
@@ -125,5 +125,17 @@ describe("team and personal workspaces", () => {
     expect(workspaceMatches(ws({ name: "Ivana Viewer's Workspace" }), "viewer", [owner])).toBe(true)
     expect(workspaceMatches(ws({ name: "Design" }), "ivana@", [owner])).toBe(true)
     expect(workspaceMatches(ws({ name: "Design" }), "tom", [owner])).toBe(false)
+  })
+})
+
+describe("Guests and administrator roles", () => {
+  it("names a person a Guest when any membership is restricted, and leaves Admin and Owner out for them", () => {
+    const guest = person({ memberships: [member("a", "MEMBER"), { ...member("b", "VIEWER"), access_mode: "restricted" }] })
+    expect(isGuest(guest)).toBe(true)
+    expect(isGuest(person({ memberships: [{ ...member("a", "MEMBER"), access_mode: "trusted" }] }))).toBe(false)
+    // An older server sends no access_mode: nothing is guessed.
+    expect(isGuest(person({ memberships: [member("a", "MEMBER")] }))).toBe(false)
+    expect(rolesFor(true)).toEqual(["MANAGER", "MEMBER", "VIEWER"])
+    expect(rolesFor(false)).toEqual(["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"])
   })
 })

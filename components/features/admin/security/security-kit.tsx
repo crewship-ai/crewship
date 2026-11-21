@@ -71,7 +71,7 @@ export function QuickPicks({ label, value, options, onPick, disabled }: {
   disabled?: boolean
 }) {
   return (
-    <span role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5 max-sm:hidden">
+    <span role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5 max-md:hidden">
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onPick(o.value)}
           className={cn("h-7 rounded-md px-2.5 text-control transition-colors disabled:opacity-50",

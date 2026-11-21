@@ -51,6 +51,9 @@ export interface AdminMembership {
   slug: string
   role: string
   joined_at: string
+  /** "restricted" for a Guest membership. A Guest anywhere cannot be made
+   *  ADMIN or OWNER anywhere (the server answers 409). Older servers omit it. */
+  access_mode?: "trusted" | "restricted"
 }
 
 /** A user record as displayed in the admin users table. */

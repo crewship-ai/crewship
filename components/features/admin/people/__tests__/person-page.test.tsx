@@ -245,6 +245,34 @@ describe("role gates", () => {
     expect(String(h.toastError.mock.calls[0][0])).toContain("Restore trusted access explicitly")
   })
 
+  it("does not offer Admin or Owner for a Guest the list names as one", async () => {
+    const guest = { ...GUEST, memberships: [{ ...m("ws-a", "Acme", "MEMBER"), access_mode: "restricted" as const }] }
+    serve(h.apiFetch, { users: [...USERS, ENV_OWNER, SUSPENDED, guest], workspaces: WORKSPACES })
+    render(<PeoplePage />)
+    const card = await open("Guest Person")
+    const select = within(card).getByRole("combobox", { name: "Role in Acme" })
+    expect(within(select).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["MANAGER", "MEMBER", "VIEWER"])
+    // A whole-workspace member keeps every role.
+    cleanup()
+    window.history.replaceState(null, "", "/admin/people")
+    render(<PeoplePage />)
+    const jana = await open("Jana")
+    expect(within(within(jana).getByRole("combobox", { name: "Role in Acme" })).getAllByRole("option").map((o) => o.getAttribute("value")))
+      .toEqual(["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"])
+  })
+
+  it("does not offer Admin when adding a Guest to another workspace", async () => {
+    const guest = { ...GUEST, memberships: [{ ...m("ws-a", "Acme", "MEMBER"), access_mode: "restricted" as const }] }
+    serve(h.apiFetch, { users: [...USERS, ENV_OWNER, SUSPENDED, guest], workspaces: WORKSPACES })
+    render(<PeoplePage />)
+    const card = await open("Guest Person")
+    fireEvent.click(within(card).getByRole("button", { name: /Add Guest to a workspace/ }))
+    const dialog = await screen.findByRole("dialog", { name: "Add to a workspace" })
+    expect(within(dialog).queryByRole("radio", { name: "Admin" })).toBeNull()
+    expect(within(dialog).getByRole("radio", { name: "Manager" })).toBeInTheDocument()
+    expect(dialog).toHaveTextContent("This person is a Guest, so Admin is not offered.")
+  })
+
   it("the last owner of a workspace keeps the role and cannot be removed", async () => {
     render(<PeoplePage />)
     const card = await open("Perko")

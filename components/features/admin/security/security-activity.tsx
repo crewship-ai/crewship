@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { ShowMore } from "@/components/ui/show-more"
-import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import type { KeeperWsStatus } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
@@ -15,6 +14,7 @@ import { STREAMS, filterActivity, type DecisionFilter, type Stream } from "./sec
 import { DecisionChip } from "./decision-chip"
 import { RequestSheet, subject, when } from "./request-sheet"
 import { AskDialog } from "./ask-dialog"
+import { useDecideAccess } from "./decide-access"
 import { WorkspacePicker } from "./workspace-picker"
 import type { InstanceGovRow } from "./use-instance-keeper"
 
@@ -58,7 +58,8 @@ export function SecurityActivity({ entries, stream, onStream, streamCount, strea
   session: { id: string; name: string } | null
   onChanged: () => void
 }) {
-  const canAct = useIsInstanceAdmin() === true
+  // Asking is `roleManage` in the current workspace: an OWNER or ADMIN there.
+  const { allowed: canAct, name: sessionName } = useDecideAccess(session?.id, session?.name)
   const [open, setOpen] = React.useState<KeeperLogEntry | null>(null)
   const [ask, setAsk] = React.useState(false)
   // Rows already match stream and decision (the server filtered); this keeps a
@@ -98,7 +99,10 @@ export function SecurityActivity({ entries, stream, onStream, streamCount, strea
           <WorkspacePicker rows={workspaces} value={picked} onChange={onPick} />
           <Segmented ariaLabel="Decision" value={decision} onChange={onDecision} options={DECISIONS} />
           {session ? (
-            <Button type="button" variant="outline" size="sm" disabled={!canAct} onClick={() => setAsk(true)}><Play className="mr-1 size-3.5" />Try a request</Button>
+            <>
+              <Button type="button" variant="outline" size="sm" disabled={!canAct} onClick={() => setAsk(true)} aria-describedby={canAct ? undefined : "ask-not-allowed"}><Play className="mr-1 size-3.5" />Try a request</Button>
+              {!canAct && <span id="ask-not-allowed" data-testid="ask-not-allowed" className="text-label text-muted-foreground">Only an Owner or Admin of {sessionName} can try a request</span>}
+            </>
           ) : (
             <span data-testid="ask-unavailable" className="text-label text-muted-foreground" title="A request is asked in your current workspace, and you have none">
               Try a request needs a workspace

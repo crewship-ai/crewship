@@ -11,7 +11,7 @@ import { UserDataActions } from "@/components/features/admin/user-data-actions"
 import { UserSessions } from "./person-sessions"
 import { WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
-  daysUntil, displayName, isLastOwner, isPersonal, personStatus, roleIn, type Person, type Role, type Workspace,
+  daysUntil, displayName, isGuest, isLastOwner, isPersonal, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
 import { PersonAvatar, RoleSelect, StatusChip, roleLabel } from "./people-parts"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -108,7 +108,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
                       <Lock className="size-3" aria-hidden />Only owner · hand it over from the workspace
                     </span>
                   ) : (
-                    <RoleSelect label={`Role in ${m.name}`} value={m.role as Role} disabled={busy === key}
+                    <RoleSelect label={`Role in ${m.name}`} value={m.role as Role} disabled={busy === key} guest={isGuest(person)}
                       onChange={(r) => r && void actions.setRole(person.id, m.workspace_id, r, `${name} is now ${roleLabel(r)} in ${m.name}`)} />
                   )}
                   <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-[44px]" disabled={lastOwner || busy === key}

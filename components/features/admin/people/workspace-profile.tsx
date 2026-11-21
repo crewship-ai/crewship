@@ -15,7 +15,7 @@ import { useShowMore } from "@/hooks/use-show-more"
 import { SettingsCard, SettingsDangerCard, SettingsKpiStrip, SettingsRow, controlHeight } from "@/components/features/settings/shared"
 import { WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
-  daysUntil, displayName, isLastOwner, isPersonal, membersOf, personStatus, roleIn, type Person, type Role, type Workspace,
+  daysUntil, displayName, isGuest, isLastOwner, isPersonal, membersOf, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
 import { PersonLabel, RoleSelect, StatusChip, roleLabel } from "./people-parts"
 import { personOptions } from "./people-pickers"
@@ -157,7 +157,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted, onOpenP
                   {lastOwner ? (
                     <span title="Hand the workspace over below"><StatusPill tone="blue" label="Owner" /></span>
                   ) : (
-                    <RoleSelect label={`Role of ${displayName(p)}`} value={role} disabled={busy === key}
+                    <RoleSelect label={`Role of ${displayName(p)}`} value={role} disabled={busy === key} guest={isGuest(p)}
                       onChange={(r) => r && void actions.setRole(p.id, ws.id, r, `${displayName(p)} is now ${roleLabel(r)} in ${ws.name}`)} />
                   )}
                   <Button size="icon-sm" variant="ghost" className="h-7 w-7 coarse:size-[44px]" disabled={lastOwner || busy === key}

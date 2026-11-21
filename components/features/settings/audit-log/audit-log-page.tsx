@@ -263,7 +263,7 @@ export function AuditLogPage() {
                       if (c.key === "entityId") setEntityName("")
                       setFilters(c.key === "range" ? { range: DEFAULT_AUDIT_FILTERS.range, from: "", to: "", sliceFrom: "", sliceTo: "" } : c.key === "slice" ? { sliceFrom: "", sliceTo: "" } : { [c.key]: DEFAULT_AUDIT_FILTERS[c.key] })
                     }}
-                    className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20">
+                    className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20 relative coarse:after:absolute coarse:after:-inset-4 coarse:after:content-['']">
                     <X className="h-3 w-3" />
                   </button>
                 </span>

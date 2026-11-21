@@ -140,12 +140,12 @@ export function SecurityWorkspaces({ rows, all, total, off, filterKey, defaults,
         <div role="toolbar" aria-label="Change the selected workspaces" data-slot="security-bulk"
           className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
             // A phone: edge to edge above the tab bar, the count without its word.
-            "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
-          <span className="px-1"><span className="font-semibold tabular-nums">{pickedRows.length}</span><span className="max-sm:hidden"> selected</span></span>
+            "max-md:inset-x-3 max-md:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-md:translate-x-0 max-md:justify-between max-md:gap-1 max-md:px-2")}>
+          <span className="px-1"><span className="font-semibold tabular-nums">{pickedRows.length}</span><span className="max-md:hidden"> selected</span></span>
           {BULK.map((b, i) => (
-            <Button key={b.key} type="button" size="sm" variant={i === 0 ? "default" : "outline"} className={cn(i === 0 ? selectionBarAction : selectionBarButton, "max-sm:px-2")}
+            <Button key={b.key} type="button" size="sm" variant={i === 0 ? "default" : "outline"} className={cn(i === 0 ? selectionBarAction : selectionBarButton, "max-md:px-2")}
               onClick={() => setBulk(b.key)}>
-              {b.label}<ChevronDown className="h-3 w-3 max-sm:hidden" />
+              {b.label}<ChevronDown className="h-3 w-3 max-md:hidden" />
             </Button>
           ))}
           <Button type="button" variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={() => onPick(pickedRows.map((r) => r.workspace_id), false)}>

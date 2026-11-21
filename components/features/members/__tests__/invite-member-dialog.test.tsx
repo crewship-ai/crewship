@@ -306,7 +306,7 @@ describe("InviteMemberDialog — the page's words", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   it("lists the roles with one line each, and names abilities and the Guest choice in the page's words", async () => {
-    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    render(<InviteMemberDialog workspaceId="ws1" callerRole="OWNER" onInvited={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /add member/i }))
     const roles = await screen.findByRole("radiogroup", { name: "Role" })
     expect(within(roles).getAllByRole("radio").map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true", "false"])
@@ -319,10 +319,26 @@ describe("InviteMemberDialog — the page's words", () => {
 
   it("keeps Admin out of a Guest invitation, and says why", async () => {
     apiFetch.mockResolvedValue(jsonResponse([]))
-    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} /></QueryClientProvider>)
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><InviteMemberDialog workspaceId="ws1" callerRole="OWNER" onInvited={vi.fn()} /></QueryClientProvider>)
     fireEvent.click(screen.getByRole("button", { name: /add member/i }))
     fireEvent.click(await screen.findByLabelText("Guest access"))
     expect(screen.getByRole("radio", { name: "Admin" })).toBeDisabled()
     expect(screen.getByRole("radio", { name: "Admin" })).toHaveAttribute("title", "Administrators cannot be guests")
+  })
+
+  // Provisioning refuses ADMIN from anyone but an OWNER ("Only workspace owner
+  // can assign ADMIN role", workspaces_provision.go), so only an OWNER sees it.
+  it.each([
+    ["OWNER", true],
+    ["ADMIN", false],
+    [undefined, false],
+  ] as const)("offers the Admin role to a caller who is %s: %s", async (callerRole, offered) => {
+    render(<InviteMemberDialog workspaceId="ws1" callerRole={callerRole} onInvited={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    const group = await screen.findByRole("radiogroup", { name: "Role" })
+    expect(within(group).queryByRole("radio", { name: "Admin" }) !== null).toBe(offered)
+    expect(within(group).getByRole("radio", { name: "Manager" })).toBeInTheDocument()
+    if (offered) expect(screen.queryByText("Only an Owner can add an Admin.")).toBeNull()
+    else expect(screen.getByText("Only an Owner can add an Admin.")).toBeInTheDocument()
   })
 })

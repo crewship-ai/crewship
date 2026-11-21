@@ -170,6 +170,12 @@ describe("roleChoices — the server's ladder, drawn the same way", () => {
     expect(roleChoices("OWNER", olive, true)).toEqual([])
   })
 
+  it("never offers Admin for a Guest — the server refuses to promote one (409)", () => {
+    const guest = { ...mel, access_mode: "restricted" as const }
+    expect(roleChoices("OWNER", guest, false)).toEqual(["VIEWER", "MEMBER", "MANAGER"])
+    expect(roleChoices("OWNER", { ...mel, access_mode: "trusted" }, false)).toEqual(["VIEWER", "MEMBER", "MANAGER", "ADMIN"])
+  })
+
   it("gives a MEMBER nothing, even over a VIEWER — role change is MANAGER+", () => {
     expect(roleChoices("MEMBER", vic, false)).toEqual([])
     expect(roleChoices(undefined, vic, false)).toEqual([])

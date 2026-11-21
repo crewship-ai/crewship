@@ -9,11 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Note } from "@/components/ui/note"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { nativeSelect } from "@/components/features/settings/shared"
-import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import {
   CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
 import { DecisionChip } from "./decision-chip"
+import { useDecideAccess } from "./decide-access"
 
 interface Crew { id: string; name: string }
 interface Agent { id: string; name: string; crew_id?: string | null }
@@ -22,7 +22,9 @@ interface Agent { id: string; name: string; crew_id?: string | null }
  * "Try a request": POST /admin/keeper/ask puts a credential request to the
  * real judge as an operator and writes a real decision to the log. The server
  * takes the workspace from the session and ignores any other, so the dialog
- * names that workspace and is only offered while it is known.
+ * names that workspace and is only offered while it is known. The route is
+ * `roleManage`: only an OWNER or ADMIN of that workspace may ask, instance
+ * administrator or not (useDecideAccess).
  */
 export function AskDialog({ open, onOpenChange, workspaceId, workspaceName, onAsked }: {
   open: boolean
@@ -31,7 +33,7 @@ export function AskDialog({ open, onOpenChange, workspaceId, workspaceName, onAs
   workspaceName: string
   onAsked: () => void
 }) {
-  const canAct = useIsInstanceAdmin() === true
+  const { allowed: canAct } = useDecideAccess(workspaceId, workspaceName)
   const [crews, setCrews] = React.useState<Crew[]>([])
   const [agents, setAgents] = React.useState<Agent[]>([])
   const { credentials } = useCredentials(open ? workspaceId : undefined)
@@ -113,6 +115,7 @@ export function AskDialog({ open, onOpenChange, workspaceId, workspaceName, onAs
         <CreateSurfaceField label="What the agent says it needs it for" htmlFor="ask-intent">
           <Textarea id="ask-intent" rows={3} value={intent} onChange={(e) => setIntent(e.target.value)} placeholder="Look up three competitor pricing pages for the weekly scan" />
         </CreateSurfaceField>
+        {!canAct && <p data-testid="ask-not-allowed" className="text-label text-muted-foreground">Only an Owner or Admin of {workspaceName} can try a request.</p>}
         {error && <p role="alert" className="text-label text-destructive">{error}</p>}
         {answer && (
           <div role="status" data-testid="ask-answer" className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3 text-control">

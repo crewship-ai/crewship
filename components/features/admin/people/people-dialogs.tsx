@@ -17,7 +17,7 @@ import {
 import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import { toast } from "@/lib/toast"
 import { LANGUAGES } from "@/lib/languages"
-import { displayName, isPersonal, personStatus, roleIn, type Person, type Role, type Workspace } from "./people-model"
+import { displayName, isGuest, isPersonal, personStatus, roleIn, type Person, type Role, type Workspace } from "./people-model"
 import { PersonAvatar, RoleSegmented, SetupLinkBox, roleLabel } from "./people-parts"
 import { personOptions, workspaceOptions } from "./people-pickers"
 import type { OwnershipConflict, SetupLink, usePeople } from "./use-people"
@@ -227,7 +227,7 @@ export function NewWorkspaceDialog({ open, onOpenChange, people, actions, busy, 
                 <div key={a.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-subtle px-2 py-1.5">
                   <PersonAvatar person={p} className="h-6 w-6" />
                   <span className="min-w-0 flex-1 truncate text-control">{displayName(p)}</span>
-                  <RoleSegmented label={`Role of ${displayName(p)}`} value={a.role} onChange={(r) => r && setAdds((prev) => prev.map((x) => (x.id === a.id ? { ...x, role: r } : x)))} />
+                  <RoleSegmented label={`Role of ${displayName(p)}`} value={a.role} guest={isGuest(p)} onChange={(r) => r && setAdds((prev) => prev.map((x) => (x.id === a.id ? { ...x, role: r } : x)))} />
                   <Button type="button" size="icon-sm" variant="ghost" className="h-7 w-7" aria-label={`Do not add ${displayName(p)}`}
                     onClick={() => setAdds((prev) => prev.filter((x) => x.id !== a.id))}><X className="h-3.5 w-3.5" /></Button>
                 </div>
@@ -268,6 +268,7 @@ export function AddToWorkspaceDialog({ open, onOpenChange, people, workspaces, a
   const [role, setRole] = React.useState<Role | null>("MEMBER")
   React.useEffect(() => { if (open) { setWsId(""); setRole("MEMBER") } }, [open])
   const n = people.length
+  const anyGuest = people.some((p) => isGuest(p))
   // For one person, the workspaces they are already in are not offered.
   const offered = n === 1 ? workspaces.filter((w) => !roleIn(people[0], w.id)) : workspaces
   const target = offered.find((w) => w.id === wsId)
@@ -292,7 +293,8 @@ export function AddToWorkspaceDialog({ open, onOpenChange, people, workspaces, a
         </div>
         <div className="grid gap-1.5">
           <span className="text-sm font-medium">Role</span>
-          <RoleSegmented label="Role" value={role} onChange={setRole} />
+          <RoleSegmented label="Role" value={role} onChange={setRole} guest={anyGuest} />
+          {anyGuest && <p className="text-label text-muted-foreground">{n > 1 ? "Some of them are Guests" : "This person is a Guest"}, so Admin is not offered.</p>}
           <p className="text-label text-muted-foreground">Owner is given by transferring the workspace, never here.</p>
         </div>
       </CreateSurfaceBody>

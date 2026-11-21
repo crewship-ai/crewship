@@ -556,6 +556,27 @@ describe("Members — reach", () => {
     expect(within(reach).getByRole("radio", { name: "Whole workspace" })).toHaveAttribute("aria-checked", "false")
   })
 
+  // The role update refuses ADMIN for a Guest with 409
+  // (workspaces_member_role.go), so the panel and the bulk bar do not offer it.
+  it("does not offer Admin for a Guest, even to an Owner, and says why", async () => {
+    h.role = "OWNER"
+    roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted")]
+    renderPage("/settings/members?member=u-rita")
+    const d = await sheet()
+    const admin = within(d).getByRole("radio", { name: "Admin" })
+    expect(admin).toBeDisabled()
+    expect(admin).toHaveAttribute("title", "A Guest cannot be an administrator")
+    expect(within(d).getByRole("radio", { name: "Manager" })).toBeEnabled()
+    expect(d.querySelector("[data-slot=role-why]")).toHaveTextContent("A Guest cannot be an administrator")
+  })
+
+  it("offers Admin to an Owner for a whole-workspace member", async () => {
+    h.role = "OWNER"
+    roster = [withMode(member("m-tom", "MEMBER", "u-tom", "Tom Trusted"), "trusted")]
+    renderPage("/settings/members?member=u-tom")
+    expect(within(await sheet()).getByRole("radio", { name: "Admin" })).toBeEnabled()
+  })
+
   it("does not guess a reach the server withheld", async () => {
     roster = [member("m-rita", "MEMBER", "u-rita", "Rita Restricted")]
     renderPage("/settings/members?member=u-rita")

@@ -45,6 +45,10 @@ type Access = "" | CapabilityBundle
 
 interface InviteMemberDialogProps {
   workspaceId: string
+  /** The caller's role here. Admin is offered to an OWNER only: provisioning
+   *  refuses anyone else ("Only workspace owner can assign ADMIN role",
+   *  workspaces_provision.go). Unknown offers no Admin. */
+  callerRole?: string | null
   onInvited?: () => void
 }
 
@@ -59,7 +63,8 @@ interface ProvisionResult {
 }
 
 
-export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialogProps) {
+export function InviteMemberDialog({ workspaceId, callerRole, onInvited }: InviteMemberDialogProps) {
+  const roleOptions = ASSIGNABLE_ROLES.filter((r) => r !== "ADMIN" || callerRole === "OWNER")
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [fullName, setFullName] = useState("")
@@ -302,13 +307,13 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             <fieldset className="space-y-2">
               <legend className="mb-2 text-sm font-medium">Role <span className="font-normal text-muted-foreground">· what they manage</span></legend>
               <div role="radiogroup" aria-label="Role" className="space-y-1.5">
-                {[...ASSIGNABLE_ROLES].reverse().map((r) => (
+                {[...roleOptions].reverse().map((r) => (
                   <RadioOption key={r} checked={role === r} title={ROLE_LABEL[r]} description={ROLE_SUMMARY_BY_ROLE[r]}
                     disabled={guest && r === "ADMIN"} why={guest && r === "ADMIN" ? "Administrators cannot be guests" : undefined}
                     onSelect={() => setRole(r)} />
                 ))}
               </div>
-              <p className="text-label text-muted-foreground">Only an Owner can add an Admin.</p>
+              {callerRole !== "OWNER" && <p className="text-label text-muted-foreground">Only an Owner can add an Admin.</p>}
             </fieldset>
 
             {!guest && <fieldset className="space-y-2">

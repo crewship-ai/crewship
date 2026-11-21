@@ -80,7 +80,7 @@ export function InvitationRows({ invitations, workspaceId, manage = false, calle
                   <span className="block truncate text-control">{inv.email}</span>
                   <span className="block truncate text-micro text-muted-foreground-soft">{ROLE_LABEL[inv.role] ?? inv.role}{inviter ? ` · invited by ${inviter}` : ""} · {joinedDate(inv.created_at)}</span>
                 </span>
-                <RolePill role={inv.role} className="max-sm:hidden" />
+                <RolePill role={inv.role} className="max-md:hidden" />
                 <StatusPill
                   tone={status === "expired" ? "danger" : status === "pending" && days <= 2 ? "warn" : "muted"}
                   label={status === "revoked" ? "Revoked" : expiryText(inv.expires_at)} />

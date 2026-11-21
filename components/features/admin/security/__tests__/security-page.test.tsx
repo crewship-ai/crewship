@@ -10,7 +10,7 @@ import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-li
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn(), resolve: null as null | ((u: string, i?: RequestInit) => unknown), ws: "ws-a" as string | null, admin: true as boolean | null }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.apiFetch(...a) }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: h.ws, loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: h.ws, loading: false, workspaces: [{ id: "ws-a", name: "Dess", slug: "dess", currentUserRole: "OWNER" }] }) }))
 vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => h.admin }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() } }))
@@ -372,11 +372,11 @@ describe("Activity", () => {
       expect(screen.queryByRole("region", { name: "Decide" })).toBeNull()
     })
 
-    it("does not let anyone but an instance administrator decide", async () => {
+    it("does not let anyone but an instance administrator who is an Owner or Admin there decide", async () => {
       h.admin = false
       const decide = await openEscalated()
       expect(within(decide).queryByRole("button", { name: "Allow" })).toBeNull()
-      expect(decide).toHaveTextContent("Only an instance administrator")
+      expect(decide).toHaveTextContent("Only an Owner or Admin of Dess can decide this request.")
     })
   })
 

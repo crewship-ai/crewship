@@ -10,11 +10,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
-import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { redactSecrets } from "@/app/(dashboard)/admin/utils"
 import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import { DecisionChip, DECISION_WORD } from "./decision-chip"
 import { STREAMS, streamOf } from "./security-model"
+import { useDecideAccess } from "./decide-access"
 
 export const when = (iso: string) => new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
 
@@ -44,12 +44,13 @@ async function messageOf(r: Response, fallback: string): Promise<string> {
  * workspace in `workspace_id`: that route resolves the workspace from the
  * query and lets an instance admin address one they are not a member of
  * (RequireWorkspaceOrInstanceAdmin), so it answers from this page.
- * Allow and Deny use POST …/resolve, which is workspace-member only on the
- * server; for a workspace the admin is not in, the server's own refusal is
- * what they read.
+ * Allow and Deny use POST …/resolve, which is `roleManage` on the server: an
+ * OWNER or ADMIN member of the request's workspace, with no exception for an
+ * instance administrator. They are offered only to such a member
+ * (useDecideAccess); anyone else reads who can decide instead.
  */
 export function RequestSheet({ entry, onClose, onResolved }: { entry: KeeperLogEntry | null; onClose: () => void; onResolved: () => void }) {
-  const canAct = useIsInstanceAdmin() === true
+  const { allowed: canAct, name: wsName } = useDecideAccess(entry?.workspace_id, entry?.workspace_name)
   const [events, setEvents] = React.useState<RequestEvent[] | null>(null)
   const [eventsError, setEventsError] = React.useState<string | null>(null)
   const [reason, setReason] = React.useState("")
@@ -156,7 +157,7 @@ export function RequestSheet({ entry, onClose, onResolved }: { entry: KeeperLogE
                     </div>
                   </>
                 ) : (
-                  <p className="text-label text-muted-foreground">Only an instance administrator can decide here.</p>
+                  <p className="text-label text-muted-foreground">Only an Owner or Admin of {wsName} can decide this request.</p>
                 )}
               </section>
             )}

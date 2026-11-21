@@ -283,20 +283,22 @@ function RoleControl({ member, choices, isSelf, label, onChangeRole, pendingRole
   }
 
   const locked = ASSIGNABLE_ROLES.some((r) => !choices.includes(r) && r !== member.role)
+  const guest = member.access_mode === "restricted"
   return (
     <>
       <div role="radiogroup" aria-label={`Role for ${label}`} className="space-y-1.5">
         {[...ASSIGNABLE_ROLES].reverse().map((r) => {
           const current = member.role === r
           const allowed = choices.includes(r)
+          const why = guest && r === "ADMIN" ? "A Guest cannot be an administrator" : "Your role cannot give this role"
           return (
             <RadioOption key={r} checked={current} title={ROLE_LABEL[r] ?? r} description={ROLE_SUMMARY_BY_ROLE[r]}
-              disabled={saving || (!current && !allowed)} why={!current && !allowed ? "Your role cannot give this role" : undefined}
+              disabled={saving || (!current && !allowed)} why={!current && !allowed ? why : undefined}
               onSelect={() => setPendingRole(r)} />
           )
         })}
       </div>
-      {locked && <p className="text-label text-muted-foreground" data-slot="role-why">You can only give roles below your own. Only an Owner makes an Admin.</p>}
+      {locked && <p className="text-label text-muted-foreground" data-slot="role-why">You can only give roles below your own. Only an Owner makes an Admin.{guest ? " A Guest cannot be an administrator; give them whole-workspace access first." : ""}</p>}
 
       <AlertDialog open={pendingRole !== null} onOpenChange={(o) => { if (!o) setPendingRole(null) }}>
         <AlertDialogContent>

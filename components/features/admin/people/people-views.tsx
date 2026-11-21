@@ -8,7 +8,7 @@ import { useShowMore } from "@/hooks/use-show-more"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
-  displayName, isEmptyWorkspace, isLastOwner, isPersonal, ownersOf, personalOwnerName, roleIn, daysUntil,
+  displayName, isEmptyWorkspace, isGuest, isLastOwner, isPersonal, ownersOf, personalOwnerName, roleIn, daysUntil,
   type HandGroups, type Person, type Workspace,
 } from "./people-model"
 import { PersonLabel, RoleSelect, StatusChip, roleLabel } from "./people-parts"
@@ -274,7 +274,7 @@ export function AccessMatrix({ people, allPeople, columns, actions, busy, resetK
                 return (
                   <td key={w.id} className={cn(td, "text-center max-md:px-1")}>
                     {editing === key ? (
-                      <RoleSelect label={`${displayName(p)} in ${w.name}`} value={role} allowNone className="w-28 max-md:w-full" disabled={busy === `m:${key}`}
+                      <RoleSelect label={`${displayName(p)} in ${w.name}`} value={role} allowNone guest={isGuest(p)} className="w-28 max-md:w-full" disabled={busy === `m:${key}`}
                         onChange={async (r) => {
                           setEditing(null)
                           if (r === role) return

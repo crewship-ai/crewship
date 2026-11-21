@@ -67,11 +67,15 @@ export const ROLE_SUMMARY_BY_ROLE: Record<string, string> = Object.fromEntries(
  * server would 403. Gate on the tier first, then the ladder: the caller edits
  * only people they strictly outrank, never themselves, and may grant only
  * roles strictly below their own (grant-below-own, no-modify-superior).
+ * A Guest is offered no administrator role.
  */
 export function roleChoices(callerRole: string | null | undefined, member: Member, isSelf: boolean): string[] {
   const callerRank = callerRole ? ROLE_RANK[callerRole] ?? 0 : 0
   if (!isManagerTier(callerRole) || isSelf || callerRank <= (ROLE_RANK[member.role] ?? 0)) return []
-  return ASSIGNABLE_ROLES.filter((r) => (ROLE_RANK[r] ?? 0) < callerRank)
+  // A Guest (restricted access) is never made an administrator: the role
+  // update refuses ADMIN/OWNER for one with 409 (workspaces_member_role.go).
+  const guest = member.access_mode === "restricted"
+  return ASSIGNABLE_ROLES.filter((r) => (ROLE_RANK[r] ?? 0) < callerRank && !(guest && r === "ADMIN"))
 }
 
 /**

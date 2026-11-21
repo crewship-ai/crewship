@@ -150,4 +150,27 @@ describe("touch layout guards", () => {
     }
     expect(found).toEqual([])
   })
+
+  // A filter chip's remove button is drawn 16px (h-4) inside a 24px chip. On
+  // a touch screen it gets a 44px hit area from a pseudo-element
+  // (coarse:after:-inset-4 around h-4 = 12 spacing units = 44px), so the chip
+  // keeps its size and the finger still finds the X.
+  it("gives every filter chip's remove button a 44px hit area on touch", () => {
+    const found: string[] = []
+    let seen = 0
+    for (const { file, text } of FILES) {
+      for (const m of text.matchAll(/aria-label=\{`Remove filter /g)) {
+        const open = text.lastIndexOf("<button", m.index)
+        const at = text.indexOf('className="', open)
+        if (open < 0 || at < 0) continue
+        const cls = text.slice(at + 11, text.indexOf('"', at + 11))
+        if (!/\bh-4 w-4\b/.test(cls)) continue
+        seen++
+        const ok = /(^|\s)relative(\s|$)/.test(cls) && cls.includes("coarse:after:absolute") && cls.includes("coarse:after:-inset-4") && cls.includes("coarse:after:content-['']")
+        if (!ok) found.push(`${file}:${text.slice(0, m.index).split("\n").length}`)
+      }
+    }
+    expect(seen).toBeGreaterThanOrEqual(4)
+    expect(found).toEqual([])
+  })
 })

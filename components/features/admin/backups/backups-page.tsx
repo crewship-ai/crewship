@@ -386,7 +386,7 @@ export function BackupsPage() {
           {chips.map((c) => (
             <span key={c.key} className="inline-flex h-7 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-label text-primary-hover">
               {c.label}
-              <button type="button" aria-label={`Remove filter ${c.label}`} onClick={c.clear} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20"><X className="h-3 w-3" /></button>
+              <button type="button" aria-label={`Remove filter ${c.label}`} onClick={c.clear} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20 relative coarse:after:absolute coarse:after:-inset-4 coarse:after:content-['']"><X className="h-3 w-3" /></button>
             </span>
           ))}
           {(filterCount > 0 || slice) && (

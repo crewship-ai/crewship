@@ -14,6 +14,18 @@ export type Workspace = AdminOrg
 export const ROLES = ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"] as const
 export type Role = (typeof ROLES)[number]
 
+/** Guest (restricted) in any workspace. Such an account is never made ADMIN or
+ *  OWNER anywhere — SetMembership refuses it with 409
+ *  (administratorAccountEligible) — so the role controls leave those out. */
+export function isGuest(p: Pick<Person, "memberships"> | null | undefined): boolean {
+  return !!p?.memberships?.some((m) => m.access_mode === "restricted")
+}
+
+/** Roles an administrator may give: everything, or below Admin for a Guest. */
+export function rolesFor(guest: boolean | undefined): readonly Role[] {
+  return guest ? ROLES.filter((r) => r !== "OWNER" && r !== "ADMIN") : ROLES
+}
+
 /** One state per person, the most pressing first. */
 export type PersonStatus = "suspended" | "locked" | "setup" | "active"
 

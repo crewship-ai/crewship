@@ -409,3 +409,37 @@ func TestEmptySuspensionIsStillSuspended(t *testing.T) {
 	}
 	wantCode(t, f.do(f.boss, "PUT", "/api/v1/admin/instance/admins/carol", ""), http.StatusConflict, "grant admin to empty suspension")
 }
+
+// Admin › People leaves ADMIN and OWNER out for a Guest, because SetMembership
+// refuses them (administratorAccountEligible). It can only do that if the
+// list says which memberships are restricted.
+func TestAdminUsersListNamesAGuestMembership(t *testing.T) {
+	f := newInstanceFixture(t)
+	seedInstanceUser(t, f.db, "gina", "gina@ex.com", "ws-new", "MEMBER")
+	if _, err := f.db.Exec(`UPDATE workspace_members SET access_mode = 'restricted' WHERE workspace_id = 'ws-new' AND user_id = 'gina'`); err != nil {
+		t.Fatalf("restrict gina: %v", err)
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/users?workspace_id=ws-old", "")
+	wantCode(t, rr, http.StatusOK, "boss lists users")
+	var users []struct {
+		ID          string `json:"id"`
+		Memberships []struct {
+			WorkspaceID string `json:"workspace_id"`
+			AccessMode  string `json:"access_mode"`
+		} `json:"memberships"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &users); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	modes := map[string]string{}
+	for _, u := range users {
+		for _, m := range u.Memberships {
+			modes[u.ID+"@"+m.WorkspaceID] = m.AccessMode
+		}
+	}
+	if modes["gina@ws-new"] != "restricted" || modes["carol@ws-new"] != "trusted" || modes["boss@ws-old"] != "trusted" {
+		t.Errorf("access modes = %v, want gina restricted in ws-new and the rest trusted", modes)
+	}
+	// And the refusal the UI mirrors: a Guest is not promoted to ADMIN.
+	wantCode(t, f.do(f.boss, "PUT", "/api/v1/admin/instance/workspaces/ws-old/members/gina", `{"role":"ADMIN"}`), http.StatusConflict, "make a Guest an ADMIN elsewhere")
+}

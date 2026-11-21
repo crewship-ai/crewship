@@ -276,7 +276,7 @@ export function MembersPage() {
       setConfirm({
         title: `Make ${eligible.length} ${eligible.length === 1 ? "person" : "people"} ${ROLE_LABEL[r]}?`,
         body: <>
-          {eligible.length < selectedPeople.length && <>{selectedPeople.length - eligible.length} of the selected already have this role or are above yours, and stay as they are. </>}
+          {eligible.length < selectedPeople.length && <>{selectedPeople.length - eligible.length} of the selected already have this role{r === "ADMIN" && selectedPeople.some((m) => m.access_mode === "restricted") ? ", are Guests (who cannot be administrators)" : ""} or are above yours, and stay as they are. </>}
           Their abilities do not change. You can only give roles below your own.
         </>,
         action: "Change role",
@@ -396,7 +396,7 @@ export function MembersPage() {
     : setFilters({ ...DEFAULT_MEMBER_FILTERS, flag: kind === "reveal" ? "reveal" : "risky-low-role" }))
   const revealCandidates = caps ? sorted.filter((m) => m.role !== "OWNER" && m.user.id !== currentUserId && !(caps[m.user.id] ?? []).includes(Capability.CredentialReveal)) : []
 
-  const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
+  const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} callerRole={role} onInvited={roster.refresh} /> : null
 
   const headline = view === "look" ? "Access worth a second pair of eyes. Nothing here is broken."
     : view === "invited" ? "People who were sent a link and have not joined yet"
@@ -489,7 +489,7 @@ export function MembersPage() {
                     <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
                       className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
                       {c.label}
-                      <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20 coarse:h-6 coarse:w-6">
+                      <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20 relative coarse:after:absolute coarse:after:-inset-4 coarse:after:content-['']">
                         <X className="h-3 w-3" />
                       </button>
                     </motion.span>
