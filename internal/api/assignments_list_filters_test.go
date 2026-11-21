@@ -75,6 +75,9 @@ func seedAssignmentFilterFixture(t *testing.T, db *sql.DB) {
 	add(filterWS, "chat-a", "ag-lead", "ag-worker", "COMPLETED", 3)
 	add(filterWS, "chat-a", "ag-lead", "ag-helper", "QUEUED", 2)
 	add(filterWS, "chat-b", "ag-other", "ag-other", "QUEUED", 4)
+	// This crew's lead delegates to an agent of another crew: the row is in
+	// crew1's list (assigned_by is crew1), so ?assigned_to= finds it there.
+	add(filterWS, "chat-a", "ag-lead", "ag-other", "QUEUED", 1)
 	add(filterOtherWS, "chat-c", "ag-foreign", "ag-foreign", "QUEUED", 3)
 	// Corrupt row: in ws A, dispatched by crew1's lead, assigned to the
 	// foreign workspace's agent. The crew list shows it unfiltered (it is
@@ -115,16 +118,16 @@ func TestAssignmentList_Filters(t *testing.T) {
 		to       string   // every row's assigned_to_slug, when set
 		statuses []string // every row's status is one of these, when set
 	}{
-		{name: "unfiltered crew list keeps its old scope", crew: "crew1", query: url.Values{}, total: 13, page: 13},
+		{name: "unfiltered crew list keeps its old scope", crew: "crew1", query: url.Values{}, total: 14, page: 14},
 		{name: "assignee by id", crew: "crew1", query: url.Values{"assigned_to": {"ag-worker"}}, total: 10, page: 10, to: "worker"},
 		{name: "assignee by slug", crew: "crew1", query: url.Values{"assigned_to": {"worker"}}, total: 10, page: 10, to: "worker"},
-		{name: "single status", crew: "crew1", query: url.Values{"status": {"QUEUED"}}, total: 8, page: 8, statuses: []string{"QUEUED"}},
+		{name: "single status", crew: "crew1", query: url.Values{"status": {"QUEUED"}}, total: 9, page: 9, statuses: []string{"QUEUED"}},
 		{name: "multiple statuses with assignee", crew: "crew1", query: url.Values{"assigned_to": {"worker"}, "status": {"PENDING,QUEUED"}}, total: 7, page: 7, to: "worker", statuses: []string{"PENDING", "QUEUED"}},
 		{name: "status is case and space tolerant", crew: "crew1", query: url.Values{"assigned_to": {"worker"}, "status": {" pending , Queued ,"}}, total: 7, page: 7, statuses: []string{"PENDING", "QUEUED"}},
 		{name: "total counts the filter, page is the window", crew: "crew1", query: url.Values{"assigned_to": {"worker"}, "status": {"QUEUED,PENDING"}, "limit": {"3"}, "offset": {"3"}}, total: 7, page: 3, to: "worker"},
 		{name: "last page is short, total unchanged", crew: "crew1", query: url.Values{"assigned_to": {"worker"}, "status": {"QUEUED,PENDING"}, "limit": {"3"}, "offset": {"6"}}, total: 7, page: 1, to: "worker"},
 		{name: "unknown agent is an empty page, not a 404", crew: "crew1", query: url.Values{"assigned_to": {"nobody"}}, total: 0, page: 0},
-		{name: "agent from another crew matches none of this crew's rows", crew: "crew1", query: url.Values{"assigned_to": {"other"}}, total: 0, page: 0},
+		{name: "agent from another crew matches only the work this crew gave it", crew: "crew1", query: url.Values{"assigned_to": {"other"}}, total: 1, page: 1, to: "other"},
 		{name: "foreign workspace agent id matches nothing", crew: "crew1", query: url.Values{"assigned_to": {"ag-foreign"}}, total: 0, page: 0},
 		{name: "foreign workspace crew is not readable", crew: "crew3", query: url.Values{"assigned_to": {"worker"}}, total: 0, page: 0},
 	}
