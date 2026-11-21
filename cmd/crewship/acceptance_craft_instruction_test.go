@@ -59,8 +59,13 @@ func craftInstructionServer(t *testing.T, busy bool) (*httptest.Server, func() [
 			MessageID string `json:"message_id"`
 			Mode      string `json:"mode"`
 		}
-		if json.Unmarshal(raw, &task) != nil || task.ChatID != "chat-new" || task.MessageID != "saved-instruction" {
-			reply(w, 403, `{"error":"native Craft agent task denied"}`)
+		if json.Unmarshal(raw, &task) != nil || task.ChatID != "chat-new" {
+			reply(w, 403, `{"error":"native Craft access denied"}`)
+			return
+		}
+		if task.MessageID != "saved-instruction" {
+			// #5596: the Page editor learns why.
+			reply(w, 403, `{"error":"native Craft agent task denied","reason":"instruction_not_recorded"}`)
 			return
 		}
 		if task.Mode == "propose" {
@@ -132,8 +137,11 @@ func TestAcceptance_CraftTaskInstructionThenStart(t *testing.T) {
 	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "saved-instruction", "--whole-document", "--mode", "propose"); code != 0 || !strings.Contains(out, "accepted-proposal-work") {
 		t.Fatalf("start --mode propose exit %d: %s", code, out)
 	}
-	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "ordinary-turn", "--whole-document"); code == 0 || !strings.Contains(out, "native HTTP 403") {
+	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "chat-new", "--message-id", "ordinary-turn", "--whole-document"); code == 0 || !strings.Contains(out, "native HTTP 403 (instruction_not_recorded: ") {
 		t.Fatalf("an ordinary turn started a task: exit %d: %s", code, out)
+	}
+	if out, code = runArtifactBinary(t, srv, "craft", "task", "start", "demo", "--chat-id", "someone-elses", "--message-id", "saved-instruction", "--whole-document"); code == 0 || !strings.Contains(out, "native HTTP 403") || strings.Contains(out, "(") {
+		t.Fatalf("a generic refusal gained a reason: exit %d: %s", code, out)
 	}
 }
 

@@ -609,6 +609,29 @@ native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
 
+Every refusal of a start is `403` and, inside the host, the same mandate
+denial. The reason is decided only after Page authority passed (#5596). Until
+the requester is shown to be able to see and edit the Page, the refusal is the
+generic `{error}` body and depends on no policy, chat or registry state. That
+includes the registry limit, which is checked after Page authority. After that
+point the body is `{error: "native Craft agent task denied", reason}`. The
+reason is one of `workspace_policy_disabled`, `crew_not_allowed`,
+`chat_unavailable`, `chat_not_private`, `instruction_not_recorded`,
+`instruction_unusable`, `agent_unavailable`, `not_owner_or_delegated`,
+`duplicate_task`, `capacity`, `credential_expiring`, `clock_unavailable` or
+`task_too_large`. Telling these apart reads only the requester's own chat and
+message, that chat's agent and the workspace policy row. A database error in
+those reads keeps the generic body. The owner/delegation and policy checks
+report a failed lookup as a refusal, so a transient error there can surface as
+`not_owner_or_delegated` or a policy reason; it is still a denial. The reasons are deliberately not opaque to an
+authorized editor: one who holds their own recorded instruction learns whether
+the workspace agent artifact policy is on and whether it allows that agent's
+crew. The owner/delegation check runs after the instruction and policy checks,
+so `not_owner_or_delegated` only ever concerns an agent the requester already
+has their own recorded instruction with, never any agent in a chat they can
+merely see. A Comment or Read grantee, a non-member and a caller
+naming a missing Page all get the same generic answer.
+
 The mode follows Q16 (owner decision 2026-10-19). The author's targeted
 instruction is the mandate. Without `mode`, a document in the author's personal
 space (private, unfiled, not crew-owned, owned by the author) is changed

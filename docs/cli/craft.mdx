@@ -338,6 +338,30 @@ answers `403` and nothing is queued. Removing the crew or disabling the policy
 stops a running task at its next step: any agent tool call (including reads),
 dispatch or confirmation.
 
+When you can see and edit the Page, a refused start names its reason, and the
+error reads `native HTTP 403 (REASON: what to fix)` (exit code `4`). Under
+`--format json` the error envelope carries it as `extensions.reason`. Without
+Page access the refusal stays a bare `native HTTP 403`: it tells nobody whether
+the Page, chat or policy exists. Nothing is queued after any refusal.
+
+| Reason | What it means |
+|---|---|
+| `workspace_policy_disabled` | The workspace agent artifact policy is off or was never saved. |
+| `crew_not_allowed` | The policy is on, but the agent's crew is not on it. |
+| `chat_unavailable` | The chat does not exist or you cannot use it. |
+| `chat_not_private` | The chat is not a private chat you created, for example a group chat. |
+| `instruction_not_recorded` | The message is not your instruction saved by `craft task instruction`, for example an ordinary turn. |
+| `instruction_unusable` | The saved instruction is empty or too large. |
+| `agent_unavailable` | The chat's agent or its crew was removed or has expired. |
+| `not_owner_or_delegated` | You do not own the document, and its owner has not given this agent write. |
+| `duplicate_task` | This message already started a task on this document. Record a new instruction. |
+| `capacity` | The server is running its maximum number of agent tasks. Try again later. |
+| `credential_expiring` | Your sign-in expires before the task could run. Sign in again. |
+| `clock_unavailable` | The server clock is unavailable. Try again later. |
+| `task_too_large` | The task input is over the size limit. Shorten the instruction. |
+
+The CLI prints only these values. It never prints any other text from a refusal body.
+
 `--mode` says whether the agent may change the document or only propose a
 change:
 

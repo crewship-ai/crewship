@@ -62,3 +62,22 @@ func TestCraftNativeAgentPublicSchemaExcludesPrivateMCPWire(t *testing.T) {
 		}
 	}
 }
+
+// #5596: the task start refusal documents its optional machine reason.
+func TestCraftNativeAgentTaskRefusalDocumentsReason(t *testing.T) {
+	doc := buildDocument([]route{{method: "POST", path: "/api/v1/pages/{slug}/craft/tasks"}})
+	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	refusal, ok := schemas["NativeCraftAgentTaskError"].(map[string]any)
+	if !ok {
+		t.Fatal("task refusal schema missing")
+	}
+	props := refusal["properties"].(map[string]any)
+	if props["error"] == nil || props["reason"] == nil || len(refusal["required"].([]string)) != 1 {
+		t.Fatalf("task refusal must require error and allow reason: %v", refusal)
+	}
+	content := errorContentForRoute(route{method: "POST", path: "/api/v1/pages/{slug}/craft/tasks"}, handlerInfo{}, "403")
+	schema := content["application/json"].(map[string]any)["schema"].(map[string]any)
+	if schema["$ref"] != "#/components/schemas/NativeCraftAgentTaskError" {
+		t.Fatalf("403 does not use the task refusal schema: %v", content)
+	}
+}
