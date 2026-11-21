@@ -86,7 +86,7 @@ export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickSt
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
                 <span className="font-medium text-sm truncate">{t.name}</span>
-                <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity" />
               </div>
               <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{t.description}</p>
               <div className="flex items-center gap-2 mt-1.5">

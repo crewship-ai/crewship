@@ -95,8 +95,8 @@ function TableRow({ s, checked, selectable, onCheck, onOpen }: RowProps) {
           </span>
         </span>
       </td>
-      <td className="whitespace-nowrap px-3.5 py-2 text-label text-muted-foreground">{src.label}</td>
-      <td className="whitespace-nowrap px-3.5 py-2 text-muted-foreground">{domainMeta(s.category).label}</td>
+      <td className="whitespace-nowrap px-3.5 py-2 text-label text-muted-foreground max-xl:hidden">{src.label}</td>
+      <td className="whitespace-nowrap px-3.5 py-2 text-muted-foreground max-xl:hidden">{domainMeta(s.category).label}</td>
       <td className="whitespace-nowrap px-3.5 py-2">
         <StatusPill className="font-sans tracking-normal" tone={trust.tone} label={trust.label} />
       </td>
@@ -115,8 +115,9 @@ function Table({ rows, sel, selectable, onCheck, onOpen }: { rows: SkillRow[]; s
         <colgroup>
           <col className="w-9" />
           <col />
-          <col className="w-44" />
-          <col className="w-28" />
+          {/* Source and Domain give their width to the name below xl (#5621). */}
+          <col className="w-44 max-xl:hidden" />
+          <col className="w-28 max-xl:hidden" />
           <col className="w-32" />
           <col className="w-36" />
           <col className="w-24" />
@@ -127,8 +128,8 @@ function Table({ rows, sel, selectable, onCheck, onOpen }: { rows: SkillRow[]; s
               <span className="sr-only">Select</span>
             </th>
             <th className="px-3.5 py-2 font-medium">Skill</th>
-            <th className="px-3.5 py-2 font-medium">Source</th>
-            <th className="px-3.5 py-2 font-medium">Domain</th>
+            <th className="px-3.5 py-2 font-medium max-xl:hidden">Source</th>
+            <th className="px-3.5 py-2 font-medium max-xl:hidden">Domain</th>
             <th className="px-3.5 py-2 font-medium">Trust</th>
             <th className="px-3.5 py-2 font-medium">Used by</th>
             <th className="px-3.5 py-2 text-right font-medium">Uses · 30 d</th>

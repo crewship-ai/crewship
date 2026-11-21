@@ -267,7 +267,7 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
           <CalendarPanel items={items} filters={filters} crews={crews} onChange={onChange} onPicked={closePanelSheet} workspaceId={workspaceId} onApplyView={applyView} />
         </SecondaryPanel>
         <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto grid max-w-[1400px] gap-3 px-4 py-4 md:px-6 md:py-5">
+          <div className="mx-auto grid max-w-[1400px] grid-cols-[minmax(0,1fr)] gap-3 px-4 py-4 md:px-6 md:py-5">
             {isMobile && (
               <button
                 type="button"
@@ -294,7 +294,7 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
                       type="button"
                       role="listitem"
                       onClick={() => setSelectedId(i.id)}
-                      className="kit-tap flex min-w-[230px] items-start gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left hover:border-foreground/20"
+                      className="kit-tap flex min-w-[230px]! items-start gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left hover:border-foreground/20"
                     >
                       <s.icon className={cn("mt-0.5 size-3.5 shrink-0", s.className)} aria-label={s.label} />
                       <span className="min-w-0">

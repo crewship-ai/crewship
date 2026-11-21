@@ -186,7 +186,7 @@ function CodeBlockView({ node, updateAttributes }: any) {
   const lang = node.attrs.language || ""
   return (
     <NodeViewWrapper className="relative group my-3">
-      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity">
         <LanguageSelector
           language={lang}
           onSelect={(l: string) => updateAttributes({ language: l })}

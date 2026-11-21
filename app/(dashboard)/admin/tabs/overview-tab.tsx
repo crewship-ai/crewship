@@ -285,7 +285,7 @@ export const OverviewTab = React.memo(function OverviewTab({
         </section>
 
         {/* ── Six checks, each its own tile: icon, name, a dot and one line. */}
-        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" aria-label="Health checks">
+        <ul className="grid grid-cols-2 gap-2 lg:grid-cols-3 2xl:grid-cols-6" aria-label="Health checks">
           {checks.map((c) => (
             <li key={c.key} data-check={c.key} data-state={c.state}
               className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-card border border-border bg-card px-3 py-2.5">
@@ -562,11 +562,11 @@ function Finding({ finding }: { finding: { key: string; severity: string; messag
   const rest = cut > 0 ? finding.message.slice(cut + 2) : ""
   const action = FINDING_ACTIONS[finding.key]
   return (
-    <div data-severity={finding.severity} className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
+    <div data-severity={finding.severity} className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 max-md:flex-wrap">
       <span className="icon-tile mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ "--ic": tint } as CSSProperties} aria-hidden>
         {high || medium ? <AlertTriangle className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 max-md:basis-[calc(100%-3rem)]">
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill tone={high ? "danger" : medium ? "warn" : "muted"} label={finding.severity.charAt(0).toUpperCase() + finding.severity.slice(1)} />
           <p className="min-w-0 flex-1 text-label font-medium leading-snug text-foreground">{head}</p>

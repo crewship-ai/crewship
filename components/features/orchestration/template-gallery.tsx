@@ -279,7 +279,7 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                   <button
                     type="button"
                     aria-label={`Delete template ${tmpl.name}`}
-                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 coarse:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
                       if (!await askConfirm({ title: `Delete template "${tmpl.name}"?`, confirmLabel: "Delete", cancelLabel: "Cancel", destructive: true })) return
                       const current = scope.current

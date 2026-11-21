@@ -366,11 +366,11 @@ export interface CanvasRowProps {
 export function CanvasRow({ label, align = "center", children }: CanvasRowProps) {
   return (
     <div className={cn(
-      "grid grid-cols-[180px_1fr] gap-4 px-4 py-2.5",
+      "grid grid-cols-[180px_1fr] gap-4 px-4 py-2.5 max-md:grid-cols-1 max-md:gap-1.5",
       align === "center" ? "items-center" : "items-start",
     )}>
       <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-2 min-w-0">{children}</div>
+      <div className="flex min-w-0 items-center gap-2 max-md:flex-wrap">{children}</div>
     </div>
   )
 }

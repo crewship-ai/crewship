@@ -33,7 +33,7 @@ export function SectionHeader({
         focus an invisible control. `group-focus-within` keeps the action
         reachable once focus lands on it.
       */}
-      <div className="invisible opacity-0 transition-opacity group-hover/sh:visible group-hover/sh:opacity-100 group-focus-within/sh:visible group-focus-within/sh:opacity-100">
+      <div className="invisible opacity-0 transition-opacity group-hover/sh:visible group-hover/sh:opacity-100 coarse:opacity-100 coarse:visible group-focus-within/sh:visible group-focus-within/sh:opacity-100">
         {action}
       </div>
     </div>

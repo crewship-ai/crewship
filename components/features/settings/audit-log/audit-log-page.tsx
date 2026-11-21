@@ -265,7 +265,7 @@ export function AuditLogPage() {
                 table without changing the range. */}
             <AuditHistogram times={chartTimes} window={customWindow} endsToday={filters.range !== "custom"} selected={slice} onSelect={pickSlice} />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-0.5" data-slot="audit-display">
-              <span className="min-w-0 flex-1 text-label text-muted-foreground">{filters.source === "workspace" ? "Every state-changing action" : AUDIT_SOURCES.find((s) => s.value === filters.source)?.hint}</span>
+              <span className="min-w-0 flex-1 text-label text-muted-foreground max-md:basis-full">{filters.source === "workspace" ? "Every state-changing action" : AUDIT_SOURCES.find((s) => s.value === filters.source)?.hint}</span>
               <label className="inline-flex items-center gap-2 text-label">
                 <Switch checked={groupRepeats} onCheckedChange={setGroupRepeats} aria-label="Group repeated events" />
                 <span aria-hidden>Group repeated events</span>

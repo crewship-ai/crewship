@@ -886,7 +886,7 @@ export function RemoveRelationButton({
       type="button"
       aria-label={`Remove link to ${identifier}`}
       onClick={onRemove}
-      className="rounded p-0.5 text-muted-foreground-soft opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+      className="rounded p-0.5 text-muted-foreground-soft opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 coarse:opacity-100"
     >
       <X className="h-3 w-3" />
     </button>
@@ -959,7 +959,7 @@ export function TitleEditor({
           setDraft(title)
           setEditing(true)
         }}
-        className="shrink-0 rounded p-1 text-muted-foreground-soft opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/title:opacity-100"
+        className="shrink-0 rounded p-1 text-muted-foreground-soft opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/title:opacity-100 coarse:opacity-100"
       >
         <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M11.5 2.5a1.4 1.4 0 0 1 2 2L6 12l-3 1 1-3z" />

@@ -301,7 +301,7 @@ export function SkillsLayout() {
           actions={
             workspaceId ? (
               <>
-                <SubBarIconButton icon={Terminal} aria-label="Command line" title="Skills from the command line" onClick={() => setCli(true)} />
+                <SubBarIconButton icon={Terminal} className="max-md:hidden" aria-label="Command line" title="Skills from the command line" onClick={() => setCli(true)} />
                 {phone ? (
                   <SubBarIconButton icon={Plus} aria-label="Add skill" onClick={addSkill} />
                 ) : (
