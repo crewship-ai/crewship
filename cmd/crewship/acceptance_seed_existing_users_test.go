@@ -104,8 +104,11 @@ func runExistingUsersSeedCLI(t *testing.T, cfg string) string {
 	// The shipped seed now provisions 44 profiles through the real password
 	// handlers. API hashing is race-instrumented in this test process; keep
 	// a bounded budget for the full roster rather than the former four users.
+	// Green CI race shards took 120-135s per run and a loaded runner crossed
+	// the former 3-minute bound twice on main; the budget only catches a hung
+	// seed, so leave room for runner variance.
 	binary := buildCrewshipBinary(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Minute)
 	defer cancel()
 	raw, err := os.ReadFile(cfg)
 	if err != nil {
