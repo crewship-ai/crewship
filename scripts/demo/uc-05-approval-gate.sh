@@ -25,7 +25,7 @@ demo_say "Without --wait: the receipt comes back as soon as the run parks (--wai
 run_receipt approval-gate-demo --inputs "{\"action\":\"$ACTION\"}"
 assert_nonempty "run id in the receipt" "$RUN_ID"
 assert_eq "the run is WAITING" "WAITING" "$RUN_STATUS"
-token="$(printf '%s\n' "$DEMO_OUT" | sed -nE 's/.*waitpoints approve ([a-f0-9]{16,}).*/\1/p' | head -1)"
+token="$(printf '%s\n' "$DEMO_OUT" | sed -nE 's/.*waitpoints approve ((wp_)?[a-f0-9]{16,}).*/\1/p' | head -1)"
 assert_nonempty "the receipt names the waitpoint and the approve command" "$token"
 
 demo_step "The gate is visible everywhere a human looks"

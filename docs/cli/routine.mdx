@@ -2224,15 +2224,42 @@ crewship routine waitpoints list --json
 
 **Output columns:** TOKEN, RUN ID, STEP, KIND, CREATED, TIMEOUT, PROMPT
 
+TOKEN is the waitpoint's public id (`wp_…`). It is not a credential — it is how
+`show`, `approve`, `reject` and `callback-url` name the waitpoint. Machine
+output carries `callback_available` instead of a callback URL.
+
 ### `waitpoints show <token>`
 
-Full prompt + metadata for a single waitpoint.
+Full prompt + metadata for a single waitpoint. When a callback URL can be
+minted for it, `show` prints the `callback-url` command rather than a URL.
+
+### `waitpoints callback-url <token>`
+
+```bash
+crewship routine waitpoints callback-url wp_abc123
+# https://crewship.example.com/api/v1/waitpoint-tokens/wpt_5d0e…
+```
+
+Mints the URL an external system (CI job, approval service, vendor webhook)
+POSTs to complete the waitpoint without signing in:
+
+```bash
+curl -X POST <callback_url> -d '{"approved":true,"payload":{}}'
+```
+
+The URL is printed **once**: Crewship stores only a digest of its secret, so it
+cannot be listed or shown again. Running the command again mints a new URL and
+the previous one stops working — use that to replace a lost or leaked URL.
+Requires MANAGER or above; each mint is audited as
+`waitpoint.callback_token.minted`. A waitpoint with a `decision_form`, or a
+held routine action, has no callback URL (`422`). `-f json` returns
+`{"token","callback_url","rotated"}`.
 
 ### `waitpoints approve <token>` / `waitpoints reject <token>`
 
 ```bash
-crewship routine waitpoints approve wpt_abc123 --comment "LGTM"
-crewship routine waitpoints reject  wpt_abc123 --comment "needs revision"
+crewship routine waitpoints approve wp_abc123 --comment "LGTM"
+crewship routine waitpoints reject  wp_abc123 --comment "needs revision"
 ```
 
 An approved legacy wait returns the literal `waited:approval:approved`; its
@@ -2293,11 +2320,10 @@ continuing branch such as revision. Legacy waits keep `waited:approval:approved`
 
 The same form is available in the run detail and Inbox. A rich decision never
 uses standing trust and cannot be completed by a legacy body-only approval.
-The public token callback cannot answer it either: a waitpoint that carries a
-`decision_form` refuses the callback with `403` (typed decisions require an
-authenticated workspace member) and the attempt is recorded as
-`waitpoint.decision_refused`; such rows list no `callback_url`. Legacy binary
-approvals keep the callback. Expiry and the first
+The public callback cannot answer it either: no callback URL can be minted for
+a waitpoint that carries a `decision_form` (`422`; typed decisions require an
+authenticated workspace member), and such rows list `callback_available:
+false`. Binary approvals can still be completed through a minted callback URL. Expiry and the first
 accepted verdict are enforced by the waitpoint store.
 
 ## `crewship routine trust`

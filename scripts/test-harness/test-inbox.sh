@@ -94,7 +94,7 @@ else
 
   # The waitpoint token the CLI prints is the same source_id the inbox row
   # carries; that identity is what lets the UI's Approve reach the right gate.
-  TOKEN="$(grep -oE 'waitpoints approve [a-f0-9]{16,}' <<<"$RUN_OUT" | awk '{print $3}' | head -1)"
+  TOKEN="$(grep -oE 'waitpoints approve (wp_)?[a-f0-9]{16,}' <<<"$RUN_OUT" | awk '{print $3}' | head -1)"
   assert_nonempty "run reports an approval token" "$TOKEN"
 
   # Give the write-through a moment: the row is inserted by the waitpoint

@@ -196,7 +196,8 @@ func seedInboxRows(now time.Time) []seedRow {
 // ids, where inbox.Insert dedupes silently while the success line still
 // reported them as written.
 //
-// Base 36 keeps it short. The `run_seed_` and `seed_` prefixes are load-bearing
+// Base 36 keeps it short. The `run_seed_`, `seed_` and (waitpoints) `wp_seed_`
+// prefixes are load-bearing
 // and must not move: --clear finds what this wrote by LIKE on exactly those.
 func seedSuffix(now time.Time) string {
 	return strconv.FormatInt(now.UnixNano(), 36)
@@ -223,7 +224,7 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 
 	if clear {
 		res, err := db.ExecContext(ctx,
-			`DELETE FROM inbox_items WHERE workspace_id = ? AND source_id LIKE 'seed_%'`, workspaceID)
+			`DELETE FROM inbox_items WHERE workspace_id = ? AND (source_id LIKE 'seed_%' OR source_id LIKE 'wp_seed_%')`, workspaceID)
 		if err != nil {
 			return fmt.Errorf("clear seeded inbox rows: %w", err)
 		}
@@ -235,7 +236,7 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 		}
 		n2, _ := res2.RowsAffected()
 		if _, err := db.ExecContext(ctx,
-			`DELETE FROM pipeline_waitpoints WHERE workspace_id = ? AND token LIKE 'seed_%'`, workspaceID); err != nil {
+			`DELETE FROM pipeline_waitpoints WHERE workspace_id = ? AND (token LIKE 'seed_%' OR token LIKE 'wp_seed_%')`, workspaceID); err != nil {
 			return fmt.Errorf("clear seeded waitpoint tokens: %w", err)
 		}
 		if _, err := db.ExecContext(ctx,
@@ -297,6 +298,13 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	written := 0
 	for i, row := range seedInboxRows(now) {
 		sourceID := fmt.Sprintf("seed_%s_%d", suffix, i)
+		if row.kind == inbox.KindWaitpoint {
+			// A waitpoint's source id is its public id, which the waitpoint
+			// store recognises by the "wp_" prefix (#1910); anything else it
+			// treats as a legacy secret and migrates to a fresh id at boot,
+			// which --clear would then no longer find.
+			sourceID = "wp_" + sourceID
+		}
 		payload := row.payload
 		if payload == nil {
 			payload = map[string]any{}
