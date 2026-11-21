@@ -620,8 +620,10 @@ reason is one of `workspace_policy_disabled`, `crew_not_allowed`,
 `instruction_unusable`, `agent_unavailable`, `not_owner_or_delegated`,
 `duplicate_task`, `capacity`, `credential_expiring`, `clock_unavailable` or
 `task_too_large`. Telling these apart reads only the requester's own chat and
-message, that chat's agent and the workspace policy row. A database error
-keeps the generic body. The reasons are deliberately not opaque to an
+message, that chat's agent and the workspace policy row. A database error in
+those reads keeps the generic body. The owner/delegation and policy checks
+report a failed lookup as a refusal, so a transient error there can surface as
+`not_owner_or_delegated` or a policy reason; it is still a denial. The reasons are deliberately not opaque to an
 authorized editor: one who holds their own recorded instruction learns whether
 the workspace agent artifact policy is on and whether it allows that agent's
 crew. The owner/delegation check runs after the instruction and policy checks,
