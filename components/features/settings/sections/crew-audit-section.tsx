@@ -439,7 +439,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
 
       {/* Column heads — the rows below are a table, read left to right. */}
       {!loading && logs.length > 0 && (
-        <div className="hidden grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 bg-surface-subtle px-4 py-1.5 sm:grid">
+        <div className="hidden grid-cols-[14px_72px_minmax(0,7rem)_minmax(0,1fr)_auto] items-center xl:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto] gap-3 border-b border-border/60 bg-surface-subtle px-4 py-1.5 sm:grid">
           <span />
           <span className="eyebrow text-muted-foreground">Time</span>
           <span className="eyebrow text-muted-foreground">Who</span>
@@ -610,7 +610,7 @@ function AuditRow({
         aria-controls={`audit-detail-${log.id}`}
         className={cn(
           "grid w-full items-center gap-x-3 gap-y-1 border-b border-border/40 px-4 py-2 text-left transition-colors hover:bg-[var(--row-hover-bg)]",
-          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
+          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,7rem)_minmax(0,1fr)_auto] xl:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
           expanded && "bg-[var(--selection-bg)]",
         )}
         onClick={onToggle}
@@ -627,7 +627,7 @@ function AuditRow({
         <span className="hidden min-w-0 sm:block"><Actor user={log.user} /></span>
         <span className="flex min-w-0 items-center gap-2 text-xs">
           <StatusPill tone={verbTone(log.action)} label={actionVerb(log.action)} />
-          <span className="shrink-0 text-muted-foreground">{entityNoun(log.entity_type)}</span>
+          <span className="min-w-0 shrink truncate text-muted-foreground">{entityNoun(log.entity_type)}</span>
           <span className="truncate font-medium text-foreground" title={label}>{shortIdLabel(label)}</span>
         </span>
         <span className="flex items-center gap-2">
@@ -734,7 +734,7 @@ function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highl
         aria-expanded={open}
         className={cn(
           "grid w-full items-center gap-x-3 gap-y-1 border-b border-border/40 px-4 py-2 text-left transition-colors hover:bg-[var(--row-hover-bg)]",
-          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
+          "grid-cols-[14px_minmax(0,1fr)_auto] sm:grid-cols-[14px_72px_minmax(0,7rem)_minmax(0,1fr)_auto] xl:grid-cols-[14px_72px_minmax(0,12rem)_minmax(0,1fr)_auto]",
           open && "bg-[var(--selection-bg)]",
         )}
         onClick={() => setOpen((v) => !v)}

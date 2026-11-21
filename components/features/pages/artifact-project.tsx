@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import Link from "next/link"
+import { ChevronDown } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
@@ -124,6 +126,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion, hosted }: {
  current.current = {submissionScope, draftKey, draft, canWrite:data?.can_write === true && data?.can_send_to_agent === true}
  const selecting = selection?.scope === selectionScope && selection.selecting
  const anchor = selection?.scope === selectionScope ? selection.anchor : undefined
+ const [commentsOpen, setCommentsOpen] = useState(false)
+ const showComments = commentsOpen || !!anchor
  const setSelecting = useCallback((value:boolean) => setSelection(previous => ({...(previous?.scope === selectionScope ? previous : {}),scope:selectionScope,selecting:value})), [selectionScope])
  const setAnchor = useCallback((value:ArtifactAnchor | undefined) => setSelection(previous => ({scope:selectionScope,selecting:previous?.scope === selectionScope && previous.selecting,anchor:value})), [selectionScope])
  useEffect(() => { setSelection(undefined) }, [selectionScope])
@@ -311,11 +315,19 @@ export function ArtifactProject({ workspaceId, slug, initialVersion, hosted }: {
        className="min-h-72 flex-1" onSelect={selection => { if (!canComment || !selecting) return; setAnchor({ version: manifest.version, path, ...selection }); setSelecting(false) }} onNavigate={next => { setScreenPath(next); setAnchor(undefined) }} />
      : <iframe ref={frame} key={`${manifest?.version}:${path}:${token}`} title="Artifact preview" data-screen={path} className="min-h-72 w-full flex-1 border-0 bg-white" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={source} />}
    </section>
-   <aside className="w-full overflow-auto border-t p-4 md:w-80 md:border-l md:border-t-0" aria-label="Comments">
-    <h2 className="mb-3 font-semibold">Comments</h2>
+   {/* On a phone the preview keeps the screen: Comments is one row under it
+       that opens on a tap, or when an element has been picked (#5621). */}
+   <aside className={cn("w-full border-t md:w-80 md:overflow-auto md:border-l md:border-t-0 md:p-4", showComments ? "overflow-auto max-md:max-h-[60%]" : "max-md:shrink-0")} aria-label="Comments">
+    <h2 className="mb-3 font-semibold max-md:hidden">Comments</h2>
+    <button type="button" aria-expanded={showComments} aria-controls="artifact-comments-body" onClick={() => setCommentsOpen(!showComments)} className="flex w-full items-center justify-between gap-2 px-4 text-left font-semibold md:hidden">
+     <span>Comments{data.comments.length > 0 ? ` · ${data.comments.length}` : ""}</span>
+     <ChevronDown aria-hidden className={cn("size-4 text-muted-foreground transition-transform", showComments && "rotate-180")} />
+    </button>
+    <div id="artifact-comments-body" className={cn("max-md:px-4 max-md:pb-4", !showComments && "max-md:hidden")}>
     {canComment && <div {...unseen(returning)} className="mb-4 space-y-2">{anchor ? <blockquote className="rounded border p-2 text-sm">Version {anchor.version} · {anchor.path}<p>{anchor.quote || anchor.selector}</p></blockquote> : <p className="text-sm text-muted-foreground">Select an element in the preview to give the agent an exact location.</p>}<textarea disabled={!draftKey||draftState?.key!==draftKey||adopting==="artifact-comment"} aria-label={data.can_write && data.can_send_to_agent ? "Comment for agent" : "Comment"} value={draft} onChange={event => setDraft(event.target.value)} className="min-h-24 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" /><p className="text-xs text-muted-foreground">{storageError ? "Browser storage unavailable. Copy your draft before leaving." : "Your unsent comment is saved in this browser."}</p><Button disabled={!anchor || !draft.trim() || comment.isPending} onClick={send}>{data.can_write && data.can_send_to_agent ? "Send to agent" : "Post comment"}</Button></div>}
     {data.comments.map(item => <article key={item.id} className="mb-3 rounded border p-3 text-sm"><p className="mb-1 text-xs text-muted-foreground">Version {item.version} · {item.path}</p><blockquote className="mb-2 border-l-2 pl-2">{item.quote}</blockquote><p>{item.text}</p>{item.task_id && <p className="mt-2 text-xs">{item.replies?.length ? "Answered" : delivery[item.id] ?? "Queued for agent"}</p>}{data.can_write && data.can_send_to_agent === true && data.origin && item.task_id && !item.replies?.length && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(item); setDelivery(previous => ({...previous,[item.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed."})) }}>Retry agent delivery</Button>}{item.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">Version {reply.version}: {reply.text}</p>)}</article>)}
     {data.shared_version > 0 && <Link className="inline-flex items-center text-sm underline coarse:min-h-[44px]" onClick={event => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && version !== data.shared_version) selectVersion(data.shared_version) }} href={hosted ? hosted.versionHref(data.shared_version) : `/pages/${encodeURIComponent(slug)}?artifact=1&version=${data.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {data.shared_version}</Link>}
+    </div>
    </aside>
   </div>
  </main>

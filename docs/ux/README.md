@@ -244,6 +244,13 @@ producer, and both are links.
 - [ ] Nothing internal leaks: no `_crewship-setup-guide` slugs, no cuids, no raw
       status enums in copy (`IN_PROGRESS` → "In progress").
 - [ ] Mobile 390px: no horizontal overflow, 44px targets, one-column stacks.
+- [ ] Touch: nothing is revealed by hover alone (`opacity-0 group-hover:opacity-100`
+      also carries `coarse:opacity-100`); a floor above 44px on a control is
+      written important (`min-w-[112px]!`), because the unlayered touch rule in
+      `app/globals.css` otherwise resets it to 44px; a wide child (a week grid,
+      a long link) sits in a parent that can shrink (`min-w-0`,
+      `grid-cols-[minmax(0,1fr)]`) so it scrolls or wraps inside its own box.
+      `components/__tests__/touch-layout-guards.test.ts` holds the first two.
 - [ ] Copy says what it is: an account API key is not a CLI token; "$0.00" is not
       "not metered"; "Available" is not "unknown".
 

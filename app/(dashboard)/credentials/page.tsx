@@ -585,7 +585,7 @@ export default function CredentialsPage() {
     : loginFilters.status !== "all" ? PROVIDER_VIEW_LABEL[loginFilters.status] ?? "AI providers" : "AI providers"
   const headerActions = (
     <>
-      <SubBarIconButton icon={Terminal} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
+      <SubBarIconButton icon={Terminal} className="max-md:hidden" aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
       {space === "providers" ? (
         <>
           {canManage && (

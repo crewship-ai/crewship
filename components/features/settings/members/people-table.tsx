@@ -70,7 +70,7 @@ export function PeopleTable({
           <th className={cn(head, caps ? "w-[30%]" : "w-1/2")}>Person</th>
           <th className={cn(head, "w-36")}>Role</th>
           {caps && <th className={head}>Abilities</th>}
-          <th className={cn(head, "w-24")}>Joined</th>
+          <th className={cn(head, "w-24 max-xl:hidden")}>Joined</th>
           <th className={cn(head, "w-10")}><span className="sr-only">Open</span></th>
         </tr>
       </thead>
@@ -128,7 +128,7 @@ export function PeopleTable({
                     </span>
                   </td>
                 )}
-                <td className={cn(cell, "text-label tabular-nums text-muted-foreground")}>{joinedDate(m.created_at)}</td>
+                <td className={cn(cell, "text-label tabular-nums text-muted-foreground max-xl:hidden")}>{joinedDate(m.created_at)}</td>
                 <td className={cn(cell, "text-muted-foreground-soft group-hover:text-foreground")}><ChevronRight className="h-3.5 w-3.5" aria-hidden /></td>
               </tr>
             )
@@ -162,7 +162,7 @@ export function PeopleList({ groups, caps, currentUserId, onOpen }: {
             const above = caps ? aboveRole(m, granted) : []
             return (
               <button key={m.id} type="button" onClick={() => onOpen(m)} title={`${label} · ${m.user.email}`} data-member={m.user.id}
-                className="flex min-h-[60px] w-full items-center gap-3 border-b border-border/60 px-4 py-2 text-left active:bg-[var(--row-hover-bg)]">
+                className="flex min-h-[60px]! w-full items-center gap-3 border-b border-border/60 px-4 py-2 text-left active:bg-[var(--row-hover-bg)]">
                 <UserAvatar name={m.user.full_name} email={m.user.email} src={m.user.avatar_url} className="h-9 w-9" textClassName="text-label" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 text-body">

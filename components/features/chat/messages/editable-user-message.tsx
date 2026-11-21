@@ -102,12 +102,12 @@ export function EditableUserMessage({
   }
 
   return (
-    <div className={cn("flex flex-col gap-1 ml-auto max-w-[80%]", className)}>
+    <div className={cn("flex min-w-0 flex-col gap-1 ml-auto max-w-[80%]", className)}>
       {/* pre-wrap: the same text is edited in a <textarea> above, so a bubble
           that collapses newlines shows something the editor does not. It also
           keeps the attachment block of a message sent with a file readable
           (lib/attachment-message.ts) instead of running it onto one line. */}
-      <div className="whitespace-pre-wrap rounded-2xl rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 text-sm">
+      <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 text-sm">
         {text}
       </div>
       {/* Edit & resend: hover, keyboard focus, and always on touch (#3874). */}

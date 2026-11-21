@@ -219,7 +219,7 @@ function AbilitiesCard({ member, label, currentUserId, isAdmin, granted, serverG
                   disabled={lock !== null || busy || capsLoading}
                   onClick={() => onCell(member, cap, !isOn)}
                   data-unsaved={unsaved || undefined}
-                  className={cn("flex w-full items-center gap-3 border-b border-border/60 px-4 py-2.5 text-left coarse:min-h-[52px] last:border-b-0",
+                  className={cn("flex w-full items-center gap-3 border-b border-border/60 px-4 py-2.5 text-left coarse:min-h-[52px]! last:border-b-0",
                     lock === null && "hover:bg-[var(--row-hover-bg)]", unsaved && "bg-[var(--save-bar-bg)]")}>
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle text-muted-foreground"><Icon className="h-3.5 w-3.5" aria-hidden /></span>
                   <span className="min-w-0 flex-1">

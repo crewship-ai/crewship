@@ -32,11 +32,11 @@ export function MembersAttention({ findings }: { findings: Finding[] }) {
           <Check className="h-3.5 w-3.5 text-success" aria-hidden />Nothing needs attention — nobody holds more than their role suggests.
         </p>
       ) : findings.map((f) => (
-        <div key={f.key} data-finding={f.key} className="flex items-center gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
+        <div key={f.key} data-finding={f.key} className="flex items-center gap-3 max-md:flex-wrap border-b border-border/60 px-4 py-3 last:border-b-0">
           <span className="icon-tile grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ "--ic": TINT[f.severity] } as CSSProperties} aria-hidden>
             {f.severity === "low" ? <Info className="h-3.5 w-3.5" /> : <TriangleAlert className="h-3.5 w-3.5" />}
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 max-md:basis-[calc(100%-3rem)]">
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill tone={toStatusTone(f.severity)} label={f.severity.charAt(0).toUpperCase() + f.severity.slice(1)} />
               <p className="min-w-0 text-label font-medium leading-snug text-foreground">{f.title}</p>
