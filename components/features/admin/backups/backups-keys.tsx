@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { StatusPill } from "@/components/ui/status-pill"
-import { Gate } from "./backups-kit"
+import { Gate, InlineInput } from "./backups-kit"
 import { InfoTip, InstanceBadge } from "./backups-storage"
 import {
   formatWhen, shortKey, type AlertChannel, type AlertDelivery, type AlertEvents, type BackupIncident, type BackupRecipient, type BackupSettings, type VaultKeysResponse,
@@ -81,6 +81,11 @@ export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[];
       {list.map((r) => (
         <SettingsRow key={r.id} label={`${r.name} · ${shortKey(r.public_key)}`}
           description={[r.holder, r.used_by?.length ? `used by ${r.used_by.join(", ")}` : ""].filter(Boolean).join(" · ") || undefined}>
+          {(list.length === 1 || !!r.used_by?.length) && (
+            <span className="text-label text-muted-foreground" data-slot="remove-reason">
+              {r.used_by?.length ? `In use by ${r.used_by.join(", ")}` : "The last key: every backup is encrypted"}
+            </span>
+          )}
           <Button type="button" size="sm" variant="outline" className={rowButton} onClick={() => setRemoving(r)} disabled={list.length === 1 || !!r.used_by?.length}
             title={list.length === 1 ? "The last key cannot go: every backup is encrypted" : r.used_by?.length ? `Used by ${r.used_by.join(", ")}: change the plan first` : undefined}>Remove</Button>
         </SettingsRow>
@@ -160,7 +165,7 @@ function VaultList({ vault, ctx, reload }: { vault: VaultKeysResponse; ctx: Sect
 const EVENTS: { key: keyof AlertEvents; label: string }[] = [
   { key: "failed", label: "a run fails" },
   { key: "incomplete", label: "contents are incomplete" },
-  { key: "stale", label: "newest backup older than {h} h" },
+  { key: "stale", label: "the newest backup is older than" },
   { key: "offsite", label: "off-site copy unreachable" },
   { key: "drill", label: "a drill fails or is overdue" },
 ]
@@ -256,14 +261,23 @@ export function AlertRoute({ settings, chosen, onChange, ctx }: {
   )
 }
 
+/** The last heartbeat ping: when, and how it was answered. */
+export function heartbeatLine(s: Pick<BackupSettings, "heartbeat_url" | "heartbeat_last_at" | "heartbeat_last_ok" | "heartbeat_last_error">): string {
+  if (!s.heartbeat_url) return "No URL set: nothing is pinged"
+  if (!s.heartbeat_last_at) return "Not pinged yet"
+  const when = `Last ping ${formatWhen(s.heartbeat_last_at)}`
+  return s.heartbeat_last_ok === false ? `${when}, not answered: ${s.heartbeat_last_error || "no reason recorded"}` : `${when}, answered OK`
+}
+
 export function AlertsBody({ settings, incident, ctx, reload }: { settings: BackupSettings; incident: BackupIncident | null; ctx: SectionCtx; reload?: () => void }) {
   const [events, setEvents] = React.useState(settings.events)
   const [url, setUrl] = React.useState(settings.heartbeat_url ?? "")
   const [channels, setChannels] = React.useState(settings.channels ?? [])
+  const [staleHours, setStaleHours] = React.useState(settings.stale_alert_hours)
   const offsiteKnown = settings.destinations.some((d) => d.kind !== "local" && d.available)
   const channelsDirty = JSON.stringify(channels) !== JSON.stringify(settings.channels ?? [])
   const changed = (Object.keys(events) as (keyof AlertEvents)[]).filter((k) => events[k] !== settings.events[k]).length
-    + (url !== (settings.heartbeat_url ?? "") ? 1 : 0) + (channelsDirty ? 1 : 0)
+    + (url !== (settings.heartbeat_url ?? "") ? 1 : 0) + (channelsDirty ? 1 : 0) + (staleHours !== settings.stale_alert_hours ? 1 : 0)
   return (
     <>
       <SettingsCard icon={Bell} tint="var(--warn)" title="Alerts" description="Who hears when a backup goes wrong">
@@ -299,7 +313,13 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
             <SettingsRow key={e.key} className={cn(locked && "opacity-60")}
               label={<label className="flex items-center gap-2">
                 <Checkbox checked={events[e.key]} disabled={locked} onCheckedChange={(v) => setEvents({ ...events, [e.key]: v === true })} />
-                {e.label.replace("{h}", String(settings.stale_alert_hours))}
+                {e.label}
+                {e.key === "stale" && (
+                  <span className="inline-flex items-center gap-1">
+                    <InlineInput aria-label="Alert when the newest backup is older than (hours)" type="number" min={1} max={2160} value={staleHours}
+                      onChange={(ev) => setStaleHours(Math.min(2160, Math.max(1, Number(ev.target.value) || 1)))} />h
+                  </span>
+                )}
               </label>}
               description={locked ? "Needs off-site storage first" : undefined}>
               {null}
@@ -309,15 +329,20 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
         <SettingsRow
           label={<span className="inline-flex items-center gap-1.5">Heartbeat URL
             <InfoTip label="About the heartbeat">An outside service you point here alerts when the pings stop — the case the inbox cannot report, because it is down too.</InfoTip></span>}
-          description="Pinged after each successful run; not proof that every backup is healthy">
+          description={<>
+            Pinged after each successful run; not proof that every backup is healthy
+            <span className={cn("block", settings.heartbeat_last_ok === false ? "text-destructive" : "text-muted-foreground")} data-slot="heartbeat-last">
+              {heartbeatLine(settings)}
+            </span>
+          </>}>
           <Input aria-label="Heartbeat URL" type="url" className={settingsControl} placeholder="https://hc.example.com/ping/…" value={url} onChange={(e) => setUrl(e.target.value)} />
         </SettingsRow>
       </SettingsCard>
       {/* The page's Save bar commits these; it says "Saved" and, on a failure, why not. */}
       <SettingsSaveBar label="Alerts" count={changed}
-        onDiscard={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? ""); setChannels(settings.channels ?? []) }}
+        onDiscard={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? ""); setChannels(settings.channels ?? []); setStaleHours(settings.stale_alert_hours) }}
         onSave={async () => {
-          const patch = { events, heartbeat_url: url.trim() || null, ...(channelsDirty ? { channels } : {}) }
+          const patch = { events, heartbeat_url: url.trim() || null, ...(channelsDirty ? { channels } : {}), ...(staleHours !== settings.stale_alert_hours ? { stale_alert_hours: staleHours } : {}) }
           if (await performSave(ctx.demo, () => saveBackupSettings(patch))) reload?.()
         }} />
     </>

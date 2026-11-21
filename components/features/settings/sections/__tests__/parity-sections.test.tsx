@@ -47,15 +47,14 @@ describe("PAR-097 accent colour", () => {
     expect(group.className.split(" ")).not.toContain("gap-y-4")
   })
 
-  it("puts the team colour in a plain row with Use, not a dashed box", () => {
+  it("puts the team colour in the same group as the swatches, with its tooltip", () => {
     hooks.hex = "#E11D48"
     render(<AppearanceSection />)
-    const card = screen.getByRole("region", { name: "Accent" })
-    expect(card.querySelector("[class*='border-dashed']")).toBeNull()
-    const row = screen.getByTestId("workspace-accent-hint")
-    expect(row.getAttribute("data-slot")).toBe("settings-row")
-    expect(row).toHaveTextContent("The workspace brand colour from General › Artifacts appearance")
-    expect(within(row).getByRole("radio", { name: "Team colour" })).toHaveTextContent("Use")
+    const group = screen.getByRole("radiogroup", { name: "Accent colour" })
+    const team = within(group).getByRole("radio", { name: "Team colour" })
+    expect(team).toHaveAttribute("title", expect.stringContaining("General › Artifacts appearance"))
+    expect(team.className.split(" ")).toContain("rounded-full")
+    expect(group.querySelector("[class*='border-dashed']")).toBeNull()
   })
 })
 
@@ -177,7 +176,7 @@ describe("PAR-119 who may reveal", () => {
     expect(card).not.toHaveTextContent("credentials:reveal, ")
     expect(card).not.toHaveTextContent("can read secrets in plaintext")
     expect(within(card).getByText(/Owners and admins by default\. More than 2 shows a warning\./)).toBeInTheDocument()
-    expect(within(card).getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?flag=reveal")
+    expect(within(card).getByRole("link", { name: /Manage in Members/ })).toHaveAttribute("href", "/settings/members?status=look")
     await waitFor(() => expect(card.querySelectorAll("[data-slot=reveal-holders] > *").length).toBeGreaterThan(0))
   })
 })

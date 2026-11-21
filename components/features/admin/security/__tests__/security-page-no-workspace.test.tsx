@@ -14,6 +14,7 @@ vi.mock("@/components/features/admin/keeper-judge-card", () => ({ KeeperJudgeCar
 vi.mock("@/components/features/admin/keeper-profile-card", () => ({ KeeperProfileCard: () => <div data-testid="card-rules" /> }))
 vi.mock("@/components/features/admin/judge-models-card", () => ({ JudgeModelsCard: () => <div data-testid="card-background" /> }))
 vi.mock("@/components/features/admin/keeper-health-card", () => ({ KeeperHealthCard: () => null }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
 
 import { SecurityPage } from "../security-page"
 import { INSTANCE_SCOPE } from "@/lib/admin-api"
@@ -48,5 +49,19 @@ describe("Security with no workspace", () => {
     expect(await screen.findByTestId("card-judge")).toHaveAttribute("data-ws", INSTANCE_SCOPE)
     fireEvent.click(screen.getByRole("button", { name: /^Background checks/ }))
     expect(await screen.findByTestId("card-background")).toBeInTheDocument()
+  })
+})
+
+// Workspace-scoped calls (a review run, the findings test, the Keeper health
+// card, "Try a request", the history of one request) need a workspace. With
+// none the control is left out and the page says why; nothing is asked of the
+// server in its name.
+describe("workspace-scoped controls with no workspace", () => {
+  it("leaves out Try a request and says why", async () => {
+    window.history.replaceState(null, "", "/admin/security?view=activity")
+    render(<SecurityPage />)
+    expect(await screen.findByTestId("ask-unavailable")).toHaveTextContent("Try a request needs a workspace")
+    expect(screen.queryByRole("button", { name: /Try a request/ })).toBeNull()
+    expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("/keeper/ask"))).toBe(false)
   })
 })

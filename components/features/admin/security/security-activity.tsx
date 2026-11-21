@@ -1,106 +1,129 @@
 "use client"
 
 import * as React from "react"
-import { Shield } from "lucide-react"
+import { BookOpen, Brain, ChevronRight, Eye, KeyRound, Play, Sparkles, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { SettingsSegmented, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
-import { redactSecrets } from "@/app/(dashboard)/admin/utils"
+import { Button } from "@/components/ui/button"
+import { Segmented } from "@/components/ui/segmented"
+import { ShowMore } from "@/components/ui/show-more"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import type { KeeperWsStatus } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
-import { STREAMS, filterActivity, streamOf, type DecisionFilter, type Stream } from "./security-model"
-import { StatusPill } from "@/components/ui/status-pill"
-import { formatStatus, type StatusTone } from "@/lib/format-status"
+import { STREAMS, filterActivity, type DecisionFilter, type Stream } from "./security-model"
+import { DecisionChip } from "./decision-chip"
+import { RequestSheet, subject, when } from "./request-sheet"
+import { AskDialog } from "./ask-dialog"
+import { useDecideAccess } from "./decide-access"
+import { WorkspacePicker } from "./workspace-picker"
+import type { InstanceGovRow } from "./use-instance-keeper"
 
-const DECISION_TONE: Record<string, StatusTone> = {
-  ALLOW: "success",
-  DENY: "danger",
-  ESCALATE: "warn",
-  PENDING: "muted",
+export { DecisionChip }
+
+export const STREAM_ICON: Record<Stream, LucideIcon> = {
+  requests: KeyRound, skill_review: Sparkles, behavior: Eye, memory_health: Brain, negative_learning: BookOpen,
 }
 
-export function DecisionChip({ decision }: { decision: string | null | undefined }) {
-  const d = decision ?? "PENDING"
-  // The stored decision is an enum (ALLOW, DENY); the pill shows its word.
-  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={formatStatus(d).label} />
-}
-
-const when = (iso: string) => new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
-
-/** What a row is about: the credential for a request, the kind for a review. */
-function subject(e: KeeperLogEntry): string {
-  if (streamOf(e) === "requests") return e.credential_name || "—"
-  return STREAMS.find((s) => s.key === streamOf(e))?.label ?? e.request_type
-}
+const DECISIONS: { value: DecisionFilter; label: string }[] = [
+  { value: "all", label: "All" }, { value: "ALLOW", label: "Allowed" }, { value: "DENY", label: "Denied" },
+  { value: "ESCALATE", label: "Escalated" }, { value: "PENDING", label: "Waiting" },
+]
 
 /**
- * Admin › Security › Activity: credential decisions and the four Phase-2
- * reviews as one list, narrowed by stream (from the side panel) and decision.
- * A row opens its full record: intent, reason, command, the judge's prompt and
- * its raw answer, secrets redacted.
+ * Admin › Security › Activity: credential decisions and the four reviews as
+ * one list, narrowed by kind (the chips), decision and workspace, all on the
+ * server (it pages through the whole history, 25 a step). A row opens its
+ * record in a sheet; "Try a request" asks the real judge in the admin's
+ * current workspace, when there is one.
  */
-export function SecurityActivity({ entries, stream, onStream, live, error, server }: {
+export function SecurityActivity({ entries, stream, onStream, streamCount, streamTotal, live, error, decision, onDecision, total, loading, onMore, workspaces, picked, onPick, session, onChanged }: {
   entries: KeeperLogEntry[]
   stream: Stream | "all"
   onStream: (s: Stream | "all") => void
+  /** Per kind, from the server, over the workspaces asked for. */
+  streamCount: Record<Stream, number>
+  streamTotal: number
   live: KeeperWsStatus
   error: string | null
-  /**
-   * The instance log, filtered and paged on the server (review R6): the
-   * entries already match stream and decision, the counts and total come
-   * from the server over the whole history, and more pages load on demand.
-   * Without it, the list is filtered here, in what was read.
-   */
-  server?: {
-    decision: DecisionFilter
-    onDecision: (d: DecisionFilter) => void
-    counts: { allow: number; deny: number; escalate: number; pending: number }
-    total: number
-    loading: boolean
-    onLoadMore: () => void
-  }
+  decision: DecisionFilter
+  onDecision: (d: DecisionFilter) => void
+  /** Rows the whole filter matches, for paging. */
+  total: number
+  loading: boolean
+  onMore: () => void
+  workspaces: InstanceGovRow[]
+  picked: string[]
+  onPick: (slugs: string[]) => void
+  /** The admin's current workspace, for "Try a request". Null: not known. */
+  session: { id: string; name: string } | null
+  onChanged: () => void
 }) {
-  const [localDecision, setLocalDecision] = React.useState<DecisionFilter>("all")
-  const decision = server ? server.decision : localDecision
-  const setDecision = server ? server.onDecision : setLocalDecision
+  // Asking is `roleManage` in the current workspace: an OWNER or ADMIN there.
+  const { allowed: canAct, name: sessionName } = useDecideAccess(session?.id, session?.name)
   const [open, setOpen] = React.useState<KeeperLogEntry | null>(null)
-  const inStream = filterActivity(entries, stream, "all")
+  const [ask, setAsk] = React.useState(false)
+  // Rows already match stream and decision (the server filtered); this keeps a
+  // live row that arrived in another kind out of the list until the reload.
   const rows = filterActivity(entries, stream, decision)
-  const serverCount: Record<string, number> | null = server
-    ? { ALLOW: server.counts.allow, DENY: server.counts.deny, ESCALATE: server.counts.escalate, PENDING: server.counts.pending }
-    : null
-  const count = (d: string) => serverCount ? serverCount[d] ?? 0 : inStream.filter((e) => (e.decision ?? "PENDING") === d).length
   const meta = STREAMS.find((s) => s.key === stream)
-  // Rows from the instance log carry their workspace; show it.
   const byWorkspace = entries.some((e) => !!e.workspace_name)
 
   return (
     <>
-      <SettingsSummary>
-        <SummaryItem tone={live === "connected" ? "success" : undefined}>{live === "connected" ? "Live" : live === "connecting" ? "Connecting…" : "Not live"}</SummaryItem>
-        <SummaryItem n={count("ALLOW")}>allowed</SummaryItem>
-        <SummaryItem n={count("DENY")} tone={count("DENY") ? "danger" : undefined}>denied</SummaryItem>
-        <SummaryItem n={count("ESCALATE")} tone={count("ESCALATE") ? "warn" : undefined}>escalated</SummaryItem>
-        <span className="ml-auto">
-          <SettingsSegmented label="Decision" value={decision} onChange={setDecision}
-            options={[{ value: "all", label: "All" }, { value: "ALLOW", label: "Allow" }, { value: "DENY", label: "Deny" }, { value: "ESCALATE", label: "Escalate" }]} />
-        </span>
-      </SettingsSummary>
+      <div role="group" aria-label="Kind" className="flex flex-wrap gap-1.5">
+        <button type="button" aria-pressed={stream === "all"} onClick={() => onStream("all")} className={chip(stream === "all")}>
+          All <span className="tabular-nums text-muted-foreground">{streamTotal}</span>
+        </button>
+        {STREAMS.map((s) => {
+          const Icon = STREAM_ICON[s.key]
+          return (
+            <button key={s.key} type="button" aria-pressed={stream === s.key} onClick={() => onStream(s.key)} className={chip(stream === s.key)}>
+              <Icon className="size-3.5" aria-hidden />{s.label} <span className="tabular-nums text-muted-foreground">{streamCount[s.key]}</span>
+            </button>
+          )
+        })}
+      </div>
 
       {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}
 
       <section aria-label="Activity" className="overflow-hidden rounded-card border border-border bg-card">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+          <div className="min-w-0 flex-[1_1_14rem]">
             <h3 className="text-sm font-semibold">{meta?.label ?? "All activity"}</h3>
             <p className="mt-0.5 text-label text-muted-foreground">{meta?.about ?? "Credential decisions and background reviews, newest first"}</p>
           </div>
-          {stream !== "all" && (
-            <button type="button" onClick={() => onStream("all")} className="text-label text-primary-hover hover:underline">Show all</button>
+          <span data-slot="live" className={cn("inline-flex items-center gap-1.5 text-label", live === "connected" ? "text-success" : "text-muted-foreground")}>
+            <span aria-hidden className={cn("size-1.5 rounded-full", live === "connected" ? "bg-success" : "bg-muted-foreground/50")} />
+            {live === "connected" ? "Live" : live === "connecting" ? "Connecting…" : "Not live"}
+          </span>
+          <WorkspacePicker rows={workspaces} value={picked} onChange={onPick} />
+          <Segmented ariaLabel="Decision" value={decision} onChange={onDecision} options={DECISIONS} />
+          {session ? (
+            <>
+              <Button type="button" variant="outline" size="sm" disabled={!canAct} onClick={() => setAsk(true)} aria-describedby={canAct ? undefined : "ask-not-allowed"}><Play className="mr-1 size-3.5" />Try a request</Button>
+              {!canAct && <span id="ask-not-allowed" data-testid="ask-not-allowed" className="text-label text-muted-foreground">Only an Owner or Admin of {sessionName} can try a request</span>}
+            </>
+          ) : (
+            <span data-testid="ask-unavailable" className="text-label text-muted-foreground" title="A request is asked in your current workspace, and you have none">
+              Try a request needs a workspace
+            </span>
           )}
         </div>
-        <div className="overflow-x-auto">
+
+        <ul className="md:hidden" aria-label="Decisions" data-slot="activity-list">
+          {rows.map((e) => (
+            <li key={e.id} className="border-b border-border last:border-b-0">
+              <button type="button" onClick={() => setOpen(e)} className="flex coarse:min-h-[44px] w-full items-center gap-3 px-4 py-3 text-left">
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block truncate text-control font-medium", e.credential_name && "font-mono")}>{subject(e)}</span>
+                  <span className="block truncate text-label text-muted-foreground">{e.agent_name}{e.workspace_name ? ` · ${e.workspace_name}` : ""} · {when(e.created_at)}</span>
+                </span>
+                <DecisionChip decision={e.decision} />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="overflow-x-auto max-md:hidden">
           <table className={settingsTable}>
             <thead>
               <tr>
@@ -110,6 +133,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error, serve
                 <th className={settingsTh}>About</th>
                 <th className={settingsTh}>Decision</th>
                 <th className={cn(settingsTh, "text-right")}>Risk</th>
+                <th className={cn(settingsTh, "w-6")} aria-hidden />
               </tr>
             </thead>
             <tbody>
@@ -120,83 +144,34 @@ export function SecurityActivity({ entries, stream, onStream, live, error, serve
                   {byWorkspace && <td className={cn(settingsTd, "whitespace-nowrap text-muted-foreground")}>{e.workspace_name}</td>}
                   <td className={settingsTd}>{e.agent_name}</td>
                   <td className={settingsTd}>
-                    <span className={cn(streamOf(e) === "requests" && "font-mono text-label")}>{subject(e)}</span>
+                    <span className={cn(e.credential_name && "font-mono text-label")}>{subject(e)}</span>
                     {e.request_type === "execute" && <span className="ml-1.5 text-label text-muted-foreground">exec</span>}
                   </td>
                   <td className={settingsTd}><DecisionChip decision={e.decision} /></td>
                   <td className={cn(settingsTd, "text-right font-mono")}>{e.risk_score != null ? `${e.risk_score}/10` : "—"}</td>
+                  <td className={settingsTd}><ChevronRight className="size-3.5 text-muted-foreground-soft" aria-hidden /></td>
                 </tr>
               ))}
-              {rows.length === 0 && !server?.loading && (
-                <tr><td colSpan={byWorkspace ? 6 : 5} className="px-3 py-8 text-center text-label text-muted-foreground">
-                  {inStream.length === 0 && stream !== "requests" && stream !== "all"
-                    ? "Nothing recorded yet. These reviews run on a schedule, and behaviour only while the watchdog is on."
-                    : "Nothing matches."}
-                </td></tr>
-              )}
             </tbody>
           </table>
         </div>
-        {server && (
-          <div className="flex items-center gap-3 border-t border-border px-4 py-2 text-label text-muted-foreground" data-slot="activity-paging">
-            <span>{server.loading ? "Loading…" : `Showing ${rows.length} of ${server.total}`}</span>
-            {rows.length < server.total && !server.loading && (
-              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-label hover:bg-accent coarse:min-h-[44px]">
-                Load more
-              </button>
-            )}
-          </div>
+        {rows.length === 0 && !loading && (
+          <p className="px-4 py-8 text-center text-label text-muted-foreground">
+            {decision === "all" && stream !== "requests" && stream !== "all" && total === 0
+              ? "Nothing recorded yet. These reviews run on a schedule, and behaviour only while the watchdog is on."
+              : "Nothing here yet. Decisions appear as agents ask."}
+          </p>
         )}
+        <ShowMore shown={entries.length} total={total} nextCount={Math.min(25, Math.max(total - entries.length, 0))} onMore={onMore} noun="decisions" paged={total > 25} loading={loading} />
       </section>
 
-      <Sheet open={!!open} onOpenChange={(o) => { if (!o) setOpen(null) }}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2 text-sm"><Shield className="h-3.5 w-3.5" />{open ? subject(open) : ""}</SheetTitle>
-            <SheetDescription className="sr-only">The full record of this decision</SheetDescription>
-          </SheetHeader>
-          {open && (
-            <div className="mt-2 grid gap-4 px-4 pb-6">
-              <dl className="grid grid-cols-2 gap-3 text-label">
-                <Fact label="Agent" value={open.agent_name} />
-                <Fact label="Decision" value={<DecisionChip decision={open.decision} />} />
-                <Fact label="Kind" value={STREAMS.find((s) => s.key === streamOf(open))?.label ?? open.request_type} />
-                <Fact label="Risk" value={open.risk_score != null ? `${open.risk_score}/10` : "—"} />
-                <Fact label="Time" value={when(open.created_at)} />
-                {open.credential_name && <Fact label="Credential" value={<span className="font-mono">{open.credential_name}</span>} />}
-              </dl>
-              <Block label="Intent" text={open.intent} />
-              {open.reason && <Block label="Reason" text={open.reason} />}
-              {open.command && <Block label="Command" text={open.command} mono />}
-              <Block label="Judge prompt" text={open.ollama_prompt} mono empty="Not recorded (L1 auto-allow or an older request)" />
-              <Block label="Judge answer" text={open.ollama_raw_response} mono empty="Not recorded (L1 auto-allow or an older request)" />
-              <p className="text-label text-muted-foreground">Request <span className="font-mono">{open.id}</span></p>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
+      <RequestSheet entry={open} onClose={() => setOpen(null)} onResolved={onChanged} />
+      {session && <AskDialog open={ask} onOpenChange={setAsk} workspaceId={session.id} workspaceName={session.name} onAsked={onChanged} />}
     </>
   )
 }
 
-function Fact({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-label text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5">{value}</dd>
-    </div>
-  )
-}
-
-function Block({ label, text, mono, empty }: { label: string; text: string | null | undefined; mono?: boolean; empty?: string }) {
-  return (
-    <section aria-label={label}>
-      <h4 className="mb-1 text-micro text-muted-foreground-soft">{label}</h4>
-      {text ? (
-        <pre className={cn("max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2.5 text-label", mono && "font-mono text-micro")}>{redactSecrets(text)}</pre>
-      ) : (
-        <p className="rounded-md border border-border bg-muted/40 p-2.5 text-label italic text-muted-foreground">{empty ?? "—"}</p>
-      )}
-    </section>
-  )
+function chip(on: boolean) {
+  return cn("inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-control transition-colors coarse:min-h-[44px]",
+    on ? "border-primary bg-primary/10 font-medium text-foreground" : "border-border text-muted-foreground hover:text-foreground")
 }

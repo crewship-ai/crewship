@@ -56,7 +56,7 @@ describe("Backups pages", () => {
       .toBe("/admin/backups?section=history&scope=workspaces&ws=dess%2Ccoolify&run=r1")
   })
   it("reads ?section= for each page and sends an unknown one to Overview", () => {
-    for (const s of ["overview", "history", "schedules", "storage", "recovery", "keys"]) {
+    for (const s of ["overview", "history", "coverage", "schedules", "storage", "recovery", "keys"]) {
       expect(initialBackupsSection(`?section=${s}`)).toBe(s)
     }
     expect(initialBackupsSection("")).toBe("overview")

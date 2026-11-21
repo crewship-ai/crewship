@@ -156,6 +156,8 @@ export interface BackupRun {
   legacy?: boolean
   /** How long writes were held for an instance run's consistent copy. */
   hold_ms?: number | null
+  /** The run this one retried (an interrupted run started again). */
+  retry_of?: string | null
 }
 
 export type CategoryKey = "agents" | "memory" | "chats" | "att" | "routines" | "journal" | "creds" | "pages" | "files" | "env"
@@ -197,6 +199,8 @@ export interface BackupPlan {
   enabled: boolean
   next_run_at: string | null
   last_run_at: string | null
+  /** False for a plan that backs up only some kinds: it never protects a workspace by itself. */
+  counts_as_protection?: boolean
 }
 
 /** GET …/plans/{id}/next?n=5 */
@@ -526,12 +530,13 @@ export interface ScopeWorkspace {
 
 export const SECTION_TITLE: Record<BackupsSection | "retention", { title: string; sub: string }> = {
   overview: { title: "Overview", sub: "What is protected, how often, where, for how long, and whether a restore really worked" },
-  history: { title: "Backup history", sub: "Every run, what it went through, and what each backup proves" },
-  schedules: { title: "Schedules", sub: "Backup plans: what goes in, when, for how long, and where" },
+  history: { title: "Runs", sub: "Every run, what it went through, and what each backup proves" },
+  coverage: { title: "Coverage", sub: "Which workspaces a backup protects, how fresh it is, and how far it was checked" },
+  schedules: { title: "Plans", sub: "What goes in, when, for how long, and where" },
   storage: { title: "Storage", sub: "Where backups are kept, how much room they need, and how hard they may push the server" },
-  recovery: { title: "Recovery", sub: "A guided restore with checks first, a dry run, its full report, and drills" },
+  recovery: { title: "Restore", sub: "A guided restore with checks first, a dry run, its full report, and drills" },
   keys: { title: "Keys & alerts", sub: "What opens a backup, what opens the secrets inside, and who hears when something is wrong" },
-  retention: { title: "Data retention", sub: "How long the server keeps each kind of live data; backup copies are kept under Backups › Schedules" },
+  retention: { title: "Data retention", sub: "How long the server keeps each kind of live data; backup copies are kept under Backups › Plans" },
 }
 
 /** Sections whose settings are the instance's alone: the scope bar says so. */
@@ -927,6 +932,22 @@ function duration(a?: string | null, b?: string | null): string {
   return r && m < 10 ? `${m}m${r}s` : `${m}m`
 }
 
+/** How long a run or phase took: "6m12s", "4m", "38s"; empty while either end is unknown. */
+export function runDuration(a?: string | null, b?: string | null): string {
+  return duration(a, b)
+}
+
+/** "4.2 s" for the time new work was held for a consistent copy (hold_ms). */
+export function formatHold(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—"
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1).replace(/\.0$/, "")} s`
+}
+
+/** Who or what started a run, in words. */
+export const TRIGGER_LABEL: Record<RunTrigger, string> = {
+  schedule: "Plan", manual: "By hand", catchup: "Catch-up after the server was off", drill: "Drill",
+}
+
 /** "copy 6m40s · pack 11m · encrypt · check 4m · off-site —" */
 export function formatPhases(phases: RunPhase[]): string {
   return phases
@@ -1004,4 +1025,162 @@ export function retentionDiff(rows: RetentionRow[], draft: Record<string, number
   return rows
     .filter((r) => !r.housekeeping && r.key in draft && (draft[r.key] !== r.days || r.mixed))
     .map((r) => ({ key: r.key, from: r.days, to: draft[r.key], mixed: !!r.mixed }))
+}
+
+// ─── Scope in words ─────────────────────────────────────────────────────────
+
+/** What the "Showing" control says: whole instance, one name, a count, or all. */
+export function scopeLabel(scope: BackupScope, selected: Set<string>, all: ScopeWorkspace[]): string {
+  if (scope === "instance") return "Whole instance"
+  if (all.length > 0 && selected.size === all.length) return `All ${all.length} workspaces`
+  if (selected.size === 1) return all.find((w) => selected.has(w.id))?.name ?? "1 workspace"
+  return `${selected.size} workspaces`
+}
+
+// ─── Coverage ───────────────────────────────────────────────────────────────
+
+export type CoverageState = "never" | "stale" | "covered" | "none"
+export const COVERAGE_STATES: CoverageState[] = ["never", "stale", "covered", "none"]
+
+export interface CoverageRow {
+  id: string
+  name: string
+  slug: string
+  logoUrl?: string | null
+  state: CoverageState
+  last_backup_at: string | null
+  plan: string | null
+  proof: ProofLevel
+}
+
+/**
+ * Every workspace with how it stands, least protected first. The server sends
+ * a row for each workspace that holds a crew (ok / warn / bad = never backed
+ * up); a workspace it left out has nothing to back up. Before the server has
+ * answered nothing is judged, so the list is empty rather than all "nothing".
+ */
+export function coverageRows(rows: WorkspaceCoverage[] | undefined, all: ScopeWorkspace[]): CoverageRow[] {
+  if (!rows) return []
+  const byId = new Map(rows.map((r) => [r.workspace_id, r]))
+  const out = all.map((w): CoverageRow => {
+    const c = byId.get(w.id)
+    const state: CoverageState = !c ? "none" : c.status === "ok" ? "covered" : c.status === "bad" ? "never" : "stale"
+    return { id: w.id, name: w.name, slug: w.slug, logoUrl: w.logoUrl, state, last_backup_at: c?.last_backup_at ?? null, plan: c?.plan ?? null, proof: c?.proof ?? 0 }
+  })
+  const rank = (s: CoverageState) => COVERAGE_STATES.indexOf(s)
+  return out
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => rank(a.r.state) - rank(b.r.state) || a.i - b.i)
+    .map((x) => x.r)
+}
+
+export function coverageCounts(rows: CoverageRow[]): Record<CoverageState, number> & { total: number } {
+  const n = { covered: 0, stale: 0, never: 0, none: 0, total: rows.length }
+  for (const r of rows) n[r.state]++
+  return n
+}
+
+export const COVERAGE_LABEL: Record<CoverageState, string> = {
+  covered: "Covered", stale: "Stale", never: "Never backed up", none: "Nothing to back up",
+}
+
+// ─── Runs ───────────────────────────────────────────────────────────────────
+
+/** The most runs the server returns (no offset): the newest 500. */
+export const RUNS_LIMIT = 500
+
+/** Said above the table when the server may have more than it sent. */
+export function runsCapNote(count: number): string | null {
+  return count >= RUNS_LIMIT ? `the newest ${RUNS_LIMIT} runs` : null
+}
+
+// ─── Back up now ────────────────────────────────────────────────────────────
+
+/** POST …/backups/run (ManualRequest in internal/backupplan/service.go). */
+export interface ManualRunBody {
+  plan_id?: string
+  scope?: BackupScope
+  workspace_ids?: string[]
+  preset?: Preset
+  contents?: CategoryKey[]
+  env_mode?: "files" | "complete"
+  recipient_ids?: string[]
+  /** Encrypts this run instead of recipients; used once, never stored. */
+  passphrase?: string
+  note?: string
+}
+
+export interface ManualRunForm {
+  scope: BackupScope
+  plan: Pick<BackupPlan, "id" | "scope" | "preset" | "workspace_ids" | "contents" | "env_mode" | "recipient_ids"> | null
+  workspaceIds: string[]
+  contents: "plan" | "full" | "some"
+  categories?: CategoryKey[]
+  env: "plan" | "files" | "complete"
+  encrypt: "plan" | "passphrase"
+  passphrase: string
+  note: string
+}
+
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x))
+
+/**
+ * The run request for the dialog. The server takes a plan's targets from the
+ * plan itself, so a plan is run as such only when it would back up exactly
+ * what the dialog says, with nothing overridden; otherwise the plan's
+ * contents, environments and keys are copied into an explicit request. A
+ * passphrase and recipients never travel together (the server refuses both).
+ */
+export function manualRunBody(f: ManualRunForm): ManualRunBody {
+  const note = f.note.trim()
+  const pass = f.encrypt === "passphrase" && f.passphrase ? f.passphrase : ""
+  const asIs = f.contents === "plan" && f.env === "plan"
+  const planRuns = !!f.plan && asIs && f.plan.scope === f.scope && (f.scope === "instance" || sameSet(f.plan.workspace_ids, f.workspaceIds))
+  const out: ManualRunBody = { scope: f.scope }
+  if (planRuns) {
+    out.plan_id = f.plan!.id
+    if (pass) out.passphrase = pass
+    if (note) out.note = note
+    return out
+  }
+  if (f.scope === "workspaces") out.workspace_ids = f.workspaceIds
+  const full = f.contents === "full" || (f.contents === "plan" && (!f.plan || f.plan.preset !== "custom"))
+  if (f.scope === "instance") out.preset = "complete"
+  else if (full) out.preset = "workspace"
+  else {
+    out.preset = "custom"
+    out.contents = f.contents === "some" ? f.categories ?? [] : f.plan?.contents ?? []
+  }
+  const env = f.env === "plan" ? f.plan?.env_mode : f.env
+  if (env) out.env_mode = env
+  if (pass) out.passphrase = pass
+  else if (f.plan?.recipient_ids.length) out.recipient_ids = f.plan.recipient_ids
+  if (note) out.note = note
+  return out
+}
+
+/** GET …/bundles/inspect?path= — the manifest, plaintext; nothing is decrypted. */
+export interface BundleManifest {
+  format_version: number
+  crewship_version_at_backup?: string
+  scope: "instance" | "workspace" | "crew"
+  scope_level?: string
+  created_at: string
+  created_by?: { email?: string; role?: string }
+  contents?: {
+    crews?: unknown[]
+    workspace?: { name?: string; slug?: string } | null
+    credstore_included?: boolean
+    auth_keys_included?: boolean
+    instance_config_included?: boolean
+    attachments_included?: number
+    attachments_missing?: number
+    memory_blobs_included?: number
+    memory_blobs_missing?: number
+    missing_container_crews?: string[]
+    service_snapshots?: number
+  }
+  encryption?: { enabled?: boolean }
+  kind?: string
+  categories?: string[]
 }

@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch"
 import { toastSaveError } from "@/components/ui/page-save-bar"
 import { SettingsCard, SettingsDangerCard, SettingsEmpty, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, settingsControl, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
 import { Gate } from "./backups-kit"
+import { WorkspacesField } from "./backups-scope-picker"
 import {
   CADENCE_LABEL, CATEGORIES, PRESETS, computeNextRuns, contentsFromPreview, describeKeep, describePlanWhen, formatPlannedRun, formatWhen,
   instantToPlanned, requiredWhy, resolveContents, wallClock,
@@ -61,7 +62,7 @@ function scheduleOf(d: PlanDraft): Schedule {
 }
 
 /**
- * Backups › Schedules: one plan at a time — what goes in, when it runs, the
+ * Backups › Plans: one plan at a time — what goes in, when it runs, the
  * calendar of what ran and what will, and how long copies are kept where.
  *
  * On the nested page (ctx.inDrill) the side panel lists the plans, so this
@@ -242,12 +243,14 @@ function PlanSummary({ plan, ctx, reload, now }: { plan: BackupPlan; ctx: Sectio
   const next = plan.next_run_at ? formatWhen(plan.next_run_at, now) : null
   return (
     <SettingsSummary>
+      <span className="text-sm font-semibold text-foreground" data-slot="plan-name">{plan.name}</span>
       <SummaryItem tone={enabled ? "success" : undefined}>{enabled ? "On" : "Off"}</SummaryItem>
       {enabled && next && <SummaryItem n={next}>next run</SummaryItem>}
       <SummaryItem>{planScopeLabel(plan, ctx)}</SummaryItem>
+      {plan.counts_as_protection === false && <SummaryItem tone="warn">does not count as protection</SummaryItem>}
       <span className="ml-auto flex items-center gap-2">
         <Button type="button" size="sm" variant="outline" className="h-7 text-xs"
-          onClick={() => void perform(ctx.demo, () => runNow({ plan_id: plan.id, scope: plan.scope }), "Backup started · it appears in Backup history", "The backup could not start")}>
+          onClick={() => void perform(ctx.demo, () => runNow({ plan_id: plan.id, scope: plan.scope }), "Backup started · it appears in Runs", "The backup could not start")}>
           Run now
         </Button>
         <label className="flex items-center gap-2 text-xs text-foreground">
@@ -292,12 +295,6 @@ function WhatCard({ draft, set, rows, ctx, onToggle, onKinds }: {
       set({ preset: "workspace", scope: "workspaces", workspace_ids: draft.workspace_ids.length ? draft.workspace_ids : [...ctx.selected], name: draft.id ? draft.name : PRESETS.workspace.label })
     }
   }
-  const toggleWs = (id: string, on: boolean) => {
-    const cur = draft.workspace_ids.length ? draft.workspace_ids : ctx.workspaces.map((w) => w.id)
-    const next = on ? [...new Set([...cur, id])] : cur.filter((x) => x !== id)
-    // Every workspace ticked is "every workspace", including future ones.
-    set({ workspace_ids: next.length === ctx.workspaces.length ? [] : next })
-  }
   return (
     <SettingsCard title="What" description={instance ? "A whole-instance backup is always a full backup" : "A full backup protects the workspace; a partial one does not"} icon={Package}>
       <SettingsRow label="Name">
@@ -309,18 +306,8 @@ function WhatCard({ draft, set, rows, ctx, onToggle, onKinds }: {
       </SettingsRow>
       {!instance && (
         <>
-          <SettingsRow label="Workspaces" description={draft.workspace_ids.length ? undefined : "Every workspace, including ones created later"}>
-            <span className="flex max-w-[22rem] flex-wrap justify-end gap-x-3 gap-y-1.5">
-              {ctx.workspaces.map((w) => {
-                const id = `plan-ws-${w.id}`
-                const on = !draft.workspace_ids.length || draft.workspace_ids.includes(w.id)
-                return (
-                  <label key={w.id} htmlFor={id} className="flex items-center gap-1.5 text-control">
-                    <Checkbox id={id} checked={on} onCheckedChange={(v) => toggleWs(w.id, v === true)} />{w.name}
-                  </label>
-                )
-              })}
-            </span>
+          <SettingsRow label="Workspaces" description={draft.workspace_ids.length ? undefined : "None picked means every workspace, including ones created later"}>
+            <WorkspacesField workspaces={ctx.workspaces} picked={draft.workspace_ids} onChange={(ids) => set({ workspace_ids: ids })} />
           </SettingsRow>
           <SettingsRow label="Contents">
             <SettingsSegmented<"full" | "some"> label="Contents" value={custom ? "some" : "full"}
@@ -477,11 +464,11 @@ function WhenCard({ draft, set, adv, setAdv, dirty, now }: {
         </SettingsRow>
       )}
       {draft.cadence === "monthly" && (
-        <SettingsRow label="On" description={draft.monthday == null ? undefined : "Day 1–28, so every month has it"}>
+        <SettingsRow label="On" description={draft.monthday == null ? undefined : "Day 1–31; a month without that day has no run"}>
           <span className="flex items-center gap-2">
             {draft.monthday != null && (
-              <Input aria-label="Day of month" type="number" min={1} max={28} className={cn(settingsControl, "sm:w-20")} value={draft.monthday}
-                onChange={(e) => set({ monthday: Math.min(28, Math.max(1, +e.target.value || 1)) })} />
+              <Input aria-label="Day of month" type="number" min={1} max={31} className={cn(settingsControl, "sm:w-20")} value={draft.monthday}
+                onChange={(e) => set({ monthday: Math.min(31, Math.max(1, +e.target.value || 1)) })} />
             )}
             <SettingsSegmented<"first" | "day"> label="Day of month" value={draft.monthday ? "day" : "first"} onChange={(v) => set({ monthday: v === "first" ? null : 1 })}
               options={[{ value: "first", label: "First Sunday" }, { value: "day", label: "A day" }]} />
@@ -515,8 +502,20 @@ function WhenCard({ draft, set, adv, setAdv, dirty, now }: {
             onChange={(e) => set({ hold_cap_minutes: Math.max(1, +e.target.value || 1) })} />min
         </span>
       </SettingsRow>
+      <SettingsRow label="Try again every" description="While it waits for running work">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Input aria-label="Try again every (minutes)" type="number" min={1} className={cn(settingsControl, "sm:w-20")} value={draft.busy_retry_minutes}
+            onChange={(e) => set({ busy_retry_minutes: Math.max(1, +e.target.value || 1) })} />min
+        </span>
+      </SettingsRow>
       <SettingsRow label="If the server was off" description="One backup as soon as it is back, not one per missed run">
         <span className="text-xs text-muted-foreground">automatic</span>
+      </SettingsRow>
+      <SettingsRow label="Alert when its newest backup is older than" description="Counted from its last good run; the alert closes with the next one">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Input aria-label="Alert when its newest backup is older than (hours)" type="number" min={1} className={cn(settingsControl, "sm:w-20")} value={draft.stale_alert_hours}
+            onChange={(e) => set({ stale_alert_hours: Math.max(1, +e.target.value || 1) })} />h
+        </span>
       </SettingsRow>
       <SettingsRow label={<Button type="button" variant="ghost" size="sm" className="-ml-2 h-7 text-xs" onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "▾" : "▸"} Advanced</Button>}
         description={adv ? "Runs on the server, never through an agent or a model" : undefined}>

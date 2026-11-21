@@ -62,7 +62,7 @@ export function WorkspaceBackups({ ws, coverage, ctx, onOpenRuns }: {
 
       <Gate resource={overview} what="This workspace's backups" skeleton="h-[240px]">
         {/* Its own row is the header above: no table of one workspace. */}
-        {(data) => <OverviewBody data={data} ctx={wsCtx} hideSpace coverage={[]} />}
+        {(data) => <OverviewBody data={data} ctx={wsCtx} hideSpace />}
       </Gate>
 
       <SettingsCard icon={History} title="Its runs" description="The last few · all of them in Runs, narrowed to it"

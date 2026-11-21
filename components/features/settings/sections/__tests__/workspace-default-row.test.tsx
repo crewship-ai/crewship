@@ -18,8 +18,7 @@ vi.mock("@/hooks/use-workspace", () => ({
   refreshWorkspaceSettings: () => ws.refresh(),
 }))
 
-import { WorkspaceDefaultCard, InheritChip } from "../workspace-default-card"
-import { markExplicit } from "@/lib/theme/appearance-explicit"
+import { WorkspaceDefaultRow } from "../workspace-default-row"
 
 let store: Map<string, string>
 beforeEach(() => {
@@ -39,20 +38,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("WorkspaceDefaultCard", () => {
+describe("WorkspaceDefaultRow", () => {
   it("saves the shared default only on its button, never on its own", async () => {
-    render(<WorkspaceDefaultCard />)
-    // Mounting, and the admin's own personal changes, must not touch the shared value.
-    markExplicit("accent")
+    render(<WorkspaceDefaultRow />)
+    // Mounting must not touch the shared value.
     await new Promise((r) => setTimeout(r, 50))
     expect(apiFetch).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Use my look as default" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use my look" }))
     await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
   })
 
   it("lets an admin set the current look as the workspace default", async () => {
-    render(<WorkspaceDefaultCard />)
-    fireEvent.click(screen.getByRole("button", { name: "Use my look as default" }))
+    render(<WorkspaceDefaultRow />)
+    fireEvent.click(screen.getByRole("button", { name: "Use my look" }))
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     const [url, init] = apiFetch.mock.calls[0]
     expect(url).toContain("/api/v1/workspaces/w1")
@@ -63,8 +61,8 @@ describe("WorkspaceDefaultCard", () => {
 
   it("resets the default with {}", async () => {
     ws.appearance_default = { accent: "teal" }
-    render(<WorkspaceDefaultCard />)
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+    render(<WorkspaceDefaultRow />)
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }))
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(JSON.parse(apiFetch.mock.calls[0][1].body)).toEqual({ appearance_default: {} })
   })
@@ -72,42 +70,35 @@ describe("WorkspaceDefaultCard", () => {
   it("shows a member the default read-only", () => {
     ws.role = "MEMBER"
     ws.appearance_default = { style: "slate", accent: "teal", theme: "dark" }
-    render(<WorkspaceDefaultCard />)
-    expect(screen.getByText("Slate · Teal · Dark")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Use my look as default" })).toBeNull()
-    expect((screen.getByRole("button", { name: "Use workspace default" }) as HTMLButtonElement).disabled).toBe(true)
+    render(<WorkspaceDefaultRow />)
+    expect(screen.getByTestId("workspace-default-look")).toHaveTextContent("Slate · Teal · Dark")
+    expect(screen.queryByRole("button", { name: "Use my look" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull()
   })
 
   it("renders nothing for a member when the workspace has no default", () => {
     ws.role = "MEMBER"
-    const { container } = render(<WorkspaceDefaultCard />)
+    const { container } = render(<WorkspaceDefaultRow />)
     expect(container.textContent).toBe("")
   })
 
-  it("Use workspace default clears what the user set", () => {
-    ws.role = "MEMBER"
-    ws.appearance_default = { accent: "teal" }
-    markExplicit("accent")
-    render(<WorkspaceDefaultCard />)
-    const button = screen.getByRole("button", { name: "Use workspace default" }) as HTMLButtonElement
-    expect(button.disabled).toBe(false)
-    fireEvent.click(button)
-    expect(store.get("crewship-appearance-explicit")).toBe("[]")
-  })
-})
-
-describe("InheritChip", () => {
-  it("says whether the value is the user's or the workspace's", () => {
-    ws.appearance_default = { accent: "teal" }
-    const { rerender } = render(<InheritChip field="accent" />)
-    expect(screen.getByTestId("inherit-accent").textContent).toContain("Workspace default")
-    markExplicit("accent")
-    rerender(<InheritChip field="accent" />)
-    expect(screen.getByTestId("inherit-accent").textContent).toContain("Set by you")
+  it("keeps Clear off while the workspace has no default, and says so", () => {
+    render(<WorkspaceDefaultRow />)
+    expect((screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/None set, so they get Harbor/)).toBeTruthy()
   })
 
-  it("is silent when the workspace has no default", () => {
-    const { container } = render(<InheritChip field="accent" />)
-    expect(container.textContent).toBe("")
+  it.each(["OWNER", "ADMIN"])("%s sees both buttons", (role) => {
+    ws.role = role
+    render(<WorkspaceDefaultRow />)
+    expect(screen.getByRole("button", { name: "Use my look" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Clear" })).toBeTruthy()
+  })
+
+  it.each(["MEMBER", "VIEWER"])("%s never gets the buttons, whether or not a default is set", (role) => {
+    ws.role = role
+    ws.appearance_default = { accent: "teal" }
+    render(<WorkspaceDefaultRow />)
+    expect(screen.queryByRole("button")).toBeNull()
   })
 })

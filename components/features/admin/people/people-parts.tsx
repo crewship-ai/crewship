@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar } from "@/components/ui/user-avatar"
-import { daysUntil, displayName, personStatus, ROLES, STATUS_LABEL, type Person, type PersonStatus, type Role } from "./people-model"
+import { daysUntil, displayName, personStatus, rolesFor, STATUS_LABEL, type Person, type PersonStatus, type Role } from "./people-model"
 import { nativeSelect } from "@/components/features/settings/shared"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { StatusTone } from "@/lib/format-status"
@@ -17,7 +17,7 @@ import { ROLE_ICON } from "@/components/features/settings/members/member-bits"
 export const roleLabel = (r: string) => r.charAt(0) + r.slice(1).toLowerCase()
 
 /** The one control for a role, the same width everywhere it appears. */
-export function RoleSelect({ value, onChange, disabled, label, allowNone, className }: {
+export function RoleSelect({ value, onChange, disabled, label, allowNone, className, guest }: {
   value: Role | null
   onChange: (r: Role | null) => void
   disabled?: boolean
@@ -25,7 +25,10 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
   /** Offer "No access" — the matrix and the Add person dialog use it. */
   allowNone?: boolean
   className?: string
+  /** A Guest: Owner and Admin are not offered (the server refuses them). */
+  guest?: boolean
 }) {
+  const options = rolesFor(guest)
   return (
     <select
       aria-label={label}
@@ -35,7 +38,8 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
       className={cn(nativeSelect, "w-36", className)}
     >
       {allowNone && <option value="">No access</option>}
-      {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+      {options.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+      {value && !options.includes(value) && <option value={value}>{roleLabel(value)}</option>}
     </select>
   )
 }
@@ -45,14 +49,16 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
  * point; tables keep the compact RoleSelect. Owner is never offered: a
  * workspace gets its owner when it is created or handed over.
  */
-export function RoleSegmented({ value, onChange, label, allowNone, disabled }: {
+export function RoleSegmented({ value, onChange, label, allowNone, disabled, guest }: {
   value: Role | null
   onChange: (r: Role | null) => void
   label: string
   allowNone?: boolean
   disabled?: boolean
+  /** A Guest: Admin is not offered (the server refuses it). */
+  guest?: boolean
 }) {
-  const options: (Role | null)[] = [...(allowNone ? [null] : []), "ADMIN", "MANAGER", "MEMBER", "VIEWER"]
+  const options: (Role | null)[] = [...(allowNone ? [null] : []), ...(guest ? [] : ["ADMIN" as const]), "MANAGER", "MEMBER", "VIEWER"]
   return (
     <div role="radiogroup" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
       {options.map((r) => {

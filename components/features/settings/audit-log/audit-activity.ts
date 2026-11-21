@@ -14,6 +14,8 @@ export interface ActivityEvent {
   action: string
   entityType: string
   userId: string | null
+  /** The thing the event is about, for "Everything about <entity>". */
+  entityId?: string | null
 }
 
 export interface DayTally {
@@ -83,16 +85,17 @@ export function facetCounts(events: ActivityEvent[], filters: AuditFilters, boun
   const cat = (e: ActivityEvent) => filters.category === "all" || e.entityType === filters.category
   const person = (e: ActivityEvent) => !filters.userId || e.userId === filters.userId
   const result = (e: ActivityEvent) => !filters.result || e.action === resultAction(filters.result)
+  const entity = (e: ActivityEvent) => !filters.entityId || e.entityId === filters.entityId
 
   const out: FacetCounts = { category: {}, person: {}, result: {} }
   const known = new Set<string>(AUDIT_CATEGORIES.map((c) => c.value))
   for (const e of inTime) {
-    if (person(e) && result(e)) {
+    if (person(e) && result(e) && entity(e)) {
       out.category.all = (out.category.all ?? 0) + 1
       if (known.has(e.entityType)) out.category[e.entityType] = (out.category[e.entityType] ?? 0) + 1
     }
-    if (cat(e) && result(e) && e.userId) out.person[e.userId] = (out.person[e.userId] ?? 0) + 1
-    if (cat(e) && person(e)) {
+    if (cat(e) && result(e) && entity(e) && e.userId) out.person[e.userId] = (out.person[e.userId] ?? 0) + 1
+    if (cat(e) && person(e) && entity(e)) {
       const r = AUDIT_RESULTS.find((x) => e.action === resultAction(x.value))
       if (r) out.result[r.value] = (out.result[r.value] ?? 0) + 1
     }

@@ -165,10 +165,11 @@ test.describe("desktop", () => {
   test("T16 the journal chain is verified on request", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings/audit")
-    const banner = page.locator("[data-slot=journal-verify]")
-    await expect(banner).toHaveAttribute("data-state", "idle")
-    await banner.getByRole("button", { name: "Verify now" }).click()
-    await expect(banner).toHaveAttribute("data-state", /ok|broken|error/)
+    const line = page.locator("[data-slot=journal-integrity]")
+    await expect(line).toHaveAttribute("data-state", "idle")
+    await line.getByRole("button", { name: "Check now" }).click()
+    await expect(page.getByRole("dialog", { name: "Record integrity" })).toBeVisible()
+    await expect(line).toHaveAttribute("data-state", /ok|broken|error/)
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
@@ -190,27 +191,22 @@ test.describe("desktop", () => {
     await expect(peek.locator("[data-slot=member-cli]")).toContainText("crewship workspace member capabilities list")
   })
 
-  test("SET-02 T13–T15 crew links: keys 1–3 switch the spaces; a matrix cell opens the small link dialog", async ({ page }) => {
+  test("SET-02 T13–T15 crew links: the panel names views; a matrix cell opens the link dialog", async ({ page }) => {
     await seed(page, PINNED)
-    await page.goto("/settings/crew-links")
-    const spaces = page.getByRole("tablist", { name: "Spaces" })
-    await expect(spaces.getByRole("tab", { name: /By crew/ })).toHaveAttribute("aria-selected", "true")
-    await page.keyboard.press("2")
-    await expect(page).toHaveURL(/view=all/)
-    await page.keyboard.press("3")
+    await page.goto("/settings/crew-links?view=all")
+    const panel = page.getByRole("complementary", { name: "Crew links navigation" })
+    await expect(panel.getByRole("button", { name: /^All links/ })).toBeVisible()
+    await page.getByRole("radio", { name: "Matrix" }).click()
     await expect(page).toHaveURL(/view=matrix/)
-    const cell = page.getByRole("button", { name: /\. Edit$/ }).first()
+    const cell = page.getByRole("grid", { name: "Rows hand work to columns" }).getByRole("button").first()
     test.skip((await cell.count()) === 0, "environment prerequisite: the workspace needs two crews")
     await cell.click()
-    const dialog = page.getByRole("dialog", { name: / → / })
+    const dialog = page.getByRole("dialog", { name: /^(New|Edit) link$/ })
     await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText("The other direction is set separately.")
-    expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(480)
+    await expect(dialog).toContainText("Each level includes the ones before it")
     // The kit dialog has a header ✕ (Close) and a footer Cancel; either dismisses.
     await dialog.getByRole("button", { name: /^(Cancel|Close)$/ }).last().click()
     await expect(dialog).toBeHidden()
-    await page.keyboard.press("1")
-    await expect(page).not.toHaveURL(/view=/)
   })
 
   test("SET-10 T13 crew link facets open inside the panel, not as a popover", async ({ page }) => {
@@ -232,7 +228,7 @@ test.describe("desktop", () => {
     await expect(range.getByRole("radio")).toHaveCount(6)
     await range.getByRole("radio", { name: "Last 30 days" }).click()
     await expect(page).toHaveURL(/audit_range=30d/)
-    await expect(page.locator("[data-slot=audit-display]").getByRole("switch", { name: "Group repeated events" })).toBeVisible()
+    await expect(page.locator("[data-slot=audit-events-head]").getByRole("button", { name: "Group repeats" })).toBeVisible()
     const row = page.locator("[data-audit-weight] > button[aria-controls]").first()
     test.skip((await row.count()) === 0, "environment prerequisite: no audit events in the last 30 days")
     await row.click()
@@ -461,16 +457,15 @@ test.describe("v67 parity", () => {
         await expect(page.getByRole("region", { name: "Who may reveal" }).getByText(/can read secrets in plaintext/)).toHaveCount(0)
       })
 
-      test("PAR-101/102/103/104 members: primary Add member, five KPI tiles, sans table head", async ({ page }) => {
+      test("PAR-101/103/104 members: primary Add member, no strip of figures, sans table head", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/members")
-        const strip = page.locator("[data-slot=members-summary]")
-        await expect(strip).toBeVisible()
-        expect(await strip.locator("[data-slot=settings-kpi]").count()).toBeGreaterThanOrEqual(3)
+        // Every fact once: the counts live in the panel and the banner, not in a strip.
+        await expect(page.locator("[data-slot=members-summary]")).toHaveCount(0)
         if (width >= 1024) {
           const add = page.getByRole("button", { name: "Add member" })
           await expect(add).toHaveAttribute("data-variant", "default")
-          const th = page.locator("table[aria-label='People and what they may do'] thead th").nth(1)
+          const th = page.locator("table[aria-label='People and their roles'] thead th").nth(1)
           await expect(th).toBeVisible()
           await expect(th).toHaveCSS("text-transform", "none")
           await sansNotMono(th)
@@ -478,23 +473,16 @@ test.describe("v67 parity", () => {
         }
       })
 
-      test("PAR-107/109 crew links: CLI hint and New link, four KPI tiles, the radial map, one column", async ({ page }) => {
+      test("PAR-107/109 crew links: CLI hint and New link, one Works with card, no KPI strip or map", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/crew-links")
         await expect(page.getByRole("button", { name: "Command line" })).toBeVisible()
-        const strip = page.locator("[data-slot=crew-links-summary]")
-        await expect(strip).toBeVisible()
-        expect(await strip.locator("[data-slot=settings-kpi]").count()).toBeGreaterThanOrEqual(3)
-        const hands = page.getByRole("region", { name: "Hands work to" })
-        test.skip((await hands.count()) === 0, "environment prerequisite: the workspace needs a crew")
-        const receives = page.getByRole("region", { name: "Receives work from" })
-        const a = (await hands.boundingBox())!, b = (await receives.boundingBox())!
-        // One column: the second card is under the first, not beside it.
-        expect(b.y).toBeGreaterThan(a.y + a.height - 2)
-        if (width >= 768) {
-          await expect(page.getByRole("region", { name: "Link map" }).locator("circle[data-slot=link-map-centre]")).toBeVisible()
-          await expect(page.getByRole("button", { name: "New link" })).toHaveAttribute("data-variant", "default")
-        }
+        await expect(page.locator("[data-slot=crew-links-summary]")).toHaveCount(0)
+        await expect(page.getByRole("region", { name: "Link map" })).toHaveCount(0)
+        const works = page.getByRole("region", { name: "Works with" })
+        test.skip((await works.count()) === 0, "environment prerequisite: the workspace needs a crew")
+        await expect(page.getByRole("region", { name: "What each level allows" })).toBeVisible()
+        if (width >= 768) await expect(page.getByRole("button", { name: "New link" })).toHaveAttribute("data-variant", "default")
       })
 
       test("PAR-110/111/112/113/114 audit log: spaces card, 24-hour times, solid bars, info banner, icon-only refresh", async ({ page }) => {

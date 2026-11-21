@@ -37,3 +37,31 @@ describe("invitation lifecycle", () => {
     await expect(reissueInvitation("ws1", "i1")).rejects.toThrow("User is already a member of this workspace")
   })
 })
+
+describe("invitation status", () => {
+  const day = 86_400_000
+  const now = Date.parse("2026-11-19T12:00:00Z")
+  const at = (days: number) => new Date(now + days * day).toISOString()
+
+  it("keeps the server's status instead of dropping it, so a revoked invitation is not 'expired'", async () => {
+    const { invitationStatus } = await import("../use-invitations")
+    // A revoked invitation has its expiry set to 1970: the date alone says expired.
+    expect(invitationStatus({ status: "revoked", expires_at: "1970-01-01T00:00:00Z" }, now)).toBe("revoked")
+    expect(invitationStatus({ status: "pending", expires_at: at(3) }, now)).toBe("pending")
+    expect(invitationStatus({ status: "expired", expires_at: at(-1) }, now)).toBe("expired")
+  })
+
+  it("falls back to the date when an older server sends no status", async () => {
+    const { invitationStatus } = await import("../use-invitations")
+    expect(invitationStatus({ expires_at: at(-2) }, now)).toBe("expired")
+    expect(invitationStatus({ expires_at: at(5) }, now)).toBe("pending")
+  })
+
+  it("needs a look when expired or ending within two days, never when revoked", async () => {
+    const { invitationNeedsLook } = await import("../use-invitations")
+    expect(invitationNeedsLook({ status: "expired", expires_at: at(-1) }, now)).toBe(true)
+    expect(invitationNeedsLook({ status: "pending", expires_at: at(2) }, now)).toBe(true)
+    expect(invitationNeedsLook({ status: "pending", expires_at: at(5) }, now)).toBe(false)
+    expect(invitationNeedsLook({ status: "revoked", expires_at: "1970-01-01T00:00:00Z" }, now)).toBe(false)
+  })
+})

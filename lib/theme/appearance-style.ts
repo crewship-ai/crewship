@@ -123,6 +123,25 @@ export const STYLES: StyleInfo[] = [
 ]
 
 /**
+ * Gallery groups by how a style looks (Settings › Appearance), not by who it
+ * resembles: the Style row's chips. Every style is in exactly one look; a
+ * test pins that. Order inside a look is the gallery order.
+ */
+export const STYLE_LOOKS = [
+  { id: "neutral", label: "Neutral", styles: ["harbor", "ink", "pewter", "mono", "cool-grey", "quartz", "studio", "charcoal", "denim", "frost", "pebble", "pane", "dove", "skyline", "cerulean", "beacon", "cobalt"] },
+  { id: "warm", label: "Warm", styles: ["blush", "sunrise", "terracotta", "lagoon", "parchment", "coral", "marigold", "sandstone", "tangerine"] },
+  { id: "violet", label: "Violet", styles: ["slate", "plum", "lilac", "orchid", "heather", "aubergine", "iris", "twilight", "mulberry", "bluebell", "regal", "wisteria"] },
+  { id: "dark", label: "Made for dark", styles: ["harbor-night", "afterglow", "ember", "carbon", "meadow", "signal", "console"] },
+] as const
+
+export type StyleLookId = (typeof STYLE_LOOKS)[number]["id"]
+
+/** The look a style belongs to; undefined for an id this build does not know. */
+export function lookOf(styleId: string): StyleLookId | undefined {
+  return STYLE_LOOKS.find((l) => (l.styles as readonly string[]).includes(styleId))?.id
+}
+
+/**
  * The knobs: each changes one aspect of the look, as tokens only, on top of
  * whichever style is active. The first option is the default and is stored as
  * no entry at all, so a knob left alone costs nothing and a client that does
@@ -138,7 +157,7 @@ export const KNOBS: Record<string, KnobDef> = {
     label: "Corners",
     default: "default",
     options: [
-      { value: "default", label: "Style default" },
+      { value: "default", label: "As the style" },
       { value: "sharp", label: "Sharp" },
       { value: "round", label: "Round" },
     ],
@@ -147,15 +166,15 @@ export const KNOBS: Record<string, KnobDef> = {
     label: "Cards",
     default: "border",
     options: [
-      { value: "border", label: "Border" },
-      { value: "shadow", label: "Shadow" },
+      { value: "border", label: "Outlined" },
+      { value: "shadow", label: "Raised" },
     ],
   },
   lines: {
     label: "Lines",
     default: "default",
     options: [
-      { value: "default", label: "Default" },
+      { value: "default", label: "Normal" },
       { value: "subtle", label: "Subtle" },
       { value: "strong", label: "Strong" },
     ],

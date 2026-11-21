@@ -60,7 +60,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"role":      nullable(str()),
 		"memberships": array(object(map[string]any{
 			"member_id": str(), "workspace_id": str(), "name": str(), "slug": str(), "role": str(), "joined_at": str(),
-		}, "member_id", "workspace_id", "name", "slug", "role", "joined_at")),
+			"access_mode": map[string]any{"type": "string", "enum": []string{"trusted", "restricted"}},
+		}, "member_id", "workspace_id", "name", "slug", "role", "joined_at", "access_mode")),
 		"last_active_at": nullable(str()), "active_sessions": integer(), "cli_tokens": integer(),
 		"locked_until": nullable(str()), "failed_login_count": integer(), "email_verified": boolean(),
 		"instance_admin": boolean(), "instance_admin_source": nullable(str()),

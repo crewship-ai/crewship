@@ -1,15 +1,15 @@
 "use client"
 
-import type { CSSProperties, ElementType } from "react"
+import { useId, type CSSProperties, type ElementType, type ReactNode } from "react"
 
-import { Briefcase, Crown, Eye, FileText, Lock, LockOpen, MessageSquare, RotateCcw, Save, Shield, User, Zap, type LucideIcon } from "lucide-react"
+import { Briefcase, Crown, Eye, FileText, LockOpen, RotateCcw, Save, Shield, TriangleAlert, User, Zap, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { StatusPill } from "@/components/ui/status-pill"
-import { Capability, hasCapability } from "@/lib/capabilities"
+import { Capability } from "@/lib/capabilities"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 
-import { ROLE_LABEL, areasHeld, chatOnly, type AreaKey } from "./members-model"
+import { CAPABILITY_NAME, PROFILE_LABEL, ROLE_LABEL, accessProfile, profileDiffText, type AreaKey } from "./members-model"
 
 /** An icon per area and per capability, the same in the roster, the panel and
  *  the phone list. Where the product already has an icon for the concept
@@ -60,61 +60,99 @@ export function ConfirmWhen({ when, className }: { when: "now" | "save"; classNa
   )
 }
 
-/** Access mode is a separate fact from the role (#2878): a restricted Member
- *  and a trusted Member share the role pill. Only the exception is marked, so
- *  a trusted roster stays quiet. */
+/** Reach is a separate fact from the role (#2878): a Guest Member and a
+ *  Member of the whole workspace share the role pill. Only the exception is
+ *  marked, so a roster of trusted people stays quiet. */
 export function RestrictedPill({ mode, className }: { mode?: "trusted" | "restricted"; className?: string }) {
   if (mode !== "restricted") return null
   return (
-    <StatusPill data-slot="restricted-pill" tone="warn" label="Restricted"
-      title="Restricted access: only the resources granted in this member's access policy"
+    <StatusPill data-slot="guest-pill" tone="muted" label="Guest"
+      title="Guest: reaches only what is shared with them"
       className={cn("font-sans tracking-normal", className)} />
   )
 }
 
-const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px text-micro"
-
 /**
- * What a person may do, as at most three flat chips (v67 `.m-chip`): an area
- * held in full reads "Routines", in part "Content 3/4"; Reveal turns the
- * secrets chip red and names it. Nothing beyond chat reads "Chat only".
+ * What a person may do, as ONE readable line: the nearest preset and what
+ * differs from it ("Power user + create skills", "Builder without reveal
+ * secrets"). An owner holds everything. The words come from `profileText`, so
+ * the roster, the CSV and the person sheet never disagree.
  */
-export function AreaChips({ granted, className }: { granted: readonly string[] | undefined; className?: string }) {
-  if (chatOnly(granted)) {
-    return (
-      <span className={cn(CHIP, "bg-chip-neutral-bg text-chip-neutral-fg", className)} data-area="chat">Chat only</span>
-    )
-  }
-  const reveal = hasCapability(granted, Capability.CredentialReveal)
+export function AbilitiesLine({ role, granted, className }: { role: string; granted: readonly string[] | undefined; className?: string }) {
+  if (role === "OWNER") return <span data-slot="abilities-line" className={cn("font-medium text-foreground", className)}>Everything</span>
+  const profile = accessProfile(granted)
+  const diff = profileDiffText(profile)
   return (
-    <span className={cn("flex min-w-0 flex-wrap gap-1", className)}>
-      {areasHeld(granted).filter((a) => a.held > 0).map((a) => {
-        const danger = a.key === "secrets" && reveal
-        return (
-          <span key={a.key} data-area={a.key}
-            title={`${a.label}: ${a.held} of ${a.total}${danger ? " · can reveal secrets" : ""}`}
-            className={cn(CHIP, danger ? "bg-chip-danger-bg text-chip-danger-fg" : "bg-chip-info-bg text-chip-info-fg")}>
-            {a.label}
-            {danger ? <span className="ml-1">· reveal</span> : a.held < a.total && <span className="ml-1 tabular-nums">{a.held}/{a.total}</span>}
-          </span>
-        )
-      })}
+    <span data-slot="abilities-line" data-preset={profile.key} className={cn("min-w-0", className)}>
+      <span className="font-medium text-foreground">{PROFILE_LABEL[profile.key]}</span>
+      {diff && <>{" "}<span className="text-muted-foreground">{diff}</span></>}
     </span>
   )
 }
 
-/** The same, as bare icons — a phone row's second line. */
-export function AreaIcons({ granted }: { granted: readonly string[] | undefined }) {
-  if (chatOnly(granted)) return <span>Chat only</span>
-  const reveal = hasCapability(granted, Capability.CredentialReveal)
+/** The warning mark of a person who holds more than their role manages. */
+export function AboveRoleMark({ role, className }: { role: string; className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      {areasHeld(granted).filter((a) => a.held > 0).map((a) => {
-        const Icon = AREA_ICON[a.key]
-        const danger = a.key === "secrets" && reveal
-        return <Icon key={a.key} data-area={a.key} className={cn("h-3.5 w-3.5", danger ? "text-destructive" : "text-primary-hover")} aria-label={danger ? "Secrets, can reveal" : a.label} />
-      })}
+    <span className={cn("inline-flex text-warn", className)} title={`More than a ${ROLE_LABEL[role] ?? role} manages`}>
+      <TriangleAlert className="h-3.5 w-3.5" aria-label={`More than a ${ROLE_LABEL[role] ?? role} manages`} />
     </span>
+  )
+}
+
+/** The red marker of a person who can read stored secrets in plaintext. */
+export function RevealMark({ className }: { className?: string }) {
+  return (
+    <span data-slot="reveal-mark" className={cn("inline-flex items-center gap-1 text-label font-medium text-destructive", className)}
+      title="Can read stored secrets in plaintext">
+      <Eye className="h-3 w-3" aria-hidden />reveals
+    </span>
+  )
+}
+
+/** The accessible name of one ability switch: the action a click takes, or
+ *  why there is none. Said in the page's words, never with the wire id. */
+export function abilityAriaLabel(cap: string, who: string, on: boolean, lock: "role" | "owner" | "self" | "readonly" | null): string {
+  const name = CAPABILITY_NAME[cap] ?? cap
+  switch (lock) {
+    case "role": return `Chat is always allowed for ${who}`
+    case "owner": return `An owner's abilities are fixed: ${name} for ${who}`
+    case "self": return `You cannot change your own abilities: ${name}`
+    case "readonly": return `${who} ${on ? "can" : "cannot"}: ${name}`
+    default: return on ? `Take away ${name} from ${who}` : `Give ${name} to ${who}`
+  }
+}
+
+/**
+ * One option of a short radio list: a dot, a title, one line (the kit's
+ * `x2-opts`). The list is a `radiogroup`; each option is a `radio`. An option
+ * can be shown but not chosen (`disabled`), with `why` as its hover reason.
+ */
+export function RadioOption({ checked, title, description, onSelect, disabled, why, className }: {
+  checked: boolean
+  title: ReactNode
+  description?: ReactNode
+  onSelect?: () => void
+  disabled?: boolean
+  why?: string
+  className?: string
+}) {
+  // The title names the option; the line under it describes it. Kept apart
+  // so a radio is called "Manager", not "ManagerCrews, agents and credentials".
+  const id = useId()
+  return (
+    <button type="button" role="radio" aria-checked={checked} disabled={disabled} title={why}
+      aria-labelledby={`${id}-t`} aria-describedby={description != null ? `${id}-d` : undefined}
+      onClick={() => { if (!checked) onSelect?.() }}
+      className={cn("flex w-full min-w-0 items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors coarse:min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60",
+        checked ? "border-primary bg-primary/5 ring-2 ring-primary/15" : "border-border bg-card hover:border-line-strong", className)}>
+      <span aria-hidden className={cn("mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border", checked ? "border-primary" : "border-control-border")}>
+        {checked && <span className="h-2 w-2 rounded-full bg-primary" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span id={`${id}-t`} className="block text-control font-medium text-foreground">{title}</span>
+        {description != null && <span id={`${id}-d`} className="mt-0.5 block text-label text-muted-foreground">{description}</span>}
+      </span>
+    </button>
   )
 }
 

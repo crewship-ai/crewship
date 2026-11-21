@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
-// v67 parity for Settings › Audit log (PAR-111, 112, 113, 114): the trail
-// switcher card, 24-hour times, the solid-bar histogram, the chain banner and
-// the Events card header. jsdom has no layout; the sizes are measured by
+// v67 parity for Settings › Audit log (PAR-111, 112, 113, 114), as the round-71
+// prototype has it: the four records as spaces, 24-hour times, the solid-bar
+// histogram inside the Events card, and the card header. jsdom has no layout; the sizes are measured by
 // e2e/settings-h2.spec.ts after deploy.
 
 const api = vi.fn()
@@ -12,7 +12,6 @@ vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "w
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 
 import { AuditLogPage } from "../audit-log-page"
-import { JournalVerifyBanner } from "../journal-verify-banner"
 
 const ok = (b: unknown) => ({ ok: true, status: 200, json: async () => b })
 // 09:16 in the viewer's own zone, so the assertion does not depend on it.
@@ -41,28 +40,42 @@ async function renderPage() {
   await screen.findByText("Pavel Srba")
 }
 
-describe("PAR-111 trail switcher", () => {
-  it("is the card of four rows, without a description under each", async () => {
+describe("PAR-111 record switcher", () => {
+  it("is the card of four records, named by what they hold, without a description under each", async () => {
     await renderPage()
     const spaces = document.querySelector<HTMLElement>("[data-slot=panel-spaces]")!
-    expect(within(spaces).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, "").trim())).toEqual(["Workspace", "Crews", "Credentials", "Keeper"])
+    expect(within(spaces).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, "").trim())).toEqual(["All changes", "Between crews", "Secret use", "Keeper decisions"])
     const panel = document.querySelector<HTMLElement>("[data-slot=secondary-panel]")!
-    expect(within(panel).queryByText("Settings, people, crews, credentials")).toBeNull()
     expect(within(panel).queryByText("Every gatekeeper decision, append-only")).toBeNull()
   })
 
-  it("groups the rest in plain sentence-case headings", async () => {
+  it("lists what changed under All changes, and moves Who and Run result into the Filter", async () => {
     await renderPage()
     const sections = Array.from(document.querySelectorAll("[data-slot=drill-section]"))
-    // (People joins them once the workspace lists someone.)
-    expect(sections.map((s) => s.firstElementChild!.textContent!.replace(/[\d]+( active)?$/, "").trim())).toEqual(["Category", "Run result"])
+    expect(sections.map((s) => s.firstElementChild!.textContent!.replace(/[\d]+( active)?$/, "").trim())).toEqual(["What changed"])
     for (const s of sections) expect(s.querySelector("button[aria-expanded]")).toBeNull()
+    const nav = within(screen.getByRole("complementary", { name: "Audit log navigation" }))
+    expect(nav.getByRole("button", { name: /^Everything/ })).toBeInTheDocument()
+    expect(nav.getByRole("button", { name: /^Workspace settings/ })).toBeInTheDocument()
+    expect(nav.queryByRole("button", { name: /^All events/ })).toBeNull()
+    expect(document.querySelector("[data-slot=facet-block]")).toBeNull()
+    fireEvent.click(nav.getByRole("button", { name: /^Filter/ }))
+    const block = document.querySelector<HTMLElement>("[data-slot=facet-block]")!
+    expect(within(block).getByRole("button", { name: /^Run result/ })).toBeInTheDocument()
   })
 
-  it("keeps the trail in the URL and the time range through a switch", async () => {
+  it("keeps the record in the URL and the time range through a switch", async () => {
     await renderPage()
-    fireEvent.click(screen.getByRole("tab", { name: /Keeper/ }))
+    fireEvent.click(screen.getByRole("tab", { name: /Keeper decisions/ }))
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_source")).toBe("keeper"))
+  })
+
+  it("on the other records says what is in it and that only time filters", async () => {
+    await renderPage()
+    fireEvent.click(screen.getByRole("tab", { name: /Between crews/ }))
+    expect(await screen.findByText(/Work handed over, messages and shared files\. This record filters by time only\./)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Filter/ })).toBeNull()
+    expect(screen.getByRole("textbox", { name: /search the audit log/i }).closest("div")).toHaveClass("opacity-50")
   })
 })
 
@@ -91,39 +104,41 @@ describe("PAR-112 times and histogram", () => {
   })
 })
 
-describe("PAR-113 journal chain banner", () => {
-  it("is a blue info banner with a shield tile, the CLI hint and Verify now", () => {
-    render(<JournalVerifyBanner workspaceId="ws" />)
-    const banner = document.querySelector<HTMLElement>("[data-slot=journal-verify]")!
-    expect(banner.className).toContain("page-banner-info")
-    expect(banner).toHaveTextContent("Journal chain")
-    expect(banner).toHaveTextContent("Every workspace event is mirrored into a hash-chained journal (HMAC-SHA256).")
-    expect(within(banner).getByText("crewship journal verify").className).toContain("font-mono")
-    // "New in UI" is the wireframe's note to the owner, not a product label.
-    expect(banner).not.toHaveTextContent("New in UI")
-    expect(within(banner).getByRole("button", { name: "Verify now" })).toBeInTheDocument()
-    expect(banner.querySelector("[data-slot=journal-verify-tile]")).not.toBeNull()
+describe("PAR-113 integrity line", () => {
+  it("is one quiet line in the head with Check now, not a banner", async () => {
+    await renderPage()
+    const line = document.querySelector<HTMLElement>("[data-slot=journal-integrity]")!
+    expect(within(line).getByRole("button", { name: "Check now" })).toBeInTheDocument()
+    expect(document.querySelector(".page-banner-info")).toBeNull()
   })
 
-  it("says Journal chain verified HH:MM once it has been checked", async () => {
+  it("says Record intact · checked HH:MM once it has been checked", async () => {
+    await renderPage()
     api.mockResolvedValue(ok({ ok: true, count: 12 }))
-    render(<JournalVerifyBanner workspaceId="ws" />)
-    fireEvent.click(screen.getByRole("button", { name: "Verify now" }))
-    expect(await screen.findByText(/Journal chain verified \d{2}:\d{2}/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }))
+    expect(await screen.findByText(/Record intact · checked \d{2}:\d{2}/)).toBeInTheDocument()
   })
 })
 
 describe("PAR-114 Events card header", () => {
-  it("has the trail and range on the right, an icon-only refresh and Export CSV", async () => {
+  it("has the record's name, the count and range, the chips, a refresh and Export CSV, with the chart inside the card", async () => {
     await renderPage()
-    const card = screen.getByRole("region", { name: "Events" })
-    const header = card.querySelector<HTMLElement>("[data-slot=settings-card-header]")!
-    expect(within(header).getByRole("heading", { name: "Events" })).toBeInTheDocument()
-    expect(header).toHaveTextContent("Workspace trail · last 7 d")
-    // The subtitle under the title is gone: the line is on the right.
-    expect(header.querySelector("h3 + p")).toBeNull()
-    const refresh = within(header).getByRole("button", { name: "Refresh audit log" })
+    const card = screen.getByRole("region", { name: "All changes" })
+    const head = card.querySelector<HTMLElement>("[data-slot=audit-events-head]")!
+    expect(head).toHaveTextContent("All changes")
+    expect(within(head).getByTestId("audit-count")).toHaveTextContent("1 event · last 7 d")
+    const refresh = within(head).getByRole("button", { name: "Refresh audit log" })
     expect(refresh.textContent?.trim()).toBe("")
-    expect(within(header).getByRole("button", { name: "Export audit log to CSV" })).toHaveTextContent("Export CSV")
+    expect(within(head).getByRole("button", { name: "Export audit log to CSV" })).toHaveTextContent("Export CSV")
+    // One card: the chart is inside it, above the table.
+    expect(card.querySelector("[data-slot=audit-histogram]")).not.toBeNull()
+    expect(document.querySelectorAll("[data-slot=audit-histogram]")).toHaveLength(1)
+  })
+
+  it("names the table's columns Time, Who, What happened", async () => {
+    await renderPage()
+    const card = screen.getByRole("region", { name: "All changes" })
+    for (const c of ["Time", "Who", "What happened"]) expect(within(card).getByText(c)).toBeInTheDocument()
+    expect(within(card).queryByText("Person")).toBeNull()
   })
 })

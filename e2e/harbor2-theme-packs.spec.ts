@@ -30,11 +30,11 @@ test.describe("Afterglow", () => {
   test("choosing it re-themes the app and a reload keeps it", async ({ page }) => {
     await seed(page, "light")
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     const gallery = page.getByRole("radiogroup", { name: "Style" })
-    // Gaming is a group in the full gallery and a category chip in the compact
-    // picker (#3657); the Afterglow palette is a radio in the Style group in both.
+    // Afterglow is in All and under the Made for dark look.
     await expect(gallery.getByRole("radio", { name: "Afterglow", exact: true })).toBeVisible()
-    await expect(page.getByRole("group", { name: "Gaming" }).or(page.getByRole("button", { name: "Gaming" })).first()).toBeVisible()
+    await expect(page.getByRole("group", { name: "Looks" }).getByRole("button", { name: /^Made for dark/ })).toBeVisible()
     const harborGround = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 
     await gallery.getByRole("radio", { name: "Afterglow", exact: true }).click()
@@ -55,6 +55,7 @@ test.describe("Afterglow", () => {
 
     await page.reload()
     await expect.poll(() => attr(page, "data-style")).toBe("afterglow")
+    await page.getByRole("button", { name: "Change style" }).click()
     await expect(page.getByRole("radiogroup", { name: "Style" }).getByRole("radio", { name: "Afterglow", exact: true })).toHaveAttribute("aria-checked", "true")
     expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(12, 13, 27)")
   })
@@ -63,6 +64,7 @@ test.describe("Afterglow", () => {
     await seed(page, "dark")
     await page.addInitScript((k) => localStorage.setItem(k, JSON.stringify({ v: 1, style: "afterglow", knobs: {} })), STYLE_KEY)
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
     const title = page.locator('[data-slot="settings-page-head"] h2, [data-slot="settings-page-head"] h1').first()
     await expect(title).toBeVisible()
@@ -75,6 +77,7 @@ test.describe("Afterglow", () => {
     await seed(page, "dark")
     await page.addInitScript((k) => localStorage.setItem(k, JSON.stringify({ v: 1, style: "afterglow", knobs: {} })), STYLE_KEY)
     await page.goto("/settings?tab=appearance")
+    await page.getByRole("button", { name: "Change style" }).click()
     await page.evaluate(() => {
       const el = document.createElement("div")
       el.id = "probe"
@@ -107,6 +110,7 @@ test.describe("Afterglow as the workspace default", () => {
       // Nothing chosen on this browser, and sync on so the default can be inherited.
       await page.addInitScript(() => { localStorage.removeItem("crewship-appearance-style") })
       await page.goto("/settings?tab=appearance")
+      await page.getByRole("button", { name: "Change style" }).click()
       await expect.poll(() => attr(page, "data-style")).toBe("afterglow")
     } finally {
       await request.patch(url, { data: { appearance_default: original } })

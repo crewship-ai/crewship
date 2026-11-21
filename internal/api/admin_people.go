@@ -297,6 +297,11 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		Slug        string `json:"slug"`
 		Role        string `json:"role"`
 		JoinedAt    string `json:"joined_at"`
+		// AccessMode is "restricted" for a Guest membership. A person who is
+		// a Guest anywhere cannot be made ADMIN or OWNER anywhere
+		// (administratorAccountEligible), so Admin › People reads it to
+		// leave those roles out instead of drawing a choice that 409s.
+		AccessMode string `json:"access_mode"`
 	}
 	type userRow struct {
 		ID               string       `json:"id"`
@@ -370,7 +375,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = rows.Close()
 
-	mq := `SELECT wm.id, wm.user_id, wm.workspace_id, w.name, w.slug, wm.role, wm.created_at
+	mq := `SELECT wm.id, wm.user_id, wm.workspace_id, w.name, w.slug, wm.role, wm.created_at, COALESCE(NULLIF(wm.access_mode, ''), 'trusted')
 		FROM workspace_members wm
 		JOIN workspaces w ON w.id = wm.workspace_id
 		WHERE w.deleted_at IS NULL`
@@ -389,7 +394,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	for mr.Next() {
 		var m membership
 		var userID string
-		if err := mr.Scan(&m.MemberID, &userID, &m.WorkspaceID, &m.Name, &m.Slug, &m.Role, &m.JoinedAt); err != nil {
+		if err := mr.Scan(&m.MemberID, &userID, &m.WorkspaceID, &m.Name, &m.Slug, &m.Role, &m.JoinedAt, &m.AccessMode); err != nil {
 			replyInternalError(w, h.logger, "scan membership (admin)", err)
 			return
 		}

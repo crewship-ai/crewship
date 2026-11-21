@@ -158,18 +158,49 @@ families), no rule about a component.
 ### Admin › Backups
 
 Backups is a nested page, `/admin/backups` (`DrillPage`), like Security and
-People. Its side panel holds the **Scope** (Whole instance, or Selected
-workspaces with the same multi-select as Security, greyed out on the
-instance-only Storage and Keys & alerts), Overview with its attention count,
-**Runs** as facets (All, Failed, Incomplete, Manual, Pinned), **Plans** as rows
-with "+ New plan", Recovery (New restore, Restore history, Drills) and the two
-instance settings. Section, facet, plan, run and scope live in the URL
-(`?section=&status=&plan=&run=&scope=&ws=`); an old `?tab=backups` link lands
-here. Proof is always three levels (checksum, contents checked, test restore)
-and a partial result reads as partial, in the warn tone — the server's verdict,
-never one recomputed in the browser. Data retention is not a backup setting: it
-stays in the Admin console. Sections live in `components/features/admin/backups/`;
-`?demo=1` (never in a production build) draws them from `__fixtures__`.
+People, in the same panel frame. The panel holds, top to bottom:
+
+- **Showing** — the one scope control, "Whole instance" or "N workspaces". It
+  opens a searchable picker (tick workspaces; "Tick all found"; 50 a step) and
+  drives Overview, Runs, Restore and **Back up now**. It replaces any ticked
+  workspace list in the panel and the Scope menus on Runs and New restore.
+- **Views** — Overview (with its attention count), Runs (with its count),
+  Restore, Coverage.
+- **Plans** — one row per plan (name, when, on/off) and "New plan"; with more
+  than eight, eight and "All N plans…".
+- **Instance settings** — Storage, Keys & alerts.
+
+The panel never lists workspaces. Hundreds of them are searched in the picker
+and paged (25 a step, `useShowMore`) in **Coverage**, whose rows open the
+workspace page (`?workspace=`: its header, its overview, "Its runs").
+
+Each fact is shown once. **Overview** is led by the server's verdict sentence;
+a local-only copy is one Needs attention item, not three cards. **Runs** shows
+result chips with counts (All, Failed, Incomplete, Manual, Pinned), Kind, Proof
+and Plan pickers, the histogram with slice selection and a paged table; the
+server returns at most the newest 500 runs (`limit=500`, no offset), so the
+table pages them in the browser and says "the newest 500 runs" when 500 came
+back. The time range sits in the top bar on Runs only. Proof is always the
+three steps (Checksum, Contents checked, Test restore), never one "restorable"
+flag, and a partial result reads as partial, in the warn tone: the server's
+verdict, never one recomputed in the browser. **Back up now** (top bar) opens a
+dialog (scope, like plan, contents, environments, the plan's keys or a one-time
+passphrase, a note) and says how many runs will start; with no key yet it opens
+the setup instead. Words: *Runs* for backups, *Restore history* for restores,
+*Plans*, *Checked to* for proof.
+
+Tables become stacked rows at phone width (no horizontal scroll, 44 px rows);
+the scope and the four views stay on the page there, since the panel is a
+sheet. Section, filters, plan, run, scope and workspace live in the URL
+(`?section=&status=&kind=&proof=&period=&q=&view=&plan=&run=&scope=&ws=&workspace=`;
+`status` is the Runs result or, on Coverage, covered / stale / never / none);
+an old `?tab=backups` link lands here. A key or destination a plan uses cannot
+be removed (the button is off and says which plan; a server 409 is the
+fallback); an instance archive is never restored online; Replace is not
+offered for a partial archive. Data retention is not a backup setting: it
+stays in the Admin console. Sections live in
+`components/features/admin/backups/`; `?demo=1` (never in a production build)
+draws them from `__fixtures__`.
 
 ## 3. Motion (all under `useReducedMotion`)
 

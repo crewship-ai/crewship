@@ -41,12 +41,15 @@ export const ROLE_RANK: Record<string, number> = {
   VIEWER: 1, MEMBER: 2, MANAGER: 3, ADMIN: 4, OWNER: 5,
 }
 
+/** One line per role: what the role manages. Used by the person sheet, the
+ *  Add member dialog and the bulk Role dialog, so a role reads the same
+ *  everywhere. */
 export const ROLE_SUMMARIES: { role: string; summary: string }[] = [
-  { role: "Owner", summary: "All permissions" },
-  { role: "Admin", summary: "All permissions except billing transfer" },
-  { role: "Manager", summary: "Crew-level access, create agents, manage credentials" },
-  { role: "Member", summary: "Own resource access only" },
-  { role: "Viewer", summary: "Read only" },
+  { role: "Owner", summary: "Everything, including handing the workspace over" },
+  { role: "Admin", summary: "People, crews and every setting" },
+  { role: "Manager", summary: "Crews, agents and credentials" },
+  { role: "Member", summary: "Their own work only" },
+  { role: "Viewer", summary: "Reads, changes nothing" },
 ]
 
 /** What a single role grants, keyed by the wire value. The legend answers
@@ -64,11 +67,15 @@ export const ROLE_SUMMARY_BY_ROLE: Record<string, string> = Object.fromEntries(
  * server would 403. Gate on the tier first, then the ladder: the caller edits
  * only people they strictly outrank, never themselves, and may grant only
  * roles strictly below their own (grant-below-own, no-modify-superior).
+ * A Guest is offered no administrator role.
  */
 export function roleChoices(callerRole: string | null | undefined, member: Member, isSelf: boolean): string[] {
   const callerRank = callerRole ? ROLE_RANK[callerRole] ?? 0 : 0
   if (!isManagerTier(callerRole) || isSelf || callerRank <= (ROLE_RANK[member.role] ?? 0)) return []
-  return ASSIGNABLE_ROLES.filter((r) => (ROLE_RANK[r] ?? 0) < callerRank)
+  // A Guest (restricted access) is never made an administrator: the role
+  // update refuses ADMIN/OWNER for one with 409 (workspaces_member_role.go).
+  const guest = member.access_mode === "restricted"
+  return ASSIGNABLE_ROLES.filter((r) => (ROLE_RANK[r] ?? 0) < callerRank && !(guest && r === "ADMIN"))
 }
 
 /**
@@ -101,7 +108,7 @@ export function extraCapabilities(granted: readonly string[] | undefined): Capab
 export const ACCESS_PROFILES: { key: CapabilityBundle; label: string; summary: string }[] = [
   { key: "chat", label: "Chat only", summary: "Talks to crew agents. Nothing else." },
   { key: "power", label: "Power user", summary: "Creates and runs routines, files issues, writes memory." },
-  { key: "admin", label: "Builder", summary: "Power user, plus skills and every credential action — including revealing secrets." },
+  { key: "admin", label: "Builder", summary: "Power user, plus skills and every secret action, including reveal." },
 ]
 export const PROFILE_LABEL: Record<string, string> = Object.fromEntries(ACCESS_PROFILES.map((p) => [p.key, p.label]))
 
@@ -131,18 +138,24 @@ export const CAPABILITY_COLUMNS: { key: string; label: string; danger?: boolean;
   },
 ]
 
-/** Short names for a profile's differences: "+Reveal", "−Run". */
-export const CAPABILITY_SHORT: Record<string, string> = {
+/** What each ability is called on this page: a verb and what it acts on.
+ *  The same words in the roster line, the person sheet, the dialogs and the
+ *  aria labels; the wire ids (`skill.create`) never reach the screen. */
+export const CAPABILITY_NAME: Record<string, string> = {
   [Capability.RoutineCreate]: "Create routines",
-  [Capability.RoutineRun]: "Run",
-  [Capability.IssueCreate]: "Issues",
-  [Capability.PageCreate]: "Pages",
-  [Capability.MemoryWrite]: "Memory",
-  [Capability.SkillCreate]: "Skills",
-  [Capability.CredentialCreate]: "Create credentials",
-  [Capability.CredentialRotate]: "Rotate",
-  [Capability.CredentialReveal]: "Reveal",
+  [Capability.RoutineRun]: "Run routines",
+  [Capability.IssueCreate]: "Create issues",
+  [Capability.PageCreate]: "Create artifacts",
+  [Capability.MemoryWrite]: "Write memory",
+  [Capability.SkillCreate]: "Create skills",
+  [Capability.CredentialCreate]: "Add secrets",
+  [Capability.CredentialRotate]: "Replace secrets",
+  [Capability.CredentialReveal]: "Reveal secrets",
 }
+/** Kept for callers that wrote a difference short; same words as the names. */
+export const CAPABILITY_SHORT: Record<string, string> = CAPABILITY_NAME
+
+const lowerName = (c: string) => (CAPABILITY_NAME[c] ?? c).toLowerCase()
 
 export interface AccessProfile {
   /** The nearest named set. */
@@ -175,10 +188,19 @@ export function exceptionCount(p: AccessProfile): number {
   return p.added.length + p.removed.length
 }
 
-/** "Builder", "Power user +Reveal", "Power user −Run +Pages". */
+/** What differs from the preset, in words: "+ create skills", "without
+ *  reveal secrets", or both. Empty when nothing differs. */
+export function profileDiffText(p: AccessProfile): string {
+  return [
+    p.added.length ? `+ ${p.added.map(lowerName).join(", ")}` : "",
+    p.removed.length ? `without ${p.removed.map(lowerName).join(", ")}` : "",
+  ].filter(Boolean).join(" ")
+}
+
+/** One readable line: "Builder", "Power user + create skills", "Builder
+ *  without reveal secrets". */
 export function profileText(p: AccessProfile): string {
-  const diff = [...p.added.map((c) => `+${CAPABILITY_SHORT[c] ?? c}`), ...p.removed.map((c) => `−${CAPABILITY_SHORT[c] ?? c}`)]
-  return [PROFILE_LABEL[p.key], ...diff].join(" ")
+  return [PROFILE_LABEL[p.key], profileDiffText(p)].filter(Boolean).join(" ")
 }
 
 /** How a cell of the matrix reads: held because of the profile, held as an
@@ -244,16 +266,19 @@ export interface MemberFilters {
   area: string
   /** One of the "needs a look" lists. */
   flag: MemberFlag
-  /** "invited" lists pending invitations instead of people. */
-  status: "" | "invited"
+  /** Which view: "" is the roster, "look" the findings, "invited" the
+   *  invitations. (`status` is the URL's old name for the invited view.) */
+  status: "" | "invited" | "look"
+  /** "whole" = trusted, "guest" = restricted; "" for any. */
+  reach: "" | "whole" | "guest"
   q: string
 }
 
-export const DEFAULT_MEMBER_FILTERS: MemberFilters = { role: "", cap: "", area: "", flag: "", status: "", q: "" }
+export const DEFAULT_MEMBER_FILTERS: MemberFilters = { role: "", cap: "", area: "", flag: "", status: "", reach: "", q: "" }
 
 export const MEMBER_FLAGS: { key: Exclude<MemberFlag, "">; label: string; hint: string }[] = [
   { key: "reveal", label: "Can reveal secrets", hint: "Reads stored secrets in plaintext" },
-  { key: "risky-low-role", label: "Above their role", hint: "Member or Viewer with skills or secrets" },
+  { key: "risky-low-role", label: "More than their role manages", hint: "A Member or Viewer who can create skills or handle secrets" },
 ]
 
 const HIGH_STAKES: ReadonlySet<string> = new Set([
@@ -297,13 +322,16 @@ export function memberMatches(m: Member, f: MemberFilters, caps: Record<string, 
   if (f.cap && caps && !hasCapability(caps[m.user.id], f.cap as CapabilityValue)) return false
   if (caps && !areaMatches(f.area, caps[m.user.id])) return false
   if (caps && !flagMatches(m, f.flag, caps[m.user.id])) return false
+  // access_mode is sent to a trusted OWNER/ADMIN only; without it the reach
+  // filter has nothing to read and is ignored, like the capability filters.
+  if (f.reach && m.access_mode && (f.reach === "guest") !== (m.access_mode === "restricted")) return false
   return matchesSearch(m, f.q)
 }
 
 export function activeFilterCount(f: MemberFilters, capsReadable: boolean): number {
   return Number(Boolean(f.role)) + Number(Boolean(f.q.trim())) +
     Number(Boolean(f.status)) +
-    (capsReadable ? Number(Boolean(f.cap)) + Number(Boolean(f.area)) + Number(Boolean(f.flag)) : 0)
+    (capsReadable ? Number(Boolean(f.cap)) + Number(Boolean(f.area)) + Number(Boolean(f.flag)) + Number(Boolean(f.reach)) : 0)
 }
 
 /** Highest role first, then by name — the order an admin scans a roster in. */
@@ -323,7 +351,7 @@ export interface MembersUrlState {
 }
 
 /**
- * ?member= (a USER id) and the filters (?role= ?cap= ?area= ?flag= ?status= ?q=) keep the
+ * ?member= (a USER id) and the filters (?role= ?cap= ?area= ?flag= ?status= ?reach= ?q=) keep the
  * page shareable and reload-safe. Defaults stay out of the URL.
  *
  * `member` names the person, not the membership row: a link is about a
@@ -342,7 +370,8 @@ export function parseMembersUrl(search: string): MembersUrlState {
       cap: (ALL_CAPABILITIES as readonly string[]).includes(p.get("cap") ?? "") ? (p.get("cap") as string) : "",
       area: ["routines", "content", "secrets", "chat"].includes(area) ? area : "",
       flag: MEMBER_FLAGS.some((f) => f.key === flag) ? (flag as MemberFlag) : "",
-      status: p.get("status") === "invited" ? "invited" : "",
+      status: p.get("status") === "invited" ? "invited" : p.get("status") === "look" ? "look" : "",
+      reach: p.get("reach") === "whole" ? "whole" : p.get("reach") === "guest" ? "guest" : "",
       q: p.get("q") ?? "",
     },
   }
@@ -357,6 +386,7 @@ export function membersUrlQuery({ member, filters }: MembersUrlState): string {
   if (filters.area) p.set("area", filters.area)
   if (filters.flag) p.set("flag", filters.flag)
   if (filters.status) p.set("status", filters.status)
+  if (filters.reach) p.set("reach", filters.reach)
   if (filters.q) p.set("q", filters.q)
   return p.toString()
 }

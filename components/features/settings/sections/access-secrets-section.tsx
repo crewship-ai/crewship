@@ -246,7 +246,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
                 <UserAvatar key={m.id} name={m.user.full_name} email={m.user.email} src={m.user.avatar_url ?? null} className="h-6 w-6 ring-2 ring-card" textClassName="text-micro" />
               ))}
             </span>
-            <Link href="/settings/members?flag=reveal" className="inline-flex items-center gap-1 text-control font-medium text-primary-hover underline-offset-2 hover:underline">
+            <Link href="/settings/members?status=look" className="inline-flex items-center gap-1 text-control font-medium text-primary-hover underline-offset-2 hover:underline">
               Manage in Members<ChevronRight className="h-3 w-3" aria-hidden />
             </Link>
           </SettingsRow>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { RefreshCw } from "lucide-react"
+import { Clock, RefreshCw } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -123,6 +123,10 @@ function reviewSlotFor(slot: string): string | null {
   }
 }
 
+/** The provider Select's value for "this check uses the judge's own model". */
+const USES_JUDGE = "__judge__"
+const PROVIDER_LABEL: Record<string, string> = { ollama: "Ollama", anthropic: "Anthropic", openai: "OpenAI", openai_compat: "OpenAI-compatible" }
+
 /** The Select's stand-in for "no credential" — Radix has no empty-string value. */
 const AUX_CREDENTIAL_NONE = "__none__"
 
@@ -228,7 +232,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`)
       setAux(body as AuxConfig)
       await load()
-      toast.success("Evaluator model saved.")
+      toast.success("Background check saved.")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save")
     } finally {
@@ -246,9 +250,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
       await load()
       // Names the trade rather than just confirming: local models are smaller
       // than the hosted defaults, so this buys cost with bluntness.
-      toast.success("Every evaluator now runs on the local judge — no per-token cost, blunter findings.")
+      toast.success("Every background check now uses the judge: no per-token cost, blunter findings.")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not switch the evaluators")
+      toast.error(err instanceof Error ? err.message : "Could not switch the background checks")
     } finally {
       setBusy(false)
     }
@@ -264,7 +268,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
       await load()
       // The consequence, not just the action: resetting off the local judge
       // puts the sweeps back on a paid model.
-      toast.success("Evaluator overrides cleared — the server's configured models are back in force.")
+      toast.success("Overrides cleared: the server's own models are back in force.")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not reset")
     } finally {
@@ -344,7 +348,6 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // noise that hides the one row that matters, the credential judge. Expanded
   // only when an operator asks, or when they are NOT all the same (in which case
   // the difference is the point).
-  const [showEach, setShowEach] = useState(false)
 
   const unusable = (rows ?? []).filter((r) => r.id !== "access_gatekeeper" && !isUsable(r)).length
   const auxBySlot = new Map((aux?.slots ?? []).map((s) => [s.slot, s]))
@@ -362,28 +365,22 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // (it could be looked at and not changed).
   const evaluatorRows = (rows ?? []).filter((r) => r.id !== "access_gatekeeper")
   const allSlots = aux?.slots ?? []
-  // Provider AND model. Keying on the model alone printed
-  // "<first slot's provider> / <model>" for a set that agreed on the model and
-  // disagreed on the provider — a summary asserting something it had not checked,
-  // and the provider is the half that decides whether the row costs money.
-  const uniformModel =
-    allSlots.length > 0 &&
-    allSlots.every(
-      (sl) => sl.model.value === allSlots[0].model.value && sl.provider.value === allSlots[0].provider.value,
-    )
-      ? `${allSlots[0].provider.value} / ${allSlots[0].model.value}`
-      : null
-  // A tier that costs money says so. "ollama" is the local judge and bills
-  // nothing; anything else is per-token, which is the fact an operator is
-  // actually deciding about.
   const evaluatorsAreFree = allSlots.length > 0 && allSlots.every((sl) => sl.provider.value === "ollama")
-  const expanded = showEach || uniformModel === null
-  const orderedRows = expanded ? evaluatorRows : []
+  // One row per check, always: a summary that hides the rows is a place to
+  // interrogate, and the rows are what this page is for.
+  const orderedRows = evaluatorRows
 
   return (
     <SettingsCard
-      title="Background checks"
-      description="The scheduled reviews: skills, the tool-call watchdog, memory audits, failure lessons and run summaries. They run on a timer, not in the credential path — nothing waits on them, and the credential judge above is unaffected by anything here."
+      icon={Clock}
+      title="Models"
+      footer={allSlots.length > 0 ? (
+        <span className="text-label text-muted-foreground">
+          A provider other than the judge needs its key; it is stored in the vault.{" "}
+          {evaluatorsAreFree ? "Running on your local model, so they cost nothing." : "These call a paid model, so they cost money per run."}
+        </span>
+      ) : undefined}
+      description="The models behind the scheduled reviews. Each change applies at once. They run on a timer, not in the credential path: nothing waits on them."
       actions={
         <>
           {aux && aux.judge_model && (
@@ -391,7 +388,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               variant="ghost" size="sm" className="h-7 px-2.5 gap-1.5 text-xs"
               disabled={busy} onClick={() => void switchToLocalJudge()}
             >
-              Use local judge for all
+              Use the judge for all
             </Button>
           )}
           {aux?.any_overridden && (
@@ -432,7 +429,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
           {unusable > 0 && (
             <div role="status" className="px-4 py-2 text-xs text-destructive border-b border-border/40 bg-destructive/[0.05]">
               {unusable === 1 ? "One check cannot run" : `${unusable} checks cannot run`} right now. Anything that
-              needs {unusable === 1 ? "it" : "them"} is refused rather than allowed — Keeper never guesses.
+              needs {unusable === 1 ? "it" : "them"} is refused rather than allowed: Keeper never guesses.
             </div>
           )}
           {orderedRows.map((r) => (
@@ -460,9 +457,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                     }`}
                   >
                     {r.detail
-                      ? `Not running — ${r.detail}`
+                      ? `Not running: ${r.detail}`
                       : r.reachable === false
-                        ? `Not answering — ${r.reach_detail}`
+                        ? `Not answering: ${r.reach_detail}`
                         : r.reach_detail}
                   </span>
                 ) : undefined
@@ -472,6 +469,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                 <SlotEditor
                   slot={auxBySlot.get(r.id)!}
                   providers={aux?.providers ?? []}
+                  judge={{ provider: aux?.judge_provider ?? "", model: aux?.judge_model ?? "" }}
                   credentials={keyCredentials}
                   workspaceId={workspaceId}
                   busy={busy}
@@ -492,49 +490,12 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               )}
             </SettingsRow>
           ))}
-          {/* One row instead of five. On a default instance the five background
-              checks are the SAME model with different timeouts, and printing
-              "anthropic / claude-haiku-4-5" five times buries the credential judge
-              above it. The detail is one click away and stays open once asked
-              for; when they are NOT all the same, the card expands on its own,
-              because then the difference is the information. */}
-          {allSlots.length > 0 && (
-            <SettingsRow
-              label="Background checks"
-              description={
-                <span className="block max-w-[30rem] leading-snug text-muted-foreground/80">
-                  Skill reviews, the tool-call watchdog, memory audits and run summaries. They run on a
-                  schedule, not in the credential path — nothing waits on them.{" "}
-                  {evaluatorsAreFree
-                    ? "Running on your local model, so they cost nothing."
-                    : "These call a paid model, so they cost money per run."}
-                </span>
-              }
-            >
-              <span className="flex items-center gap-2">
-                {uniformModel && !expanded && (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    all {allSlots.length} on {uniformModel}
-                  </span>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2.5 text-xs"
-                  onClick={() => setShowEach((v) => !v)}
-                  data-testid="keeper-aux-toggle"
-                >
-                  {expanded ? "Hide detail" : "Change"}
-                </Button>
-              </span>
-            </SettingsRow>
-          )}
-
-          {expanded && extraSlots.map((s) => (
+          {extraSlots.map((s) => (
             <SettingsRow key={s.slot} label={s.label}>
               <SlotEditor
                 slot={s}
                 providers={aux?.providers ?? []}
+                judge={{ provider: aux?.judge_provider ?? "", model: aux?.judge_model ?? "" }}
                 credentials={keyCredentials}
                 workspaceId={workspaceId}
                 busy={busy}
@@ -564,11 +525,13 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
  * here degrades an evaluator silently.
  */
 function SlotEditor({
-  slot, providers, credentials, workspaceId, busy, onSave, onProbe, probing, probeResult,
+  slot, providers, judge, credentials, workspaceId, busy, onSave, onProbe, probing, probeResult,
   onRun, runningNow, runResult,
 }: {
   slot: AuxSlot
   providers: string[]
+  /** What the credential judge runs on, for "Uses the judge". */
+  judge: { provider: string; model: string }
   credentials: { id: string; name: string }[]
   workspaceId: string | null
   busy: boolean
@@ -623,6 +586,7 @@ function SlotEditor({
     return () => controller.abort()
   }, [provider, workspaceId])
 
+  const usesJudge = judge.model !== "" && slot.model.value === judge.model && slot.provider.value === (judge.provider || "ollama")
   const pinnedKey = slot.credential_id?.value ?? ""
   const showKeyPicker = Boolean(slot.credential_id?.editable) && provider !== "ollama"
 
@@ -630,22 +594,29 @@ function SlotEditor({
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1.5">
         <Select
-          value={slot.provider.value || undefined}
+          value={usesJudge ? USES_JUDGE : slot.provider.value || undefined}
           disabled={busy}
           onValueChange={(next) => {
-            if (next === slot.provider.value) return
+            if (next === USES_JUDGE) {
+              // The judge's own server and model: what "Use the judge for all"
+              // writes into every slot, for this one.
+              if (!usesJudge && judge.model) void onSave(slot.slot, { provider: judge.provider || "ollama", model: judge.model })
+              return
+            }
+            if (next === slot.provider.value && !usesJudge) return
             // A provider alone cannot resolve — the builder needs both, and the
             // server refuses it — so the current model rides along and the
             // dropdown beside this reloads with what the new provider offers.
-            void onSave(slot.slot, { provider: next, model: slot.model.value })
+            void onSave(slot.slot, { provider: next, model: usesJudge ? "" : slot.model.value })
           }}
         >
-          <SelectTrigger size="sm" className={cn(inlineControl, "w-[7.5rem]")} aria-label={`${slot.label} provider`}>
-            <SelectValue placeholder="provider" />
+          <SelectTrigger size="sm" className={cn(inlineControl, "w-[9rem]")} aria-label={`${slot.label} provider`}>
+            <SelectValue placeholder="Provider" />
           </SelectTrigger>
           <SelectContent>
+            {judge.model && <SelectItem value={USES_JUDGE} className="text-xs">Uses the judge</SelectItem>}
             {providers.map((p) => (
-              <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
+              <SelectItem key={p} value={p} className="text-xs">{PROVIDER_LABEL[p] ?? p}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -664,7 +635,7 @@ function SlotEditor({
             aria-label={`${slot.label} model`}
             data-testid={`keeper-aux-model-${slot.slot}`}
           >
-            <SelectValue placeholder={catalogue.length === 0 ? "loading…" : "choose a model"} />
+            <SelectValue placeholder={catalogue.length === 0 ? "Loading…" : "Choose a model"} />
           </SelectTrigger>
           <SelectContent>
             {catalogue.map((m) => (
@@ -699,7 +670,7 @@ function SlotEditor({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={AUX_CREDENTIAL_NONE} className="text-label">
-                server&apos;s own key
+                The server&apos;s own key
               </SelectItem>
               {credentials.map((c) => (
                 <SelectItem key={c.id} value={c.id} className="text-label">{c.name}</SelectItem>
@@ -723,7 +694,7 @@ function SlotEditor({
           the dropdown cannot show a selection that is not in its list. */}
       {slot.model.value !== "" && catalogue.length > 0 && !catalogue.includes(slot.model.value) && (
         <span className="max-w-[22rem] text-right text-xs leading-snug text-warn">
-          <span className="font-mono">{slot.model.value}</span> is not offered by {slot.provider.value} — pick one from the list.
+          <span className="font-mono">{slot.model.value}</span> is not offered by {PROVIDER_LABEL[slot.provider.value] ?? slot.provider.value}: pick one from the list.
         </span>
       )}
       {catalogueError && (
@@ -732,7 +703,8 @@ function SlotEditor({
         </span>
       )}
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+        <TimeLimit slot={slot} busy={busy} onSave={onSave} />
         {/* One real evaluation, on request. Explicitly a button rather than
             something the page does on load: probing five hosted evaluators to
             render a status card would bill the operator for looking. */}
@@ -743,26 +715,31 @@ function SlotEditor({
           className="underline decoration-dotted hover:text-foreground disabled:opacity-50"
           data-testid={`keeper-aux-probe-${slot.slot}`}
         >
-          {probing ? "testing…" : "test"}
+          {probing ? "Testing…" : "Test"}
         </button>
         {/* Test asks whether the model answers. Run asks the question the
             evaluator exists to ask — and until this button there was no way to
             ask it except by waiting for the nightly sweep, which is why the
             behaviour watchdog had never run outside its own tests. */}
-        {evaluator && (
+        {/* A review runs against one workspace's data, so the route needs one
+            (400 "choose a workspace" without). An instance administrator in no
+            workspace gets the reason instead of a button that can only fail. */}
+        {evaluator && realWorkspace(workspaceId) === null && (
+          <span data-testid={`keeper-review-run-unavailable-${slot.slot}`} title="A review runs against one workspace's data">Run now needs a workspace</span>
+        )}
+        {evaluator && realWorkspace(workspaceId) !== null && (
           <button
             type="button"
             disabled={busy || runningNow || !slot.model.value}
             onClick={() => void onRun(slot.slot)}
             className="underline decoration-dotted hover:text-foreground disabled:opacity-50"
             data-testid={`keeper-review-run-${slot.slot}`}
-            title="Run this check now against your workspace — the verdict is recorded in the Keeper log"
+            title="Run this check now in your workspace. The verdict is recorded in the Keeper log"
           >
-            {runningNow ? "running…" : "run now"}
+            {runningNow ? "Running…" : "Run now"}
           </button>
         )}
         <span>{sourceNote(slot.model.source)}</span>
-        {slot.timeout_ms.value > 0 && <span className="tabular-nums">{Math.round(slot.timeout_ms.value / 1000)}s</span>}
         {slot.overridden && (
           <button
             type="button"
@@ -770,7 +747,7 @@ function SlotEditor({
             className="underline decoration-dotted hover:text-foreground"
             onClick={() => void onSave(slot.slot, { provider: "", model: "", timeout_ms: 0 })}
           >
-            reset
+            Reset
           </button>
         )}
       </div>
@@ -802,5 +779,32 @@ function SlotEditor({
       )}
 
     </div>
+  )
+}
+
+/**
+ * The time one run of the check may take, in seconds. Saved when the field is
+ * left, like the pickers beside it change at once; empty returns to the
+ * inherited value. The server refuses a value it cannot run with.
+ */
+function TimeLimit({ slot, busy, onSave }: { slot: AuxSlot; busy: boolean; onSave: (slot: string, patch: Record<string, unknown>) => Promise<void> }) {
+  const saved = slot.timeout_ms.value > 0 ? String(Math.round(slot.timeout_ms.value / 1000)) : ""
+  const [text, setText] = useState(saved)
+  useEffect(() => { setText(saved) }, [saved])
+  const n = Number(text)
+  const bad = text.trim() !== "" && (!Number.isInteger(n) || n < 1)
+  const commit = () => {
+    if (bad || text === saved) return
+    void onSave(slot.slot, { timeout_ms: text.trim() === "" ? 0 : n * 1000 })
+  }
+  return (
+    <label className="inline-flex items-center gap-1">
+      <span>Time limit</span>
+      <input type="number" min={1} inputMode="numeric" value={text} disabled={busy} aria-invalid={bad}
+        aria-label={`${slot.label} time limit in seconds`} data-testid={`keeper-aux-timeout-${slot.slot}`}
+        onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit() }}
+        className="h-7 w-14 rounded-md border border-control-border bg-surface-subtle px-1.5 text-right tabular-nums coarse:h-[44px]" />
+      <span>s</span>
+    </label>
   )
 }

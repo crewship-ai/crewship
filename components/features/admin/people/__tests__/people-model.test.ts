@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
-  isPersonal, workspaceMatches, facetMatches, isLastOwner, personMatches, personStatus, byAttentionThenName, daysUntil, type Person,
+  isPersonal, workspaceMatches, facetMatches, isLastOwner, personMatches, personStatus, sortPeople, sortWorkspaces, busiestWorkspaces, handGroups, handPeopleCount, peopleCsv, workspacesCsv, daysUntil, isGuest, rolesFor, type Person,
 } from "../people-model"
 
 const NOW = Date.parse("2026-09-29T12:00:00Z")
@@ -30,13 +30,60 @@ describe("facets", () => {
   ]
   const count = (f: Parameters<typeof facetMatches>[1]) => people.filter((p) => facetMatches(p, f, NOW)).map((p) => p.id)
   it("counts what each facet says", () => {
-    expect(count("attention")).toEqual(["a", "b"])
+    expect(count("locked")).toEqual(["a"])
+    expect(count("setup")).toEqual(["b"])
+    expect(count("active")).toEqual(["c"])
     expect(count("noaccess")).toEqual(["b"])
-    expect(count("admins")).toEqual(["c"])
     expect(count("all")).toHaveLength(3)
   })
-  it("puts people needing attention first", () => {
-    expect([...people].reverse().sort((x, y) => byAttentionThenName(x, y, NOW)).map((p) => p.id).slice(0, 2).sort()).toEqual(["a", "b"])
+})
+
+describe("needs a hand", () => {
+  const ws = (over: Record<string, unknown>) => ({ id: "w", name: "Lab", slug: "lab", created_at: "", _count_members: 1, _count_agents: 0, _count_crews: 0, ...over }) as never
+  const people = [
+    person({ id: "lock", locked_until: "2026-09-29T13:00:00Z" }),
+    person({ id: "setup", setup_link_expires_at: "2026-10-01T00:00:00Z" }),
+    person({ id: "nowhere" }),
+    person({ id: "gone", suspended_at: "2026-09-01T00:00:00Z" }),
+    person({ id: "fine", memberships: [member("w1", "MEMBER")] }),
+  ]
+  it("does not count anyone twice, and leaves suspended people alone", () => {
+    const g = handGroups(people, [ws({ id: "p", kind: "personal" }), ws({ id: "q", kind: "personal", _count_crews: 2 })], NOW)
+    expect(g.locked.map((p) => p.id)).toEqual(["lock"])
+    expect(g.setup.map((p) => p.id)).toEqual(["setup"])
+    expect(g.nowhere.map((p) => p.id)).toEqual(["nowhere"])
+    expect(g.emptyAccounts.map((w) => w.id)).toEqual(["p"])
+    expect(handPeopleCount(g)).toBe(3)
+  })
+  it("orders people: needs a hand first, A-Z, last active", () => {
+    expect(sortPeople(people, "hand", NOW).map((p) => p.id).slice(0, 3)).toEqual(["lock", "setup", "nowhere"])
+    expect(sortPeople([person({ id: "z", full_name: "Zed" }), person({ id: "a", full_name: "Ann" })], "az").map((p) => p.id)).toEqual(["a", "z"])
+    const recent = sortPeople([person({ id: "old", last_active_at: "2026-01-01T00:00:00Z" }), person({ id: "new", last_active_at: "2026-09-01T00:00:00Z" }), person({ id: "never" })], "recent")
+    expect(recent.map((p) => p.id)).toEqual(["new", "old", "never"])
+  })
+})
+
+describe("workspace order and the busiest", () => {
+  const w = (id: string, runs: number, created: string, over: Record<string, unknown> = {}) =>
+    ({ id, name: id, slug: id, created_at: created, runs_7d: runs, _count_members: 3, _count_agents: 0, _count_crews: 0, kind: "team", ...over }) as never
+  const list = [w("b", 5, "2026-01-01T00:00:00Z"), w("a", 9, "2026-03-01T00:00:00Z"), w("c", 1, "2026-06-01T00:00:00Z"), w("me", 99, "2026-06-01T00:00:00Z", { kind: "personal" })]
+  it("sorts busiest, A-Z and newest", () => {
+    expect(sortWorkspaces(list, "busy").map((x) => x.id)).toEqual(["me", "a", "b", "c"])
+    expect(sortWorkspaces(list, "az").map((x) => x.id)).toEqual(["a", "b", "c", "me"])
+    expect(sortWorkspaces(list, "new").map((x) => x.id).slice(0, 2).sort()).toEqual(["c", "me"])
+  })
+  it("names the top team workspaces only, never a personal account", () => {
+    expect(busiestWorkspaces(list, 2).map((x) => x.id)).toEqual(["a", "b"])
+  })
+})
+
+describe("CSV export", () => {
+  it("writes the rows, quotes commas and defuses formulas", () => {
+    const csv = peopleCsv([person({ full_name: "=SUM(A1)", email: "a@x.example", memberships: [member("Lab, East", "OWNER")], instance_admin: true })], NOW)
+    const [head, row] = csv.trim().split("\n")
+    expect(head).toBe("Name,Email,Workspaces,Last active,Status,Instance admin,Sessions")
+    expect(row).toBe("'=SUM(A1),a@x.example,\"Lab, East (owner)\",,Active,yes,0")
+    expect(workspacesCsv([{ id: "w", name: "Lab", slug: "lab", created_at: "c", _count_members: 1, _count_agents: 2, _count_crews: 3, runs_7d: 4 } as never], [])).toContain("Lab,lab,,1,3,2,4,,c")
   })
 })
 
@@ -78,5 +125,17 @@ describe("team and personal workspaces", () => {
     expect(workspaceMatches(ws({ name: "Ivana Viewer's Workspace" }), "viewer", [owner])).toBe(true)
     expect(workspaceMatches(ws({ name: "Design" }), "ivana@", [owner])).toBe(true)
     expect(workspaceMatches(ws({ name: "Design" }), "tom", [owner])).toBe(false)
+  })
+})
+
+describe("Guests and administrator roles", () => {
+  it("names a person a Guest when any membership is restricted, and leaves Admin and Owner out for them", () => {
+    const guest = person({ memberships: [member("a", "MEMBER"), { ...member("b", "VIEWER"), access_mode: "restricted" }] })
+    expect(isGuest(guest)).toBe(true)
+    expect(isGuest(person({ memberships: [{ ...member("a", "MEMBER"), access_mode: "trusted" }] }))).toBe(false)
+    // An older server sends no access_mode: nothing is guessed.
+    expect(isGuest(person({ memberships: [member("a", "MEMBER")] }))).toBe(false)
+    expect(rolesFor(true)).toEqual(["MANAGER", "MEMBER", "VIEWER"])
+    expect(rolesFor(false)).toEqual(["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"])
   })
 })

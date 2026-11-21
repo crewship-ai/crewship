@@ -8,25 +8,25 @@
  *
  * Server facts this encodes (internal/api/audit.go):
  *   - the workspace trail filters on the server by search (action, entity type,
- *     person's name/email), user_id, entity_type, action (exact), date_from,
- *     date_to;
+ *     person's name/email), user_id, entity_type, entity_id, action (exact),
+ *     date_from, date_to;
  *   - the crews / credentials / keeper trails filter by date only;
  *   - created_at is compared as text, so date_to is exclusive-by-day unless the
  *     end is sent as the start of the following day.
  */
 
 export const AUDIT_SOURCES = [
-  { value: "workspace", label: "Workspace", hint: "Settings, people, crews, credentials" },
-  { value: "crews", label: "Crews", hint: "Cross-crew dispatch, messages, shared files" },
-  { value: "credentials", label: "Credentials", hint: "Which secret was used, revealed or rotated" },
-  { value: "keeper", label: "Keeper", hint: "Every gatekeeper decision, append-only" },
+  { value: "workspace", label: "All changes", hint: "Settings, people, crews, agents and runs" },
+  { value: "crews", label: "Between crews", hint: "Work handed over, messages and shared files" },
+  { value: "credentials", label: "Secret use", hint: "Which secret was used, revealed or replaced" },
+  { value: "keeper", label: "Keeper decisions", hint: "What the gatekeeper allowed, denied or escalated" },
 ] as const
 export type AuditSource = (typeof AUDIT_SOURCES)[number]["value"]
 
 // The entity types the server writes for the workspace trail. Keep in step
 // with the write sites, or a category starts returning an empty list.
 export const AUDIT_CATEGORIES = [
-  { label: "All", value: "all" },
+  { label: "Everything", value: "all" },
   // Agent runs are most of a busy workspace's log; the writer spells the type
   // in lower case.
   { label: "Runs", value: "agent_run" },
@@ -35,7 +35,7 @@ export const AUDIT_CATEGORIES = [
   { label: "Crew links", value: "CREW_LINK" },
   { label: "Credentials", value: "CREDENTIAL" },
   { label: "People", value: "WorkspaceMember" },
-  { label: "Workspace", value: "WORKSPACE" },
+  { label: "Workspace settings", value: "WORKSPACE" },
 ] as const
 
 /** How a run ended — sent as the exact action agent.run.<value>. */
@@ -70,6 +70,8 @@ export interface AuditFilters {
   userId: string
   /** How a run ended, or "". Workspace trail only. */
   result: AuditResult | ""
+  /** One thing (an entity id): "Everything about <entity>". Workspace trail only. */
+  entityId: string
   /** A slice of the range picked on the chart, as two ISO instants (from
    *  inclusive, to exclusive) — the Crew Journal's bucket selection. It
    *  narrows the range without changing it; "" when none is picked. */
@@ -86,14 +88,15 @@ export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
   q: "",
   userId: "",
   result: "",
+  entityId: "",
   sliceFrom: "",
   sliceTo: "",
 }
 
 /** Which filters a trail honours on the server. */
-export function sourceSupports(source: AuditSource): { search: boolean; person: boolean; category: boolean; result: boolean } {
+export function sourceSupports(source: AuditSource): { search: boolean; person: boolean; category: boolean; result: boolean; entity: boolean } {
   const all = source === "workspace"
-  return { search: all, person: all, category: all, result: all }
+  return { search: all, person: all, category: all, result: all, entity: all }
 }
 
 /** The action a result filter stands for. */
@@ -133,6 +136,7 @@ export function auditQueryParams(workspaceId: string, filters: AuditFilters, pag
   if (supports.person && filters.userId) params.set("user_id", filters.userId)
   if (supports.category && filters.category !== "all") params.set("entity_type", filters.category)
   if (supports.result && filters.result) params.set("action", resultAction(filters.result))
+  if (supports.entity && filters.entityId) params.set("entity_id", filters.entityId)
   const { from, to } = rangeBounds(filters, now)
   if (from) params.set("date_from", from)
   if (to) params.set("date_to", to)
@@ -150,6 +154,7 @@ const URL_KEYS: Record<keyof AuditFilters, string> = {
   q: "audit_q",
   userId: "audit_user",
   result: "audit_result",
+  entityId: "audit_entity",
   sliceFrom: "audit_at",
   sliceTo: "audit_until",
 }
@@ -183,6 +188,7 @@ export function filtersFromSearch(search: string): AuditFilters {
     q: get("q"),
     userId: get("userId"),
     result: AUDIT_RESULTS.some((x) => x.value === get("result")) ? (get("result") as AuditResult) : "",
+    entityId: get("entityId"),
     sliceFrom: isInstant(get("sliceFrom")) && isInstant(get("sliceTo")) ? get("sliceFrom") : "",
     sliceTo: isInstant(get("sliceFrom")) && isInstant(get("sliceTo")) ? get("sliceTo") : "",
   }
@@ -224,22 +230,23 @@ export function sliceLabel(from: string, to: string): string {
 }
 
 export interface FilterChip {
-  key: "q" | "userId" | "category" | "result" | "range" | "slice"
+  key: "q" | "userId" | "category" | "result" | "entityId" | "range" | "slice"
   label: string
 }
 
 /** The non-default filters, in words, each clearable on its own. */
-export function activeFilterChips(filters: AuditFilters, people: Record<string, string>): FilterChip[] {
+export function activeFilterChips(filters: AuditFilters, people: Record<string, string>, entityName?: string): FilterChip[] {
   const chips: FilterChip[] = []
   const supports = sourceSupports(filters.source)
   if (supports.search && filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”` })
-  if (supports.person && filters.userId) chips.push({ key: "userId", label: `Person: ${people[filters.userId] ?? "Unknown"}` })
+  if (supports.person && filters.userId) chips.push({ key: "userId", label: `Who: ${people[filters.userId] ?? "Unknown"}` })
   if (supports.category && filters.category !== "all") {
     chips.push({ key: "category", label: AUDIT_CATEGORIES.find((c) => c.value === filters.category)?.label ?? filters.category })
   }
   if (supports.result && filters.result) {
     chips.push({ key: "result", label: `Runs: ${AUDIT_RESULTS.find((x) => x.value === filters.result)?.label.toLowerCase()}` })
   }
+  if (supports.entity && filters.entityId) chips.push({ key: "entityId", label: `Everything about ${entityName || "this item"}` })
   if (filters.range !== DEFAULT_AUDIT_FILTERS.range) chips.push({ key: "range", label: rangeLabel(filters) })
   if (isInstant(filters.sliceFrom) && isInstant(filters.sliceTo)) chips.push({ key: "slice", label: sliceLabel(filters.sliceFrom, filters.sliceTo) })
   return chips

@@ -18,9 +18,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
  *     and still surface a refusal — apiFetch RESOLVES on 4xx, so a dropped
  *     `res.ok` check would read as success;
  *   - ?member=<userId> (the ⌘K palette's link) opens that person;
- *   - the roster reads what each person may do as three area chips, and the
- *     page leads with what needs attention (who can reveal, who holds more
- *     than their role, invitations running out);
+ *   - the roster reads what each person may do as ONE line (the nearest
+ *     preset and what differs), and one banner leads to "Needs a look" (who
+ *     holds more than their role, invitations running out, who can reveal);
  *   - capability edits are drafts until the page's Save.
  */
 
@@ -101,6 +101,14 @@ beforeEach(() => {
     if (url.includes("/members?")) return ok(roster)
     if (url.includes("/invitations")) return ok(invitations)
     if (url.includes("/reveal-policy")) return ok({ enabled: false })
+    const access = /\/members\/([^/]+)\/access(\/effective)?\?/.exec(url)
+    if (access) {
+      const row = roster.find((m) => m.id === access[1]) as { access_mode?: string } | undefined
+      const mode = row?.access_mode ?? "trusted"
+      return ok(access[2]
+        ? { membership_id: access[1], revision: 1, explanation: "", account_restricted: mode === "restricted", decisions: [] }
+        : { membership_id: access[1], revision: 1, mode, rights: [] })
+    }
     return ok({})
   })
   h.role = "ADMIN"
@@ -117,7 +125,7 @@ function renderPage(url = "/settings/members") {
   return render(<QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>)
 }
 
-const table = () => screen.findByRole("table", { name: "People and what they may do" })
+const table = () => screen.findByRole("table", { name: "People and their roles" })
 const rowOf = (userId: string) => document.querySelector<HTMLElement>(`tr[data-member="${userId}"]`)!
 const sheet = () => waitFor(() => {
   const el = document.querySelector<HTMLElement>("[data-slot=member-detail]")
@@ -136,63 +144,142 @@ const slot = (selector: string, root: ParentNode = document) => waitFor(() => {
   if (!el) throw new Error(`no ${selector}`)
   return el
 })
-const areas = (userId: string) => [...rowOf(userId).querySelectorAll("[data-area]")].map((e) => e.getAttribute("data-area"))
+/** The roster's abilities line of one person, as the text a reader sees. */
+const abilities = (userId: string) => rowOf(userId).querySelector("[data-slot=abilities-line]")?.textContent
+/** Opens the folded "Single abilities" of the open person and returns the sheet. */
+const singles = async (d: HTMLElement) => {
+  const toggle = await within(d).findByRole("button", { name: /Single abilities/ })
+  if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle)
+  return d
+}
 
 describe("Members — the roster", () => {
-  it("groups people by role and reads what each may do as area chips", async () => {
+  it("groups people by role and reads what each may do as one line", async () => {
     renderPage()
     await table()
-    await waitFor(() => expect(areas("u-ada")).toEqual(["secrets"]))
-    expect(within(rowOf("u-ada")).getByText(/reveal/)).toBeInTheDocument()
-    expect(areas("u-olive")).toEqual(["routines", "content", "secrets"])
-    expect(within(rowOf("u-mel")).getByText("Content")).toBeInTheDocument()
-    expect(within(rowOf("u-mel")).getByText("1/4")).toBeInTheDocument()
-    expect(areas("u-vic")).toEqual(["chat"])
+    await waitFor(() => expect(abilities("u-ada")).toBe("Chat only + reveal secrets"))
+    // An owner holds everything; the others read as their nearest preset.
+    expect(abilities("u-olive")).toBe("Everything")
+    expect(abilities("u-mel")).toBe("Chat only + create issues")
+    expect(abilities("u-vic")).toBe("Chat only")
+    // A reveal holder is marked in red, an owner is not (ownership implies it).
+    expect(within(rowOf("u-ada")).getByText("reveals")).toBeInTheDocument()
+    expect(within(rowOf("u-olive")).queryByText("reveals")).toBeNull()
     const groups = screen.getAllByRole("rowheader").filter((h) => h.getAttribute("scope") === "rowgroup").map((h) => h.textContent)
     expect(groups).toEqual(["Owners1", "Admins1", "Managers1", "Members1", "Viewers1"])
-    const summary = document.querySelector("[data-slot=members-summary]")!
-    // v67's five tiles (PAR-102): a label over its figure.
-    expect(summary).toHaveTextContent("People5")
-    expect(summary).toHaveTextContent("Can reveal secrets1")
+    // Every fact once: no strip of figures that repeats the panel.
+    expect(document.querySelector("[data-slot=members-summary]")).toBeNull()
+    expect(screen.queryByText("Needs attention")).toBeNull()
+    expect(screen.queryByText("Can do")).toBeNull()
   })
 
-  it("leads with what needs attention, each finding with its verb", async () => {
+  it("heads the page with the people and invited counts, and the card with its own", async () => {
+    invitations = [{ id: "i1", email: "pat@x.io", role: "MEMBER", status: "pending", expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(), created_at: new Date().toISOString() }]
+    renderPage()
+    await table()
+    await waitFor(() => expect(document.querySelector("[data-slot=drill-head]")).toHaveTextContent("5 people · 1 invited"))
+    expect(document.querySelector("[data-slot=members-toolbar]")).toHaveTextContent("5 people")
+    fireEvent.change(screen.getByLabelText("Search members"), { target: { value: "mel" } })
+    await waitFor(() => expect(document.querySelector("[data-slot=members-toolbar]")).toHaveTextContent("1 of 5 people"))
+  })
+
+  it("leads with ONE banner, and each kind of finding is a card of its own", async () => {
     roster = [...ROSTER, member("m-ned", "MEMBER", "u-ned", "Ned Newbie")]
     CAPS.members.push({ user_id: "u-ned", role: "MEMBER", capabilities: ["chat", "credential.create"] })
-    invitations = [{ id: "i1", email: "pat@x.io", role: "MEMBER", expires_at: new Date(Date.now() + 86_400_000).toISOString(), created_at: new Date().toISOString() }]
+    invitations = [{ id: "i1", email: "pat@x.io", role: "MEMBER", status: "pending", expires_at: new Date(Date.now() + 86_400_000).toISOString(), created_at: new Date().toISOString() }]
     try {
       renderPage()
       await table()
-      const reveal = await slot("[data-finding=reveal]")
-      expect(reveal).toHaveTextContent("1 person can reveal secrets in plaintext.")
-      const above = document.querySelector<HTMLElement>("[data-finding=above]")!
-      expect(above).toHaveTextContent("Ned Newbie can create credentials as a Member.")
-      expect(rowOf("u-ned").querySelector("[aria-label='Above their role']")).not.toBeNull()
-      await waitFor(() => expect(document.querySelector("[data-finding=invites]")).toHaveTextContent("pat@x.io"))
-      fireEvent.click(within(above).getByRole("button", { name: /Open/ }))
+      const banner = await slot("[data-slot=members-look-banner]")
+      expect(banner).toHaveTextContent("3 things need a look")
+      expect(document.querySelectorAll(".page-banner")).toHaveLength(1)
+      expect(rowOf("u-ned").querySelector("[aria-label='More than a Member manages']")).not.toBeNull()
+      fireEvent.click(within(banner).getByRole("button", { name: "Review" }))
+      const above = await slot("[data-finding=above]")
+      expect(above).toHaveTextContent("Ned Newbie")
+      expect(above).toHaveTextContent("Member · can add secrets")
+      expect(await slot("[data-finding=invites]")).toHaveTextContent("pat@x.io")
+      expect(await slot("[data-finding=reveal]")).toHaveTextContent("Ada Admin")
+      expect(window.location.search).toBe("?status=look")
+      fireEvent.click(within(above).getByRole("button", { name: "Open" }))
       expect(await sheet()).toHaveAccessibleName("Member details: Ned Newbie")
     } finally {
       CAPS.members.pop()
     }
   })
 
-  it("says so when nothing needs attention", async () => {
+  it("drops the banner while a filter is active, and for a read-only role", async () => {
+    renderPage("/settings/members?role=MEMBER")
+    await table()
+    await waitFor(() => expect(document.querySelector("[data-slot=members-look-banner]")).toBeNull())
+    cleanup()
+    h.role = "MANAGER"
+    renderPage()
+    await table()
+    expect(document.querySelector("[data-slot=members-look-banner]")).toBeNull()
+  })
+
+  it("turns a finding off from its card as a draft, never for the caller", async () => {
+    roster = [...ROSTER, member("m-ned", "MEMBER", "u-ned", "Ned Newbie")]
+    CAPS.members.push({ user_id: "u-ned", role: "MEMBER", capabilities: ["chat", "issue.create", "credential.rotate"] })
+    try {
+      renderPage("/settings/members?status=look")
+      const above = await slot("[data-finding=above]")
+      fireEvent.click(within(above).getByRole("button", { name: "Turn off Replace secrets for Ned Newbie" }))
+      await save()
+      await waitFor(() => expect(writes()).toHaveLength(1))
+      expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-ned/capabilities?workspace_id=ws1")
+      expect(bodyOf()).toEqual({ set: ["chat", "issue.create"] })
+    } finally {
+      CAPS.members.pop()
+    }
+  })
+
+  it("caps a finding card at six rows and hands over to the filtered list", async () => {
+    const many = Array.from({ length: 8 }, (_, i) => member(`m-x${i}`, "MEMBER", `u-x${i}`, `Xavi ${i}`))
+    roster = [...ROSTER, ...many]
+    many.forEach((m) => CAPS.members.push({ user_id: m.user.id, role: "MEMBER", capabilities: ["chat", "skill.create"] }))
+    try {
+      renderPage("/settings/members?status=look")
+      const above = await slot("[data-finding=above]")
+      expect(above.querySelectorAll("li[data-member]")).toHaveLength(6)
+      expect(above).toHaveTextContent("6 of 8 shown")
+      fireEvent.click(within(above).getByRole("button", { name: "Show all in the list" }))
+      await waitFor(() => expect(window.location.search).toBe("?flag=risky-low-role"))
+      await table()
+      await waitFor(() => expect(document.querySelectorAll("tr[data-member]")).toHaveLength(8))
+    } finally {
+      many.forEach(() => CAPS.members.pop())
+    }
+  })
+
+  it("says so when nothing needs a look", async () => {
     const saved = CAPS.members[1].capabilities
     CAPS.members[1].capabilities = ["chat"]
     try {
-      renderPage()
-      await table()
-      expect(await screen.findByText(/Nothing needs attention/)).toBeInTheDocument()
+      renderPage("/settings/members?status=look")
+      expect(await screen.findByText("Nothing needs a look")).toBeInTheDocument()
     } finally {
       CAPS.members[1].capabilities = saved
     }
   })
 
+  it("names the views and the roles in the panel, and puts abilities and reach in the Filter", async () => {
+    renderPage()
+    await table()
+    const panel = document.querySelector<HTMLElement>("[data-slot=drill-panel], [data-panel-id=drill-members]") ?? document.body
+    for (const name of ["Everyone", "Needs a look", "Invited", "Owner", "Admin", "Manager", "Member", "Viewer"]) {
+      expect(within(panel).getAllByText(name).length).toBeGreaterThan(0)
+    }
+    expect(screen.queryByText("Can do")).toBeNull()
+    expect(screen.getByRole("button", { name: /Filter/ })).toBeInTheDocument()
+  })
+
   it("drafts a change in the panel and sends it only on Save", async () => {
     renderPage("/settings/members?member=u-mel")
-    const d = await sheet()
-    fireEvent.click(await within(d).findByRole("switch", { name: "Grant memory.write to Mel Member" }))
-    expect(within(d).getByRole("switch", { name: "Revoke memory.write from Mel Member" })).toHaveAttribute("aria-checked", "true")
+    const d = await singles(await sheet())
+    fireEvent.click(await within(d).findByRole("switch", { name: "Give Write memory to Mel Member" }))
+    expect(within(d).getByRole("switch", { name: "Take away Write memory from Mel Member" })).toHaveAttribute("aria-checked", "true")
     expect(rowOf("u-mel")).toHaveAttribute("data-unsaved")
     expect(await saveBar()).toHaveTextContent("1 unsaved change")
     expect(writes()).toHaveLength(0)
@@ -204,19 +291,19 @@ describe("Members — the roster", () => {
 
   it("drops the draft on Discard", async () => {
     renderPage("/settings/members?member=u-mel")
-    const d = await sheet()
-    fireEvent.click(await within(d).findByRole("switch", { name: "Grant memory.write to Mel Member" }))
+    const d = await singles(await sheet())
+    fireEvent.click(await within(d).findByRole("switch", { name: "Give Write memory to Mel Member" }))
     fireEvent.click(within(await saveBar()).getByRole("button", { name: "Discard" }))
-    await waitFor(() => expect(within(d).getByRole("switch", { name: "Grant memory.write to Mel Member" })).toHaveAttribute("aria-checked", "false"))
+    await waitFor(() => expect(within(d).getByRole("switch", { name: "Give Write memory to Mel Member" })).toHaveAttribute("aria-checked", "false"))
     expect(writes()).toHaveLength(0)
   })
 
   it("asks before granting anything high-stakes", async () => {
     renderPage("/settings/members?member=u-mel")
-    const d = await sheet()
-    fireEvent.click(await within(d).findByRole("switch", { name: "Grant credentials:reveal to Mel Member" }))
+    const d = await singles(await sheet())
+    fireEvent.click(await within(d).findByRole("switch", { name: "Give Reveal secrets to Mel Member" }))
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
-    await confirmWith(/Grant Reveal secrets/)
+    await confirmWith(/Give Reveal secrets/)
     await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(bodyOf()).toEqual({ set: ["chat", "credentials:reveal", "issue.create"] })
@@ -240,7 +327,7 @@ describe("Members — the roster", () => {
       const d = await sheet()
       const warning = await slot("[data-slot=member-above-role]", d)
       expect(within(warning).getByRole("button", { name: "Make Manager" })).toBeInTheDocument()
-      fireEvent.click(within(warning).getByRole("button", { name: "Turn Reveal off" }))
+      fireEvent.click(within(warning).getByRole("button", { name: "Turn it off" }))
       await save()
       await waitFor(() => expect(writes()).toHaveLength(1))
       expect(bodyOf()).toEqual({ set: ["chat", "issue.create"] })
@@ -255,25 +342,57 @@ describe("Members — the roster", () => {
     await table()
     expect(within(rowOf("u-ada")).getByRole("checkbox", { name: "Select Ada Admin" })).toBeDisabled()
     expect(within(rowOf("u-olive")).getByRole("checkbox", { name: "Select Olive Owner" })).toBeDisabled()
+    // An owner's abilities are fixed: said, with no switches to flip.
     fireEvent.click(within(rowOf("u-olive")).getByTitle(/^Olive Owner/))
     const d = await sheet()
-    await waitFor(() => expect(within(d).getByRole("switch", { name: /OWNER capabilities are immutable: memory.write/ })).toBeDisabled())
+    await waitFor(() => expect(d).toHaveTextContent(/An owner.s role and abilities are fixed/))
+    expect(within(d).queryByRole("switch")).toBeNull()
+    expect(within(d).queryByRole("button", { name: /Remove member/ })).toBeNull()
+    // Your own abilities are read, never edited.
+    fireEvent.click(within(rowOf("u-ada")).getByTitle(/^Ada Admin/))
+    await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: Ada Admin"))
+    const mine = await singles(await sheet())
+    expect(within(mine).getByRole("switch", { name: "You cannot change your own abilities: Write memory" })).toBeDisabled()
+    expect(within(mine).queryByRole("button", { name: /Remove member/ })).toBeNull()
   })
 
-  it("changes many people at once from the selection bar", async () => {
+  it("changes the abilities of many people at once in one dialog", async () => {
     renderPage()
     await table()
     fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Select Mel Member" }))
     fireEvent.click(within(rowOf("u-vic")).getByRole("checkbox", { name: "Select vic@example.com" }))
     const bar = await screen.findByRole("toolbar", { name: "Change the selected people" })
     expect(bar).toHaveTextContent("2 selected")
-    fireEvent.pointerDown(within(bar).getByRole("button", { name: /Revoke/ }), { button: 0, ctrlKey: false })
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Create issues" }))
+    // The old Set access / Grant / Revoke menus are one button now.
+    expect(within(bar).queryByRole("button", { name: /Revoke|Grant|Set access/ })).toBeNull()
+    fireEvent.click(within(bar).getByRole("button", { name: "Abilities" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("Abilities for 2 people")
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Create issues" })).getByRole("radio", { name: "Take away" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
     // Mel loses issue.create; Vic never had it, so only one person changes.
     await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
     expect(bodyOf()).toEqual({ set: ["chat"] })
+  })
+
+  it("sets a preset for everyone selected, and asks first when it gives something high-stakes", async () => {
+    renderPage()
+    await table()
+    fireEvent.click(await within(rowOf("u-mel")).findByRole("checkbox", { name: "Select Mel Member" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Abilities" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Set everyone to" })).getByRole("radio", { name: "Builder" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+    const ask = await screen.findByRole("alertdialog")
+    expect(ask).toHaveTextContent("Change abilities for 1 person?")
+    expect(ask).toHaveTextContent(/Reveal secrets/)
+    expect(writes()).toHaveLength(0)
+    await confirmWith(/^Apply$/)
+    await save()
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(bodyOf().set).toContain("credentials:reveal")
   })
 
   it("filters by area, by chat only and by who can reveal", async () => {
@@ -292,13 +411,13 @@ describe("Members — the roster", () => {
   })
 
   it("lists who can reveal with the workspace switch, and grants reveal as a draft", async () => {
-    renderPage("/settings/members?flag=reveal")
-    await table()
+    renderPage("/settings/members?status=look")
     const card = await slot("[data-slot=members-reveal-policy]")
     await waitFor(() => expect(card).toHaveTextContent("Reveal is off for this workspace"))
-    fireEvent.change(screen.getByLabelText("Person to grant reveal to"), { target: { value: "u-mel" } })
+    fireEvent.click(screen.getByRole("combobox", { name: "Person to grant reveal to" }))
+    fireEvent.click(await screen.findByRole("option", { name: /Mel Member/ }))
     fireEvent.click(screen.getByRole("button", { name: "Grant" }))
-    await confirmWith(/Grant Reveal secrets/)
+    await confirmWith(/Give Reveal secrets/)
     await save()
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0][0]).toBe("/api/v1/workspaces/ws1/members/u-mel/capabilities?workspace_id=ws1")
@@ -312,7 +431,7 @@ describe("Members — the roster", () => {
     expect(list).toHaveTextContent("pat@x.io")
     expect(list).toHaveTextContent("invited by Ada Admin")
     expect(list).toHaveTextContent("Expires in 5 days")
-    expect(screen.queryByRole("table", { name: "People and what they may do" })).toBeNull()
+    expect(screen.queryByRole("table", { name: "People and their roles" })).toBeNull()
   })
 })
 
@@ -324,8 +443,30 @@ describe("Members — one person", () => {
     const d = await sheet()
     expect(d).toHaveAccessibleName("Member details: Mel Member")
     expect(within(d).getByRole("radio", { name: "Member" })).toHaveAttribute("aria-checked", "true")
-    expect(within(d).getByRole("radio", { name: "Chat only" })).toHaveAttribute("aria-checked", "true")
-    expect(d.querySelector("[data-slot=member-exceptions]")).toHaveTextContent("+Issues")
+    // Mel holds Chat only plus one ability: a Custom set, with its difference.
+    const custom = await within(d).findByRole("radio", { name: "Custom" })
+    expect(custom).toHaveAttribute("aria-checked", "true")
+    expect(custom).toHaveAccessibleDescription("Chat only + create issues")
+    expect(within(d).getByRole("radio", { name: "Chat only" })).toHaveAttribute("aria-checked", "false")
+    // The three questions, each in a card of its own, and the way out.
+    for (const name of ["Role", "Abilities", "Reach"]) expect(within(d).getByRole("region", { name })).toBeInTheDocument()
+    expect(within(d).getByRole("region", { name: "Remove from workspace" })).toBeInTheDocument()
+    // Role: every role with its line.
+    expect(within(d).getByRole("radio", { name: "Admin" })).toHaveAccessibleDescription("People, crews and every setting")
+  })
+
+  it("folds the nine single abilities away, counting those that are on", async () => {
+    renderPage("/settings/members?member=u-mel")
+    const d = await sheet()
+    const toggle = await within(d).findByRole("button", { name: /Single abilities/ })
+    expect(toggle).toHaveTextContent("1 of 9 on")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(within(d).queryByRole("switch")).toBeNull()
+    fireEvent.click(toggle)
+    expect(within(d).getAllByRole("switch")).toHaveLength(9)
+    expect(within(d).getByRole("group", { name: "Secrets" })).toHaveTextContent("high-stakes")
+    // The reveal switch is the Owner's: only its state is shown here.
+    await waitFor(() => expect(d.querySelector("[data-slot=member-reveal-policy]")).toHaveTextContent("Reveal is off"))
   })
 
   it("opens the person a ?member= link names", async () => {
@@ -352,7 +493,10 @@ describe("Members — one person", () => {
     const d = await sheet()
     expect(within(d).getByRole("radio", { name: "Viewer" })).toBeEnabled()
     expect(within(d).getByRole("radio", { name: "Manager" })).toBeDisabled()
-    expect(within(d).queryByText("What they can do")).toBeNull()
+    // Abilities and Reach are the admin tier's.
+    expect(within(d).queryByRole("region", { name: "Abilities" })).toBeNull()
+    expect(within(d).queryByRole("region", { name: "Reach" })).toBeNull()
+    expect(within(d).getByText(/You can only give roles below your own/)).toBeInTheDocument()
     expect(screen.queryByRole("checkbox", { name: /Select/ })).toBeNull()
     expect(api.mock.calls.some(([u]) => String(u).includes("/members/capabilities"))).toBe(false)
   })
@@ -361,13 +505,13 @@ describe("Members — one person", () => {
     h.role = "MEMBER"
     renderPage("/settings/members?member=u-vic")
     const d = await sheet()
-    expect(within(d).getByText(/Your role cannot change this person's role/)).toBeInTheDocument()
+    expect(within(d).getByText(/Your role cannot change this person’s role/)).toBeInTheDocument()
     expect(within(d).queryByRole("button", { name: /Remove member/ })).toBeNull()
   })
 })
 
 describe("Members — on a phone", () => {
-  it("lists people by role with what they may do as icons, and opens one full screen", async () => {
+  it("lists people as rows with role and abilities in words, and opens one full screen", async () => {
     h.mobile = true
     renderPage()
     const list = await waitFor(() => {
@@ -375,7 +519,9 @@ describe("Members — on a phone", () => {
       if (!el) throw new Error("no list")
       return el
     })
-    await waitFor(() => expect(within(list).getByLabelText("Secrets, can reveal")).toBeInTheDocument())
+    await waitFor(() => expect(within(list).getByText("reveals")).toBeInTheDocument())
+    // Rows, not a table: nothing to scroll sideways at 390 px.
+    expect(document.querySelector("table")).toBeNull()
     expect(document.querySelector("[data-slot=members-actions]")).toContainElement(screen.getByTestId("invite-dialog"))
     fireEvent.click(within(list).getByTitle(/^Mel Member/))
     expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
@@ -385,33 +531,65 @@ describe("Members — on a phone", () => {
 /**
  * #2878 — a restricted member looked exactly like a trusted one. The roster
  * carries `access_mode` (sent only to a trusted OWNER/ADMIN); the page marks
- * the exception next to the role and names the mode in the person's panel.
+ * the exception next to the role (Guest) and names the reach in the person's
+ * panel.
  */
-describe("Members — access mode", () => {
+describe("Members — reach", () => {
   const withMode = (m: ReturnType<typeof member>, access_mode?: "trusted" | "restricted") => ({ ...m, ...(access_mode ? { access_mode } : {}) })
 
-  it("marks a restricted member's row and leaves a trusted member's row unmarked", async () => {
+  it("marks a Guest's row and leaves a whole-workspace member's row unmarked", async () => {
     roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted"), withMode(member("m-tom", "MEMBER", "u-tom", "Tom Trusted"), "trusted")]
     renderPage()
     await table()
-    expect(within(rowOf("u-rita")).getByText("Restricted")).toBeTruthy()
-    // Role and access are two facts: the role pill still reads Member.
+    expect(within(rowOf("u-rita")).getByText("Guest")).toBeTruthy()
+    // Role and reach are two facts: the role pill still reads Member.
     expect(within(rowOf("u-rita")).getByText("Member")).toBeTruthy()
-    expect(within(rowOf("u-tom")).queryByText("Restricted")).toBeNull()
+    expect(within(rowOf("u-tom")).queryByText("Guest")).toBeNull()
   })
 
-  it("names the access mode in the person's panel", async () => {
+  it("names the reach in the person's panel", async () => {
     roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted")]
     renderPage("/settings/members?member=u-rita")
-    expect((await screen.findByTestId("member-access-mode")).textContent).toMatch(/^Restricted/)
+    const d = await sheet()
+    const reach = await within(d).findByRole("radiogroup", { name: "Reach" })
+    expect(within(reach).getByRole("radio", { name: "Guest" })).toHaveAttribute("aria-checked", "true")
+    expect(within(reach).getByRole("radio", { name: "Whole workspace" })).toHaveAttribute("aria-checked", "false")
   })
 
-  it("does not guess an access mode the server withheld", async () => {
+  // The role update refuses ADMIN for a Guest with 409
+  // (workspaces_member_role.go), so the panel and the bulk bar do not offer it.
+  it("does not offer Admin for a Guest, even to an Owner, and says why", async () => {
+    h.role = "OWNER"
+    roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted")]
+    renderPage("/settings/members?member=u-rita")
+    const d = await sheet()
+    const admin = within(d).getByRole("radio", { name: "Admin" })
+    expect(admin).toBeDisabled()
+    expect(admin).toHaveAttribute("title", "A Guest cannot be an administrator")
+    expect(within(d).getByRole("radio", { name: "Manager" })).toBeEnabled()
+    expect(d.querySelector("[data-slot=role-why]")).toHaveTextContent("A Guest cannot be an administrator")
+  })
+
+  it("offers Admin to an Owner for a whole-workspace member", async () => {
+    h.role = "OWNER"
+    roster = [withMode(member("m-tom", "MEMBER", "u-tom", "Tom Trusted"), "trusted")]
+    renderPage("/settings/members?member=u-tom")
+    expect(within(await sheet()).getByRole("radio", { name: "Admin" })).toBeEnabled()
+  })
+
+  it("does not guess a reach the server withheld", async () => {
     roster = [member("m-rita", "MEMBER", "u-rita", "Rita Restricted")]
     renderPage("/settings/members?member=u-rita")
     expect(await sheet()).toHaveAccessibleName("Member details: Rita Restricted")
-    expect(screen.queryByTestId("member-access-mode")).toBeNull()
-    expect(screen.queryByText("Restricted")).toBeNull()
+    expect(document.querySelector("[data-slot=guest-pill]")).toBeNull()
+  })
+
+  it("filters by reach from the Filter facets", async () => {
+    roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted"), withMode(member("m-tom", "MEMBER", "u-tom", "Tom Trusted"), "trusted")]
+    renderPage("/settings/members?reach=guest")
+    await table()
+    await waitFor(() => expect([...document.querySelectorAll("tr[data-member]")].map((r) => r.getAttribute("data-member"))).toEqual(["u-rita"]))
+    expect(screen.getByRole("button", { name: "Remove filter Reach: Guest" })).toBeInTheDocument()
   })
 })
 
@@ -421,7 +599,7 @@ describe("Members — drafts stay where they were made", () => {
     // A newly added person can reach the refreshed roster before the bulk
     // capability cache has been refreshed. Missing is not an empty set.
     renderPage("/settings/members?member=u-mo")
-    const control = await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mo Manager" })
+    const control = await within(await singles(await sheet())).findByRole("switch", { name: "Give Write memory to Mo Manager" })
     await waitFor(() => expect(api.mock.calls.some(([url]) => String(url).includes("/members/capabilities"))).toBe(true))
     expect(control).toBeDisabled()
     fireEvent.click(control)
@@ -434,7 +612,7 @@ describe("Members — drafts stay where they were made", () => {
     window.history.replaceState(null, "", "/settings/members?member=u-mel")
     const ui = () => <QueryClientProvider client={qc}><MembersPage /></QueryClientProvider>
     const rendered = render(ui())
-    fireEvent.click(await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mel Member" }))
+    fireEvent.click(await within(await singles(await sheet())).findByRole("switch", { name: "Give Write memory to Mel Member" }))
     await saveBar()
     // The switcher asks first (PageSaveProvider's guard); switched anyway,
     // ws1's draft is neither shown nor savable in ws2.
@@ -454,7 +632,7 @@ describe("Members — drafts stay where they were made", () => {
     })
     renderPage("/settings/members?member=u-mel")
     expect(await screen.findByText(/Could not read what people may do/)).toBeInTheDocument()
-    const control = await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mel Member" })
+    const control = await within(await singles(await sheet())).findByRole("switch", { name: "Give Write memory to Mel Member" })
     // Mel holds issue.create; an empty set here would have revoked it on Save.
     expect(control).toBeDisabled()
     fireEvent.click(control)
@@ -523,7 +701,36 @@ describe("Members — pending invitations", () => {
 
   it("says when nothing is pending", async () => {
     renderPage("/settings/members?status=invited")
-    expect(await screen.findByText("No pending invitations.")).toBeInTheDocument()
+    expect(await screen.findByText("No invitations.")).toBeInTheDocument()
+  })
+
+  it("shows what the server says: a revoked invitation is not an expired one", async () => {
+    const past = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    invitations = [
+      { ...pending("i1", "MEMBER", "open@x.io") },
+      { ...pending("i2", "MEMBER", "late@x.io"), status: "expired", expires_at: past },
+      { ...pending("i3", "VIEWER", "gone@x.io"), status: "revoked", expires_at: "1970-01-01T00:00:00Z" },
+    ]
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    expect(list.querySelector("[data-invitation=i3]")).toHaveAttribute("data-status", "revoked")
+    expect(within(list.querySelector<HTMLElement>("[data-invitation=i3]")!).getByText("Revoked")).toBeInTheDocument()
+    expect(list.querySelector("[data-invitation=i3]")).not.toHaveTextContent(/Expired/)
+    expect(list.querySelector("[data-invitation=i2]")).toHaveTextContent("Expired 3 days ago")
+    // A revoked invitation can be sent again, not revoked again.
+    expect(within(list).queryByRole("button", { name: "Revoke gone@x.io" })).toBeNull()
+    expect(within(list).getByRole("button", { name: "Reissue gone@x.io" })).toHaveTextContent("Invite again")
+    // The page head counts the ones still waiting.
+    expect(document.querySelector("[data-slot=drill-head]")).not.toBeNull()
+  })
+
+  it("pages a long list of invitations 25 at a time", async () => {
+    invitations = Array.from({ length: 30 }, (_, i) => pending(`i${i}`, "MEMBER", `p${i}@x.io`))
+    renderPage("/settings/members?status=invited")
+    const list = await slot("[data-slot=members-invitations]")
+    expect(list.querySelectorAll("li[data-invitation]")).toHaveLength(25)
+    fireEvent.click(screen.getByRole("button", { name: "Show 5 more" }))
+    await waitFor(() => expect(list.querySelectorAll("li[data-invitation]")).toHaveLength(30))
   })
 })
 
@@ -577,7 +784,7 @@ describe("Members — the person peek", () => {
   it("says a high-stakes grant takes effect when you save", async () => {
     renderPage("/settings/members?member=u-mel")
     const d = await sheet()
-    fireEvent.click(await within(d).findByRole("switch", { name: "Grant credentials:reveal to Mel Member" }))
+    fireEvent.click(await within(await singles(d)).findByRole("switch", { name: "Give Reveal secrets to Mel Member" }))
     const dialog = await screen.findByRole("alertdialog")
     expect(dialog).toHaveTextContent(/Takes effect when you save/)
     expect(dialog).not.toHaveTextContent(/Applies now/)
@@ -604,12 +811,14 @@ describe("Members — the person peek", () => {
     const head = document.querySelector<HTMLElement>("[data-slot=drill-head]")
     expect(head).not.toBeNull()
     expect(within(head!).getByRole("heading", { level: 2, name: "Members" })).toBeInTheDocument()
-    expect(screen.getAllByText(/Who is in this workspace/)).toHaveLength(1)
+    // No figure yet: "0 people" would be a wrong answer while the roster loads.
+    expect(head).not.toHaveTextContent(/0 people/)
   })
 
   it("names the CLI command for the person in the peek's footer", async () => {
     renderPage("/settings/members?member=u-mel")
     const p = await peek()
     expect(p).toHaveTextContent("crewship workspace member capabilities list u-mel")
+    expect(p).toHaveTextContent("A role change applies at once. Abilities and reach wait for Save.")
   })
 })

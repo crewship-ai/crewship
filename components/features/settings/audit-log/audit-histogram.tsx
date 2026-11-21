@@ -104,7 +104,7 @@ export function AuditHistogram({ times, window, endsToday, selected, onSelect, h
   const dragRect = drag && dragTo !== null ? { lo: Math.min(drag.i, dragTo), hi: Math.max(drag.i, dragTo) } : null
   const spansDays = toMs - fromMs > 86_400_000
   return (
-    <div data-slot="audit-histogram" className="rounded-card border border-border bg-card px-4 pb-2 pt-3">
+    <div data-slot="audit-histogram" className="border-b border-border px-4 pb-2 pt-3">
       <div
         ref={ref}
         role="application"
@@ -141,7 +141,7 @@ export function AuditHistogram({ times, window, endsToday, selected, onSelect, h
       </div>
       <div className="mt-1 flex justify-between text-micro text-muted-foreground-soft">
         <span>{spansDays ? day(fromMs) : clock(fromMs)}</span>
-        <span>Drag to pick a slice of time</span>
+        <span className="max-sm:hidden">Drag to pick a slice of time</span>
         <span>{endsToday ? "Today" : spansDays ? day(toMs) : clock(toMs)}</span>
       </div>
     </div>
