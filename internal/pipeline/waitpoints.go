@@ -112,8 +112,10 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 		stopCh:    make(chan struct{}),
 		trust:     NewTrustGrantStore(db),
 	}
-	// Before anything can read a waitpoint: give legacy rows a public id and
-	// hash their secret in place (#1910, waitpoints_callback_token.go).
+	// Before anything can read a waitpoint: give legacy rows a fresh public
+	// id and a NULL callback digest. Their old secrets are not carried
+	// forward, so pre-#1910 callback URLs deliberately stop working until a
+	// MANAGER mints a new one (#1910, waitpoints_callback_token.go).
 	ensureWaitpointDigestColumn(db)
 	s.migrateLegacyTokens()
 	s.sweeperWg.Add(1)
