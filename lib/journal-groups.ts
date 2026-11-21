@@ -222,6 +222,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "craft.native_preview_shared",
     "artifact.orphaned_workbook_deleted",
     "artifact.private_output_published",
+    "artifact.returned_to_private",
     "page.published",
     "page.link_revoked",
     "page.public_view",

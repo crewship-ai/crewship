@@ -168510,6 +168510,721 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/return-private": {
+      "post": {
+        "description": "Submit page return private (POST /api/v1/pages/{slug}/return-private).",
+        "operationId": "post_api_v1_pages_slug_return-private",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Preview with dry_run=true. Mutation requires confirm=true and the exact preview review_token. Changed content, identity, versions or authority requires another preview. Tokens confer no access rights.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "review_token": {
+                        "enum": [
+                          ""
+                        ]
+                      }
+                    },
+                    "required": [
+                      "dry_run"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "review_token": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "confirm",
+                      "review_token"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "pages_version": {
+                    "maximum": 9007199254740990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "review_token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pages_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Same Page ID afterwards. Grants are deleted (recorded as retired issuances) and public links revoked, so a later share starts from nothing. Only workbooks and HTML artifact projects can be returned, because only they can be shared again (reshare names how); Docs, native Word and Sheet are refused with 409 reason no_reshare_path (#5617). Workspace OWNER and ADMIN keep the audited read.",
+                  "properties": {
+                    "after": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "subjects": {
+                          "items": {
+                            "properties": {
+                              "effective_permissions": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "comment": {
+                                    "type": "boolean"
+                                  },
+                                  "edit": {
+                                    "type": "boolean"
+                                  },
+                                  "produce": {
+                                    "type": "boolean"
+                                  },
+                                  "propose": {
+                                    "type": "boolean"
+                                  },
+                                  "read": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "read",
+                                  "comment",
+                                  "edit",
+                                  "produce",
+                                  "propose"
+                                ],
+                                "type": "object"
+                              },
+                              "label": {
+                                "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
+                                "type": "string"
+                              },
+                              "paths": {
+                                "items": {
+                                  "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "sources": {
+                                "items": {
+                                  "properties": {
+                                    "inherited": {
+                                      "type": "boolean"
+                                    },
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "permissions": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "comment": {
+                                          "type": "boolean"
+                                        },
+                                        "edit": {
+                                          "type": "boolean"
+                                        },
+                                        "produce": {
+                                          "type": "boolean"
+                                        },
+                                        "propose": {
+                                          "type": "boolean"
+                                        },
+                                        "read": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "read",
+                                        "comment",
+                                        "edit",
+                                        "produce",
+                                        "propose"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "subject_id": {
+                                "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
+                                "type": "string"
+                              },
+                              "subject_type": {
+                                "enum": [
+                                  "user",
+                                  "crew",
+                                  "agent",
+                                  "workspace"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "subject_type",
+                              "subject_id",
+                              "paths",
+                              "effective_permissions",
+                              "sources"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "withheld": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "subjects",
+                        "withheld"
+                      ],
+                      "type": "object"
+                    },
+                    "before": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "subjects": {
+                          "items": {
+                            "properties": {
+                              "effective_permissions": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "comment": {
+                                    "type": "boolean"
+                                  },
+                                  "edit": {
+                                    "type": "boolean"
+                                  },
+                                  "produce": {
+                                    "type": "boolean"
+                                  },
+                                  "propose": {
+                                    "type": "boolean"
+                                  },
+                                  "read": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "read",
+                                  "comment",
+                                  "edit",
+                                  "produce",
+                                  "propose"
+                                ],
+                                "type": "object"
+                              },
+                              "label": {
+                                "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
+                                "type": "string"
+                              },
+                              "paths": {
+                                "items": {
+                                  "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "sources": {
+                                "items": {
+                                  "properties": {
+                                    "inherited": {
+                                      "type": "boolean"
+                                    },
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "permissions": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "comment": {
+                                          "type": "boolean"
+                                        },
+                                        "edit": {
+                                          "type": "boolean"
+                                        },
+                                        "produce": {
+                                          "type": "boolean"
+                                        },
+                                        "propose": {
+                                          "type": "boolean"
+                                        },
+                                        "read": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "required": [
+                                        "read",
+                                        "comment",
+                                        "edit",
+                                        "produce",
+                                        "propose"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "subject_id": {
+                                "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
+                                "type": "string"
+                              },
+                              "subject_type": {
+                                "enum": [
+                                  "user",
+                                  "crew",
+                                  "agent",
+                                  "workspace"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "subject_type",
+                              "subject_id",
+                              "paths",
+                              "effective_permissions",
+                              "sources"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "withheld": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "subjects",
+                        "withheld"
+                      ],
+                      "type": "object"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "changes": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "after": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "comment": {
+                                "type": "boolean"
+                              },
+                              "edit": {
+                                "type": "boolean"
+                              },
+                              "produce": {
+                                "type": "boolean"
+                              },
+                              "propose": {
+                                "type": "boolean"
+                              },
+                              "read": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "read",
+                              "comment",
+                              "edit",
+                              "produce",
+                              "propose"
+                            ],
+                            "type": "object"
+                          },
+                          "before": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "comment": {
+                                "type": "boolean"
+                              },
+                              "edit": {
+                                "type": "boolean"
+                              },
+                              "produce": {
+                                "type": "boolean"
+                              },
+                              "propose": {
+                                "type": "boolean"
+                              },
+                              "read": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "read",
+                              "comment",
+                              "edit",
+                              "produce",
+                              "propose"
+                            ],
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "subject_id": {
+                            "type": "string"
+                          },
+                          "subject_type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "subject_type",
+                          "subject_id",
+                          "before",
+                          "after"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "from_folder": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "acl_version": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "slug",
+                            "acl_version"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "workbook",
+                        "artifact_project"
+                      ],
+                      "type": "string"
+                    },
+                    "notice": {
+                      "type": "string"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "released_edit_leases": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "removed_grants": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "level": {
+                            "type": "string"
+                          },
+                          "retired": {
+                            "type": "boolean"
+                          },
+                          "subject_id": {
+                            "type": "string"
+                          },
+                          "subject_type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "subject_type",
+                          "subject_id",
+                          "level",
+                          "retired"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "reshare": {
+                      "type": "string"
+                    },
+                    "review_token": {
+                      "type": "string"
+                    },
+                    "revoked_mandates": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "revoked_public_links": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expires_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "expires_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "dry_run",
+                    "page_id",
+                    "page",
+                    "kind",
+                    "pages_version",
+                    "from_folder",
+                    "before",
+                    "after",
+                    "changes",
+                    "removed_grants",
+                    "revoked_public_links",
+                    "revoked_mandates",
+                    "released_edit_leases",
+                    "reshare",
+                    "notice",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page return private",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/rollback": {
       "post": {
         "description": "Roll back page (POST /api/v1/pages/{slug}/rollback).",

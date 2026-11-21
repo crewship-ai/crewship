@@ -345,6 +345,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "craft.native_preview_shared": Eye,
   "artifact.orphaned_workbook_deleted": Trash2,
   "artifact.private_output_published": Globe,
+  "artifact.returned_to_private": Lock,
   "page.published": Globe,
   "page.link_revoked": Ban,
   "page.public_view": Eye,

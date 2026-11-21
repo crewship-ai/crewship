@@ -244,6 +244,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "craft.native_preview_shared",
   "artifact.orphaned_workbook_deleted",
   "artifact.private_output_published",
+  "artifact.returned_to_private",
   "page.published",
   "page.link_revoked",
   "page.public_view",
