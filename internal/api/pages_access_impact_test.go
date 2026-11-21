@@ -64,3 +64,73 @@ func TestPageAccessRejectsStaleAdministratorContext(t *testing.T) {
 	w := pagesAccessCall(t, f.h, f.wsID, "dave", "ADMIN", "fleet-201", "")
 	expectStatus(t, w, 403)
 }
+
+// A private artifact's role path is the administrator READ rule (#4825/#4839):
+// an ADMIN reaches it to read with audit, never to comment or edit. Only the
+// workspace OWNER, as custodian, keeps the write/administration audience. The
+// access report and the impact preview share this decoration, so both must say
+// what the server enforces (artifact_admin_read_test.go).
+func TestPageAccessPrivateRolePathMatchesCustodianRule(t *testing.T) {
+	rec := &pageRecord{PrivateAudience: true, OwnerUserID: "author", NativeCraftApplication: "wordcraft"}
+	ws := &pageAccessWorkspace{Members: []pageAccessMember{
+		{ID: "author", Role: "MEMBER"},
+		{ID: "admin", Role: "ADMIN"},
+		{ID: "owner", Role: "OWNER"},
+	}}
+	subjects := []pageAccessSubjectWire{
+		{SubjectType: pageSubjectUser, SubjectID: "author", Paths: []string{pageReachOwner}},
+		{SubjectType: pageSubjectUser, SubjectID: "admin", Paths: []string{pageReachRole}},
+		{SubjectType: pageSubjectUser, SubjectID: "owner", Paths: []string{pageReachRole}},
+	}
+	decoratePageAccess(subjects, rec, ws, nil)
+	want := map[string]pageAccessPermissions{
+		"author": {Read: true, Comment: true, Edit: true},
+		"admin":  {Read: true},
+		// Only the custodian comments on private output
+		// (pages_artifact_comment_authority.go, documents_authority.go).
+		"owner": {Read: true, Edit: true},
+	}
+	for _, s := range subjects {
+		if s.EffectivePermissions != want[s.SubjectID] {
+			t.Errorf("%s: effective %+v, want %+v", s.SubjectID, s.EffectivePermissions, want[s.SubjectID])
+		}
+		if len(s.Sources) != 1 || s.Sources[0].Permissions != want[s.SubjectID] {
+			t.Errorf("%s: sources %+v", s.SubjectID, s.Sources)
+		}
+	}
+
+	// The workspace OWNER's Edit is the `write` verb that PATCH and rollback
+	// enforce: mayEditSpec admits the custodian on private output, and
+	// workbookPageOwnerOnly then keeps a workbook to its author. Content-only
+	// author rules (Mooring, schema-1 Slides, artifact Projects) do not stop
+	// the arrangement write, so they still report Edit. Records are shaped the
+	// way each creation path leaves them: an artifact Project carries only its
+	// version head, so it has none of these flags.
+	for name, tc := range map[string]struct {
+		rec  *pageRecord
+		edit bool
+	}{
+		"native sheet":           {&pageRecord{NativeCraftApplication: "gridcraft"}, true},
+		"docs document":          {&pageRecord{HasDocument: true}, true},
+		"collaboration document": {&pageRecord{HasCollaboration: true}, true},
+		"artifact project":       {&pageRecord{ArtifactContentType: "artifact_project"}, true},
+		"artifact slides":        {&pageRecord{ArtifactContentType: "artifact_slides"}, true},
+		"gridcraft workbook":     {&pageRecord{HasWorkbook: true}, false},
+		"mooring document":       {&pageRecord{HasMooring: true}, true},
+		"schema-1 slides":        {&pageRecord{HasSlides: true, SlidesSchema: 1}, true},
+	} {
+		tc.rec.PrivateAudience, tc.rec.OwnerUserID = true, "author"
+		owner := []pageAccessSubjectWire{{SubjectType: pageSubjectUser, SubjectID: "owner", Paths: []string{pageReachRole}}}
+		decoratePageAccess(owner, tc.rec, ws, nil)
+		if want := (pageAccessPermissions{Read: true, Edit: tc.edit}); owner[0].EffectivePermissions != want {
+			t.Errorf("private %s OWNER: %+v, want %+v", name, owner[0].EffectivePermissions, want)
+		}
+	}
+
+	// A shared page keeps the manage role's edit path unchanged.
+	shared := []pageAccessSubjectWire{{SubjectType: pageSubjectUser, SubjectID: "admin", Paths: []string{pageReachRole}}}
+	decoratePageAccess(shared, &pageRecord{OwnerUserID: "author"}, ws, nil)
+	if shared[0].EffectivePermissions != (pageAccessPermissions{Read: true, Comment: true, Edit: true}) {
+		t.Fatalf("shared page admin: %+v", shared[0].EffectivePermissions)
+	}
+}
