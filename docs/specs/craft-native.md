@@ -595,7 +595,8 @@ admission before accepting work.
 
 An authenticated human with current Page write access may send
 `POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
-`{chat_id, message_id, whole_document: true}`. The message must be that human's
+`{chat_id, message_id, whole_document: true}` and an optional
+`mode: "propose" | "apply"`. The message must be that human's
 persisted original user message in the actual registered agent's chat, saved
 as a native Craft instruction in a private chat that human created: such a
 message started no turn. An ordinary turn or a group chat message is refused,
@@ -607,6 +608,17 @@ work attempt are required before the actual run credential can access the
 native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
+
+The mode follows Q16 (owner decision 2026-10-19). The author's targeted
+instruction is the mandate. Without `mode`, a document in the author's personal
+space (private, unfiled, not crew-owned, owned by the author) is changed
+directly, and any other document gets a proposal. `mode: "apply"` on a shared
+document is the explicit direct mandate. The work input records the resolved
+mode and whether the human chose it. A proposing task is refused `craft_apply`
+and lease acquisition with `409 {reason: "proposal_required"}`, even when the
+lease is free. The publishing transaction checks the same rule again. Moving
+the document out of the personal space advances its authority epoch, which
+stops the task before any further write.
 
 The normal human CLI uses the same explicit consent, Page authority and
 instruction send:
@@ -831,3 +843,31 @@ answers 404. The agent cannot decide its own proposal.
 The bounded proposal review list puts all open proposals before decided history,
 then orders each group by creation time. Newer decisions cannot hide a pending
 proposal; the per-document open-proposal cap remains 16 and the list cap 50.
+
+### Provenance of an accepted proposal
+
+Accepting never turns the agent into the writer. The saved version's recorded
+actor is the person who accepted it (`user:<id>`): that person is the approver
+and the writer. The agent stays the proposal's author. Both are visible:
+
+- Every proposal view (list, candidate, accept and reject responses) carries
+  `decided_by` and `decided_at` once the proposal is no longer open.
+  `decided_by` is a `NativeCraftDecider` (`actor_id`, `display_name`, `kind`).
+  `kind: "human"` names the person who accepted or rejected it, and also the
+  person whose accept found the document content changed: that accept records
+  the proposal `stale` with the attempting person as decider. `kind: "system"`
+  (`system:superseded`, display name `Crewship`) appears only when a new
+  proposal's sweep marked an open proposal stale before anyone decided. Only
+  the actor id and display name are returned, never other profile data.
+- A version history entry (`GET .../craft/document/versions` and
+  `GET .../craft/document/versions/{version}`) saved by accepting a proposal
+  carries `proposal: {id, author}`, with `author` in the history's own author
+  shape (`kind: "agent"`). The entry's own `author` is the accepting person.
+
+The link is derived, not stored on the version: an accepted proposal row
+matches a version when page, workspace and `result_version` agree and the
+version's recorded actor equals the proposal's `decided_by`. A plain save is
+never attributed to an agent. The provenance is read under the same live
+private read authority as the history listing, before the administrator audit,
+so a caller who cannot read the history sees neither the history nor its
+proposals. No migration was needed.

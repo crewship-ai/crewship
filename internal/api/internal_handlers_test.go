@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -910,6 +911,15 @@ func TestInternalCreateAgent(t *testing.T) {
 		// operator approval, which answers 202 Accepted rather than 201.
 		if w.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+		}
+		// Captain-created agents get the web dialog's avatar inputs (#3051).
+		var slug string
+		var seed, style sql.NullString
+		if err := db.QueryRow(`SELECT slug, avatar_seed, avatar_style FROM agents WHERE name = 'Bot'`).Scan(&slug, &seed, &style); err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if seed.String != slug || style.Valid {
+			t.Errorf("avatar = (%q, %v), want (%q, NULL)", seed.String, style, slug)
 		}
 	})
 

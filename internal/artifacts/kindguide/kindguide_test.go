@@ -5,14 +5,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// The UI's Artifact family (components/features/artifacts-library/kinds.ts)
-// plus Library, the Design mode whose content is a design system. Craft kinds
-// (word, sheet) have their own single-writer playbook, crewship-craft.
-var wantKinds = []string{"docs", "slides", "design", "library", "dashboard", "app"}
+// The UI's kinds (components/features/artifacts-library/kinds.ts) in its
+// order: the Artifact family, Library (the Design mode whose content is a
+// design system) after Design, then the native Craft kinds Word and Sheet.
+var wantKinds = []string{"docs", "slides", "design", "library", "dashboard", "app", "word", "sheet"}
 
 func TestEveryArtifactKindShipsAVersionedGuide(t *testing.T) {
 	list := List()
@@ -63,11 +64,24 @@ func TestEveryGuideAnswersTheAgentContract(t *testing.T) {
 	}
 }
 
+func TestDesignGuideKeepsExplicitStyleIntent(t *testing.T) {
+	guide, err := Lookup("design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"unless asked to change the look", "only when asked to hide or lock", "only when asked for corners or a border"} {
+		if !strings.Contains(guide.Content, rule) {
+			t.Errorf("design guide lacks %q", rule)
+		}
+	}
+}
+
 // The shared rules are one source appended to every guide; the strings below
 // preserve the shared safety contract for every kind.
 func TestSharedRulesReachEveryGuide(t *testing.T) {
 	rules := []string{
-		"third refusal",                                // conflict: stop after 3 refusals and report
+		"never retry with a newer base version",        // project conflict: wait for a new request
+		"third refusal",                                // other conflicts have a bounded retry limit
 		"Comment is not Propose",                       // a comment never stands in for a proposal
 		"Only the artifact's Owner",                    // only the Owner delegates Edit
 		"A missing host mode is not a Propose mandate", // no implicit write authority
@@ -92,13 +106,14 @@ func TestLookupAcceptsKnownKindsAndAliasesOnly(t *testing.T) {
 		"docs": "docs", "Docs": "docs", " app ": "app",
 		"design-system": "library", "design_system": "library", "library": "library",
 		"doc": "docs", "deck": "slides", "project": "app",
+		"word": "word", "wordcraft": "word", "Sheet": "sheet", "gridcraft": "sheet",
 	} {
 		g, err := Lookup(in)
 		if err != nil || g.Kind != want {
 			t.Fatalf("Lookup(%q) = %q, %v; want %q", in, g.Kind, err, want)
 		}
 	}
-	for _, in := range []string{"", "word", "sheet", "../docs", "docs.md", "rules", strings.Repeat("a", 200)} {
+	for _, in := range []string{"", "craft", "../docs", "docs.md", "rules", strings.Repeat("a", 200)} {
 		if _, err := Lookup(in); !errors.Is(err, ErrUnknownKind) {
 			t.Fatalf("Lookup(%q) err = %v, want ErrUnknownKind", in, err)
 		}
@@ -120,5 +135,38 @@ func TestLookupReturnsDetachedDeclarations(t *testing.T) {
 	a.Capabilities.Supported[0] = "model"
 	if b, _ := Lookup("app"); b.Modes[0] != "ask" || b.Capabilities.Supported[0] == "model" {
 		t.Fatal("Lookup exposes registry slices")
+	}
+}
+
+// Native Word and Sheet are Craft files, not Artifacts: their guides name the
+// original engine, say that an agent cannot create one, and point at the
+// crewship-craft tools a confirmed task offers (#5597).
+func TestCraftGuidesDescribeNativeWordAndSheet(t *testing.T) {
+	for kind, application := range map[string]string{"word": "wordcraft", "sheet": "gridcraft"} {
+		g, err := Lookup(kind)
+		if err != nil {
+			t.Fatalf("Lookup(%q): %v", kind, err)
+		}
+		flat := strings.Join(strings.Fields(g.Content), " ")
+		for _, want := range []string{
+			"native Craft", "application `" + application + "`", "You cannot create",
+			"crewship craft initialize", "craft_read", "craft_apply", "craft_propose", "crewship-craft",
+		} {
+			if !strings.Contains(flat, want) {
+				t.Errorf("%s guide lacks %q", kind, want)
+			}
+		}
+		if !strings.Contains(g.Title, "native Craft") {
+			t.Errorf("%s title %q does not say native Craft", kind, g.Title)
+		}
+		for _, unsupported := range []string{"create", "comment"} {
+			if !slices.Contains(g.Capabilities.Unsupported, unsupported) {
+				t.Errorf("%s does not declare %q unsupported", kind, unsupported)
+			}
+		}
+	}
+	word, _ := Lookup("word")
+	if flat := strings.Join(strings.Fields(word.Content), " "); !strings.Contains(flat, "`--kind docs`") {
+		t.Error("word guide does not tell a Docs document apart")
 	}
 }

@@ -401,6 +401,13 @@ type DBDump struct {
 	WorkspaceID string                      `json:"workspace_id"`
 	Tables      map[string][]map[string]any `json:"tables"`
 
+	// CrewID is set by DumpCrew only: the crew a crew-scope dump was cut
+	// for. It rides inside the encrypted payload, so unlike the manifest's
+	// scope it cannot be changed without the key, and unlike the crews
+	// table it survives a custom plan that leaves the agents category out.
+	// isCrewJournalExtract decides from it (#5578).
+	CrewID string `json:"crew_id,omitempty"`
+
 	// scope is DumpWorkspace's independent completeness derivation (#2009),
 	// computed in the dump's own snapshot. Not serialised into the payload:
 	// the create path records it in the manifest.
@@ -808,6 +815,16 @@ func tableRowCounts(dump *DBDump) map[string]int {
 	return out
 }
 
+// crewDumpTables is every table DumpCrew can select from. DumpCrew refuses a
+// filter that is not listed here, so the two cannot drift. A restore uses it
+// to recognise a crew extract from the decrypted payload itself instead of
+// the unauthenticated manifest (see isCrewJournalExtract, #5578).
+var crewDumpTables = map[string]bool{
+	"users": true, "workspaces": true, "crews": true, "environment_revisions": true,
+	"service_runtime_intents": true, "agents": true, "skills": true, "agent_skills": true,
+	"crew_members": true, "chats": true, "agent_mcp_bindings": true, "journal_entries": true,
+}
+
 // DumpCrew exports rows for a single crew within its workspace. Useful
 // for `--scope=crew` backups which produce same-instance bundles (per
 // PRD section 2.3).
@@ -826,6 +843,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
+		CrewID:      crewID,
 		Tables:      map[string][]map[string]any{},
 	}
 	// Tables to include for crew scope — subset of workspace, filtered
@@ -872,6 +890,9 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		{"journal_entries", "crew_id = ?", []any{crewID}, ""},
 	}
 	for _, f := range filters {
+		if !crewDumpTables[f.table] {
+			return nil, fmt.Errorf("backup: crew dump table %s is not listed in crewDumpTables", f.table)
+		}
 		exists, err := tableExists(ctx, tx, f.table)
 		if err != nil {
 			return nil, err
@@ -961,6 +982,28 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 		var notnull, pk int
 		var dfltValue sql.NullString
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+// tableGeneratedColumns returns the target table's generated columns. PRAGMA
+// table_info leaves them out, so tableColumns does not allow them and the
+// insert skips them, which is right: SQLite computes them. A dump's SELECT *
+// still returns them, so the dropped-column report must not count them as
+// values the restore lost.
+func tableGeneratedColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM pragma_table_xinfo(?) WHERE hidden IN (2, 3)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
 		out[name] = true
@@ -1087,6 +1130,49 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	return RestoreDumpTxHooks(ctx, db, dump, &RestoreDumpHooks{PreCommit: preCommit})
 }
 
+// restoreTargetPreflightsIn runs the checks that decide whether the TARGET
+// database may receive dump at all. They only read, and they run before any
+// hook or insert, so RestoreDumpTxHooks and a dry run (dryRunRestorePreflight)
+// share them: a dry run that skipped them reported success for a restore the
+// real run then refused.
+func restoreTargetPreflightsIn(ctx context.Context, tx *sql.Tx, dump *DBDump, legacySourceVersions []int) error {
+	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, legacySourceVersions); err != nil {
+		return err
+	}
+	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
+		return err
+	}
+	return rejectMooringDeliveryRestoreTarget(ctx, tx, dump)
+}
+
+// dryRunRestorePreflight runs the refusals RestoreDumpTxHooks applies before
+// its first write, against db, without writing: the pre-transaction collision
+// and input checks, then restoreTargetPreflightsIn inside a read-only
+// transaction that is always rolled back. The checks the --replace wipe repeats
+// inside PreInsert (ReplaceWorkspaceContentsWithOptions) already ran in
+// RestoreBackup before the dry-run branch (rejectPrivateArtifactWorkspaceReplacement
+// and runAdmissionBundlePreflight).
+func dryRunRestorePreflight(ctx context.Context, db *sql.DB, dump *DBDump, legacySourceVersions []int) error {
+	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
+		return err
+	}
+	if err := rejectGridCraftHistoryCollision(ctx, db, dump); err != nil {
+		return err
+	}
+	if err := rejectRunAdmissionInput(dump, false); err != nil {
+		return err
+	}
+	if err := validatePrivateArtifactContextDump(dump, legacySourceVersions); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("backup: begin dry-run preflight tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	return restoreTargetPreflightsIn(ctx, tx, dump, legacySourceVersions)
+}
+
 // RestoreDumpHooks carries optional tx-bound callbacks that run at
 // well-defined points inside RestoreDumpTxHooks's transaction. nil
 // closures or a nil RestoreDumpHooks are equivalent to no-ops.
@@ -1187,13 +1273,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
-	if err := runAdmissionRestorePreflightIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
-		return stats, err
-	}
-	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
-		return stats, err
-	}
-	if err := rejectMooringDeliveryRestoreTarget(ctx, tx, dump); err != nil {
+	if err := restoreTargetPreflightsIn(ctx, tx, dump, hooks.legacySourceVersions); err != nil {
 		return stats, err
 	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
@@ -1255,6 +1335,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		generated, err := tableGeneratedColumns(ctx, tx, table)
+		if err != nil {
+			return stats, fmt.Errorf("backup: generated columns of %s: %w", table, err)
 		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
@@ -1392,7 +1476,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				keys = append(keys, k)
 			}
 			sortStrings(keys)
-			tallyDroppedColumns(&dropped, table, keys, allowed)
+			tallyDroppedColumns(&dropped, table, keys, allowed, generated)
 			for _, k := range keys {
 				// Sequence is an installation-local scan position, not event identity.
 				// Let SQLite allocate it so imports cannot collide with another tenant.

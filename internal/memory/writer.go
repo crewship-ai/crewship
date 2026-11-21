@@ -74,9 +74,9 @@ type WriteResult struct {
 //     disk. flock state is per-fd, not per-inode, so a leftover
 //     empty lockfile does not "stay locked".
 //
-//   - Parent directories are created with MkdirAll(0o755) to match
-//     the loose contract callers like consolidator.appendRules
-//     already rely on.
+//   - Parent directories are created like MkdirAll; inside the shared
+//     (setgid) memory tree they, the file and its lock are made group
+//     writable explicitly, see shared_mode.go.
 //
 //   - The tempfile is created in the same directory as the target so
 //     the rename is on the same filesystem (cross-fs rename would
@@ -176,7 +176,9 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 	// (uid 1002, via group 1002 + setgid inherited from the prepped
 	// .memory root). A 0o755 subdir created by one party would lock
 	// the other out of it until the next root perms prep.
-	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+	// The umask strips that group write, so MkdirAllShared sets 02775
+	// explicitly on what it creates in the shared tree (#4777).
+	if err := mkdirAllShared(filepath.Dir(path), 0o775); err != nil {
 		return WriteResult{}, fmt.Errorf("mkdir parent: %w", err)
 	}
 
@@ -211,6 +213,14 @@ func WriteFile(ctx context.Context, path string, content []byte, cfg WriteConfig
 
 	cleanupTmp := func() {
 		_ = os.Remove(tmpPath)
+	}
+
+	if inSharedTree(filepath.Dir(path)) {
+		if err := shareFile(f); err != nil {
+			_ = f.Close()
+			cleanupTmp()
+			return WriteResult{}, fmt.Errorf("chmod tempfile: %w", err)
+		}
 	}
 
 	if _, err := f.Write(effective); err != nil {

@@ -381,10 +381,13 @@ function ChatClientBody() {
   }
   const proposalHandoffForThisSession = proposalHandoff !== null && proposalHandoffSessionRef.current === sessionId
 
-  const agent = useMemo(
-    () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
-    [tree.roster, agentSlug],
-  )
+  // The live `agent.status` overlay applies to the open agent too: the header
+  // read the once-fetched roster row and said "Idle" through a whole run.
+  const agent = useMemo(() => {
+    const row = tree.roster?.find((a) => a.slug === agentSlug) ?? null
+    const live = row ? statusOverrides[row.id] : undefined
+    return row && live && live !== row.status ? { ...row, status: live } : row
+  }, [tree.roster, agentSlug, statusOverrides])
 
   // The toolbar's path back out of the conversation, by NAME. The toolbar
   // only has the URL, and the URL carries the slug; this page has the roster.

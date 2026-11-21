@@ -191,7 +191,7 @@ func WritePersona(p PersonaPaths, layer PersonaLayer, content string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := MkdirAllShared(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("persona: mkdir: %w", err)
 	}
 	lk := NewFileLock(path + ".lock")
@@ -257,7 +257,7 @@ func BackfillFromLegacy(p PersonaPaths, legacy string) (wrote bool, err error) {
 		return false, errors.New("persona backfill: AgentDir required")
 	}
 	path := p.AgentPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := MkdirAllShared(filepath.Dir(path)); err != nil {
 		return false, fmt.Errorf("persona backfill: mkdir: %w", err)
 	}
 	lk := NewFileLock(path + ".lock")

@@ -161,6 +161,7 @@ func TestCovHireResolvesByCrewSlug(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	assertAgentsFollowCrewStyle(t, db) // #3051
 	if resp.ID == "" || !resp.Ephemeral {
 		t.Errorf("unexpected response: %+v", resp)
 	}
