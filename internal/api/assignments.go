@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -392,25 +394,88 @@ type assignmentListItem struct {
 	CreatedAt    string  `json:"created_at"`
 }
 
+// assignmentStatuses is the closed set of assignments.status values every
+// writer uses (the column has no CHECK; see migrate_consts_v93). ?status= on
+// the crew list is validated against it: an unknown value would match no row
+// and look like "nothing queued", which is the typo failure /api/v1/runs
+// rejects for the same reason.
+var assignmentStatuses = []string{"PENDING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"}
+
+// parseAssignmentStatuses splits a comma list into upper-cased statuses.
+// Blank entries are skipped, so "QUEUED," means QUEUED. ok is false when any
+// entry is outside assignmentStatuses.
+func parseAssignmentStatuses(raw string) (statuses []string, ok bool) {
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.ToUpper(strings.TrimSpace(part))
+		if s == "" {
+			continue
+		}
+		if !slices.Contains(assignmentStatuses, s) {
+			return nil, false
+		}
+		if !slices.Contains(statuses, s) {
+			statuses = append(statuses, s)
+		}
+	}
+	return statuses, true
+}
+
 func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	limit, offset := parsePagination(r, 50, 100)
 
+	// One WHERE for the page and for the COUNT behind X-Total-Count, so a
+	// filter can never narrow one and not the other (#5603).
+	where := `
+		WHERE (by_agent.crew_id = ? OR to_agent.crew_id = ?)
+		  AND a.workspace_id = ?`
+	args := []any{crewID, crewID, workspaceID}
+
+	// ?assigned_to= takes the assignee's id or slug. Agent slugs are unique
+	// per workspace, and the match is pinned to this workspace, so a slug or
+	// id from another workspace matches nothing. An unknown agent is an
+	// empty page, as ?agent_id= on /peer-conversations is, not a 404.
+	if assignedTo := strings.TrimSpace(r.URL.Query().Get("assigned_to")); assignedTo != "" {
+		where += ` AND to_agent.workspace_id = ? AND (to_agent.id = ? OR to_agent.slug = ?)`
+		args = append(args, workspaceID, assignedTo, assignedTo)
+	}
+
+	if statusRaw := r.URL.Query().Get("status"); statusRaw != "" {
+		statuses, ok := parseAssignmentStatuses(statusRaw)
+		if !ok {
+			replyError(w, http.StatusBadRequest, "status must be a comma list of: "+strings.Join(assignmentStatuses, ", "))
+			return
+		}
+		if len(statuses) > 0 {
+			where += ` AND a.status IN (?` + strings.Repeat(",?", len(statuses)-1) + `)`
+			for _, s := range statuses {
+				args = append(args, s)
+			}
+		}
+	}
+
+	const from = `
+		FROM assignments a
+		JOIN agents by_agent ON by_agent.id = a.assigned_by_id
+		JOIN agents to_agent ON to_agent.id = a.assigned_to_id`
+
+	var total int
+	if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*)`+from+where, args...).Scan(&total); err != nil {
+		replyInternalError(w, h.logger, "count assignments", err)
+		return
+	}
+
+	// a.id breaks created_at ties so two pages never share or skip a row.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT a.id, a.task, a.status, a.result_summary, a.error_message, a.queued_reason,
 		       a.started_at, a.finished_at, a.created_at,
 		       by_agent.name, by_agent.slug,
-		       to_agent.name, to_agent.slug
-		FROM assignments a
-		JOIN agents by_agent ON by_agent.id = a.assigned_by_id
-		JOIN agents to_agent ON to_agent.id = a.assigned_to_id
-		WHERE (by_agent.crew_id = ? OR to_agent.crew_id = ?)
-		  AND a.workspace_id = ?
-		ORDER BY a.created_at DESC
+		       to_agent.name, to_agent.slug`+from+where+`
+		ORDER BY a.created_at DESC, a.id DESC
 		LIMIT ? OFFSET ?
-	`, crewID, crewID, workspaceID, limit, offset)
+	`, append(args, limit, offset)...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list assignments", err)
 		return
@@ -436,6 +501,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, items)
 }
 

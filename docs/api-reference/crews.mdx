@@ -1455,7 +1455,16 @@ GET /api/v1/crews/{crewId}/assignments?workspace_id={workspaceId}
 **Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
 List task assignments for a crew, newest first. `limit` (default 50, max 100)
-and `offset` page through the rows.
+and `offset` page through the rows. Optional filters, applied before the page
+is cut:
+
+| Query | Notes |
+|---|---|
+| `assigned_to` | The assignee's agent id or slug. Resolved only within the request's workspace (agent slugs are unique per workspace), so an id or slug from another workspace matches nothing. An unknown agent returns `200` with an empty array, as `agent_id` on [peer conversations](#crew-peer-conversations) does. |
+| `status` | Comma-separated statuses: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED` (case-insensitive; blank entries are ignored). Any other value is `400 {"error": "status must be a comma list of: ..."}`. |
+
+The headers `X-Total-Count`, `X-Limit` and `X-Offset` describe the window;
+`X-Total-Count` counts every row that matches the filters, not just the page.
 
 **Response:** `200 OK` -- a bare array of assignment objects:
 

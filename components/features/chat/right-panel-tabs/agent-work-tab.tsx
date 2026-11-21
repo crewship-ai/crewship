@@ -59,7 +59,8 @@ type WorkView = "issues" | "routines"
 
 /** Open work only: closed issues are history, not what the agent is doing. */
 const OPEN_ISSUE_STATUSES = ["PLANNING", "BACKLOG", "TODO", "IN_PROGRESS", "REVIEW"]
-const QUEUED_ASSIGNMENT = new Set(["PENDING", "QUEUED"])
+/** Assignments still waiting to start; the server filters on these (#5603). */
+const QUEUED_ASSIGNMENT_STATUSES = ["PENDING", "QUEUED"]
 const ISSUE_PAGE = 50
 // Safety net for dropped frames; realtime events make updates near-instant.
 const WORK_POLL_MS = 20_000
@@ -241,10 +242,9 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
         .then(async (res) => ({ rows: await readJSON(res), total: Number(res.headers?.get?.("X-Total-Count") ?? NaN) })),
       apiFetch(`/api/v1/workspaces/${ws}/pipelines?order=recent&limit=100`, { signal }).then(readJSON),
       apiFetch(`/api/v1/runs?workspace_id=${ws}&agent_id=${who}&status=RUNNING&limit=20`, { signal }).then(readJSON),
-      // Known limit: the crew assignments API has no agent or status filter
-      // (assignments.go List), so this reads the crew's 100 newest rows and
-      // filters here. In a very busy crew an older queued row can be missed.
-      crew ? apiFetch(`/api/v1/crews/${crew}/assignments?workspace_id=${ws}&limit=100`, { signal }).then(readJSON) : noCrew,
+      // The server filters by assignee and status before it cuts the page,
+      // so an older queued row is never pushed out by newer crew traffic.
+      crew ? apiFetch(`/api/v1/crews/${crew}/assignments?workspace_id=${ws}&assigned_to=${who}&status=${QUEUED_ASSIGNMENT_STATUSES.join(",")}&limit=100`, { signal }).then(readJSON) : noCrew,
       crew ? apiFetch(`/api/v1/crews/${crew}/escalations?workspace_id=${ws}&status=PENDING&limit=100`, { signal }).then(readJSON) : noCrew,
     ]).then(([issueRes, routineRes, runRes, queueRes, decisionRes]) => {
       if (signal.aborted) return
@@ -263,9 +263,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
           const rows = (value as { data?: RunRow[] } | null)?.data
           return Array.isArray(rows) ? rows.filter((row) => !row.status || row.status.toUpperCase() === "RUNNING") : []
         }),
-        queue: settled(queueRes, (value) => Array.isArray(value)
-          ? (value as AssignmentRow[]).filter((row) => !!agentSlug && row.assigned_to_slug === agentSlug && QUEUED_ASSIGNMENT.has((row.status || "").toUpperCase()))
-          : []),
+        queue: settled(queueRes, (value) => Array.isArray(value) ? value as AssignmentRow[] : []),
         decisions: settled(decisionRes, (value) => Array.isArray(value)
           ? (value as EscalationRow[]).filter((row) => !!agentSlug && row.from_slug === agentSlug && (row.status || "PENDING").toUpperCase() === "PENDING")
           : []),

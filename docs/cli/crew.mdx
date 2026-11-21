@@ -522,7 +522,18 @@ workspace-scoped and a failed dependency is reported as a command error.
 
 ```bash
 crewship crew status <slug-or-id>
+crewship crew status backend-team --assigned-to ava --status PENDING,QUEUED
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--assigned-to` | `string` | _(all agents)_ | Only assignments to this agent, by slug or id. Sent as the route's `assigned_to` and resolved by the server within the current workspace; an unknown agent shows `No assignments` rather than an error. |
+| `--status` | `string` | _(all statuses)_ | Only assignments in these statuses, comma-separated: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED` (case-insensitive). An unknown status fails with the server's `400`. |
+
+Both filters are applied by the server before the page is cut, so
+`--assigned-to ava --status QUEUED` finds Ava's oldest queued work even behind
+many newer rows. With a filter the section heading names it, for example
+`ASSIGNMENTS (last 5, assigned to ava, status QUEUED)`.
 
 Displays a compound view with three sections:
 - **AGENTS** -- all agents with their slug, role, and status
