@@ -67,11 +67,20 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted, onOpenP
 
   React.useEffect(() => { setAdding(false); setRemoving(null); setConfirm(null); setNewOwner(""); setRenaming(false); setName(ws.name) }, [ws.id, ws.name])
 
+  // The typed name or email may already be a person; a Guest anywhere cannot
+  // be made Owner or Admin (the server answers 409), so the role list follows.
+  const matchPerson = (raw: string) => {
+    const value = raw.trim().toLowerCase()
+    return value ? people.find((p) => p.email.toLowerCase() === value || displayName(p).toLowerCase() === value) : undefined
+  }
+  const typedGuest = (() => { const m = matchPerson(who); return m ? isGuest(m) : false })()
+
   const add = async () => {
     const value = who.trim()
     if (!value) return
-    const existing = people.find((p) => p.email.toLowerCase() === value.toLowerCase() || displayName(p).toLowerCase() === value.toLowerCase())
+    const existing = matchPerson(value)
     if (existing) {
+      if (isGuest(existing) && (addRole === "ADMIN" || addRole === "OWNER")) return
       const ok = await actions.setRole(existing.id, ws.id, addRole, `${displayName(existing)} joined ${ws.name} as ${roleLabel(addRole)}`)
       if (ok) { setAdding(false); setWho("") }
       return
@@ -137,7 +146,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted, onOpenP
               <datalist id={`cands-${ws.id}`}>
                 {candidates.map((p) => <option key={p.id} value={p.email}>{displayName(p)}</option>)}
               </datalist>
-              <RoleSelect label="Role" value={addRole} onChange={(r) => r && setAddRole(r)} />
+              <RoleSelect label="Role" value={addRole} onChange={(r) => r && setAddRole(r)} guest={typedGuest} />
               <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setWho("") }}>Cancel</Button>
               <Button size="sm" onClick={add} disabled={!who.trim() || busy === "create-person"}>Add</Button>
             </div>
