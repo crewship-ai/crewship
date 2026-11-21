@@ -2,8 +2,8 @@
 title: "Runs"
 description: "Agent execution runs reconstructed from the Crew Journal stream."
 icon: "play"
-stability: experimental
-tag: Experimental
+stability: stable
+tag: Stable
 ---
 
 A "run" is one execution — either an ad-hoc agent/chat run (orchestrator picks up an assignment, exec's the CLI) or a routine/pipeline run — and ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal). The two engines key their journal entries differently, and `GET /api/v1/runs` and `GET /api/v1/runs/{id}` read both (#2284):
