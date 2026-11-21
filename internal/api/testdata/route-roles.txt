@@ -406,6 +406,7 @@ POST /api/v1/pages/{slug}/project/publish roleSelf
 POST /api/v1/pages/{slug}/project/restore roleSelf
 POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
+POST /api/v1/pages/{slug}/return-private roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleInline
 POST /api/v1/pages/{slug}/unarchive roleSelf

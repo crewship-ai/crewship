@@ -164,7 +164,7 @@ export function EditableField({
         </button>
       )}
       {!editing && !readOnly && (
-        <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity" />
       )}
       {savedFlash && <Check className="h-3 w-3 text-success" />}
       {error && (

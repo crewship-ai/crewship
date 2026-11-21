@@ -241,10 +241,10 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
                     transcript already shows exactly what the agent got; it
                     only reads as such if the block's line breaks survive.
                     Every other multi-line paste was collapsing here too. */}
-                <span className="whitespace-pre-wrap">{textContent}</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{textContent}</span>
               </div>
             </MessageContent>
-            <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity">
               {formatTimestamp(turn.timestamp)}
             </div>
           </Message>

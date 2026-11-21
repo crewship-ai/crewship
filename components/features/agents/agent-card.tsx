@@ -300,7 +300,7 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
           (after the Link), and Enter/Space fire onClick the way
           they would for any <button>. */}
       {isGhost && (
-        <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 coarse:opacity-100 group-focus-within:opacity-100 transition-opacity">
           <Button
             size="sm"
             variant="outline"

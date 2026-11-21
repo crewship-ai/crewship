@@ -102,11 +102,11 @@ function Row({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onOpen(c.id) }}
-              className="truncate text-left text-control font-medium text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+              className="truncate text-left text-control font-medium text-foreground max-md:whitespace-normal max-md:[overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-ring"
             >
               {c.name}
             </button>
-            <small className="truncate text-label text-muted-foreground">
+            <small className="truncate text-label text-muted-foreground max-md:whitespace-normal">
               {credentialTypeLabel(c.type)} · {getBrand(c.provider).label}
             </small>
           </span>

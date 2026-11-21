@@ -479,6 +479,7 @@ export function SlashPalette({
                     data-testid={`slash-action-${cmd.id}`}
                     value={`${typed} ${cmd.label} ${cmd.label_cs ?? ""}`}
                     disabled={reason !== null}
+                    className="max-md:flex-wrap"
                     onSelect={() => {
                       if (reason !== null) return
                       onAction?.(cmd)
@@ -496,7 +497,7 @@ export function SlashPalette({
                       </span>
                     )}
                     {reason !== null && (
-                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate">
+                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate max-md:ml-0 max-md:basis-full max-md:whitespace-normal max-md:pl-6">
                         {reason}
                       </span>
                     )}
@@ -525,6 +526,7 @@ export function SlashPalette({
                     data-testid={`slash-item-${cmd.id}`}
                     value={`${cmd.label} ${cmd.hint ?? ""}`}
                     disabled={reason !== null}
+                    className="max-md:flex-wrap"
                     onSelect={() => {
                       if (reason !== null) return
                       cmd.run(ctx)
@@ -538,7 +540,7 @@ export function SlashPalette({
                       </span>
                     )}
                     {reason !== null && (
-                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate">
+                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate max-md:ml-0 max-md:basis-full max-md:whitespace-normal max-md:pl-6">
                         {reason}
                       </span>
                     )}

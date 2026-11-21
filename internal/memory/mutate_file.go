@@ -23,7 +23,7 @@ func openMutationFile(storageRoot, path string, create bool) (*mutationFile, err
 	if storageRoot == "" {
 		// Trusted in-process/legacy callers retain their existing path contract.
 		if create {
-			if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+			if err := mkdirAllShared(filepath.Dir(path), 0o775); err != nil {
 				return nil, fmt.Errorf("mkdir parent: %w", err)
 			}
 		}
@@ -62,10 +62,12 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 		if part == "." {
 			continue
 		}
+		created := false
 		info, err := root.Lstat(part)
 		if errors.Is(err, os.ErrNotExist) && create {
 			err = root.Mkdir(part, 0o775)
 			if err == nil {
+				created = true
 				parent, syncErr := root.Open(".")
 				if syncErr == nil {
 					syncErr = parent.Sync()
@@ -93,14 +95,23 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 			return nil, os.ErrPermission
 		}
 		next, err := root.OpenRoot(part)
-		_ = root.Close()
 		if err != nil {
+			_ = root.Close()
 			return nil, err
 		}
 		opened, err := next.Stat(".")
 		if err != nil || !os.SameFile(info, opened) {
 			_ = next.Close()
+			_ = root.Close()
 			return nil, os.ErrPermission
+		}
+		if created {
+			err = shareRootedChild(root, next, opened)
+		}
+		_ = root.Close()
+		if err != nil {
+			_ = next.Close()
+			return nil, err
 		}
 		root = next
 	}
@@ -158,4 +169,17 @@ func (f *mutationFile) lock() interface {
 		return NewFileLock(f.path + ".lock")
 	}
 	return NewRootFileLock(f.root, f.name+".lock")
+}
+
+// shareRootedChild updates only a directory already verified and pinned by
+// openRootedMutationFile.
+func shareRootedChild(parent, child *os.Root, info os.FileInfo) error {
+	parentInfo, err := parent.Stat(".")
+	if err != nil || !isSharedDir(parentInfo) {
+		return err
+	}
+	if mode, ok := sharedDirTarget(info); ok {
+		return child.Chmod(".", mode)
+	}
+	return nil
 }

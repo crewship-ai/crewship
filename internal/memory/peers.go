@@ -155,7 +155,7 @@ func WritePeerCard(p PeerPaths, userID, workspaceID, content string) error {
 		return errors.New("peers: user_id required")
 	}
 	path := p.CardPath(slug)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := MkdirAllShared(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("peers: mkdir: %w", err)
 	}
 	lk := NewFileLock(path + ".lock")

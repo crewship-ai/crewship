@@ -172,7 +172,7 @@ function outcome(w: WorkItem): { text: string; className?: string } | null {
 }
 
 const ROW =
-  "w-full min-h-[58px] border-b border-border text-left transition-colors last:border-b-0 hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring data-[selected=true]:bg-primary/10"
+  "w-full min-h-[58px]! border-b border-border text-left transition-colors last:border-b-0 hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring data-[selected=true]:bg-primary/10"
 
 export function WorkRow({
   item,

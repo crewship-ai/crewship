@@ -38,7 +38,7 @@ import { RoutineFolderDialog } from "./routine-folder-dialog"
 
 const TRIGGER_CLASS =
   "kit-tap inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground-soft transition-opacity " +
-  "opacity-0 group-hover/section:opacity-100 group-focus-within/section:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 " +
+  "opacity-0 group-hover/section:opacity-100 coarse:opacity-100 group-focus-within/section:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 " +
   "hover:bg-foreground/[0.06] hover:text-foreground coarse:opacity-100"
 
 export interface RoutineFolderMenuProps {

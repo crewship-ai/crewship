@@ -122,7 +122,7 @@ func WriteUserModel(p UserModelPaths, userID, workspaceID, content string) error
 		return errors.New("users: user_id and workspace_id required")
 	}
 	path := p.ModelPath(slug)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := MkdirAllShared(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("users: mkdir: %w", err)
 	}
 	lk := NewFileLock(path + ".lock")

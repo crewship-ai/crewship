@@ -65,7 +65,7 @@ export function CrewPageBar({
     isMobile ? (
       <Button asChild size="icon-sm" aria-label={`Chat with ${lead.name}`}><Link href={`/chat/${encodeURIComponent(lead.slug)}`}><MessageSquare className="h-3.5 w-3.5" /></Link></Button>
     ) : (
-      <SubBarSecondary asChild icon={MessageSquare} className="border border-border"><Link href={`/chat/${encodeURIComponent(lead.slug)}`}>Chat with {lead.name}</Link></SubBarSecondary>
+      <SubBarSecondary asChild icon={MessageSquare} className="border border-border"><Link href={`/chat/${encodeURIComponent(lead.slug)}`} title={`Chat with ${lead.name}`}><span className="max-xl:sr-only">Chat with {lead.name}</span></Link></SubBarSecondary>
     )
   ) : null
   return (
@@ -76,7 +76,7 @@ export function CrewPageBar({
       ariaLabel={`Crews, ${crew.name}`}
       actions={isMobile ? chat : (
         <>
-          <SubBarSecondary asChild icon={Activity}><Link href={activityHrefFor("crew", crew.id, crew.name)}>Activity</Link></SubBarSecondary>
+          <SubBarSecondary asChild icon={Activity}><Link href={activityHrefFor("crew", crew.id, crew.name)} title="Activity"><span className="max-xl:sr-only">Activity</span></Link></SubBarSecondary>
           <SubBarSecondary icon={SquareTerminal} onClick={onTerminal}>Terminal</SubBarSecondary>
           {chat}
           <DropdownMenu>

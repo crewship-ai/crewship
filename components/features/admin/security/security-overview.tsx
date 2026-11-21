@@ -159,6 +159,7 @@ function InstanceHealthCard({ rows, error, selectedCount }: { rows: InstanceHeal
         <p className="px-4 py-3 text-label text-muted-foreground">{selectedCount === 0 ? "No workspace ticked." : "No decision window yet."}</p>
       ) : (
         <div className="overflow-x-auto">
+          <p className="sticky left-0 px-4 py-1.5 text-label text-muted-foreground md:hidden">Swipe sideways for more columns.</p>
           <table className={settingsTable}>
             <thead>
               <tr>

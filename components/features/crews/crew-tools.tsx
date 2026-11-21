@@ -210,6 +210,7 @@ export function CrewTools({ workspaceId, crewSlug, agents, integrations }: {
                 <CrNote>{query ? "Nothing matches." : "None yet."}</CrNote>
               ) : (
                 <div className="overflow-x-auto border-t border-border">
+                  <p className="sticky left-0 px-4 py-1.5 text-label text-muted-foreground md:hidden">Swipe sideways for more columns.</p>
                   <table className="w-full text-body">
                     <thead>
                       <tr className="text-left text-label text-muted-foreground">

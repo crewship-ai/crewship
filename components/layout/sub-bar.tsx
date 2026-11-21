@@ -227,7 +227,7 @@ export function SubBar<T extends string = string>({
               {!repeatsArea && (
                 <>
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
-                  <span className={section != null ? "text-muted-foreground" : "font-semibold text-foreground"}>{title}</span>
+                  <span className={cn("min-w-0 truncate", section != null ? "text-muted-foreground" : "font-semibold text-foreground")}>{title}</span>
                 </>
               )}
               {repeatsArea && section == null && <span>{title}</span>}
@@ -235,7 +235,9 @@ export function SubBar<T extends string = string>({
                 <>
                   {repeatsArea && <span className="sr-only">{title}</span>}
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
-                  <span className="font-semibold text-foreground">{section}</span>
+                  {/* Truncates instead of running under the actions when the
+                      bar is narrow (a tablet with a docked list, #5621). */}
+                  <span className="min-w-0 truncate font-semibold text-foreground">{section}</span>
                 </>
               )}
             </Heading>

@@ -42,7 +42,7 @@ export function RightPanelContent({
     return (
       // The issues page's Save bar, over this panel when the issue opens here.
       <div className="relative h-full">
-        <div className="h-full overflow-y-auto pb-20">
+        <div className="relative h-full overflow-y-auto pb-20">
           <IssueDetailSurface
             key={selectedIssue.id}
             workspaceId={workspaceId}

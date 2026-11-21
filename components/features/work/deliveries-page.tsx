@@ -180,9 +180,9 @@ export function DeliveriesPage({
               <p className="py-6 text-center text-xs text-muted-foreground">{loading ? "Loading deliveries…" : "Nothing arrived in this window."}</p>
             ) : (
               <div className="flex flex-col gap-1.5">
-                <LaneAxis from={from} to={now} win={win} className="grid-cols-[minmax(0,200px)_1fr_96px]" />
+                <LaneAxis from={from} to={now} win={win} className="grid-cols-[minmax(0,200px)_1fr_96px] max-md:grid-cols-[minmax(0,96px)_1fr_auto]" />
                 {lanes.slice(0, MAX_LANES).map((lane) => (
-                  <div key={lane.family} className="grid grid-cols-[minmax(0,200px)_1fr_96px] items-center gap-3">
+                  <div key={lane.family} className="grid grid-cols-[minmax(0,200px)_1fr_96px] max-md:grid-cols-[minmax(0,96px)_1fr_auto] items-center gap-3">
                     <span className="truncate font-mono text-xs">{lane.family}</span>
                     <span className="relative h-3.5 rounded bg-foreground/[0.04]">
                       {lane.dots.map((d) => (
@@ -193,7 +193,7 @@ export function DeliveriesPage({
                           aria-label={`${lane.family}: ${d.tone}${d.workTone ? `, work ${LEDGER_TONE_LABEL[d.workTone].toLowerCase()}` : ""}, ${relTime(d.at)}`}
                           title={`${d.tone}${d.workTone ? ` → ${LEDGER_TONE_LABEL[d.workTone].toLowerCase()}` : ""} · ${new Date(d.at).toLocaleString(undefined, { hour12: false })}`}
                           className={cn(
-                            "absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-card transition-transform hover:scale-150",
+                            "absolute top-1/2 h-2.5 min-h-0! w-2.5 min-w-0! -translate-x-1/2 -translate-y-1/2 rounded-full coarse:after:absolute coarse:after:-inset-4 coarse:after:content-[''] ring-2 ring-card transition-transform hover:scale-150",
                             dotClass(d),
                           )}
                           style={{ left: `${d.left}%` }}

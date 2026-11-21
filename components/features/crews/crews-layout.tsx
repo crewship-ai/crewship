@@ -173,8 +173,13 @@ export function CrewsLayout({
   }, [isMobile, loaded, selectedCrewSlug, selectedAgentSlug, crews, agents, lastCrew, provisioningByCrew, gapsByCrew, update])
 
   const [dockRequest, setDockRequest] = useState<{ tab: BottomTab; at: number } | null>(null)
-  const openTerminal = useCallback(() => setDockRequest({ tab: "terminal", at: Date.now() }), [])
-  const openFiles = useCallback(() => setDockRequest({ tab: "files", at: Date.now() }), [])
+  // A phone keeps no resting dock: its strip would take a row from every crew
+  // page. It is mounted when Terminal or Files is asked for and leaves again
+  // when closed, so "Open terminal" on a phone opens something (#5621).
+  const [phoneDock, setPhoneDock] = useState(false)
+  const openTerminal = useCallback(() => { setPhoneDock(true); setDockRequest({ tab: "terminal", at: Date.now() }) }, [])
+  const openFiles = useCallback(() => { setPhoneDock(true); setDockRequest({ tab: "files", at: Date.now() }) }, [])
+  const onPhoneDockChange = useCallback((open: boolean) => { if (!open) setPhoneDock(false) }, [])
 
   const bottomContext = useMemo(() => {
     if (selectedAgent) {
@@ -301,9 +306,11 @@ export function CrewsLayout({
           </div>
         )}
       </div>
-      {/* Terminal and Files of the crew container; a phone has no dock. */}
-      {!isMobile && !nothingOpen && (
+      {/* Terminal and Files of the crew container; on a phone only while open. */}
+      {(!isMobile || phoneDock) && !nothingOpen && (
         <BottomPanel
+          initialOpen={isMobile}
+          onOpenChange={isMobile ? onPhoneDockChange : undefined}
           workspaceId={workspaceId}
           context={bottomContext}
           tabs={selectedAgent ? ["terminal", "files", "exec"] : ["terminal", "files"]}

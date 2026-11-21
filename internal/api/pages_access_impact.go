@@ -48,9 +48,23 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 		for _, path := range s.Paths {
 			p := pageAccessPermissions{Read: true}
 			switch {
-			case path == pageReachOwner || path == pageReachRole || strings.HasPrefix(path, pageReachCrew):
+			case path == pageReachOwner || strings.HasPrefix(path, pageReachCrew):
 				p.Comment = true
 				p.Edit = true
+			case path == pageReachRole:
+				if !rec.PrivateAudience {
+					p.Comment = true
+					p.Edit = true
+					break
+				}
+				// On private output the role path is the administrator read
+				// rule (#4825/#4839, #5576). Only the custodian comments, so
+				// the role path never does. Edit is the `write` verb, which
+				// PATCH and rollback gate with mayEditSpec (the custodian on
+				// private output) and then workbookPageOwnerOnly. So the
+				// workspace OWNER edits every private type except a workbook,
+				// and an ADMIN never does.
+				p.Edit = privatePageCustodian(rec, viewers[s.SubjectID]) && workbookPageOwnerOnly(rec, s.SubjectID)
 			case path == pageReachGrantPage+pageGrantComment:
 				p.Comment = true
 			case path == pageReachGrantPage+pageGrantPropose:
