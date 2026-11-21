@@ -37,11 +37,10 @@ beforeEach(() => {
     issues: { ok: true, body: [openIssue], total: 7 },
     routines: { ok: true, body: [] },
     runs: { ok: true, body: { data: [{ id: "run-1", agent_id: "agent-1", status: "RUNNING", trigger_type: "chat", mission_identifier: "COPY-1", started_at: "2026-11-19T10:00:00Z" }] } },
+    // The server answers already filtered to this agent's PENDING/QUEUED rows (#5603).
     assignments: { ok: true, body: [
       { id: "a1", task: "Draft the release notes", status: "QUEUED", queued_reason: "agent_busy", assigned_to_slug: "jamie", assigned_by_name: "Lead", created_at: "2026-11-19T09:00:00Z" },
-      { id: "a2", task: "Someone else's task", status: "QUEUED", assigned_to_slug: "other", created_at: "2026-11-19T09:00:00Z" },
-      { id: "a3", task: "Finished task", status: "COMPLETED", assigned_to_slug: "jamie", created_at: "2026-11-18T09:00:00Z" },
-    ] },
+    ], total: 1 },
     escalations: { ok: true, body: [
       { id: "e1", type: "approval", reason: "Publish the pricing page?", from_slug: "jamie", status: "PENDING", created_at: "2026-11-19T10:01:00Z" },
       { id: "e2", type: "approval", reason: "Other agent question", from_slug: "other", status: "PENDING", created_at: "2026-11-19T10:01:00Z" },
@@ -130,10 +129,25 @@ describe("AgentWorkTab live work", () => {
     expect(now).toHaveTextContent("Publish the pricing page?")
     expect(now).toHaveTextContent("Queued")
     expect(now).toHaveTextContent("Draft the release notes")
-    expect(now).not.toHaveTextContent("Someone else's task")
-    expect(now).not.toHaveTextContent("Finished task")
     expect(now).not.toHaveTextContent("Other agent question")
     expect(urls().some((url) => url.includes("agent_id=agent-1") && url.includes("status=RUNNING"))).toBe(true)
+  })
+
+  it("asks the server for this agent's queued assignments and shows what it returns", async () => {
+    // An older queued row the crew's 100 newest rows would no longer reach:
+    // the server finds it, and the panel must not filter it away again.
+    replies.assignments = { ok: true, body: [
+      { id: "a1", task: "Draft the release notes", status: "QUEUED", assigned_to_slug: "jamie", created_at: "2026-11-19T09:00:00Z" },
+      { id: "a0", task: "Old queued brief", status: "PENDING", assigned_to_slug: "jamie", created_at: "2026-01-02T09:00:00Z" },
+    ], total: 2 }
+    render(<AgentWorkTab agentId="agent-1" workspaceId="ws-1" />)
+    const now = await screen.findByRole("region", { name: "Working now" })
+    const queueUrl = new URL(urls().find((url) => url.includes("/assignments"))!, "http://x")
+    expect(queueUrl.pathname).toBe("/api/v1/crews/crew-1/assignments")
+    expect(queueUrl.searchParams.get("assigned_to")).toBe("agent-1")
+    expect(queueUrl.searchParams.get("status")!.split(",").sort()).toEqual(["PENDING", "QUEUED"])
+    expect(now).toHaveTextContent("Draft the release notes")
+    expect(now).toHaveTextContent("Old queued brief")
   })
 
   it("refreshes on realtime events without blanking the list, and drops an issue reassigned away", async () => {

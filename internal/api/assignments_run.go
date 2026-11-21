@@ -1981,4 +1981,6 @@ func (h *AssignmentHandler) assignmentCancelRequested(ctx context.Context, assig
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.
-// Returns all assignments for agents in this crew, sorted by created_at DESC.
+// Returns the crew's assignments, newest first, optionally narrowed by
+// ?assigned_to= (agent id or slug) and ?status= (comma list) before paging;
+// the filtered total goes out in X-Total-Count.

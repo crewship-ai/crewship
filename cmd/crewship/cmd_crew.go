@@ -316,8 +316,24 @@ var crewStatusCmd = &cobra.Command{
 			return fmt.Errorf("parse agents: %w", err)
 		}
 
-		// Fetch assignments
-		assignResp, err := client.Get("/api/v1/crews/" + crewID + "/assignments")
+		// Fetch assignments. --assigned-to and --status go to the server,
+		// which filters before it cuts the page (#5603): filtering the rows
+		// that came back would miss an older match behind 50 newer ones.
+		assignQuery := url.Values{}
+		var assignFilter []string
+		if ref, _ := cmd.Flags().GetString("assigned-to"); strings.TrimSpace(ref) != "" {
+			assignQuery.Set("assigned_to", strings.TrimSpace(ref))
+			assignFilter = append(assignFilter, "assigned to "+strings.TrimSpace(ref))
+		}
+		if statuses, _ := cmd.Flags().GetString("status"); strings.TrimSpace(statuses) != "" {
+			assignQuery.Set("status", strings.TrimSpace(statuses))
+			assignFilter = append(assignFilter, "status "+strings.TrimSpace(statuses))
+		}
+		assignPath := "/api/v1/crews/" + crewID + "/assignments"
+		if len(assignQuery) > 0 {
+			assignPath += "?" + assignQuery.Encode()
+		}
+		assignResp, err := client.Get(assignPath)
 		if err != nil {
 			return err
 		}
@@ -391,7 +407,11 @@ var crewStatusCmd = &cobra.Command{
 				fmt.Println("  No agents")
 			}
 
-			fmt.Printf("\n%sASSIGNMENTS (last 5):%s\n", cli.Bold, cli.Reset)
+			assignHeading := "last 5"
+			if len(assignFilter) > 0 {
+				assignHeading += ", " + strings.Join(assignFilter, ", ")
+			}
+			fmt.Printf("\n%sASSIGNMENTS (%s):%s\n", cli.Bold, assignHeading, cli.Reset)
 			if len(assignmentsList) > 0 {
 				limit := 5
 				if len(assignmentsList) < limit {
@@ -488,6 +508,9 @@ func init() {
 	crewListCmd.Flags().String("q", "", "Server-side search on name and slug (case-insensitive substring)")
 
 	crewConnectCmd.Flags().String("direction", "bidirectional", "Connection direction: bidirectional or unidirectional")
+
+	crewStatusCmd.Flags().String("assigned-to", "", "Only assignments to this agent (slug or id, in this workspace)")
+	crewStatusCmd.Flags().String("status", "", "Only assignments in these statuses, comma-separated (PENDING, QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED)")
 
 	crewStandupCmd.Flags().String("since", "", "Show activity since (RFC3339, default: 24h ago)")
 

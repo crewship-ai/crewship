@@ -99,6 +99,23 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	assignment["required"] = []string{"id", "task", "status", "assigned_by_name", "assigned_by_slug", "assigned_to_name", "assigned_to_slug",
 		"result_summary", "error_message", "started_at", "finished_at", "created_at"}
 	addList("/api/v1/crews/{crewId}/assignments", "CrewAssignmentsResponseV1", assignment)
+	// #5603: assignee and status filters run before LIMIT/OFFSET and the
+	// filtered total goes out in X-Total-Count (writeListMeta). The inferred
+	// query params carry no description; these overrides replace them by
+	// name and add the paging params the helper hides from inference.
+	assignmentsList := routes["crew-workspace-get"]["GET /api/v1/crews/{crewId}/assignments"]
+	assignmentsList.Parameters = []map[string]any{
+		{"name": "assigned_to", "in": "query", "required": false, "schema": str(), "description": "Assignee agent id or slug, resolved only within the request's workspace. An unknown agent yields an empty array."},
+		{"name": "status", "in": "query", "required": false, "schema": str(), "description": "Comma-separated statuses (case-insensitive): PENDING, QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED. Any other value is 400."},
+		{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+		{"name": "offset", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 0, "default": 0}},
+	}
+	assignmentsList.SuccessHeaders = map[string]any{
+		"X-Total-Count": map[string]any{"description": "Assignments matching the filters, before pagination", "schema": map[string]any{"type": "integer", "minimum": 0}},
+		"X-Limit":       map[string]any{"description": "Page size applied", "schema": integer()},
+		"X-Offset":      map[string]any{"description": "Offset applied", "schema": integer()},
+	}
+	routes["crew-workspace-get"]["GET /api/v1/crews/{crewId}/assignments"] = assignmentsList
 	addList("/api/v1/crews/{crewId}/missions", "CrewMissionsResponseV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "created_at": str(), "updated_at": str()}))
 	// The crew issue sub-resources (GET .../issues/{identifier}, /activity,
 	// /runs, /comments, /relations, /subtasks), /escalations and /provision

@@ -88949,12 +88949,51 @@
             }
           },
           {
+            "description": "Assignee agent id or slug, resolved only within the request's workspace. An unknown agent yields an empty array.",
+            "in": "query",
+            "name": "assigned_to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated statuses (case-insensitive): PENDING, QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED. Any other value is 400.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
             }
           }
         ],
@@ -88967,7 +89006,28 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "X-Limit": {
+                "description": "Page size applied",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Offset": {
+                "description": "Offset applied",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Total-Count": {
+                "description": "Assignments matching the filters, before pagination",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "400": {
             "content": {
