@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -183,5 +184,36 @@ func TestProvision_RefusesConflictingAgentAccount(t *testing.T) {
 	cfg := &Config{Image: "debian:bookworm-slim", Features: map[string]map[string]any{commonUtilsFeatureRef: {"username": "vscode"}}}
 	if _, err := p.Provision(context.Background(), cfg.Image, cfg, ""); !errors.Is(err, ErrAgentAccountConflict) {
 		t.Fatalf("err = %v, want ErrAgentAccountConflict", err)
+	}
+}
+
+// Feature options are uppercased into the build env, so USERUID and userUid
+// would both become USERUID and the winner would depend on map order. A
+// case variant of an account option is refused, naming the key as written.
+func TestNormalizeAgentUserRefusesCaseVariantAccountKeys(t *testing.T) {
+	cu := commonUtilsFeatureRef
+	for _, key := range []string{"USERUID", "useruid", "USERGID", "Username", "USERNAME", "UID", "Gid"} {
+		t.Run(key, func(t *testing.T) {
+			c := &Config{Image: "debian:bookworm-slim", Features: map[string]map[string]any{cu: {key: "2000"}}}
+			for name, fn := range map[string]func() (bool, error){"NormalizeAgentUser": c.NormalizeAgentUser, "NormalizeDeclaredAgentUser": c.NormalizeDeclaredAgentUser} {
+				_, err := fn()
+				if !errors.Is(err, ErrAgentAccountConflict) {
+					t.Fatalf("%s: err = %v, want ErrAgentAccountConflict", name, err)
+				}
+				if !strings.Contains(err.Error(), `"`+key+`"`) {
+					t.Fatalf("%s: error must name the key as written (%q): %v", name, key, err)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeAgentUserStoresTrimmedValues(t *testing.T) {
+	c := &Config{Image: "debian:bookworm-slim", Features: map[string]map[string]any{commonUtilsFeatureRef: {"username": "agent", "userUid": " 1001 ", "userGid": "1001"}}}
+	if _, err := c.NormalizeAgentUser(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Features[commonUtilsFeatureRef]["userUid"]; got != "1001" {
+		t.Fatalf("userUid = %q, want trimmed 1001", got)
 	}
 }

@@ -3681,11 +3681,10 @@
                 }
               ]
             },
-            "propertyNames": {
-              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
-              "type": "string"
-            },
-            "type": "object"
+            "type": "object",
+            "x-crewship-property-names": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+            }
           }
         },
         "required": [
@@ -4176,11 +4175,10 @@
                 }
               ]
             },
-            "propertyNames": {
-              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
-              "type": "string"
-            },
-            "type": "object"
+            "type": "object",
+            "x-crewship-property-names": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+            }
           }
         },
         "required": [

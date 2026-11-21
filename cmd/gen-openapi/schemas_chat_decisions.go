@@ -132,6 +132,15 @@ func openAPIChatSchema(value any, namespace string) any {
 				out[key] = strings.Replace(item.(string), "#/$defs/", "#/components/schemas/"+namespace, 1)
 			case "const":
 				out["enum"] = []any{item}
+			case "propertyNames":
+				// OpenAPI 3.0.3 has no propertyNames (3.1 keyword). Keep the key
+				// pattern as a vendor extension; runtime validation stays the
+				// authority (#4630).
+				if names, ok := item.(map[string]any); ok {
+					if pattern, ok := names["pattern"]; ok {
+						out["x-crewship-property-names"] = map[string]any{"pattern": pattern}
+					}
+				}
 			default:
 				out[key] = openAPIChatSchema(item, namespace)
 			}
