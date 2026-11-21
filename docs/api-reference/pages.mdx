@@ -827,7 +827,7 @@ spelled out per level:
 | Value | Meaning |
 |---|---|
 | `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
-| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
+| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). On private output this is the administrator read: an ADMIN gets `read` only, and the OWNER gets `read` plus `edit` (the page `write` verb) on every type except a GridCraft workbook. Neither comments. |
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
 | `folder:<slug>` | The folder the page is in is shared with the subject (a user directly or through a crew, a crew by name, or everyone in the workspace). |
