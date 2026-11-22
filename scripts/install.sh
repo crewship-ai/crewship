@@ -341,7 +341,7 @@ main() {
   if [[ $TAG =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]; then
     # A valid signature from this workflow also exists on older nightlies.
     # Check the authenticated executable before replacing any installed file.
-    candidate_version=$(NO_COLOR=1 "${TMP}/crewship" version -f human)
+    candidate_version=$(NO_COLOR=1 "${TMP}/crewship" version -f table)
     [[ ${candidate_version%%$'\n'*} == "crewship $TAG" ]] || err "signed archive version differs from $TAG"
   fi
   DEST=$(pick_install_dir)
