@@ -7,7 +7,7 @@ import { test, expect, type APIRequestContext, type Browser, type BrowserContext
 //      the default: nothing was chosen, everything is inherited.
 //   3. The member changes one value: that one becomes theirs ("Set by you"),
 //      is saved to their account, and the other two stay inherited.
-//   4. "Use workspace default" gives the member the default back and removes
+//   4. "Reset to default" gives the member the default back and removes
 //      their saved choice.
 //   5. When the admin later changes the default, the member gets the new
 //      value for everything they have not chosen and keeps their own choice.
@@ -183,7 +183,7 @@ test.describe("Workspace default look for a new member", () => {
         await expectLookSource(page, "mixed")
       })
 
-      await test.step("Use workspace default returns the member to the default", async () => {
+      await test.step("Reset to default returns the member to the default", async () => {
         await page.getByRole("button", { name: "Reset to default" }).click()
         await expectLook(page, FIRST_DEFAULT)
         await expectLookSource(page, "workspace")

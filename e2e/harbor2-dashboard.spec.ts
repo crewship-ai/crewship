@@ -160,6 +160,7 @@ test.describe("states", () => {
     await page.route("**/api/v1/workspaces", async (route) => {
       if (route.request().method() !== "GET") return route.continue()
       const response = await route.fetch()
+      expect(response.ok(), `Workspaces returned HTTP ${response.status()}`).toBe(true)
       const workspaces = await response.json() as { currentUserRole: string }[]
       await route.fulfill({
         response,
