@@ -157,9 +157,9 @@ test.describe("desktop", () => {
   test("T11 filters in the URL survive a reload", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings/members?role=ADMIN")
-    await expect(page.getByRole("button", { name: /Remove filter Admin/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Remove filter Role: Admin" })).toBeVisible()
     await page.reload()
-    await expect(page.getByRole("button", { name: /Remove filter Admin/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Remove filter Role: Admin" })).toBeVisible()
   })
 
   test("T16 the journal chain is verified on request", async ({ page }) => {
@@ -168,8 +168,11 @@ test.describe("desktop", () => {
     const line = page.locator("[data-slot=journal-integrity]")
     await expect(line).toHaveAttribute("data-state", "idle")
     await line.getByRole("button", { name: "Check now" }).click()
-    await expect(page.getByRole("dialog", { name: "Record integrity" })).toBeVisible()
-    await expect(line).toHaveAttribute("data-state", /ok|broken|error/)
+    const dialog = page.getByRole("dialog").filter({ has: page.locator("[data-slot=journal-integrity-dialog]") })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole("heading", { name: "Record intact" })).toBeVisible()
+    await expect(dialog.getByText("Entries checked", { exact: true })).toBeVisible()
+    await expect(line).toHaveAttribute("data-state", "ok")
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
@@ -267,18 +270,18 @@ test.describe("desktop", () => {
 
   test("SET-07 drill pages say what they are once, in the section head", async ({ page }) => {
     await seed(page, PINNED)
-    for (const [path, sentence] of [
-      ["/settings/members", "Who is in this workspace"],
-      ["/settings/crew-links", "Who hands work to whom"],
-      ["/settings/audit", "Every state-changing action, immutably recorded"],
+    for (const [path, title] of [
+      ["/settings/members", "Members"],
+      ["/settings/crew-links", "Crew links"],
+      ["/settings/audit", "Audit log"],
     ] as const) {
       await page.goto(path)
-      await expect(page.locator("[data-slot=drill-head]")).toContainText(sentence)
-      await expect(page.getByText(sentence)).toHaveCount(1)
+      const headings = page.locator("[data-slot=drill-head]").getByRole("heading")
+      await expect(headings).toHaveText([title])
     }
   })
 
-  test("SET-07 kit DrillPage: the top bar is the path; the panel has Back above the toolbar, then facets, then spaces", async ({ page }) => {
+  test("SET-07 kit DrillPage: the top bar is the path; the panel has Back above the toolbar, then facets, then views", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings/crew-links")
     await expect(page.getByRole("heading", { level: 1 })).toContainText(/Settings\s*\/?\s*Crew links/)
@@ -288,9 +291,15 @@ test.describe("desktop", () => {
     const y = async (loc: ReturnType<Page["locator"]>) => (await loc.first().boundingBox())!.y
     const backY = await y(back)
     const searchY = await y(panel.getByRole("searchbox").or(panel.getByPlaceholder(/search/i)))
-    const spacesY = await y(panel.locator("[data-slot=panel-spaces]"))
+    await panel.getByRole("button", { name: "Filter crews" }).click()
+    const facets = panel.getByText("Network", { exact: true })
+    const views = panel.getByRole("button", { name: /^All links/ })
+    await expect(facets).toBeVisible()
+    await expect(views).toBeVisible()
+    const facetsY = await y(facets)
     expect(backY).toBeLessThan(searchY)
-    expect(searchY).toBeLessThan(spacesY)
+    expect(searchY).toBeLessThan(facetsY)
+    expect(facetsY).toBeLessThan(await y(views))
     // The back row leads to the parent.
     await back.getByRole("link", { name: "Back to Settings" }).click()
     await expect(page).toHaveURL(/\/settings(\?|$)/)
@@ -476,7 +485,13 @@ test.describe("v67 parity", () => {
       test("PAR-107/109 crew links: CLI hint and New link, one Works with card, no KPI strip or map", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/crew-links")
-        await expect(page.getByRole("button", { name: "Command line" })).toBeVisible()
+        const cliHint = page.getByRole("button", { name: "Command line" })
+        if (width < 768) {
+          await expect(cliHint).toBeHidden()
+        } else {
+          await expect(cliHint).toBeVisible()
+        }
+        await expect(page.getByRole("button", { name: "New link" })).toBeVisible()
         await expect(page.locator("[data-slot=crew-links-summary]")).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Link map" })).toHaveCount(0)
         const works = page.getByRole("region", { name: "Works with" })
@@ -485,7 +500,7 @@ test.describe("v67 parity", () => {
         if (width >= 768) await expect(page.getByRole("button", { name: "New link" })).toHaveAttribute("data-variant", "default")
       })
 
-      test("PAR-110/111/112/113/114 audit log: spaces card, 24-hour times, solid bars, info banner, icon-only refresh", async ({ page }) => {
+      test("PAR-110/111/112/113/114 audit log: spaces card, 24-hour times, solid bars, integrity status, icon-only refresh", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/audit")
         // The top bar: its <header> sits inside <main>, so it is not a banner
@@ -497,11 +512,13 @@ test.describe("v67 parity", () => {
         // The word space survives the heading's tracking (PAR-110).
         await expect(page.getByRole("heading", { name: "Audit log" }).first()).toBeVisible()
         expect(await crumb.evaluate((el) => parseFloat(getComputedStyle(el).letterSpacing) || 0)).toBeGreaterThan(-0.2)
-        await expect(page.locator("[data-slot=journal-verify]")).toHaveClass(/page-banner-info/)
+        const integrity = page.locator("[data-slot=journal-integrity]")
+        await expect(integrity).toHaveCount(1)
+        await expect(integrity.getByRole("button", { name: "Check now" })).toBeVisible()
         const chart = page.locator("[data-slot=audit-histogram]")
         await expect(chart).toBeVisible()
         await expect(chart.locator("[data-bar]").first()).toBeVisible()
-        const events = page.getByRole("region", { name: "Events" })
+        const events = page.getByRole("region", { name: "All changes" })
         await expect(events.getByRole("button", { name: "Refresh audit log" })).toHaveText("")
         const time = events.locator("[data-audit-weight] .tabular-nums").first()
         if (await time.count()) await expect(time).toHaveText(/^\d{2}:\d{2}$|^$/)
