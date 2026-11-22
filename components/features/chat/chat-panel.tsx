@@ -1648,40 +1648,44 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
               />
             </div>
           )}
-          {unavailableNotice}
-          {prepareProjectInputs}
-          {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-          {pageContextChip}
-          {proposalChip}
-          {artifactStrip}
-          {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         </div>
-        {canChat ? <ChatComposer
-          agentId={agentId}
-          sessionId={sessionId}
-          agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
-          sendRefusal={sendRefusal}
-          variant="mobile"
-          mentionMembers={mentionMembers}
-          isStreaming={isStreaming}
-          connectionStatus={connectionStatus}
-          draftSendable={draftSendable}
-          stopGeneration={stopGeneration}
-          stopping={stopping}
-          ensureSession={ensureSessionForSend}
-          ensureSessionForUpload={ensureSessionForUpload}
-          sendMessage={sendFromComposer}
-          onSend={onSend}
-          onSent={handleSent}
-          initialInput={composerInitialInput}
-          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
-          onContextApplied={() => setArtifactContext(null)}
-          askForm={activeAskForm}
-          onCloseAskForm={closeAskForm}
-          renderAskTemplate={renderAskTemplate}
-        /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
+        <div className="flex max-h-[80%] shrink-0 flex-col overflow-y-auto">
+          <div className="min-h-0 overflow-y-auto">
+            {unavailableNotice}
+            {prepareProjectInputs}
+            {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+            {pageContextChip}
+            {proposalChip}
+            {artifactStrip}
+            {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+          </div>
+          {canChat ? <ChatComposer
+            agentId={agentId}
+            sessionId={sessionId}
+            agentName={agentName}
+            documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+            artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+            sendRefusal={sendRefusal}
+            variant="mobile"
+            mentionMembers={mentionMembers}
+            isStreaming={isStreaming}
+            connectionStatus={connectionStatus}
+            draftSendable={draftSendable}
+            stopGeneration={stopGeneration}
+            stopping={stopping}
+            ensureSession={ensureSessionForSend}
+            ensureSessionForUpload={ensureSessionForUpload}
+            sendMessage={sendFromComposer}
+            onSend={onSend}
+            onSent={handleSent}
+            initialInput={composerInitialInput}
+            contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+            onContextApplied={() => setArtifactContext(null)}
+            askForm={activeAskForm}
+            onCloseAskForm={closeAskForm}
+            renderAskTemplate={renderAskTemplate}
+          /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
+        </div>
 
         <SlashPalette
           agentSlug={agentSlug}
