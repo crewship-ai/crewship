@@ -248,7 +248,7 @@ export function CrewsLayout({
 
   if (emptyWorkspace) {
     return host(
-      <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+      <div className="flex h-app-content flex-col bg-background">
         <CrewsRootBar />
         <PageEmpty
           icon={Users}
@@ -262,7 +262,7 @@ export function CrewsLayout({
   }
 
   return host(
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       {nothingOpen && <CrewsRootBar />}
       <div className="relative flex min-h-0 flex-1">
         {panel}

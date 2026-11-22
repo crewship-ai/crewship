@@ -383,7 +383,7 @@ export function PagesLayout({ workspaceId, slug, initialArtifactVersion, now }: 
   ) : null
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       <SubBar
         className="coarse:[&>div]:min-h-[44px]"
         icon={CONCEPT_ICON.pages}
