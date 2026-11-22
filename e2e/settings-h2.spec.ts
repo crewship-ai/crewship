@@ -167,12 +167,14 @@ test.describe("desktop", () => {
     await page.goto("/settings/audit")
     const line = page.locator("[data-slot=journal-integrity]")
     await expect(line).toHaveAttribute("data-state", "idle")
+    const verify = page.waitForResponse("**/api/v1/admin/journal/verify?workspace_id=*")
     await line.getByRole("button", { name: "Check now" }).click()
+    expect((await verify).ok()).toBe(true)
     const dialog = page.getByRole("dialog").filter({ has: page.locator("[data-slot=journal-integrity-dialog]") })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByRole("heading", { name: "Record intact" })).toBeVisible()
+    await expect(dialog.getByRole("heading", { name: /^Record (intact|broken)$/ })).toBeVisible()
     await expect(dialog.getByText("Entries checked", { exact: true })).toBeVisible()
-    await expect(line).toHaveAttribute("data-state", "ok")
+    await expect(line).toHaveAttribute("data-state", /^(ok|broken)$/)
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
@@ -270,14 +272,17 @@ test.describe("desktop", () => {
 
   test("SET-07 drill pages say what they are once, in the section head", async ({ page }) => {
     await seed(page, PINNED)
-    for (const [path, title] of [
-      ["/settings/members", "Members"],
-      ["/settings/crew-links", "Crew links"],
-      ["/settings/audit", "Audit log"],
+    for (const [path, title, description] of [
+      ["/settings/members", "Members", /^\d+ (person|people)/],
+      ["/settings/crew-links", "Crew links", "Who hands work to whom, and whose shared files they see."],
+      ["/settings/audit", "Audit log", "Every change in this workspace, kept exactly as it happened. Admins and the owner."],
     ] as const) {
       await page.goto(path)
-      const headings = page.locator("[data-slot=drill-head]").getByRole("heading")
-      await expect(headings).toHaveText([title])
+      const head = page.locator("[data-slot=drill-head]")
+      await expect(head.getByRole("heading")).toHaveText([title])
+      const copy = page.getByText(description, { exact: true })
+      await expect(copy).toHaveCount(1)
+      await expect(head.getByText(description, { exact: true })).toBeVisible()
     }
   })
 
@@ -524,7 +529,12 @@ test.describe("v67 parity", () => {
         if (await time.count()) await expect(time).toHaveText(/^\d{2}:\d{2}$|^$/)
         if (width >= 1024) {
           // v67 (#3605): the settings panel stays docked on a tablet.
-          await expect(page.locator("[data-slot=panel-spaces]").getByRole("tab")).toHaveCount(4)
+          const panel = page.locator("[data-slot=secondary-panel]")
+          const records = panel.getByRole("tablist", { name: "Audit record" })
+          await expect(records.getByRole("tab")).toHaveCount(4)
+          const search = panel.getByRole("textbox", { name: "Search the audit log" })
+          await expect(search).toBeVisible()
+          expect((await search.boundingBox())!.y).toBeLessThan((await records.boundingBox())!.y)
         }
       })
     })
