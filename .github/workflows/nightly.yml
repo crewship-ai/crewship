@@ -209,6 +209,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y rpm rpm2cpio cpio
           bash scripts/check-release-artifacts.sh --strict --dist dist
+          python3 scripts/ci/check-nightly-package-order.py dist "${NIGHTLY_TAG}"
+        env:
+          NIGHTLY_TAG: ${{ needs.verified.outputs.version }}
       - name: Reject binaries built with the test barrier tag
         run: bash scripts/check-no-test-barrier.sh dist
       - name: Sign checksums.txt

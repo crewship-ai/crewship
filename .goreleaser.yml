@@ -19,7 +19,9 @@ before:
 # won't install (verified on Proxmox; requirement for the pre-merge smoke, #933).
 # Real releases use a proper vX.Y.Z tag and ignore this template.
 snapshot:
-  version_template: "0.0.0-snapshot-{{ .ShortCommit }}"
+  # 0.0.1 prereleases sort above every legacy 0.0.0 snapshot on APT and DNF.
+  # The serialized nightly workflow stamps build time first, including on reruns.
+  version_template: '0.0.1-nightly.{{ .Timestamp }}.g{{ .ShortCommit }}'
 
 builds:
   # Full binary — daemon + server + embedded Next.js UI + CLI. ~55 MB.

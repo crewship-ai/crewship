@@ -150,7 +150,7 @@ verify_checksum() {
   checksums=$2
   # checksums.txt format: "<sha256>  <filename>"
   archive_basename=$(basename "$archive")
-  expected=$(grep -E "  ${archive_basename}$" "$checksums" | awk '{print $1}' | head -n1)
+  expected=$(awk -v name="$archive_basename" '$2 == name { print $1 }' "$checksums")
   if [ -z "$expected" ]; then
     err "checksum for ${archive_basename} not found in checksums.txt"
   fi
@@ -292,21 +292,42 @@ main() {
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
 
-  info "downloading ${ARCHIVE}"
-  fetch_to "${BASE_URL}/${ARCHIVE}"           "${TMP}/${ARCHIVE}"
-  fetch_to "${BASE_URL}/checksums.txt"        "${TMP}/checksums.txt"
-
-  if [ "${CREWSHIP_SKIP_VERIFY:-0}" = "1" ]; then
-    warn "skipping checksum verification (CREWSHIP_SKIP_VERIFY=1)"
-  else
+  if [[ $TAG =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]; then
+    [ "${CREWSHIP_SKIP_VERIFY:-0}" = 0 ] || err "nightly requires signature verification"
+    command -v cosign >/dev/null || err "cosign is required to install a nightly"
+    EXPECTED_CERT_IDENTITY_RE='^https://github\.com/crewship-ai/crewship/\.github/workflows/nightly\.yml@refs/heads/main$'
+    for item in checksums.txt checksums.txt.sig checksums.txt.pem; do
+      fetch_to "${BASE_URL}/${item}" "${TMP}/${item}"
+    done
+    verify_cosign "${TMP}/checksums.txt" "${TMP}/checksums.txt.sig" "${TMP}/checksums.txt.pem"
+    ARCHIVE=$(awk -v platform="_${OS}_${ARCH}.tar.gz" '
+      $2 ~ /^crewship_[[:alnum:].~+-]+_[a-z0-9]+_[a-z0-9]+[.]tar[.]gz$/ && substr($2,length($2)-length(platform)+1)==platform {
+        name=$2; count++
+      }
+      END { if (count==1) print name; else exit 1 }
+    ' "${TMP}/checksums.txt") || err "expected one Crewship archive for ${OS}/${ARCH}"
+    for item in "${ARCHIVE}" "${ARCHIVE}.sig" "${ARCHIVE}.pem"; do
+      fetch_to "${BASE_URL}/${item}" "${TMP}/${item}"
+    done
     verify_checksum "${TMP}/${ARCHIVE}" "${TMP}/checksums.txt"
-    # Cosign artifacts are best-effort: if a release predates the signing
-    # workflow they won't exist, in which case we skip silently.
-    if curl -fsSL --retry 2 -o "${TMP}/${ARCHIVE}.sig" "${BASE_URL}/${ARCHIVE}.sig" 2>/dev/null \
-       && curl -fsSL --retry 2 -o "${TMP}/${ARCHIVE}.pem" "${BASE_URL}/${ARCHIVE}.pem" 2>/dev/null; then
-      verify_cosign "${TMP}/${ARCHIVE}" "${TMP}/${ARCHIVE}.sig" "${TMP}/${ARCHIVE}.pem"
+    verify_cosign "${TMP}/${ARCHIVE}" "${TMP}/${ARCHIVE}.sig" "${TMP}/${ARCHIVE}.pem"
+  else
+    info "downloading ${ARCHIVE}"
+    fetch_to "${BASE_URL}/${ARCHIVE}"           "${TMP}/${ARCHIVE}"
+    fetch_to "${BASE_URL}/checksums.txt"        "${TMP}/checksums.txt"
+
+    if [ "${CREWSHIP_SKIP_VERIFY:-0}" = "1" ]; then
+      warn "skipping checksum verification (CREWSHIP_SKIP_VERIFY=1)"
     else
-      info "no cosign signatures published for this release — skipping"
+      verify_checksum "${TMP}/${ARCHIVE}" "${TMP}/checksums.txt"
+      # Cosign artifacts are best-effort: if a release predates the signing
+      # workflow they won't exist, in which case we skip silently.
+      if curl -fsSL --retry 2 -o "${TMP}/${ARCHIVE}.sig" "${BASE_URL}/${ARCHIVE}.sig" 2>/dev/null \
+         && curl -fsSL --retry 2 -o "${TMP}/${ARCHIVE}.pem" "${BASE_URL}/${ARCHIVE}.pem" 2>/dev/null; then
+        verify_cosign "${TMP}/${ARCHIVE}" "${TMP}/${ARCHIVE}.sig" "${TMP}/${ARCHIVE}.pem"
+      else
+        info "no cosign signatures published for this release — skipping"
+      fi
     fi
   fi
 
@@ -317,6 +338,12 @@ main() {
     err "archive did not contain expected 'crewship' binary"
   fi
 
+  if [[ $TAG =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]; then
+    # A valid signature from this workflow also exists on older nightlies.
+    # Check the authenticated executable before replacing any installed file.
+    candidate_version=$(NO_COLOR=1 "${TMP}/crewship" version -f table)
+    [[ ${candidate_version%%$'\n'*} == "crewship $TAG" ]] || err "signed archive version differs from $TAG"
+  fi
   DEST=$(pick_install_dir)
   install_binary "${TMP}/crewship" "$DEST"
   # Runtime companions (sidecar + entrypoint.sh) so `crewship start` boots
