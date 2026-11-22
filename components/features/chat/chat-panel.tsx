@@ -1602,57 +1602,60 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
-        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
-        <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
-          {isGroupChat && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
-              <Users className="h-3 w-3" />
-              Group · {Object.keys(participantNames).length}
+        {/* Let headers and the conversation scroll together when the composer needs the remaining height. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
+          {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
+          <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
+            {isGroupChat && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
+                <Users className="h-3 w-3" />
+                Group · {Object.keys(participantNames).length}
+              </span>
+            )}
+            <span className="ml-auto flex items-center gap-1.5">
+              {/* Search, export and the command palette were mounted in the
+                  desktop branch only, so on a phone they did not exist — not
+                  degraded, absent. The palette's other way in is ⌘/, which a
+                  phone has no way to press. */}
+              <MobileChatAction label="Search this conversation" onClick={() => setSearchOpen(true)}>
+                <Search className="h-4 w-4" />
+              </MobileChatAction>
+              <MobileChatAction label="Export conversation" onClick={() => setExportOpen(true)}>
+                <Download className="h-4 w-4" />
+              </MobileChatAction>
+              <MobileChatAction label={`Chat commands (${CHAT_PALETTE_SHORTCUT})`} onClick={() => setSlashPaletteOpen(true)}>
+                <SlashIcon className="h-4 w-4" />
+              </MobileChatAction>
+              <CopyLinkButton />
             </span>
-          )}
-          <span className="ml-auto flex items-center gap-1.5">
-            {/* Search, export and the command palette were mounted in the
-                desktop branch only, so on a phone they did not exist — not
-                degraded, absent. The palette's other way in is ⌘/, which a
-                phone has no way to press. */}
-            <MobileChatAction label="Search this conversation" onClick={() => setSearchOpen(true)}>
-              <Search className="h-4 w-4" />
-            </MobileChatAction>
-            <MobileChatAction label="Export conversation" onClick={() => setExportOpen(true)}>
-              <Download className="h-4 w-4" />
-            </MobileChatAction>
-            <MobileChatAction label={`Chat commands (${CHAT_PALETTE_SHORTCUT})`} onClick={() => setSlashPaletteOpen(true)}>
-              <SlashIcon className="h-4 w-4" />
-            </MobileChatAction>
-            <CopyLinkButton />
-          </span>
-        </div>
-        {artifactLibrary}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {conversationEl}
-        </div>
-        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
-          <div className="px-4 pb-2 shrink-0">
-            <AskRail
-              questions={defaultSuggestions}
-              forms={askFormList}
-              limit={EMPTY_STATE_CHIP_LIMIT}
-              disabled={isStreaming || creatingSession}
-              onPickQuestion={handleSuggestionClick}
-              onPickForm={handleFormClick}
-            />
           </div>
-        )}
-        {unavailableNotice}
-        {prepareProjectInputs}
-        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {pageContextChip}
-        {proposalChip}
-        {artifactStrip}
-        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+          {artifactLibrary}
+          <div className="flex min-h-24 flex-1 flex-col overflow-hidden">
+            {conversationEl}
+          </div>
+          {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
+            <div className="px-4 pb-2 shrink-0">
+              <AskRail
+                questions={defaultSuggestions}
+                forms={askFormList}
+                limit={EMPTY_STATE_CHIP_LIMIT}
+                disabled={isStreaming || creatingSession}
+                onPickQuestion={handleSuggestionClick}
+                onPickForm={handleFormClick}
+              />
+            </div>
+          )}
+          {unavailableNotice}
+          {prepareProjectInputs}
+          {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          {pageContextChip}
+          {proposalChip}
+          {artifactStrip}
+          {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+        </div>
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
