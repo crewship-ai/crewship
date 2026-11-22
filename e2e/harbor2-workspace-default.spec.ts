@@ -93,10 +93,10 @@ const parse = (v: unknown): Record<string, unknown> => {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : {}
 }
 
-async function expectChips(page: Page, want: Record<"style" | "theme" | "accent", "Workspace default" | "Set by you">) {
-  for (const field of ["style", "theme", "accent"] as const) {
-    await expect(page.getByTestId(`inherit-${field}`), field).toHaveText(want[field])
-  }
+async function expectLookSource(page: Page, source: "workspace" | "mixed") {
+  await expect(page.getByTestId("look-source")).toContainText(
+    source === "workspace" ? "This is the workspace default." : "You chose part of this yourself",
+  )
 }
 async function expectLook(page: Page, look: Look) {
   await expect.poll(() => html(page, "data-style"), "style").toBe(look.style)
@@ -154,9 +154,9 @@ test.describe("Workspace default look for a new member", () => {
     try {
       await test.step("first sign-in: the whole workspace default applies", async () => {
         await page.goto("/settings?tab=appearance")
-        await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
+        await expect(page.getByRole("button", { name: "Change style" })).toBeVisible()
         await expectLook(page, FIRST_DEFAULT)
-        await expectChips(page, { style: "Workspace default", theme: "Workspace default", accent: "Workspace default" })
+        await expectLookSource(page, "workspace")
         // Nothing is written to the account for values nobody chose.
         await page.waitForTimeout(1500)
         const saved = await savedAppearance(context)
@@ -166,7 +166,7 @@ test.describe("Workspace default look for a new member", () => {
 
       await test.step("changing one value makes only that one explicit, and saves it", async () => {
         await page.getByRole("radiogroup", { name: "Accent colour" }).getByRole("radio", { name: "Pink" }).click()
-        await expectChips(page, { style: "Workspace default", theme: "Workspace default", accent: "Set by you" })
+        await expectLookSource(page, "mixed")
         await expect.poll(() => html(page, "data-accent")).toBe("pink")
         await expect.poll(async () => parse((await savedAppearance(context)).appearance), { timeout: 15_000 }).toEqual({ accent: "pink" })
         // The other two still follow the default.
@@ -178,17 +178,17 @@ test.describe("Workspace default look for a new member", () => {
 
       await test.step("it survives a reload and is the same on a second visit", async () => {
         await page.reload()
-        await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
+        await expect(page.getByRole("button", { name: "Change style" })).toBeVisible()
         await expectLook(page, { ...FIRST_DEFAULT, accent: "pink" })
-        await expectChips(page, { style: "Workspace default", theme: "Workspace default", accent: "Set by you" })
+        await expectLookSource(page, "mixed")
       })
 
       await test.step("Use workspace default returns the member to the default", async () => {
-        await page.getByRole("button", { name: "Use workspace default" }).click()
+        await page.getByRole("button", { name: "Reset to default" }).click()
         await expectLook(page, FIRST_DEFAULT)
-        await expectChips(page, { style: "Workspace default", theme: "Workspace default", accent: "Workspace default" })
+        await expectLookSource(page, "workspace")
         await expect.poll(async () => parse((await savedAppearance(context)).appearance), { timeout: 15_000 }).toEqual({})
-        await expect(page.getByRole("button", { name: "Use workspace default" })).toBeDisabled()
+        await expect(page.getByRole("button", { name: "Reset to default" })).toBeDisabled()
       })
 
       await test.step("a later change of the default reaches inherited values only", async () => {
@@ -197,13 +197,13 @@ test.describe("Workspace default look for a new member", () => {
 
         await setDefault(request, SECOND_DEFAULT)
         await page.reload()
-        await expect(page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
+        await expect(page.getByRole("button", { name: "Change style" })).toBeVisible()
         // Style and theme are inherited, so they follow; the accent is the member's own.
         await expectLook(page, { ...SECOND_DEFAULT, accent: "pink" })
-        await expectChips(page, { style: "Workspace default", theme: "Workspace default", accent: "Set by you" })
+        await expectLookSource(page, "mixed")
 
         // And going back now lands on the NEW default.
-        await page.getByRole("button", { name: "Use workspace default" }).click()
+        await page.getByRole("button", { name: "Reset to default" }).click()
         await expectLook(page, SECOND_DEFAULT)
       })
 
@@ -211,9 +211,9 @@ test.describe("Workspace default look for a new member", () => {
         const other = await signInAsMember(browser)
         try {
           await other.page.goto("/settings?tab=appearance")
-          await expect(other.page.getByRole("radiogroup", { name: "Style" })).toBeVisible()
+          await expect(other.page.getByRole("button", { name: "Change style" })).toBeVisible()
           await expectLook(other.page, SECOND_DEFAULT)
-          await expectChips(other.page, { style: "Workspace default", theme: "Workspace default", accent: "Workspace default" })
+          await expectLookSource(other.page, "workspace")
         } finally {
           await other.context.close()
         }
