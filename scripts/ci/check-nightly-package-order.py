@@ -18,19 +18,19 @@ def greater(fmt, newer, older):
     return comparison == "1"
 
 def check(directory, tag):
-    date, counter = re.fullmatch(r"nightly-([0-9]{8})-r([1-9][0-9]*)", tag).groups()
+    if not re.fullmatch(r"nightly-[0-9]{8}-r[1-9][0-9]*", tag):
+        raise ValueError("invalid nightly tag")
     for fmt in ("deb", "rpm"):
         package, = directory.glob(f"crewship_*_linux_amd64.{fmt}")
         actual = (output("dpkg-deb", "-f", package, "Version") if fmt == "deb"
                   else output("rpm", "-qp", "--qf", "%{VERSION}", package))
-        # nFPM normalizes internal hyphens in RPM versions to underscores.
-        pattern = rf"(0[.]0[.]1~nightly[-_]{date}[-_]r){counter}([-_]g)[0-9a-f]+"
+        pattern = r"0[.]0[.]1~nightly[.]([0-9]+)[.]g[0-9a-f]+"
         match = re.fullmatch(pattern, actual)
         if not match:
             raise ValueError(f"{fmt}: unexpected version {actual} for {tag}")
-        prefix, suffix = match.groups()
-        older = f"{prefix}{int(counter)-1}{suffix}fffffffff"
-        newer = f"{prefix}{int(counter)+1}{suffix}000000000"
+        stamp = int(match.group(1))
+        older = f"0.0.1~nightly.{stamp-1}.gfffffffff"
+        newer = f"0.0.1~nightly.{stamp+1}.g000000000"
         if not all((greater(fmt, actual, "0.0.0~snapshot-9ffffffff"),
                     greater(fmt, actual, older), greater(fmt, newer, actual))):
             raise ValueError(f"{fmt}: {actual} breaks nightly upgrade ordering")

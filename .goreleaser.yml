@@ -20,8 +20,8 @@ before:
 # Real releases use a proper vX.Y.Z tag and ignore this template.
 snapshot:
   # 0.0.1 prereleases sort above every legacy 0.0.0 snapshot on APT and DNF.
-  # Published nightlies include the UTC date and numeric run/attempt before Git SHA.
-  version_template: '0.0.1-{{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}snapshot-{{ .Timestamp }}{{ end }}-g{{ .ShortCommit }}'
+  # The serialized nightly workflow stamps build time first, including on reruns.
+  version_template: '0.0.1-nightly.{{ .Timestamp }}.g{{ .ShortCommit }}'
 
 builds:
   # Full binary — daemon + server + embedded Next.js UI + CLI. ~55 MB.

@@ -150,7 +150,7 @@ verify_checksum() {
   checksums=$2
   # checksums.txt format: "<sha256>  <filename>"
   archive_basename=$(basename "$archive")
-  expected=$(grep -E "  ${archive_basename}$" "$checksums" | awk '{print $1}' | head -n1)
+  expected=$(awk -v name="$archive_basename" '$2 == name { print $1 }' "$checksums")
   if [ -z "$expected" ]; then
     err "checksum for ${archive_basename} not found in checksums.txt"
   fi
@@ -329,7 +329,6 @@ main() {
         info "no cosign signatures published for this release — skipping"
       fi
     fi
-
   fi
 
   info "extracting"
@@ -339,6 +338,12 @@ main() {
     err "archive did not contain expected 'crewship' binary"
   fi
 
+  if [[ $TAG =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]; then
+    # A valid signature from this workflow also exists on older nightlies.
+    # Check the authenticated executable before replacing any installed file.
+    candidate_version=$(NO_COLOR=1 "${TMP}/crewship" version -f human)
+    [[ ${candidate_version%%$'\n'*} == "crewship $TAG" ]] || err "signed archive version differs from $TAG"
+  fi
   DEST=$(pick_install_dir)
   install_binary "${TMP}/crewship" "$DEST"
   # Runtime companions (sidecar + entrypoint.sh) so `crewship start` boots
