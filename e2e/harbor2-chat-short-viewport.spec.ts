@@ -25,6 +25,15 @@ for (const viewport of [{ width: 844, height: 390 }, { width: 390, height: 844 }
         element.closest(".surface-pane")!.getBoundingClientRect().bottom,
       )).toBeLessThanOrEqual(1)
 
+      await editor.fill("@jord")
+      const suggestion = page.getByRole("option", { name: /@jordan/ })
+      await expect(suggestion).toBeVisible()
+      await expect.poll(() => suggestion.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        return !!hit && element.contains(hit)
+      })).toBe(true)
+
       await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
       const send = page.locator("form").filter({ has: editor }).locator('button[type="submit"]')
       await expect(send).toBeVisible()

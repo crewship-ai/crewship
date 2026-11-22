@@ -1649,7 +1649,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             </div>
           )}
         </div>
-        <div className="flex max-h-[80%] shrink-0 flex-col overflow-y-auto">
+        <div className="flex max-h-[80%] shrink-0 flex-col">
           <div className="min-h-0 overflow-y-auto">
             {unavailableNotice}
             {prepareProjectInputs}
