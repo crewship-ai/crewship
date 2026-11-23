@@ -19,7 +19,14 @@ func rejectMooringDeliveryRestoreTarget(ctx context.Context, tx *sql.Tx, dump *D
 		return err
 	}
 	workspaces := map[string]bool{}
-	if dump.WorkspaceID != "" {
+	// dump.WorkspaceID is the SOURCE anchor and RemapIDs does not rewrite it,
+	// while it does rewrite the carried workspaces row and every row's
+	// workspace_id. A --as-workspace/--as-crew fork therefore lands in the
+	// remapped workspace, and counting the stale anchor refused a fork on the
+	// source instance because of deliveries in the untouched source workspace.
+	// Use the anchor only when the dump carries no workspace row to say where
+	// its rows land; every row's own workspace_id is checked below either way.
+	if dump.WorkspaceID != "" && len(dump.Tables["workspaces"]) == 0 {
 		workspaces[dump.WorkspaceID] = true
 	}
 	for table, rows := range dump.Tables {
