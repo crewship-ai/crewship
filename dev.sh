@@ -736,7 +736,15 @@ stop_service() {
   ok "$name stopped"
 }
 
+validate_dev_database_url() {
+  if [[ "$DATABASE_URL" != file:?* ]]; then
+    err "Development requires a SQLite file: DATABASE_URL."
+    return 1
+  fi
+}
+
 cmd_start() {
+  validate_dev_database_url || return 1
   check_legacy_dev_process
   check_legacy_dev_paths
   check_prerequisites
@@ -883,7 +891,9 @@ cmd_status() {
     fi
   fi
 
-  echo -e "  SQLite:      ${GREEN}${DATABASE_URL}${NC}"
+  if validate_dev_database_url; then
+    echo -e "  SQLite:      ${GREEN}configured${NC}"
+  fi
 
   if pid=$(is_running "$GO_PID_FILE"); then
     if curl -sf http://localhost:$GO_PORT/api/health >/dev/null 2>&1; then
@@ -939,6 +949,7 @@ validate_dev_cleanup_dir() {
 }
 
 cmd_nuke() {
+  validate_dev_database_url || return 1
   check_legacy_dev_process || return 1
   # All commands use the paths resolved once from the same effective
   # environment, including explicit overrides from .env.local.
