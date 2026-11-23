@@ -74,7 +74,8 @@ Problem Details shape (`error` is the human-readable message).
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
-| POST | `/api/v1/waitpoint-tokens/{token}` | token | Public waitpoint completion callback |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token` | create | Mint (or rotate) the waitpoint's public callback URL; returned once |
+| POST | `/api/v1/waitpoint-tokens/{token}` | callback secret | Public waitpoint completion callback |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred receipts; `status` defaults to `pending` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-pending/{pendingId}` | member | Inspect a deferred receipt by ID, including terminal states |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel` | update | Cancel a deferred trigger |
@@ -976,11 +977,14 @@ version, `429` for the concurrency limit, `500` for execution/storage errors,
 and `503` when the schedule store or runner is unavailable.
 
 The public `POST /api/v1/waitpoint-tokens/{token}` callback has no workspace
-session requirement; the high-entropy token authenticates it. Its optional
+session requirement; the high-entropy callback secret in the path authenticates
+it. That secret is not the waitpoint's listed `token` (a public id): it exists
+only in the URL `POST …/waitpoints/{token}/callback-token` returns once, and is
+stored as a digest. Its optional
 body is `{ "approved": true, "payload": <any JSON> }`; `approved` defaults to
 `true`. It returns `200` — `{ "ok": true, "approved": true|false }`, `400` for
-an empty token or invalid JSON, `409` when the waitpoint was already decided or
-expired, `500` for completion failure, and `503` when the waitpoint backend is
+an empty token or invalid JSON, `409` when the path is not a live callback
+secret or the waitpoint was already decided or expired, `500` for completion failure, and `503` when the waitpoint backend is
 unavailable.
 
 ### Step overrides

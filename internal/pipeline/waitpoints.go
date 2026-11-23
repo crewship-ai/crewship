@@ -112,6 +112,12 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 		stopCh:    make(chan struct{}),
 		trust:     NewTrustGrantStore(db),
 	}
+	// Before anything can read a waitpoint: give legacy rows a fresh public
+	// id and a NULL callback digest. Their old secrets are not carried
+	// forward, so pre-#1910 callback URLs deliberately stop working until a
+	// MANAGER mints a new one (#1910, waitpoints_callback_token.go).
+	ensureWaitpointDigestColumn(db)
+	s.migrateLegacyTokens()
 	s.sweeperWg.Add(1)
 	go s.sweeper()
 	return s
@@ -205,8 +211,11 @@ func (s *SQLWaitpointStore) Close() {
 	s.sweeperWg.Wait()
 }
 
-// CreateApproval mints a token, persists the waitpoint row, and
-// returns the token. Default timeout is 24h if req.TimeoutSec is 0.
+// CreateApproval mints a public waitpoint id, persists the waitpoint row, and
+// returns the id. The id is NOT a credential (#1910): it is what the inbox,
+// the run's waitpoint_token and the authed approve route carry. No callback
+// capability exists until a MANAGER mints one (MintCallbackToken).
+// Default timeout is 24h if req.TimeoutSec is 0.
 func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApprovalRequest) (string, error) {
 	formJSON := ""
 	if req.DecisionForm != nil {
@@ -223,7 +232,10 @@ func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApp
 	if timeoutSec <= 0 {
 		timeoutSec = 24 * 3600
 	}
-	token := generateWaitpointToken()
+	token, err := newWaitpointID()
+	if err != nil {
+		return "", err
+	}
 	timeoutAt := time.Now().Add(time.Duration(timeoutSec) * time.Second).UTC().Format(time.RFC3339Nano) // tsformat:allow: timeout_at is string-compared by the sweep query in sweepOnce; the whole column is RFC3339Nano and tsformat would order differently against existing rows
 	// §9.8's decision-receipt addition (B10, #2364): the version that was
 	// ACTUALLY running when this waitpoint asked a human to decide.
@@ -269,7 +281,7 @@ INSERT INTO pipeline_waitpoints (
 		return token, nil
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (
     token, workspace_id, pipeline_run_id, step_id, kind, prompt,
     invoking_crew_id, status, timeout_at, routine_version, decision_form_json
@@ -856,6 +868,7 @@ func (s *SQLWaitpointStore) sweeper() {
 			return
 		case <-t.C:
 			s.sweepOnce()
+			s.migrateLegacyTokens()
 		}
 	}
 }
@@ -926,9 +939,9 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 	}
 }
 
-// generateWaitpointToken returns a 32-hex-char random token. We
-// don't bother with a prefix — these are URL fragments and tokens,
-// not entity IDs. Random bytes from crypto/rand.
+// generateWaitpointToken returns a 32-hex-char random value. It no longer
+// mints waitpoint ids or callback secrets (#1910: newWaitpointID,
+// newWaitpointCallbackSecret); trust grant ids still use it.
 func generateWaitpointToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

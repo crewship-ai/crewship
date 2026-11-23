@@ -85,14 +85,15 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 			Token    string          `json:"token"`
 			RunID    string          `json:"pipeline_run_id"`
 			Form     json.RawMessage `json:"decision_form"`
-			Callback string          `json:"callback_url"`
+			Callback bool            `json:"callback_available"`
+			Leaked   string          `json:"callback_url"`
 		}
 		if err := json.Unmarshal(request("GET", base+"waitpoints", "", true, 200), &rows); err != nil {
 			t.Fatal(err)
 		}
 		for _, row := range rows {
 			if row.RunID == runID {
-				if len(row.Form) == 0 || row.Callback != "" {
+				if len(row.Form) == 0 || row.Callback || row.Leaked != "" {
 					t.Fatalf("typed decision audience/projection is wrong: %+v", row)
 				}
 				token = row.Token
@@ -105,7 +106,10 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 	if token == "" {
 		t.Fatal("run did not create its decision")
 	}
-	request("POST", "/api/v1/waitpoint-tokens/"+token, `{"approved":true,"payload":{"action_id":"go","data":{"count":0,"enabled":false}}}`, false, 403)
+	// The listed token is the public waitpoint id, not a callback secret
+	// (#1910), and a typed decision cannot have one minted.
+	request("POST", "/api/v1/waitpoint-tokens/"+token, `{"approved":true,"payload":{"action_id":"go","data":{"count":0,"enabled":false}}}`, false, 409)
+	request("POST", base+"waitpoints/"+token+"/callback-token", `{}`, true, 422)
 	request("POST", base+"waitpoints/"+token+"/approve", `{"approved":true,"action_id":"go","data":{"count":"0","enabled":false}}`, true, 400)
 	request("POST", base+"waitpoints/"+token+"/approve", `{"approved":true,"action_id":"go","data":{"count":0,"enabled":false}}`, true, 200)
 	deadline = time.Now().Add(10 * time.Second)

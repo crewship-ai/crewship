@@ -38,8 +38,8 @@ func TestWaitpointStore_CreateApproval_DefaultTimeoutAndTruncation(t *testing.T)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if len(token) != 32 {
-		t.Errorf("token length: %d", len(token))
+	if !strings.HasPrefix(token, WaitpointIDPrefix) || len(token) != len(WaitpointIDPrefix)+32 {
+		t.Errorf("waitpoint id %q: want %q + 32 hex", token, WaitpointIDPrefix)
 	}
 
 	var timeoutAt string

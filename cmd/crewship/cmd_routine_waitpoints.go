@@ -29,7 +29,9 @@ type waitpointRow struct {
 	InvokingCrewID string                 `json:"invoking_crew_id,omitempty" yaml:"invoking_crew_id,omitempty"`
 	TimeoutAt      string                 `json:"timeout_at" yaml:"timeout_at"`
 	CreatedAt      string                 `json:"created_at" yaml:"created_at"`
-	CallbackURL    string                 `json:"callback_url,omitempty" yaml:"callback_url,omitempty"`
+	// CallbackAvailable: `callback-url <token>` can mint a public URL for
+	// this waitpoint. The URL itself is never listed (#1910).
+	CallbackAvailable bool `json:"callback_available" yaml:"callback_available"`
 }
 
 var routineWaitpointsCmd = &cobra.Command{
@@ -46,6 +48,11 @@ Examples:
   crewship routine waitpoints show <token>
   crewship routine waitpoints approve <token> --comment "LGTM"
   crewship routine waitpoints reject <token>  --comment "needs revision"
+  crewship routine waitpoints callback-url <token>
+
+<token> is the waitpoint's public id. It is not a credential: completing a
+waitpoint without signing in needs a callback URL, which callback-url mints
+and shows once.
 `,
 }
 
@@ -158,17 +165,15 @@ var routineWaitpointsShowCmd = &cobra.Command{
 				}
 				fmt.Fprintf(w, "Created:\t%s\n", formatTimestamp(r.CreatedAt))
 				fmt.Fprintf(w, "Timeout:\t%s\n", formatTimestamp(r.TimeoutAt))
-				if r.CallbackURL != "" {
-					fmt.Fprintf(w, "Callback URL:\t%s\n", r.CallbackURL)
-				}
 				_ = w.Flush()
 				if r.DecisionForm != nil {
 					raw, _ := json.MarshalIndent(r.DecisionForm, "", "  ")
 					fmt.Printf("\nDecision form:\n%s\nUse --action <id> --input <JSON> with approve or reject to match the action.\n", raw)
 				}
-				if r.DecisionForm == nil && r.CallbackURL != "" {
-					fmt.Println("\nAn external system can complete this waitpoint with no auth via:")
-					fmt.Printf("  curl -X POST %s -d '{\"approved\":true,\"payload\":{}}'\n", r.CallbackURL)
+				if r.CallbackAvailable {
+					fmt.Println("\nTo let an external system complete this waitpoint without signing in, mint")
+					fmt.Println("a callback URL (shown once; minting again replaces it):")
+					fmt.Printf("  crewship routine waitpoints callback-url %s\n", r.Token)
 				}
 				fmt.Println("\nPrompt:")
 				fmt.Println(r.Prompt)
@@ -259,6 +264,55 @@ func postWaitpointDecision(token string, approved bool, comment, action string, 
 	return nil
 }
 
+var routineWaitpointsCallbackURLCmd = &cobra.Command{
+	Use:   "callback-url <token>",
+	Short: "Mint the public callback URL for a pending waitpoint (shown once)",
+	Long: `Mint a URL an external system (CI job, approval service, vendor
+webhook) can POST to complete a pending waitpoint without signing in:
+
+  curl -X POST <callback_url> -d '{"approved":true,"payload":{}}'
+
+The URL is shown only now. Crewship stores a digest of it, so it cannot be
+listed or printed again; running this command again mints a new URL and the
+previous one stops working. Requires MANAGER or above. Waitpoints with a typed
+decision form, and held routine actions, have no callback URL.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/waitpoints/%s/callback-token",
+			ws, url.PathEscape(args[0])), map[string]any{})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Token       string `json:"token" yaml:"token"`
+			CallbackURL string `json:"callback_url" yaml:"callback_url"`
+			Rotated     bool   `json:"rotated" yaml:"rotated"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Println(out.CallbackURL)
+			if out.Rotated {
+				fmt.Fprintln(os.Stderr, "The previous callback URL for this waitpoint no longer works.")
+			}
+			fmt.Fprintln(os.Stderr, "Store it now: it cannot be shown again. Anyone holding it can complete this waitpoint.")
+		})
+	},
+}
+
 func init() {
 	for _, cmd := range []*cobra.Command{routineWaitpointsApproveCmd, routineWaitpointsRejectCmd} {
 		cmd.Flags().String("action", "", "named decision action ID")
@@ -273,6 +327,7 @@ func init() {
 	routineWaitpointsCmd.AddCommand(routineWaitpointsShowCmd)
 	routineWaitpointsCmd.AddCommand(routineWaitpointsApproveCmd)
 	routineWaitpointsCmd.AddCommand(routineWaitpointsRejectCmd)
+	routineWaitpointsCmd.AddCommand(routineWaitpointsCallbackURLCmd)
 
 	pipelineCmd.AddCommand(routineWaitpointsCmd)
 }
