@@ -66,7 +66,7 @@ services:
   # It fails on drift in both directions, so do not hand-edit it out of sync
   # with scripts/docker-api-surface/allowlist.go.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:3.4
     container_name: crewship-docker-proxy
     restart: unless-stopped
     environment:
