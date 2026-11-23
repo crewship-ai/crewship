@@ -3,7 +3,7 @@
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     restart: unless-stopped
     ports:
       - "${CREWSHIP_PG_PORT:-5432}:5432"
