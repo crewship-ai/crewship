@@ -13,7 +13,7 @@ import (
 
 // stageTestAgentCLI stages a structural (never executed) static ELF through
 // the real staging path, so attestation checks verify genuine staged bytes.
-func stageTestAgentCLI(t *testing.T) *runtimestage.AgentCLIArtifact {
+func stageTestAgentCLI(t *testing.T, root string) *runtimestage.AgentCLIArtifact {
 	t.Helper()
 	raw := make([]byte, 120)
 	copy(raw, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
@@ -29,7 +29,7 @@ func stageTestAgentCLI(t *testing.T) *runtimestage.AgentCLIArtifact {
 	if err := os.WriteFile(source, raw, 0755); err != nil {
 		t.Fatal(err)
 	}
-	a, err := runtimestage.StageAgentCLI(t.TempDir(), source)
+	a, err := runtimestage.StageAgentCLI(root, source)
 	if err != nil {
 		t.Fatal(err)
 	}

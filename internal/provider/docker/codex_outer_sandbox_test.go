@@ -15,15 +15,15 @@ import (
 )
 
 func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
-	for _, which := range []string{"valid", "mapped", "mapped-foreign-launcher", "mapped-foreign-volume", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate", "agent-cli-tampered", "agent-cli-wrong-destination", "agent-cli-volume"} {
+	for _, which := range []string{"valid", "mapped", "mapped-foreign-launcher", "mapped-foreign-volume", "mapped-agent-cli", "mapped-agent-cli-local-source", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate", "agent-cli-tampered", "agent-cli-wrong-destination", "agent-cli-volume"} {
 		t.Run(which, func(t *testing.T) {
+			root := mappingTempDir(t)
 			var artifact *runtimestage.AgentCLIArtifact
-			if strings.HasPrefix(which, "agent-cli") {
-				if artifact = stageTestAgentCLI(t); artifact == nil {
+			if strings.Contains(which, "agent-cli") {
+				if artifact = stageTestAgentCLI(t, root); artifact == nil {
 					return // compiled-out platform: no agent CLI staging
 				}
 			}
-			root := t.TempDir()
 			crew := "outer-crew"
 			slug := "fixture"
 			instance := "fixture-install"
@@ -124,7 +124,7 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 				volumes["crew-volume"]["Labels"] = copyLabels
 			case "volume-driver":
 				volumes["crew-volume"]["Driver"] = "foreign"
-			case "agent-cli":
+			case "agent-cli", "mapped-agent-cli", "mapped-agent-cli-local-source":
 				p.cfg.agentCLIArtifact = artifact
 				mounts = append(mounts, map[string]any{"Type": "bind", "Source": artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": false})
 			case "agent-cli-unconfigured":
@@ -159,11 +159,6 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 				state["Running"] = false
 			}
 			if strings.HasPrefix(which, "mapped") {
-				root, err := filepath.EvalSymlinks(root)
-				if err != nil {
-					t.Fatal(err)
-				}
-				p.cfg.OutputBasePath = root
 				p.pathMap = &daemonPathMap{local: root, daemon: "/fixture-daemon-data"}
 				p.cfg.SidecarBinaryPath = filepath.Join(root, "launcher")
 				p.cfg.EntrypointPath = filepath.Join(root, "entrypoint")
@@ -176,6 +171,17 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 				for name, local := range map[string]string{"output-volume": crew, "workspace-volume": filepath.Join("workspaces", crew), "crew-volume": filepath.Join("crews", crew)} {
 					volumes[name]["Options"].(map[string]string)["device"] = filepath.Join(p.pathMap.daemon, local)
 				}
+				if which == "mapped-agent-cli" {
+					for _, m := range mounts {
+						if m["Destination"] == agentCLIExecutable {
+							source, err := p.pathMap.translate(artifact.Path)
+							if err != nil {
+								t.Fatal(err)
+							}
+							m["Source"] = source
+						}
+					}
+				}
 				if which == "mapped-foreign-launcher" {
 					mounts[0]["Source"] = p.cfg.SidecarBinaryPath
 				}
@@ -185,7 +191,7 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 			}
 			d := managedlaunch.Descriptor{ImageID: image}
 			err := p.attestCodexOuterMetadata(context.Background(), "c1", crew, d)
-			if (err == nil) != (which == "valid" || which == "agent-cli" || which == "mapped") {
+			if (err == nil) != (which == "valid" || which == "agent-cli" || which == "mapped" || which == "mapped-agent-cli") {
 				t.Fatalf("%s qualification: %v", which, err)
 			}
 		})
