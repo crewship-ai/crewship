@@ -131,11 +131,15 @@ func (p *Provider) hostMountTreeHidden(ctx context.Context, mounts []container.M
 	if err != nil {
 		return fmt.Errorf("resolve protected host spool: %w", err)
 	}
+	daemonSpool, err := p.daemonPathForLocal(spool)
+	if err != nil {
+		return fmt.Errorf("resolve protected spool in Docker daemon: %w", err)
+	}
 	overlaps := func(source, protected string) bool {
 		return pathContains(source, protected) || (rejectDescendants && pathContains(protected, source))
 	}
 	for _, m := range mounts {
-		if m.Source != "" && (overlaps(m.Source, directory) || overlaps(m.Source, spool)) {
+		if m.Source != "" && (overlaps(m.Source, directory) || overlaps(m.Source, spool) || overlaps(m.Source, daemonSpool)) {
 			return errors.New("host capture spool is exposed to the workload")
 		}
 		source := ""
@@ -163,7 +167,7 @@ func (p *Provider) hostMountTreeHidden(ctx context.Context, mounts []container.M
 				// Ordinary local volumes use daemon-owned storage, which need
 				// not be traversable by the controller UID. Bind-backed local
 				// volumes below must authenticate the actual host device path.
-				if overlaps(v.Mountpoint, spool) {
+				if overlaps(v.Mountpoint, spool) || overlaps(v.Mountpoint, daemonSpool) {
 					return errors.New("host capture spool is exposed through a volume")
 				}
 				continue

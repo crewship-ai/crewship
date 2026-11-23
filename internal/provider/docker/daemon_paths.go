@@ -165,13 +165,20 @@ func (p *Provider) daemonMounts(mounts []mount.Mount) ([]mount.Mount, error) {
 	return out, nil
 }
 
+func (p *Provider) daemonPathForLocal(local string) (string, error) {
+	if p.pathMap != nil {
+		return p.pathMap.translate(local)
+	}
+	if p.cfg.DaemonDataPath != "" || p.cfg.ServerContainer != "" {
+		return "", fmt.Errorf("configured Docker storage mapping is unavailable")
+	}
+	return local, nil
+}
+
 // matchesDaemonPath compares an inspected daemon path with the sole path
 // this provider would supply for a trusted local bind.
 func (p *Provider) matchesDaemonPath(inspected, local string) bool {
-	if p.pathMap == nil {
-		return inspected == local
-	}
-	expected, err := p.pathMap.translate(local)
+	expected, err := p.daemonPathForLocal(local)
 	return err == nil && inspected == expected
 }
 
@@ -179,6 +186,9 @@ func (p *Provider) matchesDaemonPath(inspected, local string) bool {
 // outside the configured mapping cannot be authenticated from this process.
 func (p *Provider) localBindSource(source string) (string, error) {
 	if p.pathMap == nil {
+		if _, err := p.daemonPathForLocal(source); err != nil {
+			return "", err
+		}
 		return filepath.EvalSymlinks(source)
 	}
 	if !cleanAbsolutePath(source) || !pathContains(p.pathMap.daemon, source) {

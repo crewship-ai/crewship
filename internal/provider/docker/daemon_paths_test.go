@@ -465,3 +465,49 @@ func TestInconclusiveProbeTimeoutDoesNotConsumeReadinessBudget(t *testing.T) {
 		t.Fatal("probe consumed the readiness DB/state budget")
 	}
 }
+
+func TestDaemonPathChecksPlainVolumeOverlap(t *testing.T) {
+	root := mappingTempDir(t)
+	protected := filepath.Join(root, "agent-cli")
+	if err := os.Mkdir(protected, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const daemonRoot = "/var/lib/docker/volumes/server-data/_data"
+	for _, tc := range []struct {
+		name       string
+		source     string
+		mountpoint string
+		wantError  bool
+	}{
+		{name: "inspect source aliases server data", source: daemonRoot, mountpoint: "/var/lib/docker/volumes/other/_data", wantError: true},
+		{name: "volume mountpoint aliases server data", source: "/unrelated", mountpoint: daemonRoot, wantError: true},
+		{name: "unrelated plain volume", source: "/var/lib/docker/volumes/other/_data", mountpoint: "/var/lib/docker/volumes/other/_data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"Name": "fixture", "Driver": "local", "Mountpoint": tc.mountpoint})
+			})
+			defer close()
+			p.pathMap = &daemonPathMap{local: root, daemon: daemonRoot}
+			mounts := []container.MountPoint{{Type: mount.TypeVolume, Name: "fixture", Source: tc.source, RW: true}}
+			if err := p.hostMountTreeHidden(t.Context(), mounts, protected, true); (err != nil) != tc.wantError {
+				t.Fatalf("mount qualification = %v, want error %t", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestDaemonPathChecksRefuseUnavailableConfiguredMapping(t *testing.T) {
+	root := mappingTempDir(t)
+	p := &Provider{cfg: Config{ServerContainer: "fixture"}}
+	if p.matchesDaemonPath(root, root) {
+		t.Fatal("accepted a local path without the configured daemon mapping")
+	}
+	if _, err := p.localBindSource(root); err == nil {
+		t.Fatal("resolved an inspected source without the configured daemon mapping")
+	}
+	if err := p.hostMountTreeHidden(t.Context(), nil, root, true); err == nil {
+		t.Fatal("qualified the protected path without the configured daemon mapping")
+	}
+}

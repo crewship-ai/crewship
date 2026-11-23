@@ -60,13 +60,9 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	launcherBound := false
 	for _, mount := range c.Mounts {
 		if mount.Destination == managedlaunch.LauncherPath {
-			expected := p.cfg.SidecarBinaryPath
-			if p.pathMap != nil {
-				mapped, mapErr := p.pathMap.translate(expected)
-				if mapErr != nil {
-					return denied
-				}
-				expected = mapped
+			expected, err := p.daemonPathForLocal(p.cfg.SidecarBinaryPath)
+			if err != nil {
+				return denied
 			}
 			if mount.Source != expected {
 				return errors.New("managed launch: recreate runtime with current immutable launcher generation required")

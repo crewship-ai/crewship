@@ -19,10 +19,11 @@ import (
 // Only stateful UNIT fixtures use these declared Docker responses. Real
 // executing-inode and real-container qualification have independent tests.
 type agentSDKFake struct {
-	t        *testing.T
-	artifact *runtimestage.AgentCLIArtifact
-	commit   string
-	fault    string
+	t             *testing.T
+	artifact      *runtimestage.AgentCLIArtifact
+	commit        string
+	fault         string
+	mountedSource string
 }
 
 func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarFakeDaemon) bool {
@@ -49,7 +50,11 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		if c == nil || c.labels["crewship.agent-cli-sha256"] == "" {
 			return false
 		}
-		mounts := []map[string]any{{"Type": "bind", "Source": s.artifact.Path, "Destination": "/usr/local/bin/crewship", "RW": s.fault == "writable-sdk"}}
+		source := s.artifact.Path
+		if s.mountedSource != "" {
+			source = s.mountedSource
+		}
+		mounts := []map[string]any{{"Type": "bind", "Source": source, "Destination": "/usr/local/bin/crewship", "RW": s.fault == "writable-sdk"}}
 		if s.fault == "writable-sdk-alias" {
 			mounts = append(mounts, map[string]any{"Type": "bind", "Source": s.artifact.Path, "Destination": "/tmp/writable-sdk", "RW": true})
 		}

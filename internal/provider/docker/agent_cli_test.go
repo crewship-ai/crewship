@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/buildinfo"
-	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/buildinfo"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
 
 func agentCLIProviderFixture(t *testing.T) Config {
@@ -232,6 +233,41 @@ func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
 			}
 			if ready {
 				t.Fatal("failed SDK preflight was advertised as a ready runtime")
+			}
+		})
+	}
+}
+
+func TestAgentCLIQualificationRequiresMappedBind(t *testing.T) {
+	for _, useDaemonPath := range []bool{true, false} {
+		name := "local spelling"
+		if useDaemonPath {
+			name = "daemon spelling"
+		}
+		t.Run(name, func(t *testing.T) {
+			p, daemon, _ := newSidecarRefreshFixture(t, "", "running")
+			cfg := agentCLIProviderFixture(t)
+			var err error
+			cfg.OutputBasePath, err = filepath.EvalSymlinks(cfg.OutputBasePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged := stageRuntimeArtifacts(cfg, quietLogger())
+			p.cfg.agentCLIArtifact = staged.agentCLIArtifact
+			p.cfg.ExpectedAgentCLICommit = strings.Repeat("b", 40)
+			p.cfg.RequiredAgentCLICommands = []string{"commands", "version"}
+			p.pathMap = &daemonPathMap{local: cfg.OutputBasePath, daemon: "/fixture-daemon-storage"}
+			daemon.containers[refreshOldID].labels["crewship.agent-cli-sha256"] = staged.agentCLIArtifact.SHA256
+			source := staged.agentCLIArtifact.Path
+			if useDaemonPath {
+				source, err = p.pathMap.translate(source)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			daemon.sdk = &agentSDKFake{t: t, artifact: staged.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, mountedSource: source}
+			if err := p.qualifyAgentCLI(t.Context(), refreshOldID); (err == nil) != useDaemonPath {
+				t.Fatalf("mapped bind qualification = %v, want success %t", err, useDaemonPath)
 			}
 		})
 	}
