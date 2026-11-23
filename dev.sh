@@ -788,6 +788,7 @@ cmd_stop() {
 }
 
 cmd_restart() {
+  validate_dev_database_url || return 1
   cmd_stop
   echo ""
   cmd_start
@@ -1207,6 +1208,7 @@ cmd_seed() {
 #   ./dev.sh deploy v1.4.0            -- detached HEAD on tag
 #   ./dev.sh deploy 404650b7          -- detached HEAD on SHA
 cmd_deploy() {
+  validate_dev_database_url || return 1
   local ref="${1:-}"
   if [[ -z "$ref" ]]; then
     err "usage: ./dev.sh deploy <branch|tag|sha|pr/<NUM>>"
