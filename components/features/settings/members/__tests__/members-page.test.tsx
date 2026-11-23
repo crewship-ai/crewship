@@ -173,12 +173,12 @@ describe("Members — the roster", () => {
     expect(screen.queryByText("Can do")).toBeNull()
   })
 
-  it("heads the page with the people and invited counts, and the card with its own", async () => {
+  it("keeps the roster total in the page head and shows a separate filtered count", async () => {
     invitations = [{ id: "i1", email: "pat@x.io", role: "MEMBER", status: "pending", expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(), created_at: new Date().toISOString() }]
     renderPage()
     await table()
     await waitFor(() => expect(document.querySelector("[data-slot=drill-head]")).toHaveTextContent("5 people · 1 invited"))
-    expect(document.querySelector("[data-slot=members-toolbar]")).toHaveTextContent("5 people")
+    expect(document.querySelector("[data-slot=members-toolbar]")).not.toHaveTextContent("5 people")
     fireEvent.change(screen.getByLabelText("Search members"), { target: { value: "mel" } })
     await waitFor(() => expect(document.querySelector("[data-slot=members-toolbar]")).toHaveTextContent("1 of 5 people"))
   })

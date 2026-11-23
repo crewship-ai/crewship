@@ -169,12 +169,17 @@ test.describe("desktop", () => {
     await expect(line).toHaveAttribute("data-state", "idle")
     const verify = page.waitForResponse("**/api/v1/admin/journal/verify?workspace_id=*")
     await line.getByRole("button", { name: "Check now" }).click()
-    expect((await verify).ok()).toBe(true)
+    const response = await verify
+    expect(response.ok()).toBe(true)
+    const result = await response.json()
+    expect(typeof result.ok).toBe("boolean")
+    const heading = result.ok ? "Record intact" : "Record broken"
     const dialog = page.getByRole("dialog").filter({ has: page.locator("[data-slot=journal-integrity-dialog]") })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByRole("heading", { name: /^Record (intact|broken)$/ })).toBeVisible()
+    await expect(dialog).toHaveAccessibleName(new RegExp(`^(Record integrity|${heading})$`))
+    await expect(dialog.getByRole("heading", { name: heading, exact: true })).toBeVisible()
     await expect(dialog.getByText("Entries checked", { exact: true })).toBeVisible()
-    await expect(line).toHaveAttribute("data-state", /^(ok|broken)$/)
+    await expect(line).toHaveAttribute("data-state", result.ok ? "ok" : "broken")
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
