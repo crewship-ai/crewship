@@ -5,7 +5,7 @@ go 1.27
 toolchain go1.27.4
 
 require (
-	cel.dev/cel-go v0.33.2
+	cel.dev/cel-go v0.33.4
 	filippo.io/age v1.3.2
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -24,7 +24,7 @@ require (
 	github.com/gowebpki/jcs v1.0.2
 	github.com/grafana/pyroscope-go v1.5.0
 	github.com/jackc/pgx/v5 v5.13.0
-	github.com/klauspost/compress v1.20.4
+	github.com/klauspost/compress v1.20.5
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mdlayher/netlink v1.11.2
 	github.com/moby/docker-image-spec v1.3.1
@@ -52,7 +52,7 @@ require (
 	golang.org/x/crypto v0.59.0
 	golang.org/x/image v0.48.0
 	golang.org/x/mod v0.43.0
-	golang.org/x/net v0.62.0
+	golang.org/x/net v0.63.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
