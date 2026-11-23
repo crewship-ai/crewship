@@ -17,7 +17,6 @@ import (
 func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 	var crossHostRequests atomic.Int32
 	var sameHostPosts atomic.Int32
-	var crossHostTarget string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/same":
@@ -28,7 +27,8 @@ func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case "/cross":
-			http.Redirect(w, r, crossHostTarget, http.StatusTemporaryRedirect)
+			target := "http://" + strings.Replace(r.Host, "127.0.0.1", "localhost", 1) + "/target"
+			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 		case "/target":
 			crossHostRequests.Add(1)
 			w.WriteHeader(http.StatusNoContent)
@@ -37,7 +37,6 @@ func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	crossHostTarget = strings.Replace(server.URL, "127.0.0.1", "localhost", 1) + "/target"
 
 	provider := shoutrrrProvider{}
 	for _, tc := range []struct {
@@ -110,7 +109,7 @@ func TestShoutrrrDiscordRequiresExplicitMentions(t *testing.T) {
 				t.Fatal(err)
 			}
 			r, err := router.NewWithOptions(nil, types.SenderOptions{
-				HTTPClient: &http.Client{Transport: localDiscordTransport{target, server.Client().Transport.(*http.Transport)}},
+				HTTPClient: &http.Client{Transport: localDiscordTransport{target: target, transport: server.Client().Transport.(*http.Transport)}},
 			})
 			if err != nil {
 				t.Fatal(err)
