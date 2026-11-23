@@ -137,6 +137,12 @@ for (const viewport of [VIEWPORT, { width: 390, height: 844 }]) {
 
       const scroller = page.locator("[data-slot=content-column] > .overflow-y-auto")
       await expect.poll(() => scroller.evaluate((element) => element.clientHeight)).toBeGreaterThan(viewport.height / 2)
+      const routeShell = scroller.locator(".h-app-content")
+      await expect(routeShell).toHaveCount(1)
+      await expect.poll(() => routeShell.evaluate((element) => {
+        const scroller = element.closest("[data-slot=app-content]")!
+        return Math.abs(element.getBoundingClientRect().height - scroller.clientHeight)
+      })).toBeLessThanOrEqual(1)
       await expect.poll(() => scroller.evaluate((element) =>
         element.scrollHeight - element.clientHeight,
       )).toBeLessThanOrEqual(1)
