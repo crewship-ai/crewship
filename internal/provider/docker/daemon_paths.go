@@ -165,6 +165,16 @@ func (p *Provider) daemonMounts(mounts []mount.Mount) ([]mount.Mount, error) {
 	return out, nil
 }
 
+// matchesDaemonPath compares an inspected daemon path with the sole path
+// this provider would supply for a trusted local bind.
+func (p *Provider) matchesDaemonPath(inspected, local string) bool {
+	if p.pathMap == nil {
+		return inspected == local
+	}
+	expected, err := p.pathMap.translate(local)
+	return err == nil && inspected == expected
+}
+
 // localBindSource authenticates an inspect path in the server filesystem. Paths
 // outside the configured mapping cannot be authenticated from this process.
 func (p *Provider) localBindSource(source string) (string, error) {

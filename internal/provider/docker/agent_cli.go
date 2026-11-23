@@ -146,7 +146,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	var writable []container.MountPoint
 	for _, m := range c.Mounts {
 		if m.Destination == executable {
-			if bound || m.Type != mount.TypeBind || m.RW || m.Source != p.cfg.agentCLIArtifact.Path {
+			if bound || m.Type != mount.TypeBind || m.RW || !p.matchesDaemonPath(m.Source, p.cfg.agentCLIArtifact.Path) {
 				return denied
 			}
 			bound = true

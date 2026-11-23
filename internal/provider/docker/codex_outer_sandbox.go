@@ -99,8 +99,8 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 			// The immutable native agent CLI (#5491) is the third trusted
 			// read-only bind, accepted only from this provider's staged
 			// artifact (#5549); without a staged artifact it stays denied.
-			agentCLI := p.cfg.agentCLIArtifact != nil && m.Destination == agentCLIExecutable && m.Source == p.cfg.agentCLIArtifact.Path
-			if m.RW || !((m.Destination == managedlaunch.LauncherPath && m.Source == p.cfg.SidecarBinaryPath) || (m.Destination == "/usr/local/bin/entrypoint.sh" && m.Source == p.cfg.EntrypointPath) || agentCLI) {
+			agentCLI := p.cfg.agentCLIArtifact != nil && m.Destination == agentCLIExecutable && p.matchesDaemonPath(m.Source, p.cfg.agentCLIArtifact.Path)
+			if m.RW || !((m.Destination == managedlaunch.LauncherPath && p.matchesDaemonPath(m.Source, p.cfg.SidecarBinaryPath)) || (m.Destination == "/usr/local/bin/entrypoint.sh" && p.matchesDaemonPath(m.Source, p.cfg.EntrypointPath)) || agentCLI) {
 				return denied
 			}
 		case mount.TypeVolume:
@@ -124,7 +124,7 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 				if err != nil {
 					return denied
 				}
-				actual, err := filepath.EvalSymlinks(v.Options["device"])
+				actual, err := p.localBindSource(v.Options["device"])
 				if err != nil || actual != resolved {
 					return denied
 				}

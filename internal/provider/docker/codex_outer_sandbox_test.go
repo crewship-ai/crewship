@@ -15,7 +15,7 @@ import (
 )
 
 func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
-	for _, which := range []string{"valid", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate", "agent-cli-tampered", "agent-cli-wrong-destination", "agent-cli-volume"} {
+	for _, which := range []string{"valid", "mapped", "mapped-foreign-launcher", "mapped-foreign-volume", "uid", "owner", "crew", "rootfs", "privileged", "capdrop", "capadd", "devices", "nnp", "seccomp-unconfined", "apparmor", "pid", "ipc", "network", "userns", "uts", "cgroupns", "volumes-from", "extra-bind", "extra-volume", "tmpfs", "missing-mount", "missing-secrets", "missing-tmp", "unsafe-secrets", "volume-device", "volume-options", "volume-owner", "volume-driver", "wrong-image", "not-running", "agent-cli", "agent-cli-unconfigured", "agent-cli-missing", "agent-cli-rw", "agent-cli-source", "agent-cli-duplicate", "agent-cli-tampered", "agent-cli-wrong-destination", "agent-cli-volume"} {
 		t.Run(which, func(t *testing.T) {
 			var artifact *runtimestage.AgentCLIArtifact
 			if strings.HasPrefix(which, "agent-cli") {
@@ -158,9 +158,34 @@ func TestCodexOuterRuntimeRejectsMissingControls(t *testing.T) {
 			case "not-running":
 				state["Running"] = false
 			}
+			if strings.HasPrefix(which, "mapped") {
+				root, err := filepath.EvalSymlinks(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.cfg.OutputBasePath = root
+				p.pathMap = &daemonPathMap{local: root, daemon: "/fixture-daemon-data"}
+				p.cfg.SidecarBinaryPath = filepath.Join(root, "launcher")
+				p.cfg.EntrypointPath = filepath.Join(root, "entrypoint")
+				for i, local := range []string{p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath} {
+					if err := os.WriteFile(local, nil, 0700); err != nil {
+						t.Fatal(err)
+					}
+					mounts[i]["Source"] = filepath.Join(p.pathMap.daemon, filepath.Base(local))
+				}
+				for name, local := range map[string]string{"output-volume": crew, "workspace-volume": filepath.Join("workspaces", crew), "crew-volume": filepath.Join("crews", crew)} {
+					volumes[name]["Options"].(map[string]string)["device"] = filepath.Join(p.pathMap.daemon, local)
+				}
+				if which == "mapped-foreign-launcher" {
+					mounts[0]["Source"] = p.cfg.SidecarBinaryPath
+				}
+				if which == "mapped-foreign-volume" {
+					volumes["crew-volume"]["Options"].(map[string]string)["device"] = filepath.Join(root, "crews", crew)
+				}
+			}
 			d := managedlaunch.Descriptor{ImageID: image}
 			err := p.attestCodexOuterMetadata(context.Background(), "c1", crew, d)
-			if (err == nil) != (which == "valid" || which == "agent-cli") {
+			if (err == nil) != (which == "valid" || which == "agent-cli" || which == "mapped") {
 				t.Fatalf("%s qualification: %v", which, err)
 			}
 		})
