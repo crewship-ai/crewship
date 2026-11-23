@@ -332,11 +332,8 @@ and, for tarballs, the `checksums.txt` cosign bundle in
 <Note>
 **PostgreSQL is on the v0.2 roadmap.** The beta runs exclusively on
 SQLite via `modernc.org/sqlite` (single binary, WAL mode, no extra
-services). The server accepts only `file:` DSNs on `DATABASE_URL` —
-there is no Postgres driver in the binary today, so a `postgres://`
-URL will not connect. The commented-out `postgres:` service block in
-`docker/docker-compose.prod.yml` is a placeholder for that v0.2
-work; leave it commented for now.
+services). For Crewship's own database, set `DATABASE_URL` to a SQLite
+`file:` DSN. The PostgreSQL driver verifies external connector credentials.
 </Note>
 
 ### Docker socket: brokered through a socket proxy by default

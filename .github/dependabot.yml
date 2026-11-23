@@ -232,10 +232,7 @@ updates:
           - "minor"
           - "patch"
 
-  # docker/docker-compose.yml pins postgres:18-alpine on a floating tag.
-  # Dependabot's docker-compose ecosystem (separate from `docker` for
-  # Dockerfiles) surfaces patch / minor releases of every image
-  # referenced from a compose file in this directory.
+  # Track Compose service images such as the production Docker socket proxy.
   - package-ecosystem: "docker-compose"
     directory: "/docker"
     target-branch: "main"

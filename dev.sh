@@ -306,14 +306,6 @@ port_in_use() {
   (echo >/dev/tcp/127.0.0.1/"$1") 2>/dev/null || nc -z 127.0.0.1 "$1" 2>/dev/null
 }
 
-detect_db_mode() {
-  if [[ "${DATABASE_URL:-}" == postgresql://* || "${DATABASE_URL:-}" == postgres://* ]]; then
-    echo "postgresql"
-    return
-  fi
-  echo "sqlite"
-}
-
 check_prerequisites() {
   local missing=0
 
@@ -443,27 +435,6 @@ generate_env_local() {
   } >> "$tmp_file"
 
   mv "$tmp_file" "$env_file"
-}
-
-start_postgres() {
-  local db_mode
-  db_mode=$(detect_db_mode)
-
-  if [[ "$db_mode" != "postgresql" ]]; then
-    ok "Using SQLite (no PostgreSQL needed)"
-    return
-  fi
-
-  local pg_port=$((5432 + INSTANCE_NUM))
-  log "Starting PostgreSQL on :$pg_port (DATABASE_URL points to PostgreSQL)..."
-  if COMPOSE_PROJECT_NAME="crewship${S}" CREWSHIP_PG_PORT="$pg_port" \
-      docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" ps --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
-    ok "PostgreSQL already running"
-  else
-    COMPOSE_PROJECT_NAME="crewship${S}" CREWSHIP_PG_PORT="$pg_port" \
-      docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" up -d
-    ok "PostgreSQL started on :$pg_port"
-  fi
 }
 
 # The Go binary embeds web/out/ via //go:embed. Running `go build` without
@@ -785,11 +756,8 @@ cmd_start() {
 
   generate_env_local
 
-  local db_mode
-  db_mode=$(detect_db_mode)
-  echo -e "  Database:  ${CYAN}$db_mode${NC}"
+  echo -e "  Database:  ${CYAN}SQLite${NC}"
   echo ""
-  start_postgres
   start_go
   start_next
   echo ""
@@ -808,13 +776,7 @@ cmd_stop() {
   else
     stop_service "crewship" "$GO_PID_FILE" "$GO_PORT"
   fi
-  local db_mode
-  db_mode=$(detect_db_mode)
-  if [[ "$db_mode" == "postgresql" ]]; then
-    ok "Stopped (PostgreSQL left running)"
-  else
-    ok "Stopped"
-  fi
+  ok "Stopped"
 }
 
 cmd_restart() {
@@ -921,20 +883,7 @@ cmd_status() {
     fi
   fi
 
-  local db_mode
-  db_mode=$(detect_db_mode)
-
-  if [[ "$db_mode" == "postgresql" ]]; then
-    local pg_port=$((5432 + INSTANCE_NUM))
-    if COMPOSE_PROJECT_NAME="crewship${S}" CREWSHIP_PG_PORT="$pg_port" \
-        docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" ps --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
-      echo -e "  PostgreSQL:  ${GREEN}running${NC} (port $pg_port)"
-    else
-      echo -e "  PostgreSQL:  ${RED}stopped${NC}"
-    fi
-  else
-    echo -e "  SQLite:      ${GREEN}${DATABASE_URL}${NC}"
-  fi
+  echo -e "  SQLite:      ${GREEN}${DATABASE_URL}${NC}"
 
   if pid=$(is_running "$GO_PID_FILE"); then
     if curl -sf http://localhost:$GO_PORT/api/health >/dev/null 2>&1; then
@@ -1087,7 +1036,7 @@ cmd_nuke() {
   # sidecar containers too: crewship-N-svc-<crew>-<service> from the
   # SPEC-4 sugar path stayed running across nukes before this fix,
   # which left a "factory reset complete" message lying — the next
-  # `dev.sh start` would join the old postgres/redis still holding
+  # `dev.sh start` would join the old service containers still holding
   # their old passwords. Volumes (home / tools / svc-*-vol) needed
   # the same widening: nuke that leaves volumes behind isn't a
   # nuke, the next agent picks up a populated /home/agent and acts
@@ -1351,7 +1300,7 @@ case "${1:-help}" in
   *)
     echo "Usage: ./dev.sh {start|stop|restart|status|deploy|seed|nuke|logs|logs:go|logs:next}"
     echo ""
-    echo "  start             Start crewship + Next.js (+ PostgreSQL if configured)"
+    echo "  start             Start crewship + Next.js (SQLite)"
     echo "  stop              Stop crewship + Next.js"
     echo "  restart           Stop then start all services"
     echo "  status            Show branch / build / service status"
