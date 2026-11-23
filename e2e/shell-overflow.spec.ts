@@ -136,9 +136,23 @@ for (const viewport of [VIEWPORT, { width: 390, height: 844 }]) {
       }
 
       const scroller = page.locator("[data-slot=content-column] > .overflow-y-auto")
+      await expect.poll(() => scroller.evaluate((element) => element.clientHeight)).toBeGreaterThan(viewport.height / 2)
       await expect.poll(() => scroller.evaluate((element) =>
         element.scrollHeight - element.clientHeight,
       )).toBeLessThanOrEqual(1)
+
+      const content = page.locator("[data-slot=app-content]")
+      const fixedTop = await content.evaluate((element) => {
+        const probe = document.createElement("div")
+        probe.style.cssText = "position: fixed; top: 0; left: 0; width: 1px; height: 1px"
+        element.appendChild(probe)
+        try {
+          return probe.getBoundingClientRect().top
+        } finally {
+          probe.remove()
+        }
+      })
+      expect(fixedTop, "a fixed overlay must remain anchored to the viewport").toBe(0)
     })
   }
 }
