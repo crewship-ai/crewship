@@ -32,6 +32,11 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependabot integration: exact registry tarballs inspected and matched to
+  // pnpm-lock.yaml. These releases ship no package-level license file.
+  "@ai-sdk/provider-utils@5.0.83": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.83.tgz",
+  "@rollup/rollup-linux-x64-gnu@4.68.8": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.68.8.tgz",
+  "@rollup/rollup-linux-x64-musl@4.68.8": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.68.8.tgz",
   // November dependency integration: verified exact locked tarball SHA-512;
   // only a nested third-party license ships, no package-level Apache text.
   "@ai-sdk/provider-utils@5.0.81": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.81.tgz",
