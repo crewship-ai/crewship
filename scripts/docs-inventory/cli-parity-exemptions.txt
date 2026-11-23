@@ -20,6 +20,7 @@ GET /api/v1/auth/google/status                     retained legacy compatibility
 /api/v1/system/setup-status                        public browser setup/signup discovery; CLI seed authenticates its explicit target and does not alter signup policy
 /api/v1/oauth/callback                             provider redirect target; the browser lands here, `crewship oauth` only names it
 /api/v1/pages/runtime/bootstrap                    serves the page-runtime iframe HTML (#2472)
+/api/v1/pages/{slug}/mooring/session/reauthorize     browser transport maintenance for an already joined original connection; requires its original login credential and same-origin POST, creates no session or application command
 /api/v1/public/pages/{token}                       anonymous share-link viewer, authenticated by the URL token
 /api/v1/public/pages/{token}/unlock                anonymous share-link viewer, password step
 /api/v1/waitpoint-tokens/{token}                   one-click approve/reject link sent by notifications; `crewship routine waitpoints` covers the authenticated path
@@ -32,10 +33,14 @@ PUT /api/v1/crews/{crewId}                         alias of PATCH on the same ha
 GET /api/v1/pages/{slug}/artifact/versions         alias of GET /api/v1/pages/{slug}/artifact on the same handler (GetArtifactProject), which `crewship page artifact versions` reads
 GET /api/v1/crews/{crewId}/issues/{identifier}     redundant with GET /api/v1/issues/{identifier} (identifiers are workspace-unique), which `crewship issue get` reads
 
-# --- Pre-existing gaps ------------------------------------------------------
-# Legacy template API is used by the UI and stores a different JSON shape in
-# the same table as workflow templates. Do not promote its weakly validated
-# writes through a dedicated CLI; reconcile the two consumers before removal
-# (tracked in #5431).
-/api/v1/templates                                  UI gallery uses this legacy shape; its writes bypass workflow-stage validation
-/api/v1/templates/{templateId}                     UI gallery uses this legacy shape; its writes bypass workflow-stage validation
+# --- Pre-existing gaps: authenticated routes with no command when this gate was
+# introduced (2026-09-15). Listed so the count can only go down; each needs a
+# command, and the line goes when it lands.
+/api/v1/templates                                  legacy alias of /workflow-templates over the same table; frontend still uses it (`crewship workflow` drives /workflow-templates)
+/api/v1/templates/{templateId}                     legacy alias of /workflow-templates over the same table; frontend still uses it (`crewship workflow` drives /workflow-templates)
+
+/api/v1/pages/{slug}/mooring/command-session     default-off native browser session transport with opaque identity-fenced views and exact-origin HTTP; no dedicated CLI command or MCP surface is registered
+
+# --- In flight on another branch: the line goes when that branch lands.
+POST /api/v1/memory/initialize                     CLI in flight on feat/cli-fidelity-oct
+GET /api/v1/agents/{agentId}/peers/{userId}        CLI in flight on feat/cli-fidelity-oct

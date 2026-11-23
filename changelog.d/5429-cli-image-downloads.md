@@ -1,1 +1,0 @@
-- Add CLI commands to download a user's avatar and the current workspace logo with bounded, atomic output.
