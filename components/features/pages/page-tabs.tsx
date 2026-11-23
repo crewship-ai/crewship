@@ -100,10 +100,6 @@ export function resolveTabId(tabs: readonly PageTabView[], requested: string | n
  * authoritative for clicks — `replaceState` does not notify `useSearchParams`
  * anyway — and the query string is followed only when it actually changes,
  * which is what a real navigation looks like.
- *
- * (`nuqs` is a dependency of this repo but has no import anywhere in it, and
- * adopting it here would mean mounting its adapter in the root layout — a
- * file this change does not own. This is the idiom the app actually uses.)
  */
 export function usePageTabState(tabs: readonly PageTabView[]): [string, (id: string) => void] {
   const searchParams = useSearchParams()
