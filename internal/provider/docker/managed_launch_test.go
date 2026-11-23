@@ -18,7 +18,7 @@ import (
 )
 
 func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
-	for _, which := range []string{"valid", "writable-root", "wrong-image", "privileged", "binary-overlay", "readonly-overlay", "launcher-overlay", "missing-launcher", "symlink-parent", "dynamic-launcher", "stale-launcher", "launcher-symlink", "launcher-duplicate", "fixed-launcher", "tmpfs-binary", "tmpfs-launcher", "tmpfs-root", "tmpfs-noncanonical", "tmpfs-unrelated"} {
+	for _, which := range []string{"valid", "unavailable-crew-runtime", "writable-root", "wrong-image", "privileged", "binary-overlay", "readonly-overlay", "launcher-overlay", "missing-launcher", "symlink-parent", "dynamic-launcher", "stale-launcher", "launcher-symlink", "launcher-duplicate", "fixed-launcher", "tmpfs-binary", "tmpfs-launcher", "tmpfs-root", "tmpfs-noncanonical", "tmpfs-unrelated"} {
 		t.Run(which, func(t *testing.T) {
 			image := "sha256:" + strings.Repeat("a", 64)
 			launcherDir, err := filepath.EvalSymlinks(t.TempDir())
@@ -118,9 +118,12 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 			})
 			defer close()
 			p.cfg.SidecarBinaryPath = launcher
+			if which == "unavailable-crew-runtime" {
+				p.runtimeErr = fmt.Errorf("ordinary crew entrypoint unavailable")
+			}
 			d := managedlaunch.Descriptor{Artifact: managedlaunch.Artifact{Path: "/opt/native/claude", SHA256: strings.Repeat("b", 64), Format: "static_elf"}, ImageID: image, RevisionID: "r1", LockSHA256: strings.Repeat("c", 64), Binary: "claude", Version: "2.1.288"}
 			err = p.attestManagedLaunch(context.Background(), "c1", d, fixtureLauncherOwner, fixtureLauncherDirectory)
-			if which == "valid" || which == "tmpfs-unrelated" {
+			if which == "valid" || which == "tmpfs-unrelated" || which == "unavailable-crew-runtime" {
 				// Also exercise the actual production entrypoint on this host.
 				productionErr := p.AttestManagedLaunch(context.Background(), "c1", d)
 				if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {

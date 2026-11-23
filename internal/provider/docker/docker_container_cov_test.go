@@ -791,43 +791,27 @@ func TestEnsureCrewRuntime_StartError(t *testing.T) {
 	}
 }
 
-// ---------- EnsureCrewRuntime: init-container chown fallback ----------
-
-func TestEnsureCrewRuntime_InitChownCreateFails_FallsBackToChmod(t *testing.T) {
+// Ownership failure must not weaken data directory permissions.
+func TestEnsureCrewRuntime_InitChownCreateFails_RefusesWorldWritableFallback(t *testing.T) {
 	t.Parallel()
-	if euid := os.Geteuid(); euid == 0 || euid == 1001 {
-		// The chmod-0777 fallback only triggers when os.Chown(dir, 1001, 1001)
-		// fails. Root can chown to anyone, and uid 1001 (the agent uid — and
-		// the GitHub Actions "runner" user) can chown the dir to itself, so in
-		// both cases chown succeeds and the fallback is unreachable.
-		t.Skip("euid can chown to agent uid 1001 — chmod fallback unreachable")
-	}
-
-	f := &covRT{
-		createFn: func(req container.CreateRequest) (string, int) {
-			if req.Config != nil && req.Config.User == "0:0" {
-				return "", http.StatusInternalServerError // init container fails
-			}
-			return "real-cid-aaaaaaaaaaaa", 201
-		},
-	}
+	f := &covRT{createFn: func(req container.CreateRequest) (string, int) {
+		if req.Config != nil && req.Config.User == "0:0" {
+			return "", http.StatusInternalServerError
+		}
+		t.Error("crew container created after failed ownership initialization")
+		return "unexpected", 201
+	}}
 	cfg := covRTConfig(t)
 	p := f.provider(t, cfg)
-
-	id, err := p.EnsureCrewRuntime(context.Background(), covTeam())
-	if err != nil {
-		t.Fatalf("EnsureCrewRuntime must survive init-container failure: %v", err)
+	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err == nil || !strings.Contains(err.Error(), "ownership init create") {
+		t.Fatalf("expected ownership failure, got %v", err)
 	}
-	if id != "real-cid-aaaaaaaaaaaa" {
-		t.Errorf("id = %q, want real-cid-aaaaaaaaaaaa", id)
-	}
-	// The fallback chmods the bind dirs to 0777.
-	st, err := os.Stat(filepath.Join(cfg.OutputBasePath, "crew1"))
+	info, err := os.Stat(filepath.Join(cfg.OutputBasePath, "crew1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm() != 0o777 {
-		t.Errorf("output dir perm = %o, want 0777 fallback", st.Mode().Perm())
+	if info.Mode().Perm()&0002 != 0 {
+		t.Fatalf("output became world writable: %o", info.Mode().Perm())
 	}
 }
 

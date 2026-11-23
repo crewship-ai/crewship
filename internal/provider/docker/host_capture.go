@@ -41,7 +41,7 @@ type hostCaptureAuthority struct {
 // SupportsHostCapture reports the qualified Docker transport. Kernel process
 // identity permissions are checked again before any exact-execution stop.
 func (p *Provider) SupportsHostCapture() bool {
-	return runtime.GOOS == "linux" && strings.HasPrefix(p.detected.Host, "unix://") && hostCaptureControllerUIDSupported(os.Geteuid())
+	return p.pathMap == nil && p.cfg.ServerContainer == "" && p.cfg.DaemonDataPath == "" && runtime.GOOS == "linux" && strings.HasPrefix(p.detected.Host, "unix://") && hostCaptureControllerUIDSupported(os.Geteuid())
 }
 
 // Workload identities cannot own a protected host spool. Select the legacy
@@ -188,7 +188,7 @@ func (p *Provider) hostMountTreeHidden(ctx context.Context, mounts []container.M
 			return errors.New("host capture mount type is unqualified")
 		}
 		// Unlike a prospective spool, an inspected bind source must exist.
-		resolved, err := filepath.EvalSymlinks(source)
+		resolved, err := p.localBindSource(source)
 		if err != nil || !filepath.IsAbs(resolved) {
 			return errors.New("host capture cannot authenticate bind source")
 		}

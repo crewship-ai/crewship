@@ -98,6 +98,7 @@ type Server struct {
 	loginRefresher    *goapi.ProviderLoginRefresher
 	debugLogs         *logging.RingBuffer
 	db                *sql.DB
+	runtimeInitError  error
 	writerOwnerCheck  func() error
 	apiRouter         *goapi.Router
 	fileWatcher       *fileserver.Watcher
@@ -164,6 +165,7 @@ type Server struct {
 type Deps struct {
 	ContainerCleanup *resourcelifecycle.Controller
 
+	RuntimeInitError error // explicit runtime failed to initialize; --no-docker leaves nil.
 	Container        provider.ContainerProvider
 	Storage          provider.StorageProvider
 	State            provider.StateProvider
@@ -345,6 +347,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		terminalHandler: termHandler,
 	}
 	if deps != nil {
+		s.runtimeInitError = deps.RuntimeInitError
 		s.db = deps.DB
 		s.writerOwnerCheck = deps.WriterOwnerCheck
 	}

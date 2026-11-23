@@ -279,3 +279,36 @@ func TestRemoveLegacySecretsDirViaHelper_CreateFailurePropagates(t *testing.T) {
 		t.Errorf("error should mention 'create removal helper': %v", err)
 	}
 }
+
+func TestMappedSecretsSweepProtectsLiveDaemonBinds(t *testing.T) {
+	root := mappingTempDir(t)
+	p := &Provider{pathMap: &daemonPathMap{local: root, daemon: "/daemon/data"}}
+	items := []container.Summary{{Mounts: []container.MountPoint{
+		{Type: mount.TypeBind, Source: "/daemon/data/secrets/live/agent", Destination: "/secrets"},
+		{Type: mount.TypeBind, Source: root + "/secrets/old-spelling/agent", Destination: "/secrets"},
+	}}}
+	got, err := p.protectedLegacySecrets(items, root+"/secrets")
+	if err != nil || !got["live"] || !got["old-spelling"] || len(got) != 2 {
+		t.Fatalf("live secrets not protected: %v %v", got, err)
+	}
+	p.runtimeErr = fmt.Errorf("mapping unavailable")
+	if _, err := p.protectedLegacySecrets(items, root+"/secrets"); err == nil {
+		t.Fatal("cleanup accepted failed runtime mapping")
+	}
+}
+
+func TestLegacySecretsHelperUsesDaemonSource(t *testing.T) {
+	f := &fakeDaemon{waitExit: 0}
+	p, cleanup := newFakeDockerProvider(t, f.handler(t))
+	defer cleanup()
+	root := mappingTempDir(t)
+	p.cfg.RuntimeImage = "runtime"
+	p.pathMap = &daemonPathMap{local: root, daemon: "/daemon/data"}
+	if err := p.removeLegacySecretsDirViaHelper(context.Background(), root+"/secrets/dormant"); err != nil {
+		t.Fatal(err)
+	}
+	mounts := mountsFromCreateBody(t, f.lastCreateBody)
+	if len(mounts) != 1 || mounts[0]["Source"] != "/daemon/data/secrets/dormant" {
+		t.Fatalf("untranslated helper: %v", mounts)
+	}
+}

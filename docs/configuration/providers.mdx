@@ -247,7 +247,7 @@ type containerJSON struct {
 | `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
 | CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
 | Stop timeout | 30 seconds | 10 seconds |
-| Crew isolation controls | `CapDrop: ALL`, `no-new-privileges`, `noexec` mounts, `MemorySwap`/`ShmSize` limits, restart policy | Not applied |
+| Crew isolation controls | `CapDrop: ALL`, `no-new-privileges`, `MemorySwap`/`ShmSize` limits, restart policy; persistent-data `noexec` is requested but not qualified | Not applied |
 | `/secrets` credential tmpfs | Applied, owned by the agent UID at mode `0700` | Applied, mode `1777` — Apple's CLI has no `uid`/`gid` mount directive |
 | Process rlimits | `core=0`, `nofile`, `nproc`, `fsize` | Same four, via `--ulimit`; inherited by every `container exec`, so they bind the agent and not just the init process |
 | Process count cap | `PidsLimit` (200 per container) | No equivalent — `nproc` is the only fork backstop, though each crew is its own VM so a fork bomb cannot reach a sibling or the host |
@@ -256,7 +256,7 @@ type containerJSON struct {
 <Warning>
   `auto` still prefers Docker. A crew on the Apple provider gets the credential
   tmpfs, the egress fence, an init process and the rlimits, but not
-  `CapDrop: ALL`, `no-new-privileges`, `noexec` mounts or the memory-swap and
+  `CapDrop: ALL`, `no-new-privileges` or the memory-swap and
   restart-policy controls — several of which the Apple CLI has no flag for at
   all. `crewship start` logs a warning naming exactly what is and is not
   applied whenever it wires the Apple provider; treat that line as a deployment
@@ -341,6 +341,11 @@ next to `network_mode`, `crewship crew list` marks an unenforced fence
 its system prompt. On this provider those now report enforced.
 </Note>
 
+Persistent-data `noexec,nosuid` is a current Docker hardening limitation,
+not a guaranteed distinction between providers. The path-mapping smoke test
+checks native/mapped parity, while a separate hardening repair must establish
+actual enforcement. See [Container isolation](/security/container-isolation).
+
 ### Auto Provider
 
 **Config key:** `container.provider: "auto"`
@@ -349,7 +354,7 @@ Auto-detection tries Docker first, then falls back to Apple Containers. Useful f
 
 The order is deliberate and not merely a preference: several crew isolation
 controls exist on the Docker path only — `CapDrop: ALL`, `no-new-privileges`,
-`noexec` mounts, the memory-swap and restart-policy limits — and the Apple CLI
+the memory-swap and restart-policy limits — and the Apple CLI
 has no flag for some of them at all (see the limitations table above). The
 `restricted` egress fence, the credential tmpfs, the init process and the
 rlimits are on both. On a host with both runtimes installed, `auto` therefore

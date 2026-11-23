@@ -57,7 +57,7 @@ func (p *Provider) QualifyHostCapture(ctx context.Context, containerID string) (
 		if m.Type != mount.TypeBind || m.RW {
 			return false, nil
 		}
-		source, err := filepath.EvalSymlinks(m.Source)
+		source, err := p.localBindSource(m.Source)
 		if err != nil {
 			return false, err
 		}

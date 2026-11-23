@@ -1,45 +1,11 @@
 package docker
 
-// Host paths a VM-backed daemon can actually see (#1706).
-//
-// Every crew container bind-mounts host paths, and a bind source is a string
-// the *daemon* resolves, not this process. On a native Linux daemon those are
-// the same filesystem and the distinction never surfaces. On a VM-backed
-// runtime — Colima, Rancher Desktop, Docker Desktop, podman machine, Apple
-// containers — the daemon lives inside a VM that shares only a configured set
-// of host directories, and a bind source outside that set does not exist as
-// far as the daemon is concerned.
-//
-// That breaks the most common install outright. crewship-sidecar and
-// entrypoint.sh are MANDATORY binds (buildMounts errors without them), and
-// internal/config resolves them next to the crewship executable: Homebrew puts
-// that at /opt/homebrew/..., install.sh at /usr/local/bin. Colima shares only
-// $HOME by default, so neither exists in its VM and every crew create fails
-// with `bind source path does not exist`. The operator is told a file is
-// missing when it is plainly there.
-//
-// Two things happen here:
-//
-//  1. stageRuntimeArtifacts copies the sidecar and entrypoint under the crew
-//     data dir, and the provider binds the copies. The data dir already has to
-//     be visible to the daemon — /workspace, /output and /crew are bind-mounted
-//     out of it, so nothing works if it is not — which collapses two separate
-//     "this path must be shared" requirements into the one that was already
-//     load-bearing. On the default install ($HOME/.crewship/output) that is
-//     inside Colima's default share and a Homebrew-installed crewship starts
-//     crews on a default Colima with no configuration at all. The copy itself
-//     lives in internal/provider/runtimestage because the apple provider needs
-//     exactly the same one (#1724) — including the mtime preservation that
-//     sidecar_freshness.go depends on, which is precisely the detail a second
-//     hand-written copy would drop.
-//
-//  2. explainBindFailure turns the daemon's `bind source path does not exist`
-//     into a message that says what is actually wrong, for the cases staging
-//     cannot fix — a data dir outside the share set, a remote daemon, a
-//     hand-pinned CREWSHIP_SIDECAR_PATH. The discriminator is exact rather
-//     than a guess: the path exists on THIS host and the daemon says it does
-//     not, which is only ever true when the daemon is looking at a different
-//     filesystem.
+// Runtime artifacts are staged in the server's local storage subtree. Docker
+// resolves bind sources in the daemon namespace: a VM or a sibling server
+// container can see different paths. daemon_paths.go translates only Docker
+// request paths; staging, hashes and local file checks keep local paths.
+// Native/VM installations sharing the same paths retain staging behavior from
+// #1706. Runtime staging is shared with the Apple provider via runtimestage.
 
 import (
 	"context"
@@ -52,8 +18,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
+	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -146,17 +115,17 @@ func (p *Provider) explainBindFailure(err error) error {
 	if path == "" {
 		return err
 	}
-	if _, statErr := os.Stat(path); statErr != nil {
+	localPath := path
+	if p.pathMap != nil {
+		mapped, mapErr := p.localBindSource(path)
+		if mapErr == nil {
+			localPath = mapped
+		}
+	}
+	if _, statErr := os.Stat(localPath); statErr != nil {
 		return err
 	}
-	return fmt.Errorf(
-		"%w — the %s daemon cannot see the host path %s. It exists on this machine, so this is not a missing file: %s runs the daemon inside a VM that only shares the host directories it was configured with, and this path is not one of them. Fix it either way:\n"+
-			"  • share the path with the VM: %s\n"+
-			"  • or move what is being bound under a directory the VM already shares — Crewship stages crewship-sidecar and entrypoint.sh under its data dir (%s) for exactly this reason, so pointing --data-dir (or CREWSHIP_DATA_DIR) at a shared location fixes every crew bind at once",
-		err, p.detected.Runtime, path, p.detected.Runtime,
-		vmShareRemedy(p.detected.Runtime, path),
-		emptyOr(p.cfg.OutputBasePath, "<unset>"),
-	)
+	return fmt.Errorf("%w — the %s daemon cannot see %s, which exists on this machine. The server and daemon use different filesystems or mount namespaces. For a containerized server configure CREWSHIP_DOCKER_SERVER_CONTAINER or CREWSHIP_DOCKER_DAEMON_DATA_PATH; for a VM-backed runtime check shared directories: %s (storage: %s)", err, p.detected.Runtime, path+" (local: "+localPath+")", vmShareRemedy(p.detected.Runtime, localPath), emptyOr(p.cfg.OutputBasePath, "<unset>"))
 }
 
 // emptyOr returns fallback when s is empty.
@@ -199,24 +168,92 @@ func vmShareRemedy(runtime, path string) string {
 // the create always fails, and only the SHAPE of the failure is read.
 const preflightSentinelImage = "crewship-bind-preflight:does-not-exist"
 
-// preflightMandatoryBinds checks at boot that the daemon can see the sidecar
-// and entrypoint bind sources, instead of leaving it to blow up on a user's
-// first prompt (#1706).
-//
-// It logs rather than returning an error, and that is a call site fact rather
-// than timidity: with `container.provider: auto` (the default),
-// selectAutoContainerProvider treats a New() error as "this provider is not
-// available" and silently moves on to the next candidate, logging the reason at
-// DEBUG. A hard failure here would therefore make the most actionable message
-// in the codebase the least visible one. The same explanation is attached to
-// the create error too, where it reaches the user's provisioning failure.
+// Probe errors are classified conservatively for unqualified runtimes. Only
+// local configuration/mapping errors and recognized daemon bind-source rejection
+// block runtime admission. Inconclusive API replies are logged, never promoted
+// to a new unavailable state. Only verified success is cached for 30 seconds.
+const runtimeProbeTTL = 30 * time.Second
+
+type mandatoryProbeState struct {
+	err        error
+	verifiedAt time.Time
+}
+
+func (p *Provider) runtimeAvailable(ctx context.Context) error {
+	if p.runtimeErr != nil || p.runtimeProbeGate == nil {
+		return p.runtimeErr
+	}
+	select {
+	case p.runtimeProbeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-p.runtimeProbeGate }()
+	previous := p.runtimeProbeState.Load()
+	if previous != nil && previous.err == nil && !previous.verifiedAt.IsZero() && time.Since(previous.verifiedAt) < runtimeProbeTTL {
+		return nil
+	}
+	verified, err := p.probeMandatoryBinds(ctx)
+	// An inconclusive retry does not disprove a known prior bind/config failure.
+	if !verified && err == nil && previous != nil {
+		err = previous.err
+	}
+	state := &mandatoryProbeState{err: err}
+	if verified {
+		state.verifiedAt = time.Now()
+	}
+	p.runtimeProbeState.Store(state)
+	return err
+}
+
+// Keep a slow or queued probe from consuming the readiness handler's DB/state
+// budget or delaying warm crew reuse. The prior recognized failure remains
+// blocking; an unknown response or probe wait alone is not a runtime verdict.
+func (p *Provider) runtimeAvailableForRequest(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if p.runtimeErr != nil || p.runtimeProbeGate == nil {
+		return p.runtimeErr
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	err := p.runtimeAvailable(probeCtx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil && probeCtx.Err() != nil {
+		if previous := p.runtimeProbeState.Load(); previous != nil && previous.err != nil {
+			return previous.err
+		}
+		p.logger.Warn("mandatory bind probe inconclusive; retaining runtime availability", "error", err)
+		return nil
+	}
+	return err
+}
+
 func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
+	if err := p.runtimeAvailable(ctx); err != nil {
+		p.logger.Error("no crew can start on this container runtime: mandatory mount preflight failed", "runtime", p.detected.Runtime, "socket", p.detected.Socket, "error", err)
+	}
+}
+
+func (p *Provider) probeMandatoryBinds(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	for _, source := range []string{p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath} {
+		info, err := os.Stat(source)
+		if err != nil {
+			return false, fmt.Errorf("mandatory runtime file %s: %w", source, err)
+		}
+		if !runtimeFileModeAllowed(info.Mode(), goruntime.GOOS) {
+			return false, fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
+		}
+	}
 	mounts, err := p.buildMounts("preflight", "", "", "", "")
 	if err != nil {
-		return // no sidecar/entrypoint configured; validateSidecarPaths already said so
+		return false, err
 	}
-	// Keep only the read-only sidecar/entrypoint binds: the crew data dirs are
-	// per-crew and do not exist yet at boot.
 	var binds []mount.Mount
 	for _, m := range mounts {
 		if m.Type == mount.TypeBind {
@@ -224,23 +261,25 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 		}
 	}
 	if len(binds) == 0 {
-		return
+		return true, nil
 	}
-	_, createErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config:     &container.Config{Image: preflightSentinelImage},
-		HostConfig: &container.HostConfig{Mounts: binds},
+	created, createErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{Image: preflightSentinelImage}, HostConfig: &container.HostConfig{Mounts: binds},
 	})
-	// The only outcome that means anything is a bind-source rejection. An
-	// image-not-found error (the expected one) says the mounts validated;
-	// anything else is a daemon problem this probe has no opinion about.
-	if unreachableBindSourcePath(createErr) == "" {
-		return
+	if createErr == nil {
+		_, createErr = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{})
+		if createErr == nil || cerrdefs.IsNotFound(createErr) {
+			return true, nil
+		}
 	}
-	p.logger.Error("no crew can start on this container runtime: a mandatory bind source is unreachable from the daemon (#1706)",
-		"runtime", p.detected.Runtime,
-		"socket", p.detected.Socket,
-		"error", p.explainBindFailure(createErr).Error(),
-	)
+	if cerrdefs.IsNotFound(createErr) && strings.HasSuffix(strings.TrimSpace(createErr.Error()), "No such image: "+preflightSentinelImage) {
+		return true, nil
+	}
+	if unreachableBindSourcePath(createErr) != "" {
+		return false, p.explainBindFailure(createErr)
+	}
+	p.logger.Warn("mandatory bind probe inconclusive; retaining runtime availability", "error", createErr)
+	return false, nil
 }
 
 // A digest-addressed bind source is never replaced. Docker archive reads mount
@@ -331,4 +370,10 @@ func managedLauncherServerUIDError(uid int) error {
 		return fmt.Errorf("managed launch: server UID %d collides with agent/sidecar UID; use a host-native server under a different UID (official server image unsupported for this pilot)", uid)
 	}
 	return nil
+}
+
+// Windows reports regular files as 0444/0666 regardless of executable content.
+// Preserve its Docker Desktop path while checking POSIX execute bits elsewhere.
+func runtimeFileModeAllowed(mode os.FileMode, hostOS string) bool {
+	return mode.IsRegular() && (hostOS == "windows" || mode.Perm()&0111 != 0)
 }
