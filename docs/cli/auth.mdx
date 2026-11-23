@@ -8,6 +8,11 @@ tag: Stable
 
 # crewship auth
 
+## `crewship auth avatar-get`
+
+Download a user's stored avatar with `auth avatar-get <user-id> --output <file>`.
+`--output` names a destination replaced atomically after a successful response.
+
 Self-service account commands. Login, logout, and whoami stay top-level
 (`crewship login` / `logout` / `whoami`); `auth` hosts the newer account
 mutations.
