@@ -20,7 +20,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/nftables v0.3.0
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/gowebpki/jcs v1.0.2
 	github.com/grafana/pyroscope-go v1.5.0
 	github.com/jackc/pgx/v5 v5.13.0
