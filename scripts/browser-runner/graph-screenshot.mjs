@@ -32,14 +32,19 @@ try {
           await page.keyboard.press("Enter")
           keyboardSelected = /(^| )selected( |$)/.test(await edge.getAttribute("class") ?? "")
         }
-        const path = edge.locator(".react-flow__edge-path").first()
+        const path = edge.locator(".react-flow__edge-path, .edge-dash-idle, .edge-dash-active").first()
         await path.scrollIntoViewIfNeeded()
+        await pane.locator(".react-flow__pane").first().click({ position: { x: 8, y: 8 } })
         const clickPoint = await path.evaluate(el => {
-          const p = el.getPointAtLength(el.getTotalLength() / 2)
-          const pos = new DOMPoint(p.x, p.y).matrixTransform(el.getScreenCTM())
-          return { x: pos.x, y: pos.y }
+          const edge = el.closest(".react-flow__edge")
+          for (const fraction of [0.5, 0.48, 0.52, 0.4, 0.6]) {
+            const p = el.getPointAtLength(el.getTotalLength() * fraction)
+            const pos = new DOMPoint(p.x, p.y).matrixTransform(el.getScreenCTM())
+            if (edge?.contains(document.elementFromPoint(pos.x, pos.y))) return { x: pos.x, y: pos.y }
+          }
+          return null
         })
-        await page.mouse.click(clickPoint.x, clickPoint.y)
+        if (clickPoint) await page.mouse.click(clickPoint.x, clickPoint.y)
         const mouseSelected = /(^| )selected( |$)/.test(await edge.getAttribute("class") ?? "")
         const fit = graph.locator(".react-flow__controls-fitview")
         await expect(fit).toBeVisible()
@@ -54,7 +59,7 @@ try {
           return !!bounds && !!node && node.x >= bounds.x - 2 && node.y >= bounds.y - 2 &&
             node.x + node.width <= bounds.x + bounds.width + 2 && node.y + node.height <= bounds.y + bounds.height + 2
         }).toBe(true)
-        console.log("GRAPH " + JSON.stringify({ name, theme, edgeFocusable, keyboardSelected, mouseSelected, fit: true }))
+        console.log("GRAPH " + JSON.stringify({ name, theme, edgeFocusable, keyboardSelected, mouseHit: !!clickPoint, mouseSelected, fit: true }))
         const screenshot = await graph.screenshot({ animations: "disabled", type: "jpeg", quality: 65 })
         await writeFile(join(process.env.BROWSER_EVIDENCE, theme + "-" + index + ".jpg"), screenshot)
       }
