@@ -279,7 +279,7 @@ const (
 //
 // Free when the pilot list is empty: no inspect, no behaviour change.
 func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fencedExec, error) {
-	if len(p.cfg.EgressFenceCrews) == 0 && !p.anyFenced() {
+	if p.pathMap == nil && len(p.cfg.EgressFenceCrews) == 0 && !p.anyFenced() {
 		return fencedExec{}, nil
 	}
 	insp, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
@@ -291,6 +291,11 @@ func (p *Provider) guardFencedExec(ctx context.Context, containerID string) (fen
 		return fencedExec{}, nil
 	}
 	team := provider.CrewConfig{ID: c.Config.Labels[crewCrewIDLabel], Slug: c.Config.Labels[crewCrewLabel]}
+	if p.pathMap != nil && c.Config.Labels[crewKindLabel] == crewRuntimeKind {
+		if err := p.checkMappedRuntimeMounts(ctx, c.Mounts, team); err != nil {
+			return fencedExec{}, err
+		}
+	}
 	// Labels can be missing (pre-label containers) or stale (a renamed
 	// slug); a container this provider has ever fenced stays fenced by id.
 	if crewID, ok := p.fencedCrew.Load(c.ID); ok {

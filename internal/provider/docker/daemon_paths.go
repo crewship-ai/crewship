@@ -11,6 +11,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -230,9 +231,11 @@ func (p *Provider) checkMappedFeatureVolumes(team provider.CrewConfig) error {
 	return nil
 }
 
-// Check the mounts returned by Docker, not a fresh projection of the request.
-// A cached or restarted runtime may have been created under older rules.
-func (p *Provider) checkMappedRuntimeVolumes(ctx context.Context, mounts []container.MountPoint, team provider.CrewConfig) error {
+var errMappedRuntimeMount = errors.New("mapped runtime mount rejected")
+
+// Check the mounts returned by Docker. A cached or restarted runtime may
+// have been created under older rules.
+func (p *Provider) checkMappedRuntimeMounts(ctx context.Context, mounts []container.MountPoint, team provider.CrewConfig) error {
 	if p.pathMap == nil {
 		return nil
 	}
@@ -243,23 +246,42 @@ func (p *Provider) checkMappedRuntimeVolumes(ctx context.Context, mounts []conta
 		"/output":    filepath.Join(p.pathMap.local, team.ID),
 		"/crew":      filepath.Join(p.pathMap.local, "crews", team.ID),
 	}
+	helperBinds := map[string]string{
+		"/usr/local/bin/crewship-sidecar": p.cfg.SidecarBinaryPath,
+		"/usr/local/bin/entrypoint.sh":    p.cfg.EntrypointPath,
+	}
+	if p.cfg.agentCLIArtifact != nil {
+		helperBinds[agentCLIExecutable] = p.cfg.agentCLIArtifact.Path
+	}
 	for _, m := range mounts {
-		if m.Type != mount.TypeVolume {
+		switch m.Type {
+		case mount.TypeBind:
+			if local := helperBinds[m.Destination]; local == "" || m.RW || !p.matchesDaemonPath(m.Source, local) {
+				return fmt.Errorf("%w: unexpected or writable helper bind", errMappedRuntimeMount)
+			}
 			continue
+		case mount.TypeTmpfs:
+			if m.Source != "" || (m.Destination != "/tmp" && m.Destination != "/secrets") {
+				return fmt.Errorf("%w: unexpected temporary filesystem", errMappedRuntimeMount)
+			}
+			continue
+		case mount.TypeVolume:
+		default:
+			return fmt.Errorf("%w: unsupported daemon mount type", errMappedRuntimeMount)
 		}
 		managedPath := bindTargets[m.Destination]
 		switch m.Destination {
 		case "/home/agent":
 			if team.Slug == "" || m.Name != p.homeVolumeName(team.ID, team.Slug) {
-				return errors.New("mapped runtime has an unexpected home volume")
+				return fmt.Errorf("%w: has an unexpected home volume", errMappedRuntimeMount)
 			}
 		case "/opt/crew-tools":
 			if team.Slug == "" || m.Name != p.toolsVolumeName(team.ID, team.Slug) {
-				return errors.New("mapped runtime has an unexpected tools volume")
+				return fmt.Errorf("%w: has an unexpected tools volume", errMappedRuntimeMount)
 			}
 		default:
 			if managedPath == "" {
-				return errors.New("mapped runtime contains an unowned volume")
+				return fmt.Errorf("%w: contains an unowned volume", errMappedRuntimeMount)
 			}
 		}
 		result, err := p.client.VolumeInspect(ctx, m.Name, client.VolumeInspectOptions{})
@@ -268,7 +290,7 @@ func (p *Provider) checkMappedRuntimeVolumes(ctx context.Context, mounts []conta
 		}
 		v := result.Volume
 		if v.Name != m.Name || v.Driver != "local" || !cleanAbsolutePath(v.Mountpoint) || v.Mountpoint != m.Source {
-			return errors.New("mapped runtime volume cannot be authenticated")
+			return fmt.Errorf("%w: volume cannot be authenticated", errMappedRuntimeMount)
 		}
 		if managedPath != "" {
 			device, err := p.daemonPathForLocal(managedPath)
@@ -278,18 +300,61 @@ func (p *Provider) checkMappedRuntimeVolumes(ctx context.Context, mounts []conta
 			if v.Labels[crewCrewIDLabel] != team.ID || v.Labels[crewKindLabel] != noexecBindVolumeKind ||
 				v.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || v.Options["type"] != "none" ||
 				v.Options["o"] != noexecBindMountOpts || v.Options["device"] != device {
-				return errors.New("mapped runtime data volume does not match the crew's storage")
+				return fmt.Errorf("%w: data volume does not match the crew's storage", errMappedRuntimeMount)
 			}
-		} else if len(v.Options) != 0 {
-			return errors.New("mapped runtime home or tools volume is not daemon managed")
+		} else if err := p.checkMappedManagedVolume(v, m.Name, team.ID); err != nil {
+			return err
 		}
-		for _, root := range []string{p.pathMap.local, p.pathMap.daemon} {
-			if pathContains(root, v.Mountpoint) || pathContains(v.Mountpoint, root) {
-				return errors.New("mapped runtime volume overlaps server storage")
-			}
+		if p.mappedVolumeOverlapsStorage(v.Mountpoint) {
+			return fmt.Errorf("%w: volume overlaps server storage", errMappedRuntimeMount)
 		}
 	}
 	return nil
+}
+
+func (p *Provider) mappedVolumeOverlapsStorage(path string) bool {
+	for _, root := range []string{p.pathMap.local, p.pathMap.daemon} {
+		if pathContains(root, path) || pathContains(path, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Provider) checkMappedManagedVolume(v volume.Volume, name, crewID string) error {
+	if v.Name != name || v.Driver != "local" || !cleanAbsolutePath(v.Mountpoint) || len(v.Options) != 0 || p.mappedVolumeOverlapsStorage(v.Mountpoint) {
+		return fmt.Errorf("%w: home or tools volume is not daemon managed", errMappedRuntimeMount)
+	}
+	if owner := v.Labels[resourcelifecycle.InstanceLabel]; owner != "" && owner != p.cfg.InstanceID {
+		return fmt.Errorf("%w: home or tools volume belongs to another installation", errMappedRuntimeMount)
+	}
+	if owner := v.Labels[crewCrewIDLabel]; owner != "" && owner != crewID {
+		return fmt.Errorf("%w: home or tools volume belongs to another crew", errMappedRuntimeMount)
+	}
+	return nil
+}
+
+// Refusal of a provably owned runtime disables Docker's autonomous restart.
+// Transient daemon/inspect errors remain fail-closed without stopping work.
+func (p *Provider) stopMappedRuntimeOnRefusal(ctx context.Context, team provider.CrewConfig, inspected container.InspectResponse, cause error) error {
+	if !errors.Is(cause, errMappedRuntimeMount) || p.cfg.InstanceID == "" || inspected.Config == nil ||
+		inspected.ID == "" || inspected.State == nil || (!inspected.State.Running && !inspected.State.Restarting) {
+		return cause
+	}
+	labels := inspected.Config.Labels
+	if labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID ||
+		labels[crewKindLabel] != crewRuntimeKind || labels[crewCrewIDLabel] != team.ID {
+		return cause
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	p.evictWarm(team.ID)
+	p.fenced.Delete(inspected.ID)
+	policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	_, updateErr := p.client.ContainerUpdate(ctx, inspected.ID, client.ContainerUpdateOptions{RestartPolicy: &policy})
+	timeout := 5
+	_, stopErr := p.client.ContainerStop(ctx, inspected.ID, client.ContainerStopOptions{Timeout: &timeout})
+	return errors.Join(cause, updateErr, stopErr)
 }
 
 func (p *Provider) startMappedCrewContainer(ctx context.Context, id string, team provider.CrewConfig) error {
@@ -298,7 +363,7 @@ func (p *Provider) startMappedCrewContainer(ctx context.Context, id string, team
 		if err != nil {
 			return fmt.Errorf("inspect mapped runtime before start: %w", err)
 		}
-		if err := p.checkMappedRuntimeVolumes(ctx, result.Container.Mounts, team); err != nil {
+		if err := p.checkMappedRuntimeMounts(ctx, result.Container.Mounts, team); err != nil {
 			return err
 		}
 	}

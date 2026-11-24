@@ -531,9 +531,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		if state.Status != container.StateRunning {
 			p.evictWarm(team.ID)
 		} else {
-			if err := p.checkMappedRuntimeVolumes(ctx, inspected.Container.Mounts, team); err != nil {
+			if err := p.checkMappedRuntimeMounts(ctx, inspected.Container.Mounts, team); err != nil {
 				p.evictWarm(team.ID)
-				return "", err
+				return "", p.stopMappedRuntimeOnRefusal(ctx, team, inspected.Container, err)
 			}
 			// Revalidate the fence too: a restart inside the warm TTL
 			// (daemon, restart policy, operator) drops the fence, and the warm
@@ -684,6 +684,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			if err := p.ensureVolume(ctx, name); err != nil {
 				return "", err
 			}
+			if p.pathMap != nil {
+				inspected, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+				if err != nil {
+					return "", fmt.Errorf("inspect mapped ownership volume: %w", err)
+				}
+				if err := p.checkMappedManagedVolume(inspected.Volume, name, team.ID); err != nil {
+					return "", err
+				}
+			}
 			crewVolumes = append(crewVolumes, name)
 		}
 	}
@@ -711,6 +720,12 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 
 	if err := p.startMappedCrewContainer(ctx, resp.ID, team); err != nil {
+		if errors.Is(err, errMappedRuntimeMount) {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			_, removeErr := p.client.ContainerRemove(cleanup, resp.ID, client.ContainerRemoveOptions{RemoveVolumes: false})
+			cancel()
+			err = errors.Join(err, removeErr)
+		}
 		return "", fmt.Errorf("container start: %w", err)
 	}
 
@@ -808,8 +823,8 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
-				if err := p.checkMappedRuntimeVolumes(ctx, inspect.Mounts, team); err != nil {
-					return "", false, err
+				if err := p.checkMappedRuntimeMounts(ctx, inspect.Mounts, team); err != nil {
+					return "", false, p.stopMappedRuntimeOnRefusal(ctx, team, inspect, err)
 				}
 				// The list is an older snapshot. A stop/start between list and
 				// inspect must not reuse a stopped runtime or tear down a live one.

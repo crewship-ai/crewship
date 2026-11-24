@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -566,5 +567,73 @@ func TestMappedFeatureVolumeAdmissionPrecedesContainerStart(t *testing.T) {
 				t.Fatalf("unmapped runtime changed its feature rules: %v", err)
 			}
 		})
+	}
+}
+
+func TestMappedRuntimeMountAdmissionProtectsOwnedRuntime(t *testing.T) {
+	root := mappingTempDir(t)
+	sidecar := filepath.Join(root, "sidecar")
+	if err := os.WriteFile(sidecar, []byte("runtime fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var updates, stops atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/crew/update"):
+			var options container.UpdateConfig
+			if err := json.NewDecoder(r.Body).Decode(&options); err != nil || options.RestartPolicy.Name != container.RestartPolicyDisabled {
+				t.Errorf("restart policy update: %v, %v", options.RestartPolicy, err)
+			}
+			updates.Add(1)
+			_, _ = fmt.Fprint(w, "{}")
+		case strings.HasSuffix(r.URL.Path, "/containers/crew/stop"):
+			if updates.Load() != 1 {
+				t.Error("runtime stopped before disabling restart")
+			}
+			stops.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected Docker request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	p := &Provider{client: cli, pathMap: &daemonPathMap{local: root, daemon: "/daemon/storage"}}
+	p.cfg.InstanceID = "own-installation"
+	p.cfg.SidecarBinaryPath = sidecar
+	team := provider.CrewConfig{ID: "own", Slug: "slug"}
+	mounts := []container.MountPoint{{Type: mount.TypeBind, Source: "/daemon/storage/sidecar", Destination: "/usr/local/bin/crewship-sidecar"}}
+	if err := p.checkMappedRuntimeMounts(t.Context(), mounts, team); err != nil {
+		t.Fatalf("legitimate read-only helper bind rejected: %v", err)
+	}
+	mounts[0].RW = true
+	refusal := p.checkMappedRuntimeMounts(t.Context(), mounts, team)
+	if !errors.Is(refusal, errMappedRuntimeMount) {
+		t.Fatalf("writable helper accepted: %v", refusal)
+	}
+	inspected := container.InspectResponse{
+		ID: "crew", State: &container.State{Running: true},
+		Config: &container.Config{Labels: map[string]string{
+			crewKindLabel: crewRuntimeKind, crewCrewIDLabel: team.ID,
+			resourcelifecycle.InstanceLabel: "other-installation",
+		}},
+	}
+	if err := p.stopMappedRuntimeOnRefusal(t.Context(), team, inspected, refusal); !errors.Is(err, refusal) {
+		t.Fatalf("foreign runtime should still be refused: %v", err)
+	}
+	if updates.Load() != 0 || stops.Load() != 0 {
+		t.Fatal("refusal altered foreign runtime")
+	}
+	inspected.Config.Labels[resourcelifecycle.InstanceLabel] = p.cfg.InstanceID
+	if err := p.stopMappedRuntimeOnRefusal(t.Context(), team, inspected, refusal); !errors.Is(err, refusal) {
+		t.Fatalf("missing original refusal: %v", err)
+	}
+	if updates.Load() != 1 || stops.Load() != 1 {
+		t.Fatalf("owned refusal produced updates=%d stops=%d", updates.Load(), stops.Load())
 	}
 }
