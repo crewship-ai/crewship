@@ -686,7 +686,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
-	resp, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
+	resp, err := dockerutil.CreateCrewContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:           containerCfg,
 		HostConfig:       hostConfig,
 		NetworkingConfig: &dockernetwork.NetworkingConfig{},
@@ -1368,44 +1368,23 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		}
 	}
 	if needsDockerChown {
-		volTargets := make([]string, 0, len(volumes))
-		var mounts []mount.Mount
-		var binds []string
-		if p.relabelCrewBinds() {
-			// Label these roots before chown and before mounting the same
-			// data as noexec/nosuid local volumes in the crew container.
-			// shared and agents are already reachable beneath dirs.crew.
-			for _, dir := range []string{dirs.output, dirs.workspace, dirs.crew} {
-				bind, err := sharedCrewBind(p.cfg.OutputBasePath, dir, "/mnt"+dir, "rw")
-				if err != nil {
-					return err
-				}
-				binds = append(binds, bind)
-			}
-		} else {
-			for _, dir := range dirs.all {
-				mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
-			}
-		}
-		for i, name := range volumes {
-			target := fmt.Sprintf("/mntvol/%d", i)
-			volTargets = append(volTargets, target)
-			mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
+		host, volTargets, err := p.ownershipHelperMounts(dirs, volumes)
+		if err != nil {
+			return err
 		}
 		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets, p.relabelCrewBinds())
-		initResp, initErr := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
+		initResp, initErr := dockerutil.CreateCrewContainer(ctx, p.client, client.ContainerCreateOptions{
 			Config: &container.Config{
 				Image:      runtimeImage,
 				User:       "0:0",
 				Entrypoint: []string{"sh", "-c", chownCmd},
 			},
-			HostConfig: &container.HostConfig{Mounts: mounts, Binds: binds},
+			HostConfig: host,
 		})
 		if initErr == nil {
 			_, startErr := p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
 			if startErr != nil && p.relabelCrewBinds() {
-				_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
-				return fmt.Errorf("start SELinux crew bind preparation: %w", startErr)
+				return errors.Join(fmt.Errorf("start SELinux crew bind preparation: %w", startErr), p.removeOwnershipHelper(ctx, initResp.ID, true))
 			}
 			// ContainerWait returns two channels; drain one of them (or
 			// cancel) so we do not leak a goroutine inside the docker client
@@ -1428,14 +1407,20 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 				p.logger.Debug("init container wait timed out", "error", waitCtx.Err())
 			}
 			waitCancel()
-			_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
-			if initErr != nil && p.relabelCrewBinds() {
-				return fmt.Errorf("finish SELinux crew bind preparation: %w", initErr)
+			if p.detected.Runtime == "podman" {
+				if err := p.removeOwnershipHelper(ctx, initResp.ID, initErr != nil || startErr != nil); err != nil {
+					return errors.Join(initErr, err)
+				}
+			} else {
+				_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
+			}
+			if initErr != nil && p.detected.Runtime == "podman" {
+				return fmt.Errorf("finish Podman crew bind preparation: %w", initErr)
 			}
 			p.logger.Debug("init container fixed bind-mount ownership")
 		} else {
-			if p.relabelCrewBinds() {
-				return fmt.Errorf("prepare SELinux crew binds: %w", initErr)
+			if p.detected.Runtime == "podman" {
+				return fmt.Errorf("prepare Podman crew binds: %w", initErr)
 			}
 			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
 			for _, dir := range dirs.all {
@@ -1444,6 +1429,44 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		}
 	}
 	return nil
+}
+
+func (p *Provider) removeOwnershipHelper(ctx context.Context, id string, force bool) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err := p.client.ContainerRemove(cleanup, id, client.ContainerRemoveOptions{Force: force})
+	if err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove crew ownership helper %s: %w", id, err)
+	}
+	return nil
+}
+
+func (p *Provider) ownershipHelperMounts(dirs crewDirs, volumes []string) (*container.HostConfig, []string, error) {
+	volTargets := make([]string, 0, len(volumes))
+	var mounts []mount.Mount
+	var binds []string
+	if p.relabelCrewBinds() {
+		// Label these roots before chown and before mounting the same
+		// data as noexec/nosuid local volumes in the crew container.
+		// shared and agents are already reachable beneath dirs.crew.
+		for _, dir := range []string{dirs.output, dirs.workspace, dirs.crew} {
+			bind, err := sharedCrewBind(p.cfg.OutputBasePath, dir, "/mnt"+dir, "rw")
+			if err != nil {
+				return nil, nil, err
+			}
+			binds = append(binds, bind)
+		}
+	} else {
+		for _, dir := range dirs.all {
+			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
+		}
+	}
+	for i, name := range volumes {
+		target := fmt.Sprintf("/mntvol/%d", i)
+		volTargets = append(volTargets, target)
+		mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
+	}
+	return &container.HostConfig{Mounts: mounts, Binds: binds}, volTargets, nil
 }
 
 // buildCrewContainerConfig assembles the container env (merging and

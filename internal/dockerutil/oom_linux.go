@@ -63,31 +63,7 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, cli any, endpoint string) (i
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	sock := conn.(*net.UnixConn)
-	raw, err := sock.SyscallConn()
-	if err != nil {
-		return 0, err
-	}
-	var optErr error
-	if err = raw.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil {
-		return 0, err
-	}
-	if optErr != nil {
-		return 0, optErr
-	}
-	if _, err = io.WriteString(sock, "GET /info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-		return 0, err
-	}
-	var first [1]byte
-	oob := make([]byte, unix.CmsgSpace(unix.SizeofUcred))
-	n, control, _, _, err := sock.ReadMsgUnix(first[:], oob)
-	if err != nil {
-		return 0, err
-	}
-	if n != 1 {
-		return 0, io.ErrUnexpectedEOF
-	}
-	reader := bufio.NewReader(io.LimitReader(io.MultiReader(bytes.NewReader(first[:]), sock), 1<<20))
-	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	response, control, err := unixHTTPPeer(sock, http.MethodGet, "/info")
 	if err != nil {
 		return 0, err
 	}
@@ -108,29 +84,68 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, cli any, endpoint string) (i
 	if !slices.Contains(info.SecurityOptions, "name=rootless") {
 		return 0, nil
 	}
-	messages, err := unix.ParseSocketControlMessage(oob[:control])
+	cred, err := peerCredentials(control)
 	if err != nil {
 		return 0, err
 	}
-	for _, msg := range messages {
-		if msg.Header.Level != unix.SOL_SOCKET || msg.Header.Type != unix.SCM_CREDENTIALS {
-			continue
-		}
-		cred, err := unix.ParseUnixCredentials(&msg)
-		if err != nil {
-			return 0, err
-		}
-		if cred.Uid == 0 {
-			return 0, nil
-		}
-		if cred.Pid <= 0 {
-			return 0, fmt.Errorf("Podman service PID unavailable")
-		}
-		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", cred.Pid))
-		if err != nil {
-			return 0, err
-		}
-		return strconv.Atoi(strings.TrimSpace(string(data)))
+	if cred.Uid == 0 {
+		return 0, nil
 	}
-	return 0, fmt.Errorf("Podman service credentials unavailable")
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", cred.Pid))
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+func unixHTTPPeer(sock *net.UnixConn, method, path string) (*http.Response, []byte, error) {
+	raw, err := sock.SyscallConn()
+	if err != nil {
+		return nil, nil, err
+	}
+	var optErr error
+	if err = raw.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil {
+		return nil, nil, err
+	}
+	if optErr != nil {
+		return nil, nil, optErr
+	}
+	if _, err = io.WriteString(sock, method+" "+path+" HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		return nil, nil, err
+	}
+	var first [1]byte
+	oob := make([]byte, unix.CmsgSpace(unix.SizeofUcred))
+	n, control, _, _, err := sock.ReadMsgUnix(first[:], oob)
+	if err != nil {
+		return nil, nil, err
+	}
+	if n != 1 {
+		return nil, nil, io.ErrUnexpectedEOF
+	}
+	reader := bufio.NewReader(io.LimitReader(io.MultiReader(bytes.NewReader(first[:]), sock), 1<<20))
+	response, err := http.ReadResponse(reader, &http.Request{Method: method})
+	if err != nil {
+		return nil, nil, err
+	}
+	return response, oob[:control], nil
+}
+
+func peerCredentials(control []byte) (*unix.Ucred, error) {
+	messages, err := unix.ParseSocketControlMessage(control)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range messages {
+		if msg.Header.Level == unix.SOL_SOCKET && msg.Header.Type == unix.SCM_CREDENTIALS {
+			cred, err := unix.ParseUnixCredentials(&msg)
+			if err != nil {
+				return nil, err
+			}
+			if cred.Pid <= 0 {
+				return nil, fmt.Errorf("Podman service PID unavailable")
+			}
+			return cred, nil
+		}
+	}
+	return nil, fmt.Errorf("Podman service credentials unavailable")
 }

@@ -3,6 +3,8 @@ package dockerutil
 import (
 	"context"
 	"fmt"
+	"net"
+	"slices"
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
@@ -11,6 +13,33 @@ import (
 
 type containerCreator interface {
 	ContainerCreate(context.Context, client.ContainerCreateOptions) (client.ContainerCreateResult, error)
+}
+
+// CreateCrewContainer uses an authenticated connection for Crewship's shared
+// SELinux binds. The source checks and the create request use the same socket,
+// including when the HTTP transport redials.
+func CreateCrewContainer(ctx context.Context, cli *client.Client, opts client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
+	if opts.HostConfig == nil || !slices.ContainsFunc(opts.HostConfig.Binds, sharedCrewRelabel) {
+		return CreateContainer(ctx, cli, opts)
+	}
+	host := cli.DaemonHost()
+	socket, ok := strings.CutPrefix(host, "unix://")
+	if !ok {
+		return client.ContainerCreateResult{}, fmt.Errorf("SELinux crew bind relabel requires a verified local Podman service")
+	}
+	bound, err := client.New(client.WithHost(host), client.WithAPIVersion(cli.ClientVersion()),
+		client.WithDialContext(func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialPodmanBinds(ctx, socket, opts.HostConfig.Binds)
+		}))
+	if err != nil {
+		return client.ContainerCreateResult{}, err
+	}
+	defer bound.Close()
+	return CreateContainer(ctx, bound, opts)
+}
+
+func sharedCrewRelabel(bind string) bool {
+	return strings.HasSuffix(bind, ":ro,z") || strings.HasSuffix(bind, ":rw,z")
 }
 
 // CreateContainer carries a local rootless Podman service's OOM adjustment into

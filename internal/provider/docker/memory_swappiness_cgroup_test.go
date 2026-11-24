@@ -134,7 +134,7 @@ func TestDetectCgroupVersion(t *testing.T) {
 				w.WriteHeader(http.StatusNotFound)
 			})
 			defer cleanup()
-			if got, enabled := detectMountEnvironment(context.Background(), p.client); got != tc.want || enabled != tc.selinux {
+			if got, enabled, err := detectMountEnvironment(context.Background(), p.client, "docker"); err != nil || got != tc.want || enabled != tc.selinux {
 				t.Errorf("detectMountEnvironment = (%q, %t), want (%q, %t)", got, enabled, tc.want, tc.selinux)
 			}
 		})
@@ -146,8 +146,8 @@ func TestDetectCgroupVersion(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		})
 		defer cleanup()
-		if got, enabled := detectMountEnvironment(context.Background(), p.client); got != "" || enabled {
-			t.Errorf("detectCgroupVersion on a failing daemon = %q, want \"\"", got)
+		if _, _, err := detectMountEnvironment(context.Background(), p.client, "podman"); err == nil {
+			t.Fatal("failed Podman info probe accepted as SELinux disabled")
 		}
 	})
 }

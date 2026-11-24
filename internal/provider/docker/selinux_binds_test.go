@@ -3,9 +3,11 @@ package docker
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/moby/moby/api/types/mount"
@@ -66,10 +68,13 @@ func TestPodmanSELinuxDataPreparation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.fixBindMountOwnership(context.Background(), "image", dirs, []string{"home"}); err != nil {
+	if err := p.fixBindMountOwnership(context.Background(), "image", dirs, []string{"home"}); err == nil || len(f.creates) != 0 {
+		t.Fatal("sent a relabel request to a TCP daemon")
+	}
+	host, _, err := p.ownershipHelperMounts(dirs, []string{"home"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	host := f.creates[0].HostConfig
 	if len(host.Binds) != 3 || len(host.Mounts) != 1 || host.Mounts[0].Type != mount.TypeVolume {
 		t.Fatalf("unexpected preparation mounts: %v %v", host.Binds, host.Mounts)
 	}
@@ -81,6 +86,43 @@ func TestPodmanSELinuxDataPreparation(t *testing.T) {
 		if !slices.Contains(host.Binds, src+":/mnt"+dir+":rw,z") {
 			t.Fatalf("missing shared label for %s", dir)
 		}
+	}
+}
+
+func TestPodmanSELinuxOwnershipHelperCleanupAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	removed := make(chan bool, 1)
+	p, cleanup := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"Id":"owned-helper"}`))
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/wait"):
+			cancel()
+			<-r.Context().Done()
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/owned-helper"):
+			removed <- r.URL.Query().Get("force") == "1"
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer cleanup()
+	p.detected.Runtime = "podman"
+	if err := p.fixBindMountOwnership(ctx, "image", crewDirs{}, []string{"home"}); err == nil {
+		t.Fatal("canceled Podman helper reported success")
+	}
+	select {
+	case force := <-removed:
+		if !force {
+			t.Fatal("running helper removal was not forced")
+		}
+	default:
+		t.Fatal("canceled wait left a running helper")
 	}
 }
 
