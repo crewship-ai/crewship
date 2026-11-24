@@ -166,6 +166,15 @@ func (p *ImageReferences) validate(result client.ContainerInspectResult, id stri
 	return nil
 }
 
+// ReferenceSweepError reports candidates deferred after inventory completed.
+type ReferenceSweepError struct {
+	Deferred int
+	Cause    error
+}
+
+func (e *ReferenceSweepError) Error() string { return e.Cause.Error() }
+func (e *ReferenceSweepError) Unwrap() error { return e.Cause }
+
 // Reconcile removes only proven own references no longer selected or acquired.
 // Inventory is outside the lifecycle gate; each removal rereads desired refs
 // and reserves the artifact's current IDs/aliases under a short final gate.
@@ -190,62 +199,77 @@ func (p *ImageReferences) Reconcile(ctx context.Context, gate *resourcelifecycle
 	if err != nil {
 		return err
 	}
-	for _, candidate := range listed.Items {
-		if err := p.releaseUnused(ctx, gate, candidate.ID, desired); err != nil {
-			return err
+	var partial ReferenceSweepError
+	for i, candidate := range listed.Items {
+		if err := ctx.Err(); err != nil {
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
 		}
+		globalFailure, err := p.releaseUnused(ctx, gate, candidate.ID, desired)
+		if err == nil {
+			continue
+		}
+		if globalFailure {
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
+		}
+		partial.Deferred++
+		if partial.Cause == nil {
+			partial.Cause = fmt.Errorf("reference %q: %w", candidate.ID, err)
+		}
+	}
+	if partial.Deferred != 0 {
+		return &partial
 	}
 	return nil
 }
 
-func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) error {
+func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) (globalFailure bool, err error) {
 	release, ok := gate.TryCollect()
 	if !ok {
-		return nil
+		return true, fmt.Errorf("image collection gate busy")
 	}
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if !p.mu.TryLock() {
-		return nil
+		return true, fmt.Errorf("image reference protection busy")
 	}
 	defer p.mu.Unlock()
 	c, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
-		return err
+		return false, err
 	}
 	id := c.Container.Image
 	if err := p.validate(c, id); err != nil {
-		return err
+		return false, err
 	}
 	img, err := p.client.ImageInspect(ctx, id)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if img.Config == nil {
-		return fmt.Errorf("image reference has incomplete image configuration")
+		return false, fmt.Errorf("image reference has incomplete image configuration")
 	}
 	aliases := append([]string{id, devcontainer.ImageAcquisitionRef(img.Config.Labels)}, img.RepoTags...)
 	releaseImage, idle := gate.TryCollectImages(aliases...)
 	if !idle {
-		return nil
+		return false, nil
 	}
 	defer releaseImage()
 	refs, err := desired(ctx)
 	if err != nil {
-		return err
+		return true, err
 	}
 	for _, ref := range refs {
 		for _, alias := range aliases {
 			if ref.Ref != "" && ref.Ref == alias {
-				return nil
+				return false, nil
 			}
 		}
 	}
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false}); err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return false, nil
 }
 
 // SetImageReferenceAcquirer is called once while the server wires routes,
