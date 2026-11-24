@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
 import { readFileSync } from "node:fs"
 const fixture = JSON.parse(readFileSync(new URL("../internal/api/testdata/chat-entity-refs/page.json", import.meta.url), "utf8"))
 
@@ -653,7 +653,7 @@ const RESTRICTED_CATALOG = [
   { id: "page-launch", slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
   { id: "page-silent", slug: "silent", name: "Silent draft", actions: [] },
 ]
-test("restricted member's Artifacts shows exactly their old Pages catalog, and old links land on it", async ({ page }) => {
+async function installRestrictedArtifactCatalog(page: Page) {
   const forbidden: string[] = []
   const seen = new Set<string>()
   await page.route("**/api/**", async (route) => {
@@ -672,7 +672,11 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
     else if (path === "/api/v1/workspaces/ws-a/restricted-pages") body = RESTRICTED_CATALOG
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
   })
-  const main = page.locator("main, [data-slot=content-column]").first()
+  return { forbidden, seen, main: page.locator("main, [data-slot=content-column]").first() }
+}
+
+test("restricted member's Artifacts shows their old Pages catalog and authorized links", async ({ page }) => {
+  const { forbidden, seen, main } = await installRestrictedArtifactCatalog(page)
 
   // The catalog home: the same artifacts, each opening the same actions.
   await page.goto("/artifacts?workspace_id=ws-a")
@@ -715,6 +719,14 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
     await expect(page.getByText("This artifact isn’t part of your access")).toHaveCount(0)
     await expect(page.getByText("Launch plan")).toHaveCount(0)
   }
+
+  await page.waitForTimeout(500)
+  expect([...seen].sort()).toEqual(RESTRICTED_BEFORE.requests)
+  expect(forbidden).toEqual([])
+})
+
+test("restricted member's Artifacts hides ungranted items and preserves the sidebar link", async ({ page }) => {
+  const { forbidden, seen, main } = await installRestrictedArtifactCatalog(page)
 
   // Anything not granted: the gate, never the address's or another artifact's name.
   for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a", "/pages/craft/editor?page_id=page-secret&workspace_id=ws-a"]) {
