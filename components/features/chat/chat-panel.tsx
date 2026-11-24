@@ -1549,24 +1549,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     </Conversation>
   )
 
-  const compactScrollerRef = useRef<HTMLDivElement>(null)
-  const compactComposerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const scroller = compactScrollerRef.current
-    const composer = compactComposerRef.current
-    if (!scroller || !composer || !canChat || typeof ResizeObserver === "undefined") return
-    // The textarea grows as its draft wraps. Preserve the end of the short
-    // pane while it is being edited, and leave transcript scrolling alone.
-    const followEditor = () => {
-      if (!composer.contains(document.activeElement)) return
-      if (getComputedStyle(scroller).flexDirection === "column-reverse") scroller.scrollTop = 0
-    }
-    const resize = new ResizeObserver(followEditor)
-    resize.observe(composer)
-    resize.observe(scroller)
-    return () => resize.disconnect()
-  }, [mobilePanel, viewerOpen, canChat])
-
   const conversationUnavailable = refusedScopes.has(chatReadScope)
   const unavailableNotice = conversationUnavailable ? (
     <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
@@ -1619,7 +1601,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   if (mobilePanel === "chat") {
     return withProjects(
       <div className="relative flex flex-col h-full">
-        <div ref={compactScrollerRef} data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none] [@media(max-height:640px)]:flex-col-reverse" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
+        <div data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none] [@media(max-height:640px)]:flex-col-reverse" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         <div className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-min">
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
           <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
@@ -1649,7 +1631,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             </span>
           </div>
           {artifactLibrary}
-          <div className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-20">
+          {/* Keep the history itself scrollable even when the short pane
+              expands to fit the composer and surrounding controls. */}
+          <div data-slot="chat-transcript" className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-20 [@media(max-height:640px)]:basis-0 [@media(max-height:640px)]:[contain:size]">
             {conversationEl}
           </div>
           <div className="shrink-0 empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
@@ -1668,7 +1652,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
               />
             </div>
           )}
-        <div ref={compactComposerRef} className="shrink-0 bg-background">
+        <div className="shrink-0 bg-background">
           <div className="empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
             {unavailableNotice}
             {prepareProjectInputs}

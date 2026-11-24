@@ -115,12 +115,14 @@ test.describe("short chat viewport", () => {
     await expect(page.getByText("Docker is not running.", { exact: true })).toBeVisible()
     const editor = page.locator("textarea[data-slot=input-group-control]")
     await expect(editor).toBeVisible()
+    await page.setViewportSize({ width: 667, height: 575 })
     await editor.fill("@")
     const matches = page.getByRole("listbox", { name: "Mention suggestions" })
     await expect(matches.getByRole("option")).toHaveCount(6)
     for (let i = 0; i < 5; i++) await editor.press("ArrowDown")
     await expect(matches.getByRole("option", { selected: true })).toBeInViewport({ ratio: 0.5 })
     await editor.press("Escape")
+    await page.setViewportSize({ width: 667, height: 375 })
     await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
     const put = page.waitForRequest(request => request.method() === "POST" && request.url().includes("/attachments?"))
     const chooser = page.waitForEvent("filechooser")
@@ -140,11 +142,34 @@ test.describe("short chat viewport", () => {
     await expect(failed).toHaveCount(0)
     await editor.fill("")
     const newest = page.getByText("Newest reply in the short chat", { exact: true })
-    await newest.scrollIntoViewIfNeeded()
-    await expect.poll(() => newest.evaluate(element => {
-      const rect = element.getBoundingClientRect()
-      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-    })).toBe(true)
+    await expect(newest).toBeInViewport({ ratio: 0.5 })
+    await expect(editor).toBeInViewport({ ratio: 0.5 })
+
+    const transcript = page.locator('[data-slot="chat-transcript"]').getByRole("log")
+    const history = transcript.locator(":scope > div").first()
+    await expect.poll(() => history.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(80)
+    const pane = page.locator('[data-slot="compact-chat-scroll"]')
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeCloseTo(0, 0)
+    await history.evaluate(element => { element.scrollTop = 60 })
+    const jumpToLatest = transcript.getByRole("button", { name: "Scroll to bottom" })
+    await expect(jumpToLatest).toBeVisible()
+    await expect(newest).not.toBeInViewport()
+
+    // Model the last turn gaining another block while the user reads upthread.
+    await history.evaluate(element => {
+      const growth = document.createElement("p")
+      growth.dataset.testStreamGrowth = ""
+      growth.style.height = "48px"
+      growth.textContent = "Another block of the latest answer"
+      element.firstElementChild!.appendChild(growth)
+    })
+    await page.setViewportSize({ width: 667, height: 390 })
+    await expect(jumpToLatest).toBeVisible()
+    await expect.poll(() => history.evaluate(element => element.scrollTop)).toBeCloseTo(60, 0)
+    await history.locator("[data-test-stream-growth]").evaluate(element => element.remove())
+    await jumpToLatest.click()
+    await expect(newest).toBeInViewport({ ratio: 0.5 })
+    await expect(editor).toBeInViewport({ ratio: 0.5 })
   })
 
 })

@@ -156,7 +156,7 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
           <AtSign className="h-3 w-3" />
           <span>{members.some((m) => m.kind === "human") ? "Mention a participant" : "Mention an agent"}</span>
         </div>
-        <ul id={listId} role="listbox" aria-label="Mention suggestions" className="max-h-64 overflow-y-auto py-1 [@media(max-height:520px)]:max-h-[min(16rem,18dvh)]">
+        <ul id={listId} role="listbox" aria-label="Mention suggestions" className="max-h-64 overflow-y-auto py-1 [@media(max-height:640px)]:max-h-[min(16rem,18dvh)]">
           {matches.map((m, i) => (
             <li key={m.id} role="presentation">
               <button
@@ -166,7 +166,7 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
                 aria-selected={i === selected}
                 tabIndex={-1}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setHighlighted(i)}
+                onMouseMove={() => setHighlighted(i)}
                 onClick={() => {
                   onPick(m, trigger.start)
                   setTrigger(null)
