@@ -3,6 +3,8 @@ package dockerutil
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -38,7 +40,7 @@ func TestPodmanSELinuxRejectsForwardedSocket(t *testing.T) {
 		Config:     &container.Config{Image: "test"},
 		HostConfig: &container.HostConfig{Binds: []string{"/tmp:/mnt:rw,z"}, OomScoreAdj: 1},
 	})
-	if err == nil || !strings.Contains(err.Error(), "installed Podman executable") || client.IsErrConnectionFailed(err) {
+	if err == nil || !strings.Contains(err.Error(), "verify Podman SELinux binds") || client.IsErrConnectionFailed(err) {
 		t.Fatalf("connected peer failed validation, got %v", err)
 	}
 }
@@ -94,5 +96,30 @@ func TestPodmanSELinuxRefusesReplaceableSource(t *testing.T) {
 	}
 	if err := verifyRelabelSources("/", []string{source + ":/mnt:ro,z"}); err == nil {
 		t.Fatal("accepted a source that another user can replace")
+	}
+}
+
+func TestPodmanSELinuxMountDiagnostics(t *testing.T) {
+	proc := t.TempDir()
+	if err := os.Mkdir(filepath.Join(proc, "ns"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("mnt:[1234]", filepath.Join(proc, "ns/mnt")); err != nil {
+		t.Fatal(err)
+	}
+	const info = "1 1 0:1 / / rw - btrfs private-source private-options\n" +
+		"2 1 0:2 /data /var/lib/crew\\040data rw - btrfs private-source private-options\n" +
+		"3 1 0:3 / /var/lib/crew rw - btrfs private-source private-options\n"
+	if err := os.WriteFile(filepath.Join(proc, "mountinfo"), []byte(info), 0600); err != nil {
+		t.Fatal(err)
+	}
+	view := relabelMountView(proc, 42, []string{"/var/lib/crew data/output:/output:rw,z"})
+	fields := map[string]slog.Value{}
+	for _, attr := range view.Group() {
+		fields[attr.Key] = attr.Value
+	}
+	if fields["pid"].Int64() != 42 || fields["mnt_ns"].String() != "mnt:[1234]" ||
+		fmt.Sprint(fields["mountinfo"].Any()) != `[1 1 0:1 / / 2 1 0:2 /data /var/lib/crew\040data]` {
+		t.Fatalf("unexpected namespace diagnostics: %v", fields)
 	}
 }

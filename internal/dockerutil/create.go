@@ -2,6 +2,7 @@ package dockerutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -35,8 +36,20 @@ func CreateCrewContainer(ctx context.Context, cli *client.Client, opts client.Co
 		return client.ContainerCreateResult{}, err
 	}
 	defer bound.Close()
-	return CreateContainer(ctx, bound, opts)
+	created, err := CreateContainer(ctx, bound, opts)
+	var refused *relabelRefusal
+	if errors.As(err, &refused) {
+		return created, fmt.Errorf("verify Podman SELinux binds: %w", refused.cause)
+	}
+	return created, err
 }
+
+// Keep filesystem errors opaque to the Moby dial transport, which treats
+// ENOENT and EACCES as failures to reach the socket. Restore the cause at
+// the CreateCrewContainer boundary.
+type relabelRefusal struct{ cause error }
+
+func (e *relabelRefusal) Error() string { return e.cause.Error() }
 
 func sharedCrewRelabel(bind string) bool {
 	return strings.HasSuffix(bind, ":ro,z") || strings.HasSuffix(bind, ":rw,z")

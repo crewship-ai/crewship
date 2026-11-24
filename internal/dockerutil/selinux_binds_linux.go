@@ -1,10 +1,12 @@
 package dockerutil
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -42,35 +44,8 @@ func dialPodmanBinds(ctx context.Context, socket string, binds []string) (net.Co
 	if resp.StatusCode != http.StatusOK || resp.Close || resp.Header.Get("Libpod-Api-Version") == "" {
 		return nil, errors.New("SELinux relabel requires a persistent local Podman connection")
 	}
-	cred, err := peerCredentials(control)
-	if err != nil {
-		return nil, err
-	}
-	// Hold the process directory across all checks, including PID reuse.
-	proc, err := os.Open(fmt.Sprintf("/proc/%d", cred.Pid))
-	if err != nil {
-		return nil, err
-	}
-	defer proc.Close()
-	dir := fmt.Sprintf("/proc/self/fd/%d", proc.Fd())
-	installed, err := os.Stat("/usr/bin/podman")
-	if err != nil {
-		return nil, fmt.Errorf("identify installed Podman for SELinux relabel: %w", err)
-	}
-	exe, err := os.Stat(filepath.Join(dir, "exe"))
-	if err != nil || !os.SameFile(exe, installed) {
-		return nil, errors.New("SELinux relabel peer is not the installed Podman executable")
-	}
-	args, err := os.ReadFile(filepath.Join(dir, "cmdline"))
-	if err != nil {
-		return nil, err
-	}
-	// A podman system dial-stdio process can itself be a forwarder.
-	if !localPodmanServiceCommand(args) {
-		return nil, errors.New("SELinux relabel peer is not a local Podman system service")
-	}
-	if err := verifyRelabelSources(filepath.Join(dir, "root"), binds); err != nil {
-		return nil, err
+	if err := verifyPodmanBindPeer(control, binds); err != nil {
+		return nil, &relabelRefusal{err}
 	}
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return nil, err
@@ -78,6 +53,84 @@ func dialPodmanBinds(ctx context.Context, socket string, binds []string) (net.Co
 	success = true
 	return conn, nil
 }
+
+func verifyPodmanBindPeer(control []byte, binds []string) error {
+	cred, err := peerCredentials(control)
+	if err != nil {
+		return err
+	}
+	// Hold the process directory across all checks, including PID reuse.
+	proc, err := os.Open(fmt.Sprintf("/proc/%d", cred.Pid))
+	if err != nil {
+		return err
+	}
+	defer proc.Close()
+	dir := fmt.Sprintf("/proc/self/fd/%d", proc.Fd())
+	installed, err := os.Stat("/usr/bin/podman")
+	if err != nil {
+		return fmt.Errorf("identify installed Podman for SELinux relabel: %w", err)
+	}
+	exe, err := os.Stat(filepath.Join(dir, "exe"))
+	if err != nil || !os.SameFile(exe, installed) {
+		return errors.New("SELinux relabel peer is not the installed Podman executable")
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "cmdline"))
+	if err != nil {
+		return err
+	}
+	// A podman system dial-stdio process can itself be a forwarder.
+	if !localPodmanServiceCommand(args) {
+		return errors.New("SELinux relabel peer is not a local Podman system service")
+	}
+	if err := verifyRelabelSources(filepath.Join(dir, "root"), binds); err != nil {
+		slog.Warn("Podman SELinux bind validation failed", "error", err,
+			"crewship", relabelMountView("/proc/self", os.Getpid(), binds),
+			"podman", relabelMountView(dir, int(cred.Pid), binds))
+		return err
+	}
+	return nil
+}
+
+// Log only mount IDs, device, root and mount point for mounts covering a
+// relabel source. Filesystem options and unrelated host mounts stay private.
+func relabelMountView(procDir string, pid int, binds []string) slog.Value {
+	ns, err := os.Readlink(filepath.Join(procDir, "ns/mnt"))
+	if err != nil {
+		ns = err.Error()
+	}
+	var mounts []string
+	f, err := os.Open(filepath.Join(procDir, "mountinfo"))
+	if err == nil {
+		defer f.Close()
+		lines := bufio.NewScanner(f)
+		for lines.Scan() {
+			fields := strings.Fields(lines.Text())
+			if len(fields) < 6 {
+				continue
+			}
+			for _, bind := range binds {
+				if !sharedCrewRelabel(bind) {
+					continue
+				}
+				src, _, _ := strings.Cut(bind, ":")
+				// mountinfo escapes spaces, tabs, newlines and backslashes.
+				point := mountInfoUnescape.Replace(fields[4])
+				if src == point || strings.HasPrefix(src, strings.TrimSuffix(point, "/")+"/") {
+					mounts = append(mounts, strings.Join(fields[:5], " "))
+					break
+				}
+			}
+		}
+		err = lines.Err()
+	}
+	attrs := []slog.Attr{slog.Int("pid", pid), slog.String("mnt_ns", ns), slog.Any("mountinfo", mounts)}
+	if err != nil {
+		attrs = append(attrs, slog.String("mountinfo_error", err.Error()))
+	}
+	return slog.GroupValue(attrs...)
+}
+
+var mountInfoUnescape = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 
 func localPodmanServiceCommand(cmdline []byte) bool {
 	args := strings.Split(string(bytes.TrimSuffix(cmdline, []byte{0})), "\x00")
