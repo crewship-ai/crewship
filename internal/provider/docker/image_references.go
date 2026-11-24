@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -204,11 +205,12 @@ func (p *ImageReferences) Reconcile(ctx context.Context, gate *resourcelifecycle
 		if err := ctx.Err(); err != nil {
 			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
 		}
-		globalFailure, err := p.releaseUnused(ctx, gate, candidate.ID, desired)
+		err := p.releaseUnused(ctx, gate, candidate.ID, desired)
 		if err == nil {
 			continue
 		}
-		if globalFailure {
+		var global *referenceInventoryError
+		if errors.As(err, &global) {
 			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
 		}
 		partial.Deferred++
@@ -222,54 +224,59 @@ func (p *ImageReferences) Reconcile(ctx context.Context, gate *resourcelifecycle
 	return nil
 }
 
-func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) (globalFailure bool, err error) {
+// A failure obtaining shared evidence invalidates the remaining pass.
+type referenceInventoryError struct{ error }
+
+func (e *referenceInventoryError) Unwrap() error { return e.error }
+
+func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) error {
 	release, ok := gate.TryCollect()
 	if !ok {
-		return true, fmt.Errorf("image collection gate busy")
+		return &referenceInventoryError{errors.New("image collection gate busy")}
 	}
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if !p.mu.TryLock() {
-		return true, fmt.Errorf("image reference protection busy")
+		return &referenceInventoryError{errors.New("image reference protection busy")}
 	}
 	defer p.mu.Unlock()
 	c, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
-		return false, err
+		return err
 	}
 	id := c.Container.Image
 	if err := p.validate(c, id); err != nil {
-		return false, err
+		return err
 	}
 	img, err := p.client.ImageInspect(ctx, id)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if img.Config == nil {
-		return false, fmt.Errorf("image reference has incomplete image configuration")
+		return fmt.Errorf("image reference has incomplete image configuration")
 	}
 	aliases := append([]string{id, devcontainer.ImageAcquisitionRef(img.Config.Labels)}, img.RepoTags...)
 	releaseImage, idle := gate.TryCollectImages(aliases...)
 	if !idle {
-		return false, nil
+		return nil
 	}
 	defer releaseImage()
 	refs, err := desired(ctx)
 	if err != nil {
-		return true, err
+		return &referenceInventoryError{err}
 	}
 	for _, ref := range refs {
 		for _, alias := range aliases {
 			if ref.Ref != "" && ref.Ref == alias {
-				return false, nil
+				return nil
 			}
 		}
 	}
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false}); err != nil {
-		return false, err
+		return err
 	}
-	return false, nil
+	return nil
 }
 
 // SetImageReferenceAcquirer is called once while the server wires routes,

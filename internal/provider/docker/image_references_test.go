@@ -201,6 +201,70 @@ func TestImageReferencesRejectMutableCrossInstallationBuildInput(t *testing.T) {
 	}
 }
 
+func TestImageReferencesReconcileDeferScope(t *testing.T) {
+	for _, mode := range []string{"missing image", "running container", "active build", "incomplete inventory", "selection recheck fails"} {
+		t.Run(mode, func(t *testing.T) {
+			f, first := referenceFixture(t)
+			second := "sha256:" + strings.Repeat("2", 64)
+			img := f.images[first]
+			img.ID = second
+			f.images[second] = img
+			p := NewImageReferences(f, referenceBorrower)
+			if _, err := p.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: first, Required: true}, {Ref: second, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			firstContainer := strings.Repeat("c", 64)
+			secondContainer := strings.Repeat("d", 64)
+			gate := &resourcelifecycle.ImageUse{}
+			reads := 0
+			switch mode {
+			case "missing image":
+				delete(f.images, first)
+			case "running container":
+				f.containers[firstContainer].Container.State.Running = true
+				f.containers[firstContainer].Container.State.Status = "running"
+			case "active build":
+				release, err := gate.UseImages(t.Context(), first)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "incomplete inventory":
+				f.listErr = errors.New("incomplete list")
+			}
+			err := p.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
+				reads++
+				if mode == "selection recheck fails" && reads == 2 {
+					return nil, errors.New("incomplete selection")
+				}
+				return nil, nil
+			})
+			var partial *ReferenceSweepError
+			switch mode {
+			case "incomplete inventory", "selection recheck fails":
+				if err == nil || len(f.removed) != 0 {
+					t.Fatalf("global failure: removed=%v err=%v", f.removed, err)
+				}
+				if mode == "selection recheck fails" && (!errors.As(err, &partial) || partial.Deferred != 2 || reads != 2) {
+					t.Fatalf("failed recheck: reads=%d err=%v", reads, err)
+				}
+				return
+			case "missing image", "running container":
+				if !errors.As(err, &partial) || partial.Deferred != 1 {
+					t.Fatalf("expected one deferred reference: %v", err)
+				}
+			case "active build":
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !slices.Equal(f.removed, []string{secondContainer}) {
+				t.Fatalf("removed %v", f.removed)
+			}
+		})
+	}
+}
+
 func TestImageReferencesReconcileChecksFreshSelectionAndAcquisition(t *testing.T) {
 	for _, mode := range []string{"late selection", "active build", "unreferenced", "inventory failure", "database failure"} {
 		t.Run(mode, func(t *testing.T) {
@@ -264,69 +328,5 @@ func TestImageReferencesRetainUnlabelledLegacySelectionsWithoutClaimingOwnership
 	}
 	if len(f.images[id].Config.Labels) != 0 {
 		t.Fatal("reference changed source image provenance")
-	}
-}
-
-func TestImageReferencesReconcileDeferScope(t *testing.T) {
-	for _, mode := range []string{"missing image", "running container", "active build", "incomplete inventory", "selection recheck fails"} {
-		t.Run(mode, func(t *testing.T) {
-			f, first := referenceFixture(t)
-			second := "sha256:" + strings.Repeat("2", 64)
-			img := f.images[first]
-			img.ID = second
-			f.images[second] = img
-			p := NewImageReferences(f, referenceBorrower)
-			if _, err := p.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: first, Required: true}, {Ref: second, Required: true}}); err != nil {
-				t.Fatal(err)
-			}
-			firstContainer := strings.Repeat("c", 64)
-			secondContainer := strings.Repeat("d", 64)
-			gate := &resourcelifecycle.ImageUse{}
-			reads := 0
-			switch mode {
-			case "missing image":
-				delete(f.images, first)
-			case "running container":
-				f.containers[firstContainer].Container.State.Running = true
-				f.containers[firstContainer].Container.State.Status = "running"
-			case "active build":
-				release, err := gate.UseImages(t.Context(), first)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer release()
-			case "incomplete inventory":
-				f.listErr = errors.New("incomplete list")
-			}
-			err := p.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
-				reads++
-				if mode == "selection recheck fails" && reads == 2 {
-					return nil, errors.New("incomplete selection")
-				}
-				return nil, nil
-			})
-			var partial *ReferenceSweepError
-			switch mode {
-			case "incomplete inventory", "selection recheck fails":
-				if err == nil || len(f.removed) != 0 {
-					t.Fatalf("global failure: removed=%v err=%v", f.removed, err)
-				}
-				if mode == "selection recheck fails" && (!errors.As(err, &partial) || partial.Deferred != 2 || reads != 2) {
-					t.Fatalf("failed recheck: reads=%d err=%v", reads, err)
-				}
-				return
-			case "missing image", "running container":
-				if !errors.As(err, &partial) || partial.Deferred != 1 {
-					t.Fatalf("expected one deferred reference: %v", err)
-				}
-			case "active build":
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			if !slices.Equal(f.removed, []string{secondContainer}) {
-				t.Fatalf("removed %v", f.removed)
-			}
-		})
 	}
 }
