@@ -1,3 +1,4 @@
+@layer theme, base, xyflow, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
@@ -7,6 +8,13 @@
 @import "./styles/packs.generated.css";
 
 @custom-variant dark (&:is(.dark *));
+
+@layer components {
+  /* Keep the Crewship background palette visible through the graph canvas. */
+  .react-flow {
+    --xy-background-color: transparent;
+  }
+}
 
 /* Touch sizing belongs to the input device, not to the window width.
  *
