@@ -44,8 +44,8 @@ reports are ignored build output, not an operational procedure.
    container. Check whether the original request has already produced a run
    before submitting it again.
 4. If the crew uses a custom process tree and its owner has confirmed a
-   maintenance window, an administrator can run `crewship crew restart-agents
-   <crew>` followed by `crewship crew start <crew>` in the same workspace.
+   maintenance window, an administrator can run
+   `crewship crew restart-agents <crew>` followed by `crewship crew start <crew>` in the same workspace.
    Verify a current runtime contract, the required egress fence and a
    successful synthetic agent turn. Investigate provider authentication
    errors separately after runtime admission succeeds.

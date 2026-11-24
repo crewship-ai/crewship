@@ -1,0 +1,1 @@
+- **An agent chat could stall after a server upgrade left its crew on an older runtime.** Crewship now checks for active work before replacing the runtime, shows when chat is waiting, and records interrupted preparation in the conversation. If occupancy or storage ownership cannot be established, the runtime stays in place for investigation.
