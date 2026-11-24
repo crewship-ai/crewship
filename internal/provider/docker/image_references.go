@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,9 @@ func (p *ImageReferences) Preserve(ctx context.Context, refs []resourcelifecycle
 		id, err := p.preserve(stepCtx, ref)
 		cancel()
 		if err != nil {
+			if id != "" {
+				return nil, &referenceValidationError{id, err}
+			}
 			return nil, err
 		}
 		if id != "" {
@@ -167,6 +171,14 @@ func (p *ImageReferences) validate(result client.ContainerInspectResult, id stri
 	return nil
 }
 
+// The image was resolved, but its deterministic reference failed validation.
+type referenceValidationError struct {
+	imageID string
+	error
+}
+
+func (e *referenceValidationError) Unwrap() error { return e.error }
+
 // ReferenceSweepError reports candidates deferred after inventory completed.
 type ReferenceSweepError struct {
 	Deferred int
@@ -189,29 +201,53 @@ func (p *ImageReferences) Reconcile(ctx context.Context, gate *resourcelifecycle
 	}
 	// Missing historical/current references cannot protect existing bytes.
 	// Dispatch/restore still require the current artifact, never rebuilding it.
+	var partial ReferenceSweepError
+	deferredNames := map[string]bool{}
+	var protected []resourcelifecycle.ImageReference
 	for _, ref := range refs {
 		ref.Required = false
 		if _, err := p.Preserve(ctx, []resourcelifecycle.ImageReference{ref}); err != nil {
-			return err
+			var invalid *referenceValidationError
+			if !errors.As(err, &invalid) {
+				return errors.Join(partial.Cause, err)
+			}
+			name := imageReferenceName(p.owner, invalid.imageID)
+			if !deferredNames[name] {
+				deferredNames[name] = true
+				protected = append(protected, resourcelifecycle.ImageReference{Ref: invalid.imageID})
+				partial.Deferred++
+				if partial.Cause == nil {
+					partial.Cause = fmt.Errorf("selected image %q: %w", invalid.imageID, err)
+				}
+			}
 		}
 	}
 	listed, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true,
 		Filters: make(client.Filters).Add("label", imageReferenceOwnerLabel+"="+p.owner)})
 	if err != nil {
-		return err
+		return errors.Join(partial.Cause, err)
 	}
-	var partial ReferenceSweepError
-	for i, candidate := range listed.Items {
-		if err := ctx.Err(); err != nil {
-			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
+	candidates := slices.DeleteFunc(listed.Items, func(c container.Summary) bool {
+		return slices.ContainsFunc(c.Names, func(name string) bool { return deferredNames[strings.TrimPrefix(name, "/")] })
+	})
+	currentSelection := func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		current, err := desired(ctx)
+		if err != nil {
+			return nil, err
 		}
-		err := p.releaseUnused(ctx, gate, candidate.ID, desired)
+		return append(current, protected...), nil
+	}
+	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(candidates) - i, Cause: errors.Join(partial.Cause, err)}
+		}
+		err := p.releaseUnused(ctx, gate, candidate.ID, currentSelection)
 		if err == nil {
 			continue
 		}
 		var global *referenceInventoryError
 		if errors.As(err, &global) {
-			return &ReferenceSweepError{Deferred: partial.Deferred + len(listed.Items) - i, Cause: err}
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(candidates) - i, Cause: errors.Join(partial.Cause, err)}
 		}
 		partial.Deferred++
 		if partial.Cause == nil {
