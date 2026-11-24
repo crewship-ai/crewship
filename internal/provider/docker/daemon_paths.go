@@ -2,15 +2,20 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // daemonPathMap is immutable after startup. Only request paths are translated;
@@ -210,5 +215,46 @@ func (p *Provider) RuntimeReady(ctx context.Context) error {
 		return err
 	}
 	_, err := p.client.Ping(ctx, client.PingOptions{})
+	return err
+}
+
+// Feature-declared names are caller input. Only ordinary Docker-managed local
+// volumes are admitted for a mapped server. A driver device or mountpoint that
+// aliases server storage must never reach the workload or its startup hooks.
+func (p *Provider) checkMappedFeatureVolumes(ctx context.Context, team provider.CrewConfig, allowMissing bool) error {
+	if p.pathMap == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	for _, m := range team.ExtraMounts {
+		if !strings.EqualFold(m.Type, "volume") || !devcontainer.IsAllowedMountSource(m.Source) {
+			continue
+		}
+		res, err := p.client.VolumeInspect(ctx, m.Source, client.VolumeInspectOptions{})
+		if errdefs.IsNotFound(err) && allowMissing {
+			continue // Docker can create an ordinary local volume for a new name.
+		}
+		if err != nil {
+			return fmt.Errorf("inspect feature volume %q: %w", m.Source, err)
+		}
+		v := res.Volume
+		if v.Name != m.Source || v.Driver != "local" || len(v.Options) != 0 || !cleanAbsolutePath(v.Mountpoint) {
+			return fmt.Errorf("feature volume %q is not an ordinary local Docker volume", m.Source)
+		}
+		for _, root := range []string{p.pathMap.local, p.pathMap.daemon} {
+			if pathContains(root, v.Mountpoint) || pathContains(v.Mountpoint, root) {
+				return errors.New("feature volume overlaps server storage")
+			}
+		}
+	}
+	return nil
+}
+
+func (p *Provider) startMappedCrewContainer(ctx context.Context, id string, team provider.CrewConfig) error {
+	if err := p.checkMappedFeatureVolumes(ctx, team, false); err != nil {
+		return err
+	}
+	_, err := p.client.ContainerStart(ctx, id, client.ContainerStartOptions{})
 	return err
 }

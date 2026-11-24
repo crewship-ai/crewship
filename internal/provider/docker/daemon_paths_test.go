@@ -511,3 +511,56 @@ func TestDaemonPathChecksRefuseUnavailableConfiguredMapping(t *testing.T) {
 		t.Fatal("qualified the protected path without the configured daemon mapping")
 	}
 }
+
+func TestMappedFeatureVolumeAdmissionPrecedesContainerStart(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		driver     string
+		mountpoint string
+		options    map[string]string
+		status     int
+		allowed    bool
+	}{
+		{name: "ordinary local", driver: "local", mountpoint: "/daemon/volumes/ordinary/_data", status: 200, allowed: true},
+		{name: "mapped storage alias", driver: "local", mountpoint: "/daemon/volumes/crewship/_data", status: 200},
+		{name: "mapped storage ancestor", driver: "local", mountpoint: "/daemon/volumes", status: 200},
+		{name: "bind backed local", driver: "local", mountpoint: "/daemon/volumes/ordinary/_data", options: map[string]string{"type": "none", "o": "bind"}, status: 200},
+		{name: "plugin", driver: "plugin", mountpoint: "/daemon/volumes/ordinary/_data", status: 200},
+		{name: "uninspectable", status: 403},
+		{name: "missing at start", status: 404},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var starts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/volumes/fixture"):
+					w.WriteHeader(tc.status)
+					_ = json.NewEncoder(w).Encode(map[string]any{"Name": "fixture", "Driver": tc.driver, "Mountpoint": tc.mountpoint, "Options": tc.options})
+				case strings.HasSuffix(r.URL.Path, "/containers/crew/start"):
+					starts.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected Docker request %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cli.Close() })
+			p := &Provider{client: cli, pathMap: &daemonPathMap{local: "/app/storage", daemon: "/daemon/volumes/crewship/_data"}}
+			team := provider.CrewConfig{ExtraMounts: []provider.CrewMount{{Source: "fixture", Type: "volume", Target: "/feature"}}}
+			if tc.status == 404 {
+				if err := p.checkMappedFeatureVolumes(t.Context(), team, true); err != nil {
+					t.Fatalf("before create, Docker may provision a missing volume: %v", err)
+				}
+			}
+			err = p.startMappedCrewContainer(t.Context(), "crew", team)
+			if got := err == nil; got != tc.allowed || (starts.Load() == 1) != tc.allowed {
+				t.Fatalf("allowed=%v starts=%d err=%v, want allowed=%v", got, starts.Load(), err, tc.allowed)
+			}
+		})
+	}
+}

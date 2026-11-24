@@ -688,6 +688,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
+	if err := p.checkMappedFeatureVolumes(ctx, team, true); err != nil {
+		return "", err
+	}
 	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:           containerCfg,
 		HostConfig:       hostConfig,
@@ -702,7 +705,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 
-	if _, err := p.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
+	if err := p.startMappedCrewContainer(ctx, resp.ID, team); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
 	}
 
@@ -1176,7 +1179,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				}
 				defer releaseSlot()
 
-				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
+				if err := p.startMappedCrewContainer(ctx, c.ID, team); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
 				}
 				if err := p.ensureEgressFence(ctx, team, c.ID, reusedImage); err != nil {
