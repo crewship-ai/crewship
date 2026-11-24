@@ -3,3 +3,6 @@ onlyBuiltDependencies:
   - "@prisma/engines"
   - "prisma"
   - "esbuild"
+
+patchedDependencies:
+  react-compiler-runtime@1.0.0: patches/react-compiler-runtime@1.0.0.patch

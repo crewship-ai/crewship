@@ -149,10 +149,9 @@ type RateLimiter struct {
 // NewRateLimiter creates a rate limiter that allows reqPerMin requests per
 // minute per IP, with a burst equal to reqPerMin (token bucket).
 //
-// The returned limiter spawns a background cleanup goroutine. Long-lived
-// callers (the server's router) can ignore the cleanup lifecycle — the
-// goroutine ends with the process. Test callers should defer Close() so
-// the per-test goroutine doesn't accumulate across `go test ./...`.
+// The returned limiter runs a background cleanup loop. The owning router
+// calls Close during shutdown. Callers that construct a limiter directly
+// should arrange to call Close when they are done with it.
 func NewRateLimiter(reqPerMin int) *RateLimiter {
 	rl := &RateLimiter{
 		visitors: make(map[string]*ipLimiter),
@@ -227,11 +226,8 @@ func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	return v.limiter
 }
 
-// cleanupLoop removes stale entries every 3 minutes. Exits when
-// Close() is called — without it, every test that constructs a
-// RateLimiter leaks one goroutine until the binary exits, which
-// shows up as a 4-min `go test ./internal/api/` timeout once a
-// dozen tests have done so.
+// cleanupLoop removes stale entries every 3 minutes and exits when Close
+// signals the stop channel.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(3 * time.Minute)
 	defer ticker.Stop()

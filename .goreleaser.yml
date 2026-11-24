@@ -482,7 +482,7 @@ nfpms:
     bindir: /usr/bin
     contents:
       - src: dist/crewship-cli_linux_{{ .Arch }}*/crewship-agent-cli
-        dst: /usr/libexec/crewship/crewship-agent-cli
+        dst: /usr/libexec/crewship/
         file_info:
           mode: 0755
       # Distribution legal files (scripts/gen-license-bundle.sh): project
@@ -525,6 +525,7 @@ nfpms:
         file_info:
           mode: 0644
     scripts:
+      preinstall: packaging/nfpm/preinstall.sh
       postinstall: packaging/nfpm/postinstall.sh
       preremove: packaging/nfpm/preremove.sh
     # Recommend Docker but don't hard-require it: agents need a runtime, but a

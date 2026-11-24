@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Workflow, activity and routine graphs use React Flow 13.** The graph styles follow the selected light or dark theme, and fit-to-view keeps the existing proportional margins.
+
 - **Docs now say what the code does for delegation limits and learned rules (#1781, #1783).** Delegation depth and fan-out are limits per instance (`delegation.max_depth`, `delegation.max_fanout`); the per-agent `delegation_timeout_s`, `max_delegation_depth` and `max_parallel_delegates` columns are unused and the guide says so. Learned rules (`learned-*.md`) are written for operator review and are not delivered to any agent, and hand-written `topics/*.md` files are not returned by memory search. The consolidate guide's path and rule format are corrected, and the Memory guide no longer says consolidation rewrites `AGENT.md` / `CREW.md`. Delivering these to agents is tracked as post-1.0 work.
 - **The Crewship sail moved to the top bar and the update banner is gone (#5552).** "Crewship X is available" no longer takes a row under the top bar of every page. The sail now sits after Activity and Inbox on every page and on phones, in the same lit blue tile it had at the foot of the rail. A newer release puts a dot on it; its panel names the version, links the release notes, can mark that version as seen, and keeps Documentation, What's new, Report a problem and About Crewship. The rail ends with its navigation.
 
@@ -645,6 +647,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **Workspace default look.** An owner or admin can set a default style, accent and theme for the workspace (Settings › Appearance › Workspace default, `crewship workspace update --appearance-default`, `PATCH /api/v1/workspaces/{id}` field `appearance_default`). Members inherit every value they have not chosen themselves; Appearance shows which is which and offers Use workspace default. Appearance sync now saves only values you changed, instead of your whole look. Personal appearance changes save as you make them and the last one can be undone from the toast that follows.
+
+- **Member Settings removes the repeated roster count from the unfiltered table toolbar.** Applying a filter still shows how many people match.
 
 - **Harbor 2: Settings details.** Appearance › Sidebar now uses the rail's own names (Expanded, Expand on hover, Collapsed). An old `/settings?tab=audit` link opened by a Member or Manager lands on the Audit log page, which says who may read it, instead of silently showing Profile. The Account security page for restricted sessions uses the same 820 px column as the rest of Settings. The CLI calls behind Members, Crew links and the journal check are now covered by acceptance tests.
 

@@ -22,7 +22,7 @@ func (p *Provider) ResolveCrewMiseLock(ctx context.Context, imageID string, cfg 
 	if err != nil {
 		return nil, fmt.Errorf("mise resolve: inspect selected image: %w", err)
 	}
-	if img.ID != imageID || img.Config == nil || img.Config.Labels[devcontainer.ImageInstanceLabel] != devcontainer.ImageNamespace(p.cfg.InstanceID) || img.Config.Labels[devcontainer.ImageKindLabel] != devcontainer.ImageKindCrew {
+	if dockerutil.ConfigImageID(img.ID) != imageID || img.Config == nil || img.Config.Labels[devcontainer.ImageInstanceLabel] != devcontainer.ImageNamespace(p.cfg.InstanceID) || img.Config.Labels[devcontainer.ImageKindLabel] != devcontainer.ImageKindCrew {
 		return nil, fmt.Errorf("mise resolve: selected image is not owned by this installation")
 	}
 	return devcontainer.ResolveMiseLock(ctx, p.client, imageID, cfg, bump)

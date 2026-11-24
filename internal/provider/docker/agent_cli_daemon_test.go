@@ -30,6 +30,9 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 	reply := func(value any) {
 		if data, ok := value.(map[string]any); ok && strings.Contains(uri, "/containers/") && strings.HasSuffix(uri, "/json") {
 			host := data["HostConfig"].(map[string]any)
+			if strings.HasPrefix(s.fault, "podman-") || s.fault == "docker-expanded" {
+				host["CapDrop"] = []string{"CAP_CHOWN", "CAP_SETUID"}
+			}
 			if s.fault == "privileged" {
 				host["Privileged"] = true
 			}
@@ -60,12 +63,21 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		reply(map[string]any{"Id": c.id, "Name": "/" + c.name, "Image": "sha256:" + strings.Repeat("a", 64), "State": map[string]any{"Status": c.status, "Running": c.status == "running"}, "Config": map[string]any{"Image": "default/runtime:latest", "User": "1001:1001", "Labels": c.labels}, "HostConfig": map[string]any{"ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "Tmpfs": map[string]string{"/secrets": secretsTmpfsSpec}}, "Mounts": mounts})
 		return true
 	case r.Method == http.MethodHead && strings.HasSuffix(uri, "/archive"):
+		if s.fault == "podman-local-archive" {
+			s.t.Error("local SELinux Podman qualification sent a live archive request")
+		}
 		target := r.URL.Query().Get("path")
 		mode := os.ModeDir | 0755
 		if target == "/usr/local/bin/crewship" {
 			mode = 0555
 		}
 		stat := container.PathStat{Name: path.Base(target), Mode: mode}
+		if strings.HasPrefix(s.fault, "podman-") {
+			stat.LinkTarget = target
+			if s.fault == "podman-symlink" && target == agentCLIExecutable {
+				stat.Mode |= os.ModeSymlink
+			}
+		}
 		if s.fault == "parent-alias" && target == "/usr/local/bin" {
 			stat.LinkTarget = "/home/agent"
 		}
@@ -102,6 +114,13 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		if json.NewDecoder(r.Body).Decode(&body) != nil {
 			return false
 		}
+		if strings.HasPrefix(s.fault, "podman-") {
+			if len(body.Cmd) != 3 || body.Cmd[2] != "--require-empty-capabilities" {
+				http.Error(w, "missing capability check", http.StatusBadRequest)
+				return true
+			}
+			body.Cmd = body.Cmd[:2]
+		}
 		if len(body.Cmd) == 2 && body.Cmd[0] == "/usr/local/bin/crewship" && body.Cmd[1] == "agent-runtime-probe" {
 			reply(map[string]any{"Id": "fixture-sdk-exec"})
 			return true
@@ -114,7 +133,11 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		covHijackUpgrade(s.t, w, r, covStdcopyFrame(1, string(raw)))
 		return true
 	case strings.HasSuffix(uri, "/exec/fixture-sdk-exec/json"):
-		reply(map[string]any{"Running": false, "ExitCode": 0})
+		code := 0
+		if s.fault == "podman-capabilities" {
+			code = 1
+		}
+		reply(map[string]any{"Running": false, "ExitCode": code})
 		return true
 	}
 	return false

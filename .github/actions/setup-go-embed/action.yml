@@ -11,6 +11,9 @@ inputs:
   go-version:
     description: Go version
     required: true
+  prime-modules:
+    description: Download the module graph before running Go commands
+    default: 'false'
 
 runs:
   using: composite
@@ -35,6 +38,11 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         cache: true
+
+    - name: Prime the Go module cache
+      if: inputs.prime-modules == 'true'
+      shell: bash
+      run: python3 scripts/ci/prime-go-modules.py
 
     # Fail with a sentence instead of `pattern all:out: no matching files
     # found`, which points at web/embed.go and reads like a compile error
