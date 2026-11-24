@@ -32,7 +32,7 @@ cleanup() {
     while IFS= read -r name; do [ -z "$name" ] || docker volume rm "$name" >/dev/null 2>&1 || true; done < <(docker volume ls -q --filter "label=crewship.instance-id=$instance")
   done
   for n in "$prefix-a" "$prefix-b" "$prefix-proxy" "$prefix-native-probe" "$prefix-storage-helper" "$prefix-path-probe"; do docker rm -fv "$n" >/dev/null 2>&1 || true; done
-  docker volume rm "$prefix-a" "$prefix-b" "$prefix-a-restored" >/dev/null 2>&1 || true
+  docker volume rm "$prefix-a" "$prefix-b" "$prefix-a-restored" "$prefix-a-rollback" >/dev/null 2>&1 || true
   docker network rm "$prefix" >/dev/null 2>&1 || true
   rm -rf "$work"
   exit "$status"
@@ -91,7 +91,20 @@ wait_server() {
     sleep 1
   done
   echo "Containerized runtime did not become ready: $name" >&2
-  # Do not print application logs: startup can contain instance-specific data.
+  docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} restarts={{.RestartCount}}' "$name" >&2 || true
+  # Classify startup errors without printing application logs or values.
+  docker logs "$name" 2>&1 | awk '
+    BEGIN { lines=0 }
+    /panic:/ { panic=1 }
+    /migrat/ && /fail|error|incompatible|not found|unknown/ { migrations=1 }
+    /no such table|no such column/ { schema=1 }
+    /permission denied|read-only file system/ { filesystem=1 }
+    /staging/ && /fail|error|rejected/ { staging=1 }
+    /database is locked|resource temporarily unavailable/ { busy=1 }
+    /lock file|process already running|server already running/ { competing=1 }
+    { lines++ }
+    END { printf "Startup classes: lines=%d panic=%d migration=%d schema=%d file_permission=%d staging=%d busy=%d competing=%d\n", lines, panic, migrations, schema, filesystem, staging, busy, competing }
+  ' >&2 || true
   return 1
 }
 probe() {
@@ -243,7 +256,25 @@ if [ -n "$previous" ]; then
   [ "$(identity "$data_volume_a")" = "$original_identity" ]
   # shellcheck disable=SC2016
   helper "$data_volume_a" 'test "$(cat /store/upgrade/marker)" = preserved; test "$(readlink /store/upgrade/reference)" = marker; test "$(stat -c "%a %u %g" /store/upgrade/marker)" = "600 1001 1001"'
-  start_server "$prefix-a" "$previous"
+  echo 'Attempting rollback on the upgraded volume'
+  if ! start_server "$prefix-a" "$previous"; then
+    echo 'Same-volume rollback failed; checking a separate rollback from the untouched archive' >&2
+    docker rm -f "$prefix-a" >/dev/null
+    data_volume_a="$prefix-a-rollback"
+    docker volume create "$data_volume_a" >/dev/null
+    archive_helper "$data_volume_a" --same-owner -xpf - <"$work/backup.tar"
+    helper "$data_volume_a" "chown $root_uid:$root_gid /store && chmod $root_mode /store"
+    manifest "$data_volume_a" >"$work/rollback.manifest"
+    diff -u "$work/before.manifest" "$work/rollback.manifest"
+    db_marker "$data_volume_a" check
+    start_server "$prefix-a" "$previous"
+    original_path_probe
+    stop_server
+    db_marker "$data_volume_a" check
+    [ "$(identity "$data_volume_a")" = "$original_identity" ]
+    echo 'Backup-based rollback verified with an isolated volume; same-volume rollback remains failed' >&2
+    exit 1
+  fi
   original_path_probe
   stop_server
   db_marker "$data_volume_a" check
