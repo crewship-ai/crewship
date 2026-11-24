@@ -1549,6 +1549,18 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     </Conversation>
   )
 
+  const compactScrollerRef = useRef<HTMLDivElement>(null)
+  const keepDraftControlsVisible = () => {
+    const scroller = compactScrollerRef.current
+    if (!scroller || !window.matchMedia("(max-height: 640px)").matches) return
+    // An editor input can grow its box. Follow explicit typing in the outer
+    // pane, while passive resizes and incoming turns leave both scroll
+    // positions alone.
+    requestAnimationFrame(() => {
+      if (scroller.isConnected) scroller.scrollTop = 0
+    })
+  }
+
   const conversationUnavailable = refusedScopes.has(chatReadScope)
   const unavailableNotice = conversationUnavailable ? (
     <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
@@ -1601,7 +1613,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   if (mobilePanel === "chat") {
     return withProjects(
       <div className="relative flex flex-col h-full">
-        <div data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none] [@media(max-height:640px)]:flex-col-reverse" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
+        <div ref={compactScrollerRef} data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none] [@media(max-height:640px)]:flex-col-reverse" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         <div className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-min">
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
           <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
@@ -1652,7 +1664,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
               />
             </div>
           )}
-        <div className="shrink-0 bg-background">
+        <div className="shrink-0 bg-background" onInputCapture={(event) => {
+          if (event.target instanceof HTMLTextAreaElement) keepDraftControlsVisible()
+        }}>
           <div className="empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
             {unavailableNotice}
             {prepareProjectInputs}

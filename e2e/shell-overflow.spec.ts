@@ -140,6 +140,7 @@ test.describe("short chat viewport", () => {
     await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
     await failed.getByRole("button", { name: "Remove sample.txt" }).click()
     await expect(failed).toHaveCount(0)
+    await page.setViewportSize({ width: 667, height: 575 })
     await editor.fill("")
     const newest = page.getByText("Newest reply in the short chat", { exact: true })
     await expect(newest).toBeInViewport({ ratio: 0.5 })
@@ -163,7 +164,7 @@ test.describe("short chat viewport", () => {
       growth.textContent = "Another block of the latest answer"
       element.firstElementChild!.appendChild(growth)
     })
-    await page.setViewportSize({ width: 667, height: 390 })
+    await page.setViewportSize({ width: 667, height: 595 })
     await expect(jumpToLatest).toBeVisible()
     await expect.poll(() => history.evaluate(element => element.scrollTop)).toBeCloseTo(60, 0)
     await history.locator("[data-test-stream-growth]").evaluate(element => element.remove())
