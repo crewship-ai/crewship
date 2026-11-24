@@ -49,6 +49,7 @@ TESTS = {
         'TestImageChange_RealHeartbeatSurvivesNewImageAdmission',
         'TestImageChange_RealIdleVerifierProtectsDetachedWork',
         'TestFencedRuntimeUpgradeAfterServerRestart',
+        'TestCrewDataSurvivesContainerReplacement',
     },
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},
