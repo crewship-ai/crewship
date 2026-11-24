@@ -2,6 +2,7 @@ package backup_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -111,6 +112,10 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	dump, err := backup.DumpWorkspace(ctx, db, ws)
 	if err != nil {
 		t.Fatal(err)
+	}
+	raw, err := json.Marshal(dump)
+	if err != nil || strings.Contains(string(raw), old) {
+		t.Fatal("workspace export retained a legacy waitpoint identity")
 	}
 	store := pipeline.NewSQLWaitpointStore(db)
 	t.Cleanup(store.Close)

@@ -225,6 +225,10 @@ func TestRouter_Route_ApprovalsBypassRateGate(t *testing.T) {
 		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-approve-1", TargetUserID: "u_member", Title: "Approve",
 	})
 
+	var retained int
+	if err := db.QueryRow("SELECT count(*) FROM notification_deliveries WHERE source_id='wp-approve-1' OR instr(dedup_key,'wp-approve-1')>0").Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("legacy approval identifier in %d deliveries: %v", retained, err)
+	}
 	if got := srv.count(); got != 1 {
 		t.Fatalf("approvals must bypass the rate gate; got %d posts, want 1", got)
 	}

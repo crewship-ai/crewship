@@ -112,23 +112,24 @@ func TestWaitpointCallbackPartialMigrationRestart(t *testing.T) {
 	}
 	// Exercise a manager issuing a URL and then deciding the same pending
 	// item through the authenticated door while its migration is deferred.
+	if _, err = db.ExecContext(ctx, "DROP TRIGGER defer_one_waitpoint"); err != nil {
+		t.Fatal(err)
+	}
+	id := LegacyWaitpointPublicID(ws, old)
 	if _, _, err = store.MintCallbackToken(ctx, ws, old, "operator"); err != nil {
 		t.Fatal(err)
 	}
 	actor := WaitpointDecider{Kind: DeciderUser, ID: "operator"}
-	if err = store.Decide(ctx, ws, old, true, actor, "approved before restart"); err != nil {
+	if err = store.Decide(ctx, ws, id, true, actor, "approved before restart"); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.Decide(ctx, ws, old, false, actor, "second decision"); !errors.Is(err, ErrAlreadyDecided) {
+	if err = store.Decide(ctx, ws, id, false, actor, "second decision"); !errors.Is(err, ErrAlreadyDecided) {
 		t.Fatalf("second decision: %v", err)
 	}
 	store.Close()
-	if _, err = db.ExecContext(ctx, "DROP TRIGGER defer_one_waitpoint"); err != nil {
-		t.Fatal(err)
-	}
+
 	next := NewSQLWaitpointStore(db)
 	t.Cleanup(next.Close)
-	id := LegacyWaitpointPublicID(ws, old)
 	var count int
 	err = db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_waitpoints w JOIN inbox_items i ON w.workspace_id=i.workspace_id AND w.token=i.source_id
 		WHERE w.token=? AND w.status='approved' AND w.decided_by_user_id='operator' AND w.decision_payload='approved before restart'
