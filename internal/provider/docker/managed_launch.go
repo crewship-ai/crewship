@@ -46,7 +46,14 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	got, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	cli, err := p.runtimeInspectionClient()
+	if err != nil {
+		return err
+	}
+	if cli != p.client {
+		defer cli.Close()
+	}
+	got, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return denied
 	}
@@ -94,12 +101,6 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 			}
 		}
 	}
-	for dir := range parents {
-		st, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: dir})
-		if err != nil || !st.Stat.Mode.IsDir() || !p.unaliasedPath(st.Stat, dir) {
-			return denied
-		}
-	}
 	// The FIRST process must already be immune to loader injection. Merely
 	// clearing LD_* after starting a dynamic image wrapper would be too late.
 	f, err := os.Open(p.cfg.SidecarBinaryPath)
@@ -121,18 +122,43 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 || !owner(info) || parentErr != nil || !directory(parent) {
 		return denied
 	}
-	// Secondary consistency check; archive reads do not attest live bind inodes.
-	copied, err := p.client.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{SourcePath: managedlaunch.LauncherPath})
-	if err != nil {
-		return denied
-	}
-	defer copied.Content.Close()
-	if managedlaunch.VerifyArchiveFile(copied.Content, path.Base(managedlaunch.LauncherPath), f) != nil {
-		return denied
+	if p.relabelCrewBinds() {
+		opened, err := f.Stat()
+		if err != nil || !os.SameFile(info, opened) {
+			return denied
+		}
+		if err := verifyPodmanMountedFile(ctx, cli, c, parents, managedlaunch.LauncherPath, opened); err != nil {
+			return err
+		}
+	} else {
+		for dir := range parents {
+			st, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: dir})
+			if err != nil || !st.Stat.Mode.IsDir() || !p.unaliasedPath(st.Stat, dir) {
+				return denied
+			}
+		}
+		// Secondary consistency check; archive reads do not attest live bind inodes.
+		copied, err := p.client.CopyFromContainer(ctx, id, client.CopyFromContainerOptions{SourcePath: managedlaunch.LauncherPath})
+		if err != nil {
+			return denied
+		}
+		defer copied.Content.Close()
+		if managedlaunch.VerifyArchiveFile(copied.Content, path.Base(managedlaunch.LauncherPath), f) != nil {
+			return denied
+		}
 	}
 	expected := p.ExpectedSidecarHash()
 	if expected == "" || !strings.HasPrefix(hostArtifact.SHA256, expected) {
 		return denied
 	}
 	return nil
+}
+
+// Use the authenticated Podman connection for containers that require local
+// SELinux relabel checks. Other engines may live in a different VM.
+func (p *Provider) runtimeInspectionClient() (*client.Client, error) {
+	if p.relabelCrewBinds() {
+		return dockerutil.NewLocalPodmanClient(p.client, nil)
+	}
+	return p.client, nil
 }

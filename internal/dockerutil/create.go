@@ -23,15 +23,7 @@ func CreateCrewContainer(ctx context.Context, cli *client.Client, opts client.Co
 	if opts.HostConfig == nil || !slices.ContainsFunc(opts.HostConfig.Binds, sharedCrewRelabel) {
 		return CreateContainer(ctx, cli, opts)
 	}
-	host := cli.DaemonHost()
-	socket, ok := strings.CutPrefix(host, "unix://")
-	if !ok {
-		return client.ContainerCreateResult{}, fmt.Errorf("SELinux crew bind relabel requires a verified local Podman service")
-	}
-	bound, err := client.New(client.WithHost(host), client.WithAPIVersion(cli.ClientVersion()),
-		client.WithDialContext(func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialPodmanBinds(ctx, socket, opts.HostConfig.Binds)
-		}))
+	bound, err := NewLocalPodmanClient(cli, opts.HostConfig.Binds)
 	if err != nil {
 		return client.ContainerCreateResult{}, err
 	}
@@ -42,6 +34,20 @@ func CreateCrewContainer(ctx context.Context, cli *client.Client, opts client.Co
 		return created, fmt.Errorf("verify Podman SELinux binds: %w", refused.cause)
 	}
 	return created, err
+}
+
+// NewLocalPodmanClient authenticates the local service on each connection.
+// Passing binds also verifies their relabel sources before using the connection.
+func NewLocalPodmanClient(cli *client.Client, binds []string) (*client.Client, error) {
+	host := cli.DaemonHost()
+	socket, ok := strings.CutPrefix(host, "unix://")
+	if !ok {
+		return nil, fmt.Errorf("SELinux crew bind relabel requires a verified local Podman service")
+	}
+	return client.New(client.WithHost(host), client.WithAPIVersion(cli.ClientVersion()),
+		client.WithDialContext(func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialPodmanBinds(ctx, socket, binds)
+		}))
 }
 
 // Keep filesystem errors opaque to the Moby dial transport, which treats

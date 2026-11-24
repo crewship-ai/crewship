@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -130,7 +131,14 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	denied := errors.New("native agent CLI requires its current read-only mount in a qualified crew runtime")
-	got, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	cli, err := p.runtimeInspectionClient()
+	if err != nil {
+		return err
+	}
+	if cli != p.client {
+		defer cli.Close()
+	}
+	got, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("inspect native agent CLI runtime: %w", err)
 	}
@@ -180,18 +188,16 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if err := runtimestage.VerifyAgentCLIArtifact(p.cfg.agentCLIArtifact); err != nil {
 		return err
 	}
-	for _, target := range []string{"/usr", "/usr/local", "/usr/local/bin", executable} {
-		stat, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: target})
-		if err != nil || !p.unaliasedPath(stat.Stat, target) {
-			return denied
+	if p.relabelCrewBinds() {
+		host, err := os.Lstat(p.cfg.agentCLIArtifact.Path)
+		if err != nil {
+			return err
 		}
-		if target == executable {
-			if !stat.Stat.Mode.IsRegular() || stat.Stat.Mode.Perm() != 0555 {
-				return denied
-			}
-		} else if !stat.Stat.Mode.IsDir() {
-			return denied
+		if err := verifyPodmanMountedFile(ctx, cli, c, nil, executable, host); err != nil {
+			return fmt.Errorf("verify mounted agent CLI: %w", err)
 		}
+	} else if err := p.verifyAgentCLIArchivePaths(ctx, id); err != nil {
+		return err
 	}
 	image, err := p.client.ImageInspect(ctx, c.Image)
 	if err != nil {
@@ -236,4 +242,22 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 		return errors.New("native agent CLI returned an invalid probe protocol")
 	}
 	return validateAgentCLIProbe(probe, p.cfg.agentCLIArtifact, p.cfg.ExpectedAgentCLICommit, p.cfg.RequiredAgentCLICommands)
+}
+
+func (p *Provider) verifyAgentCLIArchivePaths(ctx context.Context, id string) error {
+	const executable = agentCLIExecutable
+	for _, target := range []string{"/usr", "/usr/local", "/usr/local/bin", executable} {
+		stat, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: target})
+		if err != nil || !p.unaliasedPath(stat.Stat, target) {
+			return errors.New("unqualified native agent CLI path")
+		}
+		if target == executable {
+			if !stat.Stat.Mode.IsRegular() || stat.Stat.Mode.Perm() != 0555 {
+				return errors.New("unqualified native agent CLI path")
+			}
+		} else if !stat.Stat.Mode.IsDir() {
+			return errors.New("unqualified native agent CLI path")
+		}
+	}
+	return nil
 }
