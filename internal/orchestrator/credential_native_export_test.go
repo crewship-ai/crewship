@@ -78,5 +78,5 @@ func TestNativeCredentialFixtureUsesProductionBatchStdin(t *testing.T) {
 // Delegates to production startup as UID1002. This test seam does not exist in
 // product builds and does not implement a separate credential transport.
 func NativeKeeperSidecarForTest(ctx context.Context, ctr provider.ContainerProvider, containerID string, ipc *SidecarIPCConfig, members []SidecarCrewMember, network *SidecarNetworkPolicy, logger *slog.Logger) error {
-	return startSidecar(ctx, ctr, containerID, nil, nil, ipc, nil, members, network, nil, "native-keeper-fixture", logger)
+	return startSidecar(ctx, ctr, containerID, "test-run", nil, nil, ipc, nil, members, network, nil, "native-keeper-fixture", logger)
 }

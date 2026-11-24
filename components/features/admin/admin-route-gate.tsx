@@ -29,7 +29,7 @@ export function AdminRouteGate({ title, children }: { title: string; children: R
 
   if (!instanceAdmin) {
     return (
-      <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
+      <div className="flex h-app-content flex-col">
         <SubBar icon={Shield} title={title} ariaLabel={title} />
         <PageNoAccess
           area="the Admin console"

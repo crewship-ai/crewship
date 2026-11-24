@@ -67,7 +67,7 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 		return nil, fmt.Errorf("mise resolve: inspect image: %w", err)
 	}
 	platform := map[string]string{"amd64": "linux-x64", "arm64": "linux-arm64"}[inspected.Architecture]
-	if inspected.ID != imageID || inspected.Os != "linux" || platform == "" || len(inspected.Config.Volumes) != 0 {
+	if dockerutil.ConfigImageID(inspected.ID) != imageID || inspected.Os != "linux" || platform == "" || len(inspected.Config.Volumes) != 0 {
 		return nil, errors.New("mise resolve: unsupported image identity, platform or declared volumes")
 	}
 	env := []string{}
@@ -84,7 +84,7 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 		Config:     &container.Config{Image: imageID, User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"360"}, Env: env, WorkingDir: "/tmp", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue, "crewship.mise-resolver": name}},
 		HostConfig: &container.HostConfig{NetworkMode: "bridge", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Init: &init, Resources: container.Resources{Memory: 512 << 20, MemorySwap: 512 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/tmp": "rw,nosuid,nodev,size=268435456,uid=1001,gid=1001,mode=0700"}},
 	}
-	created, err := docker.ContainerCreate(ctx, options)
+	created, err := dockerutil.CreateContainer(ctx, docker, options)
 	if err != nil {
 		return nil, fmt.Errorf("mise resolve: create builder: %w", err)
 	}
@@ -146,7 +146,7 @@ func ResolveMiseLock(ctx context.Context, docker *client.Client, imageID string,
 
 func auditMiseResolver(c container.InspectResponse, imageID, name string) error {
 	h := c.HostConfig
-	if c.Config == nil || h == nil || c.Image != imageID || c.Config.User != "1002:1002" || c.Config.Labels["crewship.mise-resolver"] != name || !slices.Equal(c.Config.Entrypoint, []string{"/bin/sleep"}) || !slices.Equal(c.Config.Cmd, []string{"360"}) || c.Config.Healthcheck == nil || !slices.Equal(c.Config.Healthcheck.Test, []string{"NONE"}) || h.Privileged || !h.ReadonlyRootfs || h.NetworkMode != "bridge" || h.PidMode != "" || h.IpcMode != "private" || h.UTSMode != "" || h.CgroupnsMode != "private" || len(h.CapAdd) != 0 || !slices.Contains(h.CapDrop, "ALL") || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") || len(h.Binds) != 0 || len(h.Mounts) != 0 || len(c.Mounts) != 0 || len(h.VolumesFrom) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || h.Memory != 512<<20 || h.MemorySwap != 512<<20 || h.NanoCPUs != 1e9 || h.PidsLimit == nil || *h.PidsLimit != 128 || len(h.Tmpfs) != 1 || h.Tmpfs["/tmp"] != "rw,nosuid,nodev,size=268435456,uid=1001,gid=1001,mode=0700" {
+	if c.Config == nil || h == nil || dockerutil.ConfigImageID(c.Image) != imageID || c.Config.User != "1002:1002" || c.Config.Labels["crewship.mise-resolver"] != name || !slices.Equal(c.Config.Entrypoint, []string{"/bin/sleep"}) || !slices.Equal(c.Config.Cmd, []string{"360"}) || c.Config.Healthcheck == nil || !slices.Equal(c.Config.Healthcheck.Test, []string{"NONE"}) || h.Privileged || !h.ReadonlyRootfs || h.NetworkMode != "bridge" || h.PidMode != "" || h.IpcMode != "private" || h.UTSMode != "" || h.CgroupnsMode != "private" || len(h.CapAdd) != 0 || !slices.Contains(h.CapDrop, "ALL") || !slices.Contains(h.SecurityOpt, "no-new-privileges:true") || len(h.Binds) != 0 || len(h.Mounts) != 0 || len(c.Mounts) != 0 || len(h.VolumesFrom) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || h.Memory != 512<<20 || h.MemorySwap != 512<<20 || h.NanoCPUs != 1e9 || h.PidsLimit == nil || *h.PidsLimit != 128 || len(h.Tmpfs) != 1 || h.Tmpfs["/tmp"] != "rw,nosuid,nodev,size=268435456,uid=1001,gid=1001,mode=0700" {
 		return errors.New("mise resolve: builder configuration rejected")
 	}
 	return nil

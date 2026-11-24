@@ -10,6 +10,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 )
 
@@ -99,11 +100,12 @@ func (p *Provisioner) inspectToolchain(ctx context.Context, image string, bins [
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	inspected, err := p.docker.ImageInspect(ctx, image)
+	inspected.ID = dockerutil.ConfigImageID(inspected.ID)
 	if err != nil || inspected.ID == "" {
 		return unknown
 	}
 	unknown.ImageID = inspected.ID
-	created, err := p.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.docker, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: inspected.ID, User: "1001:1001", Entrypoint: []string{"/bin/true"}, Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue}},
 		HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}},
 		Name:       tempContainerName(),

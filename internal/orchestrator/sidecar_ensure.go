@@ -108,6 +108,7 @@ type sidecarSettleSpec struct {
 	// crewOnly marks the crew-level caller — see crewOnlySidecarMustBeReplaced.
 	crewOnly bool
 
+	runID      string // empty for an agent-less crew sidecar
 	creds      []Credential
 	memoryCfg  *SidecarMemoryConfig
 	ipcCfg     *SidecarIPCConfig
@@ -187,7 +188,7 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 	if !needStart {
 		return false, nil
 	}
-	if err := startSidecar(ctx, o.container, spec.containerID, spec.creds, spec.memoryCfg,
+	if err := startSidecar(ctx, o.container, spec.containerID, spec.runID, spec.creds, spec.memoryCfg,
 		spec.ipcCfg, spec.routeAuth, spec.members, spec.networkPolicy, spec.mcpServers,
 		spec.configFingerprint, logger); err != nil {
 		return false, err

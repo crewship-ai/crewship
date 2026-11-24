@@ -202,8 +202,8 @@ github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
 github.com/ncruces/go-strftime v1.1.0 h1:vtPmPWMkb539RGV9WpWT9EwJGvrOCKvMNI4obWL47Hk=
 github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2KmZ9Fj7xeG/g=
-github.com/nicholas-fedor/shoutrrr v0.24.0 h1:k5yEH3jCRVjIldtQE1LsFlRrnKS+c40UKZ47bHMfZU4=
-github.com/nicholas-fedor/shoutrrr v0.24.0/go.mod h1:VC9VA+l0L8rOZjuiEKSnWC6lHf+reDjUSYmWh4nT1go=
+github.com/nicholas-fedor/shoutrrr v0.25.0 h1:3h6t0GSHi0j+KYXTYf2tXdEhM22R/u0gJKznhcM12k8=
+github.com/nicholas-fedor/shoutrrr v0.25.0/go.mod h1:WzPFvHCXGB/PYwtTHIT/8sBX6gnamGeSiSV5FjWYYgk=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=

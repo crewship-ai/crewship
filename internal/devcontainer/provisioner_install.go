@@ -17,9 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 func (p *Provisioner) aggregateFeatureRequirements(features []*ResolvedFeature, rootEnv map[string]string) AggregatedRequirements {
@@ -57,7 +58,7 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 	if err := p.ensureImage(ctx, baseImage); err != nil {
 		return "", fmt.Errorf("pull base image %q: %w", baseImage, err)
 	}
-	resp, err := p.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+	resp, err := dockerutil.CreateContainer(ctx, p.docker, client.ContainerCreateOptions{
 		Config: &container.Config{
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},

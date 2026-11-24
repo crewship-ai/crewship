@@ -22,6 +22,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -350,7 +351,7 @@ func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, targe
 			{Type: mount.TypeVolume, Source: target, Target: "/to"},
 		},
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:     helperCfg,
 		HostConfig: helperHost,
 	})
@@ -677,13 +678,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
+	if err := p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes); err != nil {
+		return "", err
+	}
 
 	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
 	if err != nil {
 		return "", err
 	}
-	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	resp, err := dockerutil.CreateCrewContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:           containerCfg,
 		HostConfig:       hostConfig,
 		NetworkingConfig: &dockernetwork.NetworkingConfig{},
@@ -801,7 +804,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("%w: inspect existing container %s: missing state", provider.ErrRuntimeImageUpdatePending, containerName)
 				}
 				c.State = inspect.State.Status
-				imageChanged := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage
+				imageChanged := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && dockerutil.ConfigImageID(inspect.Image) != desiredImage
 				if inspect.State.Paused || c.State == container.StatePaused {
 					if imageChanged {
 						return "", true, fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying: %w", c.ID, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage})
@@ -1354,8 +1357,8 @@ func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 // ownership is what decides whether the agent can create entries in it;
 // the files inside were written by the agent already. A recursive chown
 // of a 1.6 GB /home/agent on every create would cost seconds for nothing.
-func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs, volumes []string) {
-	needsDockerChown := goruntime.GOOS == "windows" || len(volumes) > 0
+func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs, volumes []string) error {
+	needsDockerChown := goruntime.GOOS == "windows" || len(volumes) > 0 || p.relabelCrewBinds()
 	if !needsDockerChown {
 		for _, dir := range dirs.all {
 			if err := os.Chown(dir, 1001, 1001); err != nil {
@@ -1365,27 +1368,24 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		}
 	}
 	if needsDockerChown {
-		volTargets := make([]string, 0, len(volumes))
-		var mounts []mount.Mount
-		for _, dir := range dirs.all {
-			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
+		host, volTargets, err := p.ownershipHelperMounts(dirs, volumes)
+		if err != nil {
+			return err
 		}
-		for i, name := range volumes {
-			target := fmt.Sprintf("/mntvol/%d", i)
-			volTargets = append(volTargets, target)
-			mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
-		}
-		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets)
-		initResp, initErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets, p.detected.Runtime == "podman")
+		initResp, initErr := dockerutil.CreateCrewContainer(ctx, p.client, client.ContainerCreateOptions{
 			Config: &container.Config{
 				Image:      runtimeImage,
 				User:       "0:0",
 				Entrypoint: []string{"sh", "-c", chownCmd},
 			},
-			HostConfig: &container.HostConfig{Mounts: mounts},
+			HostConfig: host,
 		})
 		if initErr == nil {
-			_, _ = p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
+			_, startErr := p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
+			if startErr != nil && p.detected.Runtime == "podman" {
+				return errors.Join(fmt.Errorf("start Podman crew bind preparation: %w", startErr), p.removeOwnershipHelper(ctx, initResp.ID, true))
+			}
 			// ContainerWait returns two channels; drain one of them (or
 			// cancel) so we do not leak a goroutine inside the docker client
 			// when the wait completes. A short timeout keeps us from hanging
@@ -1393,24 +1393,80 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 			waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
 			wait := p.client.ContainerWait(waitCtx, initResp.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 			select {
-			case <-wait.Result:
+			case result := <-wait.Result:
+				if result.StatusCode != 0 {
+					initErr = fmt.Errorf("ownership helper exited with status %d", result.StatusCode)
+				}
 			case werr := <-wait.Error:
 				if werr != nil {
+					initErr = werr
 					p.logger.Debug("init container wait returned error", "error", werr)
 				}
 			case <-waitCtx.Done():
+				initErr = waitCtx.Err()
 				p.logger.Debug("init container wait timed out", "error", waitCtx.Err())
 			}
 			waitCancel()
-			_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
+			if p.detected.Runtime == "podman" {
+				if err := p.removeOwnershipHelper(ctx, initResp.ID, initErr != nil || startErr != nil); err != nil {
+					return errors.Join(initErr, err)
+				}
+			} else {
+				_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
+			}
+			if initErr != nil && p.detected.Runtime == "podman" {
+				return fmt.Errorf("finish Podman crew bind preparation: %w", initErr)
+			}
 			p.logger.Debug("init container fixed bind-mount ownership")
 		} else {
+			if p.detected.Runtime == "podman" {
+				return fmt.Errorf("prepare Podman crew binds: %w", initErr)
+			}
 			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
 			for _, dir := range dirs.all {
 				os.Chmod(dir, 0777) //nolint:errcheck
 			}
 		}
 	}
+	return nil
+}
+
+func (p *Provider) removeOwnershipHelper(ctx context.Context, id string, force bool) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err := p.client.ContainerRemove(cleanup, id, client.ContainerRemoveOptions{Force: force})
+	if err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("remove crew ownership helper %s: %w", id, err)
+	}
+	return nil
+}
+
+func (p *Provider) ownershipHelperMounts(dirs crewDirs, volumes []string) (*container.HostConfig, []string, error) {
+	volTargets := make([]string, 0, len(volumes))
+	var mounts []mount.Mount
+	var binds []string
+	if p.relabelCrewBinds() {
+		// Label these roots before chown and before mounting the same
+		// data as noexec/nosuid local volumes in the crew container.
+		// shared and agents are already reachable beneath dirs.crew.
+		for _, dir := range []string{dirs.output, dirs.workspace, dirs.crew} {
+			bind, err := sharedCrewBind(p.cfg.OutputBasePath, dir, "/mnt"+dir, "rw")
+			if err != nil {
+				return nil, nil, err
+			}
+			binds = append(binds, bind)
+		}
+	} else {
+		for _, dir := range dirs.all {
+			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
+		}
+	}
+	for i, name := range volumes {
+		target := fmt.Sprintf("/mntvol/%d", i)
+		volTargets = append(volTargets, target)
+		mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
+	}
+	return &container.HostConfig{Mounts: mounts, Binds: binds}, volTargets, nil
 }
 
 // buildCrewContainerConfig assembles the container env (merging and
@@ -1605,6 +1661,10 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 	if err != nil {
 		return nil, nil, err
 	}
+	crewMounts, binds, err := p.stagedArtifactBinds(crewMounts)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Apply feature-declared mounts (e.g. DinD needs /var/run/docker.sock).
 	// Feature metadata is user-controlled via devcontainer.json, so each
 	// mount source is validated against an allowlist to prevent malicious
@@ -1728,6 +1788,7 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 			Ulimits:          crewUlimits(),
 		},
 		Mounts: crewMounts,
+		Binds:  binds,
 		Tmpfs: map[string]string{
 			// noexec,nosuid mirrors /secrets (secretsTmpfsSpec) — cheap
 			// defense-in-depth: rw still permits staging a file here, but
@@ -1925,7 +1986,7 @@ func shellQuote(s string) string {
 // nothing else in the tree is able to do this, and why it is not -R. The
 // step is appended with `;` rather than `&&` so a failure on one volume
 // cannot skip the other, and cannot mask the bind chown's result.
-func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string) string {
+func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string, requireSuccess bool) string {
 	mnt := func(p string) string { return shellQuote("/mnt" + p) }
 
 	chownCmd := "chown -R 1001:1001"
@@ -1936,7 +1997,13 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 	// here: restore needs the same guarantee, and when it was spelled
 	// out only in this function the restore path could discover it only
 	// by failing (#1746).
-	chownCmd += ` && ` + memory.MemoryOwnershipCmd(mnt(crewPath))
+	if requireSuccess {
+		// Stop on a denied chown before a later volume chmod masks it.
+		chownCmd = "set -e; " + chownCmd + " ; "
+	} else {
+		chownCmd += " && "
+	}
+	chownCmd += memory.MemoryOwnershipCmd(mnt(crewPath))
 	for _, target := range volumeTargets {
 		chownCmd += ` ; chown 1001:1001 ` + shellQuote(target) + ` ; chmod 755 ` + shellQuote(target)
 	}

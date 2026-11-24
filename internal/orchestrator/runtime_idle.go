@@ -108,7 +108,7 @@ printf 'crewship-idle-census-end\n'
 	return idleProcessTree(string(data))
 }
 
-// A Crewship runtime is an init (optionally Docker's init wrapper), its sleep
+// A Crewship runtime is an init (optionally the engine's init wrapper), its sleep
 // entrypoint and the trusted sidecar. Every other process vetoes replacement,
 // including detached CLI sessions and background shell jobs after recovery.
 func idleProcessTree(output string) error {
@@ -138,7 +138,7 @@ func idleProcessTree(output string) error {
 			probeSeen = true
 			continue
 		}
-		if pid == 1 && parent == 0 && (f[3] == "docker-init" || f[3] == "tini" || f[3] == "sleep") {
+		if pid == 1 && parent == 0 && (f[3] == "docker-init" || f[3] == "tini" || f[3] == "podman-init" || f[3] == "sleep") {
 			initSeen = true
 			if f[3] == "sleep" {
 				sleeper = true

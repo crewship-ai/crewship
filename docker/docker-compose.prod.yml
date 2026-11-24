@@ -2,8 +2,7 @@
 # Usage: docker compose -f docker/docker-compose.prod.yml up -d
 # Requires: .env file in project root (see .env.example)
 #
-# Default: SQLite (zero deps, embedded in crewship binary)
-# Optional: Uncomment postgres service for multi-user deployments
+# SQLite is embedded in the Crewship binary.
 
 services:
   crewship:
@@ -88,6 +87,7 @@ services:
       # /volumes -- VolumeCreate, VolumeInspect, VolumeList, VolumeRemove.
       VOLUMES: 1
       # /info -- cgroup version and host-filesystem detection.
+      # Local rootless Podman also uses /info to identify the responding service.
       INFO: 1
       # /_ping and /version -- daemon detection. The image defaults both to 1;
       # set explicitly so this file is the whole story.
@@ -121,30 +121,10 @@ services:
     networks:
       - crewship-internal
 
-  # Uncomment for PostgreSQL mode:
-  # postgres:
-  #   image: postgres:18-alpine
-  #   container_name: crewship-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: ${POSTGRES_USER:-crewship}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-  #     POSTGRES_DB: ${POSTGRES_DB:-crewship}
-  #   volumes:
-  #     - crewship-pgdata:/var/lib/postgresql/data
-  #   networks:
-  #     - crewship-internal
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crewship}"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 5
-
 volumes:
   crewship-data:
   crewship-logs:
   crewship-db:
-  # crewship-pgdata:
 
 networks:
   crewship-internal:

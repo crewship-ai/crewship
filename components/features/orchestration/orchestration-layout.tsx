@@ -555,7 +555,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   }
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       <SubBar icon={CircleDot} title="Issues" section={sectionTitle} ariaLabel="Issues" actions={actions} />
       <div className="relative flex min-h-0 flex-1">
         <SecondaryPanel id="issues" label="Issues views">

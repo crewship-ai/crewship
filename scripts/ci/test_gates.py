@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -6,8 +7,77 @@ import subprocess
 import tempfile
 import unittest
 from plan import classify, changed_paths, craft_changed, full_matrix, release_changed
-from verdict import ALWAYS, CODE, CRAFT, FULL, GO, PARITY, failures
+from verdict import ALWAYS, CODE, CRAFT, FULL, GO, PARITY, failures, require_backup_coverage, require_native_coverage
 from parity import TESTS, missing_tests
+
+
+def native_receipts(directory):
+    prefix = 'github.com/crewship-ai/crewship/'
+    cli = prefix + 'cmd/crewship'
+    inventory = [cli, *[f'{prefix}internal/package{i}' for i in range(89)]]
+    receipts = []
+    for platform in ('linux-arm64', 'macos-arm64'):
+        for index in range(3):
+            selected = inventory[index::3]
+            receipts.append(dict(source_sha="reviewed", run_id="123", platform=platform, index=index, count=3,
+                                 inventory=inventory, selected=selected, completed=selected,
+                                 cli_build=cli in selected))
+    for index, receipt in enumerate(receipts):
+        folder = directory / str(index)
+        folder.mkdir(parents=True)
+        (folder / 'platform-shard.json').write_text(json.dumps(receipt))
+    return receipts
+
+
+def backup_receipts(directory):
+    names = ['TestA', 'TestB']
+    digest = hashlib.sha256('\n'.join(names).encode()).hexdigest()
+    for index, name in enumerate(names):
+        folder = directory / str(index)
+        folder.mkdir(parents=True)
+        receipt = dict(source_sha='reviewed', run_id='123', index=index, count=2,
+                       package='github.com/crewship-ai/crewship/internal/backup',
+                       inventory_count=len(names), inventory_sha256=digest, selected=[name], seconds=10)
+        (folder / 'api-race-shard.json').write_text(json.dumps(receipt))
+
+
+class BackupCoverageTests(unittest.TestCase):
+    def test_exact_partition_and_workflow_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            backup_receipts(directory)
+            require_backup_coverage(directory, 'reviewed', '123')
+            last = directory / '1' / 'api-race-shard.json'
+            receipt = json.loads(last.read_text())
+            for change in (dict(index=0), dict(selected=['TestA']), dict(selected=['TestC']),
+                           dict(run_id='456'), dict(source_sha='other'), dict(package='other')):
+                last.write_text(json.dumps({**receipt, **change}))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    require_backup_coverage(directory, 'reviewed', '123')
+            last.unlink()
+            with self.assertRaises(ValueError):
+                require_backup_coverage(directory, 'reviewed', '123')
+
+
+class NativeCoverageTests(unittest.TestCase):
+    def test_reject_missing_duplicate_and_unexecuted_native_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            receipts = native_receipts(directory)
+            inventory = receipts[0]['inventory']
+            require_native_coverage(directory, "reviewed", "123")
+            last = directory / '5' / 'platform-shard.json'
+            for change in (
+                dict(index=1), dict(completed=[]), dict(inventory=inventory[:-1]), dict(source_sha="other"),
+                dict(selected=receipts[4]['selected'], completed=receipts[4]['selected']),
+                dict(cli_build=True), dict(run_id="456"),
+            ):
+                last.write_text(json.dumps({**receipts[5], **change}))
+                with self.subTest(change=list(change)), self.assertRaises(ValueError):
+                    require_native_coverage(directory, "reviewed", "123")
+            last.unlink()
+            with self.assertRaises(ValueError):
+                require_native_coverage(directory, "reviewed", "123")
 
 
 class GateTests(unittest.TestCase):
@@ -415,7 +485,7 @@ class GateTests(unittest.TestCase):
         self.assertTrue(failures({}))
 
     # ── #4752: expensive lanes run in the merge queue, not twice per PR ──
-    EXPENSIVE = {'go-platforms', 'go-race', 'go-race-cli-shards', 'go-race-cli',
+    EXPENSIVE = {'go-platforms', 'go-race', 'go-race-backup', 'go-race-cli-shards', 'go-race-cli',
                  'go-race-api-template', 'go-race-api-shards', 'go-race-api',
                  'cli-subprocess-race', 'go-shuffle', 'mooring-actual'}
 
@@ -517,13 +587,16 @@ class GateTests(unittest.TestCase):
             reduced[name]['result'] = 'skipped'
         script = Path(__file__).with_name('verdict.py')
         env = {k: v for k, v in os.environ.items() if k != 'GITHUB_EVENT_NAME'}
-        for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
-                                   ('pull_request', reduced, 0), (None, self.results(), 0)]:
-            run_env = dict(env, CI_NEEDS=json.dumps(needs))
-            if event:
-                run_env['GITHUB_EVENT_NAME'] = event
-            result = subprocess.run(['python3', str(script)], env=run_env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, code, (event, result.stdout))
+        with tempfile.TemporaryDirectory() as tmp:
+            native_receipts(Path(tmp) / '.ci-native-platforms')
+            backup_receipts(Path(tmp) / '.ci-backup-race')
+            for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
+                                       ('pull_request', reduced, 0), (None, self.results(), 0)]:
+                run_env = dict(env, CI_NEEDS=json.dumps(needs), GITHUB_SHA='reviewed', GITHUB_RUN_ID='123')
+                if event:
+                    run_env['GITHUB_EVENT_NAME'] = event
+                result = subprocess.run(['python3', str(script)], cwd=tmp, env=run_env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, code, (event, result.stdout))
 
 
 if __name__ == '__main__':

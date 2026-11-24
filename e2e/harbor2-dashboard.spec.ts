@@ -156,6 +156,17 @@ test.describe("states", () => {
 
   test("unfinished onboarding lands on /onboarding without flashing the dashboard", async ({ page }) => {
     await seed(page)
+    // Invited members and admins with an existing workspace stay on the dashboard.
+    await page.route("**/api/v1/workspaces", async (route) => {
+      if (route.request().method() !== "GET") return route.continue()
+      const response = await route.fetch()
+      expect(response.ok(), `Workspaces returned HTTP ${response.status()}`).toBe(true)
+      const workspaces = await response.json() as { currentUserRole: string }[]
+      await route.fulfill({
+        response,
+        json: workspaces.map((workspace) => ({ ...workspace, currentUserRole: "OWNER" })),
+      })
+    })
     await page.route(/\/api\/v1\/onboarding\/status/, (route: Route) => route.fulfill({ json: { completed: false } }))
     let flashed = false
     page.on("framenavigated", async () => {

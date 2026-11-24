@@ -434,7 +434,7 @@ function SettingsPage() {
   const showHead = section != null && !moved
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
+    <div className="flex flex-col h-app-content">
       {/* Settings was the last page with no sub-bar: its identity lived in the
           global top bar as a "Settings / Profile" breadcrumb, which made it the
           one page whose top bar was not plain "Crewship". The identity belongs

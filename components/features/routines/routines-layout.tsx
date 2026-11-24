@@ -352,7 +352,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   )
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       {/* Routines › {view} / Routines › {crew} › {routine}. The area's own
           breadcrumb links back to the overview, so the content needs no
           "Back to routines" bar. New routine and Import belong to the list;

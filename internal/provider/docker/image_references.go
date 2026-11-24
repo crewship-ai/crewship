@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 )
 
 const imageReferenceOwnerLabel = "crewship.image.reference.instance-id"
+const imageReferenceTagsLabel = "crewship.image.reference.config-tags"
 const imageReferenceIDLabel = "crewship.image.reference.image-id"
 const imageReferenceNamePrefix = "crewship-image-ref-"
 
@@ -87,7 +89,8 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		return "", fmt.Errorf("selected environment %q unavailable; restore its image or explicitly rebuild: %w", ref.Ref, err)
 	}
-	if !dockerutil.IsLocalImageID(img.ID) || img.Config == nil {
+	img.ID = dockerutil.ConfigImageID(img.ID)
+	if img.ID == "" || img.Config == nil {
 		return "", fmt.Errorf("image %q has incomplete immutable identity/configuration", ref.Ref)
 	}
 	labels := img.Config.Labels
@@ -101,7 +104,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	name := imageReferenceName(p.owner, img.ID)
 	existing, err := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err == nil {
-		return img.ID, p.validate(existing, img.ID)
+		return img.ID, p.validate(ctx, existing, img)
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect environment reference: %w", err)
@@ -116,17 +119,23 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		tmpfs[destination] = "ro,nosuid,nodev,noexec,size=4096"
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	referenceLabels := map[string]string{
+		imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
+		resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
+		devcontainer.TempContainerLabelKey: "",
+	}
+	if dockerutil.IsPodman(ctx, p.client) {
+		// Retagging the image does not change Config.Image of an existing
+		// reference container. Keep the names inspected at creation.
+		referenceLabels[imageReferenceTagsLabel] = strings.Join(img.RepoTags, "\n")
+	}
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Name: name,
 		Config: &container.Config{
 			Image: img.ID, Entrypoint: []string{"/bin/false"}, Cmd: []string{"crewship-image-reference"},
 			User: "1001:1001", NetworkDisabled: true,
 			Healthcheck: &container.HealthConfig{Test: []string{"NONE"}},
-			Labels: map[string]string{
-				imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
-				resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
-				devcontainer.TempContainerLabelKey: "",
-			},
+			Labels:      referenceLabels,
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode: "none", ReadonlyRootfs: true, Tmpfs: tmpfs,
@@ -140,23 +149,34 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		if inspectErr != nil {
 			return "", fmt.Errorf("retain exact environment %s: %w", img.ID, err)
 		}
-		return img.ID, p.validate(existing, img.ID)
+		return img.ID, p.validate(ctx, existing, img)
 	}
 	existing, err = p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("confirm environment reference: %w", err)
 	}
-	return img.ID, p.validate(existing, img.ID)
+	return img.ID, p.validate(ctx, existing, img)
 }
 
-func (p *ImageReferences) validate(result client.ContainerInspectResult, id string) error {
+func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, img client.ImageInspectResult) error {
 	c := result.Container
+	id := dockerutil.ConfigImageID(img.ID)
 	raw, idErr := hex.DecodeString(c.ID)
 	if idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
-		c.Image != id || c.Config.Image != id ||
+		id == "" || dockerutil.ConfigImageID(c.Image) != id ||
 		c.Config.Labels[imageReferenceOwnerLabel] != p.owner || c.Config.Labels[imageReferenceIDLabel] != id ||
 		strings.TrimPrefix(c.Name, "/") != imageReferenceName(p.owner, id) {
 		return fmt.Errorf("environment reference identity/state mismatch for %q; retaining conflicting container", c.ID)
+	}
+	// Podman may report a display tag in Config.Image even when create used
+	// the config ID. Accept only names observed on this same image; a cache
+	// rebuild may already have moved the display tag to a later revision.
+	if dockerutil.ConfigImageID(c.Config.Image) != id {
+		display := c.Config.Image
+		recorded := strings.Split(c.Config.Labels[imageReferenceTagsLabel], "\n")
+		if display == "" || !dockerutil.IsPodman(ctx, p.client) || !(slices.Contains(img.RepoTags, display) || slices.Contains(recorded, display)) {
+			return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
+		}
 	}
 	for _, m := range c.Mounts {
 		if m.Type == "volume" || m.Type == "bind" {
@@ -214,12 +234,15 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	if err != nil {
 		return err
 	}
-	id := c.Container.Image
-	if err := p.validate(c, id); err != nil {
-		return err
+	id := dockerutil.ConfigImageID(c.Container.Image)
+	if id == "" {
+		return fmt.Errorf("image reference has invalid config ID")
 	}
 	img, err := p.client.ImageInspect(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := p.validate(ctx, c, img); err != nil {
 		return err
 	}
 	if img.Config == nil {
