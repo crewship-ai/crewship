@@ -198,9 +198,6 @@ func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
 		VALUES(?,?,'old-run','gate','approval','2099-01-01'),('wp_current',?,'current-run','gate','approval','2099-01-01')`, old, ws, ws); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.Exec("UPDATE pipeline_waitpoints SET callback_token_hash='source-digest' WHERE token='wp_current'"); err != nil {
-		t.Fatal(err)
-	}
 	bundle := f.create(t, true)
 	dir := filepath.Join(t.TempDir(), "restored")
 	if _, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: dir, Actor: "u_admin"}); err != nil {
@@ -235,7 +232,20 @@ func TestWaitpointRestoreRejectsInvalidIdentity(t *testing.T) {
 				invalid := row("invalid")
 				invalid[field] = float64(42)
 				dump := &backup.DBDump{Tables: map[string][]map[string]any{"pipeline_waitpoints": {row("wp_valid"), invalid}}}
-				var err error
+				observer, err := db.Conn(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer observer.Close()
+				version := func() int {
+					var v int
+					if err := observer.QueryRowContext(t.Context(), "PRAGMA data_version").Scan(&v); err != nil {
+						t.Fatal(err)
+					}
+					return v
+				}
+				before := version()
+
 				switch op {
 				case "additive":
 					err = backup.RestoreDump(t.Context(), db, dump)
@@ -244,6 +254,9 @@ func TestWaitpointRestoreRejectsInvalidIdentity(t *testing.T) {
 				}
 				if err == nil {
 					t.Error("accepted invalid waitpoint identity")
+				}
+				if version() != before {
+					t.Fatal("restore committed changes to the target database")
 				}
 				var total, original int
 				if err := db.QueryRow(`SELECT count(*),count(*) FILTER(WHERE token='wp_target' AND callback_token_hash='target-digest') FROM pipeline_waitpoints`).Scan(&total, &original); err != nil || total != 1 || original != 1 {

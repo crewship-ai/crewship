@@ -1209,6 +1209,9 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	if err := validateWaitpointIdentities(dump); err != nil {
+		return RestoreStats{}, err
+	}
 	imageUse := resourcelifecycle.Images(db)
 	releaseImages := imageUse.Use()
 	defer releaseImages()
@@ -1494,6 +1497,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					continue
 				}
 				val := row[k]
+				// Bundle data cannot authorize callbacks on the destination.
+				if table == "pipeline_waitpoints" && k == "callback_token_hash" {
+					val = nil
+				}
 				if documentBinaryColumn(table, k) {
 					// Early native-proposal bundles encoded this BLOB as TEXT.
 					// Preserve readable legacy candidates without weakening the

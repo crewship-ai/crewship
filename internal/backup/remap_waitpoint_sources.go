@@ -9,6 +9,22 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
+// Validate decoded values before SQLite affinity or fork remapping can change
+// their types. The error identifies the field without logging a legacy bearer.
+func validateWaitpointIdentities(dump *DBDump) error {
+	if dump == nil {
+		return nil
+	}
+	for i, row := range dump.Tables["pipeline_waitpoints"] {
+		for _, key := range []string{"token", "workspace_id"} {
+			if value, ok := row[key].(string); !ok || value == "" {
+				return fmt.Errorf("backup: pipeline_waitpoints row %d requires nonempty text in %s", i+1, key)
+			}
+		}
+	}
+	return nil
+}
+
 // Forks need independent source identities, including the token primary key
 // which the generic id-column remapper cannot see. Same-ID restores never call
 // this path. Historical invocation proof and answer hashes stay unchanged;
