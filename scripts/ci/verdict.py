@@ -40,13 +40,15 @@ def failures(needs, event=None):
     return errors
 
 
-def require_native_coverage(directory, expected_sha=None):
+def require_native_coverage(directory, expected_sha, run_id):
     receipts = [json.loads(path.read_text()) for path in sorted(directory.rglob("platform-shard.json"))]
     platforms = {"linux-arm64", "macos-arm64"}
     if len(receipts) != 6 or {r["platform"] for r in receipts} != platforms:
         raise ValueError("need six native receipts across both arm64 platforms")
-    if expected_sha and any(r["source_sha"] != expected_sha for r in receipts):
-        raise ValueError("native receipts come from another revision")
+    if not expected_sha or not run_id or any(
+        r["source_sha"] != expected_sha or r["run_id"] != run_id for r in receipts
+    ):
+        raise ValueError("native receipts come from another revision or workflow run")
     cli = "github.com/crewship-ai/crewship/cmd/crewship"
     for platform in sorted(platforms):
         shards = [r for r in receipts if r["platform"] == platform]
@@ -73,7 +75,8 @@ if __name__ == '__main__':
     errors = failures(needs, os.environ.get('GITHUB_EVENT_NAME'))
     if not errors and needs['go-platforms']['result'] == 'success':
         try:
-            require_native_coverage(Path('.ci-native-platforms'), os.environ['GITHUB_SHA'])
+            require_native_coverage(Path('.ci-native-platforms'), os.environ['GITHUB_SHA'],
+                                    os.environ['GITHUB_RUN_ID'])
         except (KeyError, OSError, TypeError, ValueError) as error:
             errors.append(f'go-platforms: {error}')
     for error in errors:

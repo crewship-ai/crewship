@@ -1822,6 +1822,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go vet
         run: go vet ./...
@@ -2002,6 +2003,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Go test (package partition + internal/api slice)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
@@ -2056,6 +2058,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go test (shuffled)
         # go test prints the chosen seed per package as `-test.shuffle N`.
@@ -2307,6 +2310,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Go test (race, CLI partition)
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
@@ -2392,6 +2396,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go test (race)
         # No -shuffle here on purpose: `go-shuffle` owns order-dependence
@@ -2479,6 +2484,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Download this run's measured template
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2595,6 +2601,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build and test native package shard
         env:
           PLATFORM: ${{ matrix.platform }}

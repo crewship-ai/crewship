@@ -216,7 +216,6 @@
     "github.com/crewship-ai/crewship/tools/pages-build": 1.06,
     "github.com/crewship-ai/crewship/web": 1.019
   },
-  "overrides": "internal/access 590.574 (PR #2961 run 37474891269), internal/chatshare <229, internal/backup 930 (PR #2941 run 37474930943)",
   "source_runs": [
     45333298955,
     45371822592,

@@ -11,6 +11,9 @@ inputs:
   go-version:
     description: Go version
     required: true
+  prime-modules:
+    description: Download the module graph before long Go test lanes
+    default: 'false'
 
 runs:
   using: composite
@@ -37,6 +40,7 @@ runs:
         cache: true
 
     - name: Prime the Go module cache
+      if: inputs.prime-modules == 'true'
       shell: bash
       run: |
         python3 - <<'PYTHON'

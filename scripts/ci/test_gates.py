@@ -18,7 +18,7 @@ def native_receipts(directory):
     for platform in ('linux-arm64', 'macos-arm64'):
         for index in range(3):
             selected = inventory[index::3]
-            receipts.append(dict(source_sha="reviewed", platform=platform, index=index, count=3,
+            receipts.append(dict(source_sha="reviewed", run_id="123", platform=platform, index=index, count=3,
                                  inventory=inventory, selected=selected, completed=selected,
                                  cli_build=cli in selected))
     for index, receipt in enumerate(receipts):
@@ -34,19 +34,19 @@ class NativeCoverageTests(unittest.TestCase):
             directory = Path(tmp)
             receipts = native_receipts(directory)
             inventory = receipts[0]['inventory']
-            require_native_coverage(directory, "reviewed")
+            require_native_coverage(directory, "reviewed", "123")
             last = directory / '5' / 'platform-shard.json'
             for change in (
                 dict(index=1), dict(completed=[]), dict(inventory=inventory[:-1]), dict(source_sha="other"),
                 dict(selected=receipts[4]['selected'], completed=receipts[4]['selected']),
-                dict(cli_build=True),
+                dict(cli_build=True), dict(run_id="456"),
             ):
                 last.write_text(json.dumps({**receipts[5], **change}))
                 with self.subTest(change=list(change)), self.assertRaises(ValueError):
-                    require_native_coverage(directory, "reviewed")
+                    require_native_coverage(directory, "reviewed", "123")
             last.unlink()
             with self.assertRaises(ValueError):
-                require_native_coverage(directory, "reviewed")
+                require_native_coverage(directory, "reviewed", "123")
 
 
 class GateTests(unittest.TestCase):
@@ -560,7 +560,7 @@ class GateTests(unittest.TestCase):
             native_receipts(Path(tmp) / '.ci-native-platforms')
             for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
                                        ('pull_request', reduced, 0), (None, self.results(), 0)]:
-                run_env = dict(env, CI_NEEDS=json.dumps(needs), GITHUB_SHA='reviewed')
+                run_env = dict(env, CI_NEEDS=json.dumps(needs), GITHUB_SHA='reviewed', GITHUB_RUN_ID='123')
                 if event:
                     run_env['GITHUB_EVENT_NAME'] = event
                 result = subprocess.run(['python3', str(script)], cwd=tmp, env=run_env, capture_output=True, text=True)

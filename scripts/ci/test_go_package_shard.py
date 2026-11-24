@@ -1,6 +1,7 @@
 """Package partitions cover the listing exactly once and refuse truncation."""
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -20,6 +21,56 @@ def api_inventory(n=50):
 
 
 class GoPackageShardTests(unittest.TestCase):
+    def test_entrypoint_selects_shuffle_costs_without_splitting_packages(self):
+        with patch.object(SHARD, 'run', return_value=0) as run:
+            self.assertEqual(SHARD.main(['shuffle', '0', '3', '-shuffle=on']), 0)
+            run.assert_called_once_with(0, 3, ['-shuffle=on'], split_api=False, profile='shuffle')
+        with self.assertRaises(ValueError):
+            SHARD.main(['shuffle', '0', '3', '--split-api'])
+
+    def test_native_receipt_requires_all_terminal_package_events(self):
+        cli = P + 'cmd/crewship'
+        packages = [cli, *[P + f'internal/package{i}' for i in range(89)]]
+        for result in ('success', 'missing', 'duplicate', 'failed'):
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                scripts = root / 'scripts/ci'
+                scripts.mkdir(parents=True)
+                (scripts / 'go-platform-costs.json').write_text(json.dumps({
+                    'default_seconds': 1, 'platforms': {'macos-arm64': {cli: 50}},
+                }))
+                output = root / '.ci-results'
+                output.mkdir()
+                receipt = output / 'platform-shard.json'
+                receipt.write_text('{}')
+
+                def run(args, **kwargs):
+                    if args[0] == 'go':
+                        self.assertEqual(args, ['go', 'build', './cmd/crewship'])
+                        return
+                    self.assertEqual(args[:2], ['bash', 'scripts/ci/go-test.sh'])
+                    self.assertEqual(args[-3:], ['-count=1', '-timeout', '30m'])
+                    if result == 'failed':
+                        raise subprocess.CalledProcessError(1, args)
+                    assigned = args[2:-3]
+                    executed = {'missing': assigned[:-1], 'duplicate': assigned + assigned[:1]}.get(result, assigned)
+                    events = [dict(Package=p, Action='skip' if p == cli else 'pass') for p in executed]
+                    (output / 'go-test.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in events))
+
+                with patch.object(SHARD, 'ROOT', root), patch.dict(SHARD.os.environ, GITHUB_SHA='reviewed', GITHUB_RUN_ID='123'), \
+                        patch.object(SHARD.subprocess, 'check_output', side_effect=['darwin\narm64', 'reviewed', '\n'.join(packages)]), \
+                        patch.object(SHARD.subprocess, 'run', side_effect=run):
+                    if result == 'success':
+                        self.assertEqual(SHARD.run_platform('macos-arm64', 0, 3), 0)
+                        proof = json.loads(receipt.read_text())
+                        self.assertTrue(proof['cli_build'])
+                        self.assertEqual(proof['completed'], proof['selected'])
+                        self.assertEqual(proof['run_id'], '123')
+                    else:
+                        with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                            SHARD.run_platform('macos-arm64', 0, 3)
+                        self.assertFalse(receipt.exists())
+
     def weights(self):
         costs = json.loads(Path(__file__).with_name("general-race-costs.json").read_text())
         return dict(costs["packages"], **SHARD.EXTRA_COSTS), costs["default_seconds"]

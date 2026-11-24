@@ -114,10 +114,11 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('runner: macos-15', lane)
         self.assertIn('runner: ubuntu-24.04-arm', lane)
         self.assertIn('go-package-shard.py native "$PLATFORM" "$SHARD_INDEX" 3', lane)
-        self.assertIn('if-no-files-found: error', lane)
+        self.assertIn('if-no-files-found: error', self.step(lane, 'Upload exact native package coverage'))
         native = (ROOT / 'scripts/ci/go-package-shard.py').read_text().split('def run_platform(', 1)[1]
         self.assertIn('["go", "list", "./..."]', native)
         self.assertIn('["go", "build", "./cmd/crewship"]', native)
+        self.assertIn('"-count=1"', native)
         go_timeout = int(re.search(r'"-timeout", "(\d+)m"', native).group(1))
         job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
         self.assertGreaterEqual(go_timeout, 30)
