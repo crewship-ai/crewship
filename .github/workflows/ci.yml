@@ -248,7 +248,8 @@ jobs:
     needs: [merge-conflict-markers]
     name: Shell
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Include the pinned Go setup and bounded Actionlint module download.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,7 +265,16 @@ jobs:
           gh api "repos/$REPO/codeowners/errors?ref=$SHA" > "$RUNNER_TEMP/codeowners-errors.json"
           jq '.errors' "$RUNNER_TEMP/codeowners-errors.json"
           jq -e '.errors | type == "array" and length == 0' "$RUNNER_TEMP/codeowners-errors.json"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        timeout-minutes: 2
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Prime the Actionlint module cache
+        timeout-minutes: 2
+        run: python3 scripts/ci/prime-go-modules.py --attempt-timeout 20 --tool github.com/rhysd/actionlint@v1.7.7
       - name: Validate GitHub workflow syntax and expressions
+        timeout-minutes: 2
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
       - name: CI gate regression tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
@@ -444,6 +454,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build server and CLI from this commit
         run: go build -o crewship ./cmd/crewship
       - name: Generate ephemeral instance secrets
@@ -807,6 +818,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build CLI from this commit
         run: go build -o crewship ./cmd/crewship
       - name: Run C1 command breadth smoke
@@ -843,6 +855,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Runtime facts
         run: docker version
       # Asserts, inside a real container built from the product's own default
@@ -866,6 +879,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Prepare pinned synthetic fixture
         timeout-minutes: 3
         run: |
@@ -967,6 +981,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -1362,6 +1377,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Check documented provider order and frontend vocabularies
         timeout-minutes: 10
         run: python3 scripts/ci/parity.py
@@ -1435,6 +1451,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Install pinned Rust and WASM target
         timeout-minutes: 5
         run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
@@ -1487,6 +1504,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Require documentation contract evidence without the Go matrix
         timeout-minutes: 10
         run: timeout --kill-after=30s 8m go run ./scripts/docs-inventory -strict
@@ -2271,6 +2289,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Require instrumented CLI and named acceptance scenarios
         timeout-minutes: 15
         run: python3 scripts/ci/cli-subprocess-race.py
@@ -2477,6 +2496,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build and measure genuine race migration template
         run: python3 scripts/ci/api-race-shard.py bootstrap .ci-api-template 4600
       - name: Upload template and actual execution evidence
@@ -2677,6 +2697,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Preserve already shipped migrations
         env:
@@ -2840,6 +2861,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       # Wipe the embed dir before pulling the artifact so a stale checkout
       # copy of web/out cannot satisfy the embed directive if the
@@ -2929,6 +2951,9 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Prime the Go module cache
+        timeout-minutes: 4
+        run: python3 scripts/ci/prime-go-modules.py
       - name: Install and run both packages through the server
         timeout-minutes: 15
         env:
@@ -3041,6 +3066,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: nextjs-static-export
