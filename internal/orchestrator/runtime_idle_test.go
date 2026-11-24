@@ -117,3 +117,15 @@ func TestTTLUsesManagedAdmissionAndRetainsDeferredCandidate(t *testing.T) {
 		}
 	}
 }
+
+func TestPodmanInitCensus(t *testing.T) {
+	baseline := strings.Replace(idleCensus, "docker-init", "podman-init", 1)
+	for _, tc := range []struct {
+		extra string
+		busy  bool
+	}{{"", false}, {"1001 40 1 podman-init\n", true}} {
+		if err := idleProcessTree(baseline + tc.extra + "crewship-idle-census-end\n"); (err != nil) != tc.busy {
+			t.Errorf("extra %q: %v", tc.extra, err)
+		}
+	}
+}

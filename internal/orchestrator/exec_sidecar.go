@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // Where the sidecar's stderr lands, and how much of it we are willing to keep.
@@ -151,11 +152,39 @@ func sidecarLaunchScript(credsB64 string) string {
 			// as fallbacks: a container may still be running an older
 			// bind-mounted sidecar that predates --health-check, and on that
 			// binary the flag exits non-zero as an unknown flag.
-			`sleep 0.5`+"\n"+
-			`if crewship-sidecar --health-check --addr 127.0.0.1:9119 2>/dev/null; then exit 0; `+
-			`elif wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
-			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
-			`else echo "sidecar health check failed (no probe succeeded; sidecar log: %[2]s)" >&2; exit 1; fi`,
+			`ticks=100
+pause() {
+  [ "$ticks" -gt 0 ] && kill -0 "$SIDECAR_PID" 2>/dev/null || return 1
+  ticks=$((ticks - 1))
+  sleep 0.1
+}
+probe() {
+  "$@" </dev/null >/dev/null 2>&1 &
+  probe_pid=$!
+  while kill -0 "$probe_pid" 2>/dev/null; do
+    if ! pause; then
+      kill -KILL "$probe_pid" 2>/dev/null
+      wait "$probe_pid" 2>/dev/null
+      return 1
+    fi
+  done
+  wait "$probe_pid" && kill -0 "$SIDECAR_PID" 2>/dev/null
+}
+while pause; do
+  probe crewship-sidecar --health-check --addr 127.0.0.1:9119 && exit 0
+  probe wget -q -O /dev/null http://127.0.0.1:9119/health && exit 0
+  probe curl -sf http://127.0.0.1:9119/health && exit 0
+done
+if kill -0 "$SIDECAR_PID" 2>/dev/null; then
+  kill "$SIDECAR_PID" 2>/dev/null
+  echo "sidecar readiness timed out" >&2
+else
+  echo "sidecar exited before readiness" >&2
+fi
+if [ -f %[2]s ] && [ ! -L %[2]s ] && [ -O %[2]s ]; then
+  tail -c 2048 %[2]s >&2
+fi
+exit 1`,
 		credsB64,
 		sidecarLogPath,
 		"  "+strings.ReplaceAll(sidecarLogTrimOnce(sidecarLogPath), "\n", "\n  "),
@@ -1273,7 +1302,27 @@ func startSidecar(
 		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
 	}
 	if !running && exitCode != 0 {
-		msg := strings.TrimSpace(string(output))
+		redactor := scrubber.New()
+		values := collectSecretValues(AgentRunRequest{Credentials: creds})
+		if ipcCfg != nil {
+			values = append(values, ipcCfg.Token, ipcCfg.AgentToken, ipcCfg.AgentRunKey)
+		}
+		if routeAuth != nil {
+			values = append(values, routeAuth.Key)
+		}
+		for _, member := range crewMembers {
+			values = append(values, member.AuthToken)
+		}
+		for _, server := range mcpInput {
+			if server.Credential != nil {
+				values = append(values, server.Credential.PlainValue)
+			}
+			for _, value := range server.Env {
+				values = append(values, value)
+			}
+		}
+		redactor.AddSecretValues(values...)
+		msg := redactor.Scrub(strings.TrimSpace(string(output)))
 		if readErr != nil {
 			msg += fmt.Sprintf(" (read error: %v)", readErr)
 		}

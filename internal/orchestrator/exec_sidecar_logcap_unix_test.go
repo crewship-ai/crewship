@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // -----------------------------------------------------------------------------
@@ -253,5 +255,45 @@ func TestSidecarLogTrim_NonAppendingWriterDefeatsTheCap(t *testing.T) {
 			"to restore the pre-trim size. If this ever holds, re-derive whether `2>>` is "+
 			"still load-bearing in sidecarLaunchScript before relaxing it.",
 			got, trimmed)
+	}
+}
+
+func TestSidecarStartupReadiness(t *testing.T) {
+	for _, mode := range []string{"slow", "dead", "hung"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, body := range map[string]string{
+				"crewship-sidecar": `if [ "$1" = --health-check ]; then
+                    if [ "$MODE" = hung ]; then sleep 30; fi
+                    test -f ready; exit $?
+                fi
+                echo startup-diagnostic >&2
+                if [ "$MODE" = dead ]; then exit 1; fi
+                sleep 1; touch ready; exec sleep 30`,
+				"wget": "exit 1", "curl": "exit 1",
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("sh")
+			cmd.Dir = dir
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "MODE="+mode)
+			cmd.Stdin = strings.NewReader(strings.ReplaceAll(sidecarLaunchScript(""), sidecarLogPath, "sidecar.log"))
+			start := time.Now()
+			out, err := cmd.CombinedOutput()
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			elapsed := time.Since(start)
+			if mode == "slow" {
+				if err != nil {
+					t.Fatalf("slow startup: %v: %s", err, out)
+				}
+			} else if err == nil || !strings.Contains(string(out), "startup-diagnostic") || elapsed > 13*time.Second || (mode == "dead" && elapsed > 3*time.Second) {
+				t.Fatalf("%s: %v after %s: %s", mode, err, elapsed, out)
+			}
+		})
 	}
 }

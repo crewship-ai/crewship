@@ -120,8 +120,13 @@ func verifyRelabelSources(serviceRoot string, binds []string) error {
 				relative = "."
 			}
 			remote, err := root.Lstat(relative)
-			if err != nil || !os.SameFile(local, remote) {
-				return fmt.Errorf("Podman sees a different SELinux bind path at %q", child)
+			if err != nil {
+				stat := local.Sys().(*syscall.Stat_t)
+				return fmt.Errorf("inspect Podman SELinux bind path %q (local dev=%d ino=%d): %w", child, stat.Dev, stat.Ino, err)
+			}
+			if !os.SameFile(local, remote) {
+				here, peer := local.Sys().(*syscall.Stat_t), remote.Sys().(*syscall.Stat_t)
+				return fmt.Errorf("Podman sees a different SELinux bind path at %q (local dev=%d ino=%d, peer dev=%d ino=%d)", child, here.Dev, here.Ino, peer.Dev, peer.Ino)
 			}
 			if child == "/" {
 				break

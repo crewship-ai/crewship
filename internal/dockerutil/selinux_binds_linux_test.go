@@ -2,10 +2,12 @@ package dockerutil
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,11 +43,14 @@ func TestPodmanSELinuxSourceIdentity(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(remoteSrc), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := verifyRelabelSources(other, binds); !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "local dev=") {
+		t.Fatalf("missing peer path lost its lookup error or local identity: %v", err)
+	}
 	if err := os.WriteFile(remoteSrc, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyRelabelSources(other, binds); err == nil {
-		t.Fatal("accepted another inode at the same absolute path")
+	if err := verifyRelabelSources(other, binds); err == nil || !strings.Contains(err.Error(), "peer dev=") || strings.Count(err.Error(), "ino=") != 2 {
+		t.Fatalf("different inodes must report both identities: %v", err)
 	}
 }
 
