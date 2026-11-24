@@ -63,6 +63,9 @@ func (s *agentSDKFake) serve(w http.ResponseWriter, r *http.Request, d *sidecarF
 		reply(map[string]any{"Id": c.id, "Name": "/" + c.name, "Image": "sha256:" + strings.Repeat("a", 64), "State": map[string]any{"Status": c.status, "Running": c.status == "running"}, "Config": map[string]any{"Image": "default/runtime:latest", "User": "1001:1001", "Labels": c.labels}, "HostConfig": map[string]any{"ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "Tmpfs": map[string]string{"/secrets": secretsTmpfsSpec}}, "Mounts": mounts})
 		return true
 	case r.Method == http.MethodHead && strings.HasSuffix(uri, "/archive"):
+		if s.fault == "podman-local-archive" {
+			s.t.Error("local SELinux Podman qualification sent a live archive request")
+		}
 		target := r.URL.Query().Get("path")
 		mode := os.ModeDir | 0755
 		if target == "/usr/local/bin/crewship" {

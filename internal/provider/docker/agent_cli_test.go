@@ -209,7 +209,7 @@ func TestAgentCLIRequiredMissingClientCannotReuseLiveRuntime(t *testing.T) {
 }
 
 func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
-	for _, fault := range []string{"podman-safe", "podman-symlink", "podman-capabilities", "docker-expanded", "privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "writable-sdk-alias", "writable-sdk-volume-alias", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
+	for _, fault := range []string{"podman-safe", "podman-local-archive", "podman-symlink", "podman-capabilities", "docker-expanded", "privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "writable-sdk-alias", "writable-sdk-volume-alias", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
 		t.Run(fault, func(t *testing.T) {
 			p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
 			fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
@@ -223,6 +223,9 @@ func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
 			daemon.sdk = &agentSDKFake{t: t, artifact: fixture.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, fault: fault}
 			if strings.HasPrefix(fault, "podman-") {
 				p.detected.Runtime = "podman"
+			}
+			if fault == "podman-local-archive" {
+				p.selinuxEnabled = true
 			}
 			if fault == "stale-probe-commit" {
 				daemon.sdk.commit = strings.Repeat("c", 40)
