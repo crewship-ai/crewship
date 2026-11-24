@@ -105,7 +105,7 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO inbox_items(id,workspace_id,kind,source_id,title) VALUES(?,?,'waitpoint',?,'Approve')`, oldInbox, ws, old); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO inbox_item_reads(inbox_item_id,user_id) VALUES(?,'u_reader')`, oldInbox); err != nil {
+	if _, err := db.Exec(`INSERT INTO inbox_item_reads(inbox_item_id,user_id) VALUES(?,'u_admin')`, oldInbox); err != nil {
 		t.Fatal(err)
 	}
 	dump, err := backup.DumpWorkspace(ctx, db, ws)
