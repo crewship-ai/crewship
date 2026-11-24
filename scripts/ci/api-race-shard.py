@@ -29,6 +29,7 @@ RACE_GCFLAGS = os.environ.get('RACE_GCFLAGS', '-gcflags=modernc.org/...=-d=check
 # Linux limits EACH argv string, independently of total ARG_MAX. Leave room
 # for the terminator and fail clearly as the suite grows, never truncate it.
 MAX_PATTERN_BYTES = 120_000
+BACKUP_PACKAGE = MODULE + '/internal/backup'
 BOOTSTRAP_PACKAGE = MODULE + '/internal/testutil'
 BOOTSTRAP_TEST = 'TestCIRaceTemplateBootstrap'
 
@@ -144,7 +145,7 @@ def fingerprint(names):
     return hashlib.sha256('\n'.join(sorted(names)).encode()).hexdigest()
 
 
-def partition(inventory, count, *, adjacent=False):
+def partition(inventory, count, *, adjacent=False, boundaries=None):
     if not 1 <= count <= 32:
         raise ValueError('require 1 <= shard count <= 32')
     names = []
@@ -155,12 +156,18 @@ def partition(inventory, count, *, adjacent=False):
         raise ValueError('duplicate top-level test in Go inventory')
     names.sort()
     if adjacent:
-        if PACKAGE != MODULE + '/internal/api':
-            raise ValueError('adjacent partitions require the API package')
+        if PACKAGE not in {MODULE + '/internal/api', BACKUP_PACKAGE}:
+            raise ValueError('adjacent partitions require the API or backup package')
         # Adjacent names permit small inventory-checked prefix expressions.
         # Keep exactly the same number of processes and every parent/subtest.
-        shards = [names[i * len(names) // count:(i + 1) * len(names) // count]
-                  for i in range(count)]
+        if boundaries is None:
+            indices = [i * len(names) // count for i in range(1, count)]
+        else:
+            if len(boundaries) != count - 1 or sorted(set(boundaries)) != boundaries:
+                raise ValueError('invalid measured API shard boundaries')
+            indices = [bisect_left(names, name) for name in boundaries]
+        edges = [0, *indices, len(names)]
+        shards = [names[start:end] for start, end in zip(edges, edges[1:])]
     else:
         shards = [names[i::count] for i in range(count)]
     # These API parents build the same real CLI. Keep their build/cache reuse
@@ -270,7 +277,18 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
     # compile is reused by the run instead of rebuilding SQLite.
     inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, env=env, text=True)
-    names, shards = partition(inventory, count, adjacent=PACKAGE == MODULE + '/internal/api')
+    api = PACKAGE == MODULE + '/internal/api'
+    boundaries = None
+    if api and count == 6:
+        boundaries = json.loads((ROOT / 'scripts/ci/api-race-cost-boundaries.json').read_text())['upper_starts']
+    if PACKAGE == BACKUP_PACKAGE:
+        if count != 2:
+            raise ValueError('backup race requires two shards')
+        if not env.get('GITHUB_RUN_ID') or not env.get('GITHUB_SHA') or subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip() != env['GITHUB_SHA']:
+            raise ValueError('backup race must run on the workflow revision')
+        boundaries = json.loads((ROOT / 'scripts/ci/backup-race-cost-boundaries.json').read_text())['upper_starts']
+    names, shards = partition(inventory, count, adjacent=api or PACKAGE == BACKUP_PACKAGE, boundaries=boundaries)
     selected = shards[index]
     pattern = selection_pattern(selected, names if PACKAGE == MODULE + '/internal/api' else None)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),
@@ -279,6 +297,8 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
                 'selection_pattern_sha256': hashlib.sha256(pattern.encode()).hexdigest(),
                 'selection_pattern_bytes': len(pattern.encode()),
                 'selection_mode': 'inventory-prefix-v1' if PACKAGE == MODULE + '/internal/api' else 'exact-names-v1'}
+    if PACKAGE == BACKUP_PACKAGE:
+        manifest['run_id'] = env['GITHUB_RUN_ID']
     if bootstrap_digest is not None:
         manifest['bootstrap_sha256'] = bootstrap_digest
     if profile_directory is not None:
@@ -294,7 +314,8 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
     return 0
 
 
-def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=None):
+def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=None, *,
+                       expected_package=PACKAGE, run_id=None):
     if len(manifests) != count or sorted(m.get('index', -1) for m in manifests) != list(range(count)):
         raise ValueError('missing or duplicate API shard evidence')
     reference = manifests[0]
@@ -307,10 +328,12 @@ def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=Non
             raise ValueError('API shards do not reference the required measured bootstrap')
         # Identity: one package and one source revision. Download patterns
         # already pin both; this keeps a mixed evidence set from validating.
-        if manifest.get('package') != PACKAGE or manifest.get('source_sha') != reference.get('source_sha'):
+        if manifest.get('package') != expected_package or manifest.get('source_sha') != reference.get('source_sha'):
             raise ValueError('race shard evidence comes from another package or revision')
         if expected_sha and manifest.get('source_sha') != expected_sha:
             raise ValueError('race shard evidence does not match this revision')
+        if run_id and manifest.get('run_id') != run_id:
+            raise ValueError('race shard evidence does not match this workflow run')
         if (manifest.get('count') != count or
                 manifest.get('inventory_count') != reference.get('inventory_count') or
                 manifest.get('inventory_sha256') != reference.get('inventory_sha256')):

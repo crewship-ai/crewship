@@ -87,6 +87,7 @@ services:
       # /volumes -- VolumeCreate, VolumeInspect, VolumeList, VolumeRemove.
       VOLUMES: 1
       # /info -- cgroup version and host-filesystem detection.
+      # Local rootless Podman also uses /info to identify the responding service.
       INFO: 1
       # /_ping and /version -- daemon detection. The image defaults both to 1;
       # set explicitly so this file is the whole story.

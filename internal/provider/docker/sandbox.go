@@ -17,6 +17,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
@@ -49,7 +50,7 @@ func (p *Provider) CreateSandbox(ctx context.Context, spec provider.SandboxSpec)
 	if err != nil {
 		return provider.SandboxRef{}, fmt.Errorf("sandbox image: %w", err)
 	}
-	if inspected.ID != spec.ImageID || len(inspected.Config.Volumes) != 0 {
+	if dockerutil.ConfigImageID(inspected.ID) != spec.ImageID || len(inspected.Config.Volumes) != 0 {
 		return provider.SandboxRef{}, provider.ErrSandboxDenied
 	}
 	// The lifetime keeper runs as trusted UID 1002; agent execs use UID 1001
@@ -68,7 +69,7 @@ func (p *Provider) CreateSandbox(ctx context.Context, spec provider.SandboxSpec)
 	env = append(env, "HOME="+provider.SandboxHome, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "DISABLE_AUTOUPDATER=1")
 	init := true
 	pids := spec.PIDs
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Name:       fmt.Sprintf("crewship-sandbox-%x-%s", sha256.Sum256([]byte(p.cfg.InstanceID)), spec.ID),
 		Config:     &container.Config{Image: spec.ImageID, User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{strconv.FormatInt(int64((spec.Lifetime+time.Second-1)/time.Second), 10)}, Env: env, WorkingDir: "/tmp", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{resourcelifecycle.InstanceLabel: p.cfg.InstanceID, sandboxInstanceLabel: spec.ID, sandboxKindLabel: "offline-v1"}},
 		HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Init: &init, Resources: container.Resources{Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs, PidsLimit: &pids}, Tmpfs: map[string]string{provider.SandboxHome: "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}},
@@ -105,7 +106,7 @@ func (p *Provider) ownedSandbox(ctx context.Context, ref provider.SandboxRef) (c
 		return container.InspectResponse{}, err
 	}
 	c := result.Container
-	if c.Config == nil || c.Config.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || c.Config.Labels[sandboxInstanceLabel] != ref.ID || c.Config.Labels[sandboxKindLabel] != "offline-v1" || c.Image != ref.ImageID {
+	if c.Config == nil || c.Config.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || c.Config.Labels[sandboxInstanceLabel] != ref.ID || c.Config.Labels[sandboxKindLabel] != "offline-v1" || dockerutil.ConfigImageID(c.Image) != ref.ImageID {
 		return c, provider.ErrSandboxDenied
 	}
 	return c, nil
@@ -116,7 +117,7 @@ func (p *Provider) InspectSandbox(ctx context.Context, ref provider.SandboxRef) 
 	if err != nil {
 		return provider.SandboxState{}, err
 	}
-	return provider.SandboxState{Running: c.State != nil && c.State.Running, ImageID: c.Image}, nil
+	return provider.SandboxState{Running: c.State != nil && c.State.Running, ImageID: ref.ImageID}, nil
 }
 func (p *Provider) RemoveSandbox(ctx context.Context, ref provider.SandboxRef) error {
 	if _, err := p.ownedSandbox(ctx, ref); err != nil {

@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // -----------------------------------------------------------------------------
@@ -253,5 +255,59 @@ func TestSidecarLogTrim_NonAppendingWriterDefeatsTheCap(t *testing.T) {
 			"to restore the pre-trim size. If this ever holds, re-derive whether `2>>` is "+
 			"still load-bearing in sidecarLaunchScript before relaxing it.",
 			got, trimmed)
+	}
+}
+
+func TestSidecarStartupReadiness(t *testing.T) {
+	for _, mode := range []string{"slow", "dead", "hung"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			realSleep, err := exec.LookPath("sleep")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range map[string]string{
+				"crewship-sidecar": `if [ "$1" = --health-check ]; then
+                    if [ "$MODE" = hung ]; then sleep 30; fi
+                    test -f ready; exit $?
+                fi
+                if [ "$MODE" = dead ]; then
+                    printf 'opaque-credential-at-boundary%2040s\n' x >&2
+                fi
+                echo startup-diagnostic >&2
+                if [ "$MODE" = dead ]; then exit 1; fi
+                sleep 1; touch ready; exec sleep 30`,
+				// A loaded host can resume each poll late. Its latency must not
+				// accumulate into the readiness deadline.
+				"sleep": `if [ "$MODE" = hung ] && [ "$1" = 0.1 ]; then set -- 0.2; fi
+exec "$REAL_SLEEP" "$@"`,
+				"wget": "exit 1", "curl": "exit 1",
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("sh")
+			cmd.Dir = dir
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "MODE="+mode, "REAL_SLEEP="+realSleep)
+			cmd.Stdin = strings.NewReader(strings.ReplaceAll(sidecarLaunchScript(""), sidecarLogPath, "sidecar.log"))
+			start := time.Now()
+			out, err := cmd.CombinedOutput()
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			elapsed := time.Since(start)
+			if mode == "dead" && !strings.Contains(string(out), "opaque-credential-at-boundary") {
+				t.Fatalf("startup log was cut before the host could redact it")
+			}
+			if mode == "slow" {
+				if err != nil {
+					t.Fatalf("slow startup: %v: %s", err, out)
+				}
+			} else if err == nil || !strings.Contains(string(out), "startup-diagnostic") || elapsed > 13*time.Second || (mode == "dead" && elapsed > 3*time.Second) {
+				t.Fatalf("%s: %v after %s: %s", mode, err, elapsed, out)
+			}
+		})
 	}
 }

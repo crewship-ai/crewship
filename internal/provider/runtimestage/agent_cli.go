@@ -160,18 +160,28 @@ func StageAgentCLI(outputBase, source string) (*AgentCLIArtifact, error) {
 // republishing it. Runtime admission calls this after proving the tree is not
 // exposed through writable crew mounts.
 func VerifyAgentCLIArtifact(artifact *AgentCLIArtifact) error {
+	file, err := OpenVerifiedAgentCLI(artifact)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+// OpenVerifiedAgentCLI keeps the verified executable inode pinned so callers
+// can compare it with a live mount without resolving the staging name again.
+func OpenVerifiedAgentCLI(artifact *AgentCLIArtifact) (*os.File, error) {
 	denied := errors.New("native agent CLI generation is no longer trusted")
 	if artifact == nil || len(artifact.SHA256) != 64 || filepath.Base(artifact.Path) != "crewship-agent-cli-"+artifact.SHA256 {
-		return denied
+		return nil, denied
 	}
 	parent := filepath.Dir(artifact.Path)
 	for current := parent; ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
 		if err != nil || !safeAgentCLIDirectory(info) {
-			return denied
+			return nil, denied
 		}
 		if current == parent && info.Mode().Perm() != 0700 {
-			return denied
+			return nil, denied
 		}
 		if current == filepath.Dir(current) {
 			break
@@ -179,20 +189,21 @@ func VerifyAgentCLIArtifact(artifact *AgentCLIArtifact) error {
 	}
 	info, err := os.Lstat(artifact.Path)
 	if err != nil || !safeAgentCLIFile(info, true) {
-		return denied
+		return nil, denied
 	}
 	file, err := os.OpenFile(artifact.Path, os.O_RDONLY|agentCLINoFollowFlag(), 0)
 	if err != nil {
-		return denied
+		return nil, denied
 	}
-	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil || !os.SameFile(info, opened) || !safeAgentCLIFile(opened, true) {
-		return denied
+		file.Close()
+		return nil, denied
 	}
 	actual, err := managedlaunch.CaptureFile("/usr/local/bin/crewship", file)
 	if err != nil || actual.SHA256 != artifact.SHA256 {
-		return denied
+		file.Close()
+		return nil, denied
 	}
-	return nil
+	return file, nil
 }
