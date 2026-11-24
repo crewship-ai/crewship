@@ -842,13 +842,20 @@ func nullIfBlank(s string) sql.NullString {
 // Waitpoint routes historically carried a bearer token where the public ID
 // appears today. Record the operation without persisting the path credential.
 func cliUseAuditPath(path string) string {
-	prefix, tail, ok := strings.Cut(path, "/pipelines/waitpoints/")
-	if !ok {
-		return path
+	for _, route := range []string{"/pipelines/waitpoints/", "/inbox/"} {
+		prefix, tail, ok := strings.Cut(path, route)
+		if !ok {
+			continue
+		}
+		id, op, hasOp := strings.Cut(tail, "/")
+		if route == "/inbox/" && !strings.HasPrefix(id, "ibx_") {
+			continue
+		}
+		clean := prefix + route + "{id}"
+		if hasOp {
+			clean += "/" + op
+		}
+		return clean
 	}
-	_, op, ok := strings.Cut(tail, "/")
-	if !ok {
-		return prefix + "/pipelines/waitpoints/{id}"
-	}
-	return prefix + "/pipelines/waitpoints/{id}/" + op
+	return path
 }

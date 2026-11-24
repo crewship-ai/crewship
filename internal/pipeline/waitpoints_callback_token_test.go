@@ -65,6 +65,7 @@ func TestWaitpointCallback_MintStoresOnlyDigestAndRotates(t *testing.T) {
 		INSERT INTO users(id,email,full_name) VALUES('u_1','mint@example.test','Manager')`); err != nil {
 		t.Fatal(err)
 	}
+	migrateWaitpointFixture(t, db)
 	store := NewSQLWaitpointStore(db)
 	t.Cleanup(store.Close)
 	ctx := context.Background()
@@ -170,6 +171,7 @@ func TestWaitpointCallback_LegacyRowsMigrate_NoTraceLeft(t *testing.T) {
 		}
 	}
 
+	migrateWaitpointFixture(t, db)
 	store := NewSQLWaitpointStore(db)
 	defer store.Close()
 
@@ -215,39 +217,6 @@ func TestWaitpointCallback_LegacyRowsMigrate_NoTraceLeft(t *testing.T) {
 		t.Fatalf("migrated waitpoint cannot be decided by id: %v", err)
 	}
 
-	// Idempotent, and a legacy row restored into a running server is picked
-	// up by the next sweep without a restart.
-	store.sweepOnce()
-	store.migrateLegacyTokens()
-	var after string
-	_ = db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id='run_1'`).Scan(&after)
-	if after != id {
-		t.Fatalf("second pass re-migrated the row: %q -> %q", id, after)
-	}
-	const restored = "aaaabbbbccccddddaaaabbbbccccdddd"
-	if _, err := db.Exec(`INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, timeout_at) VALUES ('` + restored + `','ws_a','run_3','gate','approval','2999-01-01T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	store.mu.Lock()
-	ch := make(chan waitDecision, 1)
-	store.listeners[restored] = ch
-	store.mu.Unlock()
-	store.migrateLegacyTokens()
-	assertNoPlaintext(t, db, restored)
-	var restoredID string
-	_ = db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id='run_3'`).Scan(&restoredID)
-	// A waiter parked on the old value is woken by a decision on the new id.
-	if err := store.CompleteApproval(ctx, "ws_a", restoredID, true, "u_1", ""); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case d := <-ch:
-		if !d.approved {
-			t.Fatal("listener got a denial")
-		}
-	default:
-		t.Fatal("the listener registered under the old value was not moved to the new id")
-	}
 }
 
 // assertNoPlaintext fails if secret appears in any text column of any table,

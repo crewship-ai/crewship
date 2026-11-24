@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -140,7 +138,7 @@ func (s *SQLWaitpointStore) AfterDecide(ctx context.Context, result *WaitpointDe
 	if result == nil || !result.Applied {
 		return
 	}
-	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", result.Token, result.Status, result.DeciderID)
+	s.resolveInbox(ctx, result.WorkspaceID, result.Token, result.Status, result.DeciderID)
 	s.mu.Lock()
 	if channel, ok := s.listeners[result.Token]; ok {
 		select {

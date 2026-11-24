@@ -481,6 +481,18 @@ func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, use
 	if tx == nil || kind == "" || sourceID == "" {
 		return 0, nil
 	}
+	return resolveSource(ctx, tx, kind, sourceID, action, userID, "", nil)
+}
+
+// ResolveWorkspaceSourceTx addresses an Inbox card by its full unique key.
+func ResolveWorkspaceSourceTx(ctx context.Context, tx DBTX, workspace, kind, sourceID, action, userID string) (int64, error) {
+	if workspace == "" || tx == nil || kind == "" || sourceID == "" {
+		return 0, nil
+	}
+	return resolveSource(ctx, tx, kind, sourceID, action, userID, " AND workspace_id = ?", []any{workspace})
+}
+
+func resolveSource(ctx context.Context, tx DBTX, kind, sourceID, action, userID, scope string, scopeArgs []any) (int64, error) {
 	// Encoding must stay byte-identical to ResolveBySource below, which this
 	// function was extracted from — otherwise resolved_at carries two formats
 	// depending on which variant wrote the row.
@@ -492,8 +504,8 @@ func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, use
 		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
 		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
 		    updated_at = ?
-		WHERE kind = ? AND source_id = ? AND state != 'resolved'`,
-		now, userID, action, now, kind, sourceID)
+		WHERE kind = ? AND source_id = ? AND state != 'resolved'`+scope,
+		append([]any{now, userID, action, now, kind, sourceID}, scopeArgs...)...)
 	if err != nil {
 		return 0, err
 	}
@@ -943,7 +955,7 @@ func ResolveByThreadOrSource(ctx context.Context, db *sql.DB, logger *slog.Logge
 	// built ON ResolveBySourceTx rather than a second copy of its UPDATE
 	// (caught in review), so the two can never drift on what "resolved"
 	// means.
-	n, err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID)
+	n, err := ResolveWorkspaceSourceTx(ctx, db, workspaceID, kind, sourceID, action, userID)
 	if err != nil {
 		logger.Warn("inbox resolve by thread or source", "error", err, "kind", kind, "source_id", sourceID)
 		return

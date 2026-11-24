@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"strings"
 )
@@ -1304,6 +1305,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: probe waitpoint identity schema: %w", err)
 		}
 		if columns["callback_token_hash"] {
+			if err := database.ConvertWaitpointIdentities(ctx, tx); err != nil {
+				return stats, fmt.Errorf("backup: convert destination waitpoints: %w", err)
+			}
 			dump = normalizeLegacyWaitpointRestore(dump)
 		}
 	}

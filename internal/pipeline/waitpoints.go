@@ -117,12 +117,7 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 		cancelSweep: cancelSweep,
 		trust:       NewTrustGrantStore(db),
 	}
-	// Before anything can read a waitpoint: give legacy rows a fresh public
-	// id and a NULL callback digest. Their old secrets are not carried
-	// forward, so pre-#1910 callback URLs deliberately stop working until a
-	// MANAGER mints a new one (#1910, waitpoints_callback_token.go).
 	ensureWaitpointDigestColumn(db)
-	s.migrateLegacyTokens()
 	s.sweeperWg.Add(1)
 	go s.sweeper()
 	return s
@@ -169,16 +164,16 @@ WHERE status = 'pending' AND timeout_at <= ?`, now, now)
 
 	if timedOut > 0 {
 		rows, qerr := s.db.QueryContext(ctx, `
-SELECT token, pipeline_run_id FROM pipeline_waitpoints
+SELECT token, pipeline_run_id,workspace_id FROM pipeline_waitpoints
 WHERE status = 'timed_out' AND decided_at = ?`, now)
 		if qerr != nil {
 			return timedOut, 0, fmt.Errorf("waitpoints: recover transitioned scan: %w", qerr)
 		}
-		type expiredWP struct{ token, runID string }
+		type expiredWP struct{ token, runID, workspace string }
 		var expired []expiredWP
 		for rows.Next() {
 			var e expiredWP
-			if scanErr := rows.Scan(&e.token, &e.runID); scanErr == nil {
+			if scanErr := rows.Scan(&e.token, &e.runID, &e.workspace); scanErr == nil {
 				expired = append(expired, e)
 			}
 		}
@@ -189,7 +184,7 @@ WHERE status = 'timed_out' AND decided_at = ?`, now)
 		// resumer is usually unset — the boot run-recovery scan handles
 		// these — so resumeRun is a no-op there.
 		for _, wp := range expired {
-			inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", wp.token, "timed_out", "")
+			s.resolveInbox(ctx, wp.workspace, wp.token, "timed_out", "")
 			s.resumeRun(wp.runID)
 		}
 	}
@@ -747,22 +742,24 @@ func (s *SQLWaitpointStore) commitDecision(ctx context.Context, apply func(*sql.
 func (s *SQLWaitpointStore) CancelWaitpointsForRun(ctx context.Context, pipelineRunID string) (int, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: decided_at is stored/compared as RFC3339Nano throughout this store (see the timeout sweep match) — format parity is required, tsformat would mismatch
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT token FROM pipeline_waitpoints WHERE pipeline_run_id = ? AND status = 'pending'`,
+		`SELECT token,workspace_id FROM pipeline_waitpoints WHERE pipeline_run_id = ? AND status = 'pending'`,
 		pipelineRunID)
 	if err != nil {
 		return 0, fmt.Errorf("waitpoints: cancel-for-run scan: %w", err)
 	}
-	var tokens []string
+	type pendingGate struct{ token, workspace string }
+	var tokens []pendingGate
 	for rows.Next() {
-		var tok string
-		if scanErr := rows.Scan(&tok); scanErr == nil {
+		var tok pendingGate
+		if scanErr := rows.Scan(&tok.token, &tok.workspace); scanErr == nil {
 			tokens = append(tokens, tok)
 		}
 	}
 	rows.Close()
 
 	cancelled := 0
-	for _, tok := range tokens {
+	for _, gate := range tokens {
+		tok := gate.token
 		res, execErr := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = 'cancelled', decided_at = ?
@@ -774,7 +771,7 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 			continue
 		}
 		cancelled++
-		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "cancelled", "")
+		s.resolveInbox(ctx, gate.workspace, tok, "cancelled", "")
 		s.mu.Lock()
 		if ch, ok := s.listeners[tok]; ok {
 			select {
@@ -895,7 +892,6 @@ func (s *SQLWaitpointStore) sweeper() {
 			return
 		case <-t.C:
 			s.sweepOnce()
-			s.migrateLegacyTokens()
 		}
 	}
 }
@@ -917,18 +913,18 @@ func (s *SQLWaitpointStore) sweepOnce() {
 	// past the regular sweep until RecoverPending runs at next boot.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT token, pipeline_run_id FROM pipeline_waitpoints
+SELECT token, pipeline_run_id,workspace_id FROM pipeline_waitpoints
 WHERE status = 'pending' AND timeout_at <= ?
 LIMIT 200`, now)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-	type expiredWP struct{ token, runID string }
+	type expiredWP struct{ token, runID, workspace string }
 	var expired []expiredWP
 	for rows.Next() {
 		var e expiredWP
-		if err := rows.Scan(&e.token, &e.runID); err == nil {
+		if err := rows.Scan(&e.token, &e.runID, &e.workspace); err == nil {
 			expired = append(expired, e)
 		}
 	}
@@ -955,7 +951,7 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 		// Cascade into the inbox projection so the user's "needs
 		// approval" row clears at the same moment the source
 		// becomes terminal. Idempotent at the SQL layer.
-		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
+		s.resolveInbox(ctx, wp.workspace, tok, "timed_out", "")
 		s.mu.Lock()
 		if ch, ok := s.listeners[tok]; ok {
 			select {
@@ -1047,4 +1043,10 @@ func whoCanAct(stepID string) []string {
 		return []string{"role:ADMIN"}
 	}
 	return []string{"role:MANAGER"}
+}
+
+func (s *SQLWaitpointStore) resolveInbox(ctx context.Context, workspace, token, action, user string) {
+	if _, err := inbox.ResolveWorkspaceSourceTx(ctx, s.db, workspace, inbox.KindWaitpoint, token, action, user); err != nil {
+		slog.Warn("resolve waitpoint Inbox card", "workspace_id", workspace, "error", err)
+	}
 }
