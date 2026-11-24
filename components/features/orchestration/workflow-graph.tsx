@@ -17,6 +17,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
+import { controlsFitViewOptions, legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
@@ -174,7 +175,7 @@ function WorkflowGraphInner(
       setNodes(graphData.nodes)
       setEdges(graphData.edges)
       // Animate zoom to fit new mission
-      setTimeout(() => fitView({ duration: 500, padding: 0.25 }), 50)
+      setTimeout(() => fitView({ duration: 500, padding: legacyFitViewPadding(0.25) }), 50)
       return
     }
 
@@ -309,7 +310,7 @@ function WorkflowGraphInner(
           const absY = (parent?.position.y || 0) + activeNode.position.y + 60
           setCenter(absX, absY, { zoom: 1.2, duration: 600 })
         } else {
-          fitView({ duration: 600, padding: 0.2 })
+          fitView({ duration: 600, padding: legacyFitViewPadding(0.2) })
         }
       },
     }),
@@ -371,8 +372,9 @@ function WorkflowGraphInner(
           onNodeClick={onNodeClick}
           onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
+          elevateEdgesOnSelect={false}
           fitView
-          fitViewOptions={{ padding: 0.3 }}
+          fitViewOptions={{ padding: legacyFitViewPadding(0.3) }}
           minZoom={0.1}
           maxZoom={2.5}
           proOptions={{ hideAttribution: true }}
@@ -386,6 +388,7 @@ function WorkflowGraphInner(
             color="rgba(100, 116, 139, 0.15)"
           />
           <Controls
+            fitViewOptions={controlsFitViewOptions}
             showInteractive={false}
             className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
           />

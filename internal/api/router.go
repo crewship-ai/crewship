@@ -1110,14 +1110,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	SecurityHeaders(VersionHeader(r.version, EnforceOrigin(quiesceGate(http.HandlerFunc(r.routeWithRateLimiting))))).ServeHTTP(w, req)
 }
 
-// Shutdown releases background resources the router owns — the port-expose
-// registry's TTL purge goroutine and the provisioning handler's
-// cleanup/GC loops. Safe to call multiple times. The server's shutdown
-// path invokes this after the HTTP listener stops accepting new
-// connections but before process exit, so neither loop keeps a hanging
-// reference to the DB handle or the Docker client.
-
+// Shutdown releases the router's background resources, including its rate
+// limiter sweeps. The server calls it after the HTTP listener stops accepting
+// connections. It is safe on a partially constructed router and on repeat calls.
 func (r *Router) Shutdown() {
+	for _, limiter := range []*RateLimiter{r.authRL, r.apiRL, r.credTestRL, r.credRevealRL} {
+		if limiter != nil {
+			limiter.Close()
+		}
+	}
+
 	r.craftComponentsMu.Lock()
 	if r.craftInstallCancel != nil {
 		r.craftInstallCancel()

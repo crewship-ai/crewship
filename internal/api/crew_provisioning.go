@@ -18,10 +18,11 @@ import (
 )
 
 type ProvisioningHandler struct {
-	gcWake              chan struct{}
-	legacyImageEviction bool                    // deprecated opt-in alias; protected by mu
-	instanceID          string                  // image ownership; read/written under mu
-	sandboxRuntime      provider.SandboxRuntime // optional qualification backend; set before serving
+	lastCompleteReferenceSweep time.Time // protected by mu
+	gcWake                     chan struct{}
+	legacyImageEviction        bool                    // deprecated opt-in alias; protected by mu
+	instanceID                 string                  // image ownership; read/written under mu
+	sandboxRuntime             provider.SandboxRuntime // optional qualification backend; set before serving
 
 	db             *sql.DB
 	logger         *slog.Logger

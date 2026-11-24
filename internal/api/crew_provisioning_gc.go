@@ -7,12 +7,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/moby/moby/api/types/image"
@@ -66,11 +68,29 @@ func (h *ProvisioningHandler) reconcileImageReferences(ctx context.Context) {
 	defer writer.Leave()
 	ctx, cancel := context.WithTimeout(writer.Context(), 30*time.Second)
 	defer cancel()
-	if err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+	err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
 		return resourcelifecycle.SelectedImageReferences(ctx, h.db)
-	}); err != nil {
-		h.logger.Warn("environment reference reconciliation deferred; retaining references", "error", err)
+	})
+	h.mu.Lock()
+	if err == nil {
+		h.lastCompleteReferenceSweep = time.Now().UTC()
 	}
+	last := h.lastCompleteReferenceSweep
+	h.mu.Unlock()
+	var lastComplete any
+	if !last.IsZero() {
+		lastComplete = last
+	}
+	if err != nil {
+		var partial *dockerprovider.ReferenceSweepError
+		var deferred any // unknown if the inventory itself failed
+		if errors.As(err, &partial) {
+			deferred = partial.Deferred
+		}
+		h.logger.Warn("environment reference reconciliation incomplete", "deferred", deferred, "last_complete", lastComplete, "error", err)
+		return
+	}
+	h.logger.Debug("environment reference reconciliation complete", "deferred", 0, "last_complete", lastComplete)
 }
 
 func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {

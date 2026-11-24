@@ -310,6 +310,7 @@ export function MembersPage() {
   const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const toggle = <K extends "area" | "cap" | "reach">(key: K, value: MemberFilters[K]) => pick({ [key]: filters[key] === value ? "" : value } as Partial<MemberFilters>)
   const activeFilters = activeFilterCount(filters, capsReadable) - Number(Boolean(filters.status))
+  const waitingForFilteredCapabilities = capsReadable && !caps && Boolean(filters.cap || filters.area || filters.flag)
   const toolbar = (
     <>
       <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search name or email…" aria-label="Search members" />
@@ -482,9 +483,11 @@ export function MembersPage() {
               )}
               <SettingsCard icon={Users} title="People" hideHeader>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-2.5" data-slot="members-toolbar">
-                  <b className="text-control font-semibold tabular-nums">
-                    {shown.length === members.length ? `${members.length} ${members.length === 1 ? "person" : "people"}` : `${shown.length} of ${members.length} people`}
-                  </b>
+                  {activeFilters > 0 && !waitingForFilteredCapabilities && (
+                    <b className="text-control font-semibold tabular-nums">
+                      {shown.length} of {members.length} people
+                    </b>
+                  )}
                   {chips.map((c) => (
                     <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
                       className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-micro font-medium text-primary-hover">
