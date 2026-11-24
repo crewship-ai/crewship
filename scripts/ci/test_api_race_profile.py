@@ -55,6 +55,9 @@ class ProfileForwarding(unittest.TestCase):
         scripts.mkdir(parents=True)
         for name in ['go-test.sh', 'go-events.py']:
             shutil.copy(ROOT / 'scripts/ci' / name, scripts / name)
+        (scripts / 'api-race-cost-boundaries.json').write_text(json.dumps({
+            'upper_starts': ['TestB', 'TestC', 'TestD', 'TestE', 'TestF'],
+        }))
         binary = self.root / 'bin'
         binary.mkdir()
         go = binary / 'go'

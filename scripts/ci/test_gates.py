@@ -10,24 +10,30 @@ from verdict import ALWAYS, CODE, CRAFT, FULL, GO, PARITY, failures, require_nat
 from parity import TESTS, missing_tests
 
 
+def native_receipts(directory):
+    prefix = 'github.com/crewship-ai/crewship/'
+    cli = prefix + 'cmd/crewship'
+    inventory = [cli, *[f'{prefix}internal/package{i}' for i in range(89)]]
+    receipts = []
+    for platform in ('linux-arm64', 'macos-arm64'):
+        for index in range(3):
+            selected = inventory[index::3]
+            receipts.append(dict(source_sha="reviewed", platform=platform, index=index, count=3,
+                                 inventory=inventory, selected=selected, completed=selected,
+                                 cli_build=cli in selected))
+    for index, receipt in enumerate(receipts):
+        folder = directory / str(index)
+        folder.mkdir(parents=True)
+        (folder / 'platform-shard.json').write_text(json.dumps(receipt))
+    return receipts
+
+
 class NativeCoverageTests(unittest.TestCase):
     def test_reject_missing_duplicate_and_unexecuted_native_packages(self):
-        prefix = 'github.com/crewship-ai/crewship/'
-        cli = prefix + 'cmd/crewship'
-        inventory = [cli, *[f'{prefix}internal/package{i}' for i in range(89)]]
-        receipts = []
-        for platform in ('linux-arm64', 'macos-arm64'):
-            for index in range(3):
-                selected = inventory[index::3]
-                receipts.append(dict(source_sha="reviewed", platform=platform, index=index, count=3,
-                                     inventory=inventory, selected=selected,
-                                     completed=selected, cli_build=cli in selected))
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            for index, receipt in enumerate(receipts):
-                folder = directory / str(index)
-                folder.mkdir()
-                (folder / 'platform-shard.json').write_text(json.dumps(receipt))
+            receipts = native_receipts(directory)
+            inventory = receipts[0]['inventory']
             require_native_coverage(directory, "reviewed")
             last = directory / '5' / 'platform-shard.json'
             for change in (
@@ -550,13 +556,15 @@ class GateTests(unittest.TestCase):
             reduced[name]['result'] = 'skipped'
         script = Path(__file__).with_name('verdict.py')
         env = {k: v for k, v in os.environ.items() if k != 'GITHUB_EVENT_NAME'}
-        for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
-                                   ('pull_request', reduced, 0), (None, self.results(), 0)]:
-            run_env = dict(env, CI_NEEDS=json.dumps(needs))
-            if event:
-                run_env['GITHUB_EVENT_NAME'] = event
-            result = subprocess.run(['python3', str(script)], env=run_env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, code, (event, result.stdout))
+        with tempfile.TemporaryDirectory() as tmp:
+            native_receipts(Path(tmp) / '.ci-native-platforms')
+            for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
+                                       ('pull_request', reduced, 0), (None, self.results(), 0)]:
+                run_env = dict(env, CI_NEEDS=json.dumps(needs), GITHUB_SHA='reviewed')
+                if event:
+                    run_env['GITHUB_EVENT_NAME'] = event
+                result = subprocess.run(['python3', str(script)], cwd=tmp, env=run_env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, code, (event, result.stdout))
 
 
 if __name__ == '__main__':
