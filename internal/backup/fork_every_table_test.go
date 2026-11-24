@@ -271,6 +271,7 @@ func synthValue(table string, c genColumn, allowed map[string]string, createSQL 
 // Each entry is a place the generator gave up, so keep the list readable: a
 // growing one is a signal, not an inconvenience.
 var genColumnOverrides = map[string]any{
+	"pipeline_waitpoints.token": "wp_fixture_gate", // The waitpoint primary key is named token, rather than id.
 	// Resource grants have exactly one typed resource FK, so forks can remap it.
 	"access_grants.resource_kind": "agent",
 	"access_grants.project_id":    nil,
