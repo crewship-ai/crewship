@@ -1,145 +1,74 @@
-name: PR Image Build
+name: Isolated Browser Evidence
 
-# Reusable image gate in CI. The change plan covers all build-context inputs;
-# CI Result requires this job when code changes. Build locally, then boot the
-# exact image without pushing PR code to the registry.
 on:
-  workflow_call:
-    inputs:
-      platform:
-        type: string
-        default: linux/amd64
   workflow_dispatch:
     inputs:
-      platform:
-        description: Image architecture to build and boot without publication
+      candidate:
+        description: Exact product commit in this repository
+        required: true
+        type: string
+      suite:
+        description: Targeted browser suite
+        required: true
         type: choice
-        default: linux/amd64
-        options:
-          - linux/amd64
-          - linux/arm64
-      registry_image:
-        description: Existing immutable image to smoke on BOTH architectures (skips build)
-        type: string
-      expected_sha:
-        description: Required with registry_image; full embedded source SHA
-        type: string
+        options: [settings, runtime, chat, graphs]
 
 permissions:
   contents: read
 
-# Cancellation is owned by the calling workflow.
 jobs:
-  build:
-    if: ${{ !inputs.registry_image }}
-    name: PR Image Build
+  verify:
     runs-on: ubuntu-latest
-    # release.yml's docker job gets 45 for a multi-arch (amd64+arm64) push
-    # under QEMU. This builds linux/amd64 only, natively, with no push and no
-    # signing — a PR wants a verdict quickly, and every failure class this
-    # guards against (#849/#886's missing COPY, a `pnpm prisma generate` or
-    # `pnpm build` break, the #1567 web/out gate) is architecture-independent,
-    # so the default stays amd64; dispatch can rehearse ARM before release.
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
-      PLATFORM: ${{ inputs.platform || 'linux/amd64' }}
+      CANDIDATE: ${{ inputs.candidate }}
+      SUITE: ${{ inputs.suite }}
+      NEXT_TELEMETRY_DISABLED: '1'
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Resolve commit timestamp
-        id: metadata
-        run: echo "date=$(git log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Validate target platform
-        run: |
-          case "$PLATFORM" in
-            linux/amd64|linux/arm64) ;;
-            *) echo 'Unsupported image smoke platform' >&2; exit 1 ;;
-          esac
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
-        if: inputs.platform == 'linux/arm64'
-        with:
-          platforms: arm64
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # `load: true` pulls the built image into the runner's local Docker
-      # daemon so the smoke step below can `docker run` it directly — no
-      # registry round-trip, and nothing is pushed anywhere (no `push:` key
-      # at all; `load` and `push` are mutually exclusive in buildx). A
-      # separate GHA cache scope from release.yml / nightly.yml's default
-      # scope keeps this job's frequent, throwaway PR builds from evicting
-      # the layers those two release paths depend on.
-      - name: Build image (no push)
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v6.18.0
-        with:
-          context: .
-          pull: true
-          # Refresh OS security fixes on retries without rebuilding compiler stages.
-          no-cache-filters: runtime
-          platforms: ${{ env.PLATFORM }}
-          load: true
-          provenance: false
-          tags: crewship:pr-build
-          build-args: |
-            VERSION=ci-${{ github.sha }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ steps.metadata.outputs.date }}
-          cache-from: type=gha,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
-          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
-
-      - name: Scan the built image
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
-        with:
-          image: crewship:pr-build
-          fail-build: true
-          severity-cutoff: critical
-          output-format: table
-
-      # Same probe smoke-test.yml's "Smoke Docker image" job runs post-release
-      # against the published tag, minus the registry pull — the image never
-      # left this runner. Cheap (a container start + exit), and it is the one
-      # check that proves the multi-stage COPY chain produced a binary that
-      # actually runs, not just one that compiled.
-      - name: Probe `crewship version` inside the built image
-        run: |
-          set -euo pipefail
-          VERSION="ci-${{ github.sha }}"
-          OUT=$(docker run --rm --platform "$PLATFORM" crewship:pr-build version)
-          echo "$OUT"
-          if ! echo "$OUT" | grep -qF "$VERSION"; then
-            echo "::error::container 'crewship version' output did not contain the build's own version string ($VERSION)"
-            exit 1
-          fi
-
-      - name: Verify image boot and embedded UI
-        env:
-          EXPECTED_SHA: ${{ github.sha }}
-        run: bash scripts/ci/smoke-image.sh crewship:pr-build "$EXPECTED_SHA" "$PLATFORM"
-
-  registry-smoke:
-    name: Smoke existing registry image (both platforms)
-    if: github.event_name == 'workflow_dispatch' && inputs.registry_image != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      IMAGE: ${{ inputs.registry_image }}
-      SHA: ${{ inputs.expected_sha }}
-    steps:
-      - name: Validate immutable identity
+      - name: Validate exact input
         shell: bash
-        run: |
-          [[ "$IMAGE" =~ ^ghcr\.io/crewship-ai/crewship@sha256:[0-9a-f]{64}$ ]]
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+        run: '[[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          platforms: arm64
-      - name: Boot both platforms from the same immutable index
+          path: candidate
+          ref: ${{ inputs.candidate }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: '1.27.4'
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+        with:
+          package_json_file: candidate/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: candidate/pnpm-lock.yaml
+      - name: Run authenticated browser checks on the exact commit
+        working-directory: candidate
+        shell: bash
         run: |
-          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
-          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          build_root=$(mktemp -d "$RUNNER_TEMP/crewship-browser-XXXXXX")
+          export CREWSHIP_THROWAWAY_STATE="$build_root/state"
+          export BROWSER_EVIDENCE="$RUNNER_TEMP/browser-evidence"
+          mkdir -p "$BROWSER_EVIDENCE"
+          case "$SUITE" in
+            settings) route=/settings/members; spec=settings-h2.spec.ts ;;
+            runtime) route=/crews; spec=shell-overflow.spec.ts ;;
+            chat) route=/chat; spec=shell-overflow.spec.ts ;;
+            graphs) route=/graph-check; spec=harbor2-shell.spec.ts ;;
+            *) exit 2 ;;
+          esac
+          bash ../scripts/browser-runner/check.sh "$build_root" "$CANDIDATE" "$route" "$spec"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: browser-${{ inputs.suite }}-${{ inputs.candidate }}
+          path: ${{ runner.temp }}/browser-evidence/
+          if-no-files-found: warn
+          retention-days: 14
