@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -69,6 +70,9 @@ func (p *ImageReferences) Preserve(ctx context.Context, refs []resourcelifecycle
 		id, err := p.preserve(stepCtx, ref)
 		cancel()
 		if err != nil {
+			if id != "" {
+				return nil, &referenceValidationError{id, err}
+			}
 			return nil, err
 		}
 		if id != "" {
@@ -186,6 +190,23 @@ func (p *ImageReferences) validate(ctx context.Context, result client.ContainerI
 	return nil
 }
 
+// The image was resolved, but its deterministic reference failed validation.
+type referenceValidationError struct {
+	imageID string
+	error
+}
+
+func (e *referenceValidationError) Unwrap() error { return e.error }
+
+// ReferenceSweepError reports candidates deferred after inventory completed.
+type ReferenceSweepError struct {
+	Deferred int
+	Cause    error
+}
+
+func (e *ReferenceSweepError) Error() string { return e.Cause.Error() }
+func (e *ReferenceSweepError) Unwrap() error { return e.Cause }
+
 // Reconcile removes only proven own references no longer selected or acquired.
 // Inventory is outside the lifecycle gate; each removal rereads desired refs
 // and reserves the artifact's current IDs/aliases under a short final gate.
@@ -199,35 +220,80 @@ func (p *ImageReferences) Reconcile(ctx context.Context, gate *resourcelifecycle
 	}
 	// Missing historical/current references cannot protect existing bytes.
 	// Dispatch/restore still require the current artifact, never rebuilding it.
+	var partial ReferenceSweepError
+	deferredNames := map[string]bool{}
+	var protected []resourcelifecycle.ImageReference
 	for _, ref := range refs {
 		ref.Required = false
 		if _, err := p.Preserve(ctx, []resourcelifecycle.ImageReference{ref}); err != nil {
-			return err
+			var invalid *referenceValidationError
+			if !errors.As(err, &invalid) {
+				return errors.Join(partial.Cause, err)
+			}
+			name := imageReferenceName(p.owner, invalid.imageID)
+			if !deferredNames[name] {
+				deferredNames[name] = true
+				protected = append(protected, resourcelifecycle.ImageReference{Ref: invalid.imageID})
+				partial.Deferred++
+				if partial.Cause == nil {
+					partial.Cause = fmt.Errorf("selected image %q: %w", invalid.imageID, err)
+				}
+			}
 		}
 	}
 	listed, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true,
 		Filters: make(client.Filters).Add("label", imageReferenceOwnerLabel+"="+p.owner)})
 	if err != nil {
-		return err
+		return errors.Join(partial.Cause, err)
 	}
-	for _, candidate := range listed.Items {
-		if err := p.releaseUnused(ctx, gate, candidate.ID, desired); err != nil {
-			return err
+	candidates := slices.DeleteFunc(listed.Items, func(c container.Summary) bool {
+		return slices.ContainsFunc(c.Names, func(name string) bool { return deferredNames[strings.TrimPrefix(name, "/")] })
+	})
+	currentSelection := func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		current, err := desired(ctx)
+		if err != nil {
+			return nil, err
 		}
+		return append(current, protected...), nil
+	}
+	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(candidates) - i, Cause: errors.Join(partial.Cause, err)}
+		}
+		err := p.releaseUnused(ctx, gate, candidate.ID, currentSelection)
+		if err == nil {
+			continue
+		}
+		var global *referenceInventoryError
+		if errors.As(err, &global) {
+			return &ReferenceSweepError{Deferred: partial.Deferred + len(candidates) - i, Cause: errors.Join(partial.Cause, err)}
+		}
+		partial.Deferred++
+		if partial.Cause == nil {
+			partial.Cause = fmt.Errorf("reference %q: %w", candidate.ID, err)
+		}
+	}
+	if partial.Deferred != 0 {
+		return &partial
 	}
 	return nil
 }
 
+// A failure obtaining shared evidence invalidates the remaining pass.
+type referenceInventoryError struct{ error }
+
+func (e *referenceInventoryError) Unwrap() error { return e.error }
+
 func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) error {
 	release, ok := gate.TryCollect()
 	if !ok {
-		return nil
+		return &referenceInventoryError{errors.New("image collection gate busy")}
 	}
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if !p.mu.TryLock() {
-		return nil
+		return &referenceInventoryError{errors.New("image reference protection busy")}
 	}
 	defer p.mu.Unlock()
 	c, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
@@ -256,7 +322,7 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	defer releaseImage()
 	refs, err := desired(ctx)
 	if err != nil {
-		return err
+		return &referenceInventoryError{err}
 	}
 	for _, ref := range refs {
 		for _, alias := range aliases {

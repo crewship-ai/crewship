@@ -1,0 +1,1 @@
+- **A stale environment reference could prevent cleanup of unrelated references.** Crewship now keeps the affected reference and checks the others individually. Cleanup logs report how many references were deferred when the inventory is available, along with the last complete pass in the current server process.
