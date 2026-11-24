@@ -638,6 +638,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Move to a working folder (who gains content and history, same ID, a result per item) and Duplicate are built behind `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` and stay hidden until the server routes exist.
 - Show a personal view of private Documents and display the private creation audience before sending a chat request.
 
+- **Chat keeps its composer visible on short screens.** The input and mention picker remain reachable when viewport height is limited.
+
 - **Tool activity in chat no longer shows failures as success.** A group of tool steps says "Worked" only when every step succeeded; a failed step is labelled, opens the group and is never green, and parallel tool calls are matched to their own results. A finished reply with steps that have no recorded result reads "Finished" rather than success. A reasoning block shows its approved safe summary line next to the recorded time.
 
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
