@@ -192,3 +192,39 @@ func TestWaitpointLegacyDecisionReceipts(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitpointLegacyRotationRollback(t *testing.T) {
+	db := testutil.MigratedSQLDB(t)
+	store := NewSQLWaitpointStore(db)
+	defer store.Close()
+	const old = "0733f212d4124c599fbb9198f1026575"
+	const grant = "wpt_fixture_before_conversion"
+	if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('ws','Workspace','ws');
+	INSERT INTO users(id,email,full_name) VALUES('user','user@example.test','U');
+	INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at,callback_token_hash)
+	VALUES(?,'ws','run','step','approval','2099-01-01',?);
+	CREATE TRIGGER reject_grant_receipt BEFORE INSERT ON journal_entries BEGIN SELECT RAISE(ABORT,'unavailable'); END`, old, HashCapabilityToken(grant)); err != nil {
+		t.Fatal(err)
+	}
+	secret, _, err := store.MintCallbackToken(t.Context(), "ws", old, "user")
+	if err == nil || secret != "" {
+		t.Fatal("rotation committed without a receipt")
+	}
+	if callbackDigest(t, db, old) != HashCapabilityToken(grant) {
+		t.Fatal("failed conversion replaced previous grant")
+	}
+	if _, err := db.Exec("DROP TRIGGER reject_grant_receipt"); err != nil {
+		t.Fatal(err)
+	}
+	secret, rotated, err := store.MintCallbackToken(t.Context(), "ws", old, "user")
+	if err != nil || !rotated || secret == "" {
+		t.Fatalf("rotation failed: %v", err)
+	}
+	if id, _, err := store.ResolveCallbackToken(t.Context(), secret); err != nil || id != LegacyWaitpointPublicID("ws", old) {
+		t.Fatalf("new grant identity: %v", err)
+	}
+	if id, _, err := store.ResolveCallbackToken(t.Context(), grant); err != nil || id != "" {
+		t.Fatalf("previous grant still active: %v", err)
+	}
+	assertNoPlaintext(t, db, old)
+}
