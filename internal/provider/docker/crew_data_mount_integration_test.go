@@ -3,12 +3,15 @@
 package docker
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -51,9 +54,22 @@ func TestCrewDataSurvivesContainerReplacement(t *testing.T) {
 		}
 		host := &container.HostConfig{Mounts: mounts, Binds: binds}
 		script := `set -eu
-awk '$5 == "/output" && $6 ~ /(^|,)noexec(,|$)/ && $6 ~ /(^|,)nosuid(,|$)/ {ok=1} END {exit !ok}' /proc/self/mountinfo
-if [ "$1" = second ]; then [ "$(cat /output/marker)" = first ]; fi
-echo "$1" >> /output/marker`
+awk '$5 == "/output" {
+    print > "/dev/stderr"
+    found=1
+    if ($6 ~ /(^|,)noexec(,|$)/) noexec=1
+    if ($6 ~ /(^|,)nosuid(,|$)/) nosuid=1
+}
+END {
+    if (!found) exit 20
+    if (!noexec) exit 21
+    if (!nosuid) exit 22
+}' /proc/self/mountinfo
+if [ "$1" = second ]; then
+    marker=$(cat /output/marker) || exit 23
+    [ "$marker" = first ] || exit 24
+fi
+echo "$1" >> /output/marker || exit 25`
 		created, err := dockerutil.CreateCrewContainer(ctx, cli, client.ContainerCreateOptions{Config: &container.Config{Image: img, User: "0:0", Entrypoint: []string{"/bin/sh", "-c", script, "sh", turn}}, HostConfig: host})
 		if err != nil {
 			t.Fatal(err)
@@ -71,7 +87,14 @@ echo "$1" >> /output/marker`
 			select {
 			case result := <-wait.Result:
 				if result.StatusCode != 0 {
-					t.Fatalf("%s: %s exited %d", engine, turn, result.StatusCode)
+					logs, logErr := cli.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStderr: true, Tail: "4"})
+					if logErr != nil {
+						t.Fatalf("%s: %s exited %d; stderr unavailable: %v", engine, turn, result.StatusCode, logErr)
+					}
+					defer logs.Close()
+					var stderr bytes.Buffer
+					_, copyErr := stdcopy.StdCopy(io.Discard, &stderr, io.LimitReader(logs, 8192))
+					t.Fatalf("%s: %s exited %d; fixture stderr %q (read error %v)", engine, turn, result.StatusCode, stderr.String(), copyErr)
 				}
 			case err := <-wait.Error:
 				t.Fatal(err)
