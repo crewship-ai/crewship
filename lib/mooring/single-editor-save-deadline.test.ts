@@ -23,7 +23,7 @@ const rows = new Map<string, DocumentDraft>()
 const store = { exclusive: true, load: vi.fn(async () => [...rows.values()]), put: vi.fn(async (row: DocumentDraft) => { rows.set(row.id, row) }), remove: vi.fn(async (id: string) => { rows.delete(id) }), close: vi.fn() }
 beforeEach(() => {
   vi.stubGlobal("crypto", webcrypto)
-  rows.clear(); store.put.mockClear(); store.remove.mockClear(); store.load.mockClear()
+  rows.clear(); store.put.mockReset(); store.remove.mockClear(); store.load.mockClear()
   store.put.mockImplementation(async (row: DocumentDraft) => { rows.set(row.id, row) })
   store.remove.mockImplementation(async (id: string) => { rows.delete(id) })
   mock.open.mockReset(); mock.open.mockResolvedValue(store); mock.retire = undefined
@@ -273,47 +273,52 @@ function stagedWrites(r: Rig) {
   return { sending, commit, manualStored, saveManual, newerStarted, land, landed, saveNewer }
 }
 
-it("a timed-out persist that lands late is never overwritten or retired by an older queued manual ticket", async () => {
+it("a timed-out persist that lands late is never overwritten or retired by an older queued manual ticket", async ({ onTestFinished }) => {
   // A is in flight while manual ticket B queues behind it. Newer edit C
   // misses the deadline, then lands before A retires its journal row.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
   const base = await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
   const confirming = Promise.withResolvers<void>()
-  const journal = { ...base, confirm(d: NativeDraft) { confirming.resolve(); return base.confirm(d) } }
+  const confirm = vi.fn((d: NativeDraft) => { confirming.resolve(); return base.confirm(d) })
+  const journal = { ...base, confirm }
   const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
   const writes = stagedWrites(r)
-  try {
-    r.edit(2)
-    const a = r.controller.save()
-    await writes.sending.promise
-    let bDone = false
-    const b = writes.saveManual().finally(() => { bDone = true })
-    await writes.manualStored.promise
-    const c = writes.saveNewer()
-    const rowC = await writes.newerStarted.promise
-
-    await vi.advanceTimersByTimeAsync(50)
-    writes.commit.resolve()
-    await confirming.promise
-    // C expires while A is still waiting for the queued journal confirmation.
-    await vi.advanceTimersByTimeAsync(60)
-    await c
-    expect(bDone).toBe(false)
-
-    writes.land.resolve()
-    await a
-    await b
-    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
-    expect(r.requests.map(q => q.bytes[0])).not.toContain(3)
-  } finally {
+  onTestFinished(async () => {
     writes.commit.resolve()
     writes.land.resolve()
     vi.useRealTimers()
     await r.controller.close()
-  }
+  })
+
+  r.edit(2)
+  const a = r.controller.save()
+  await writes.sending.promise
+  expect(r.requests).toHaveLength(1)
+  let bDone = false
+  const b = writes.saveManual().finally(() => { bDone = true })
+  await writes.manualStored.promise
+  expect(store.put).toHaveBeenCalledTimes(2)
+  const c = writes.saveNewer()
+  const rowC = await writes.newerStarted.promise
+  expect(store.put).toHaveBeenCalledTimes(3)
+
+  await vi.advanceTimersByTimeAsync(50)
+  writes.commit.resolve()
+  await confirming.promise
+  expect(confirm).toHaveBeenCalledOnce()
+  // C expires while A is still waiting for the queued journal confirmation.
+  await vi.advanceTimersByTimeAsync(60)
+  await c
+  expect(bDone).toBe(false)
+
+  writes.land.resolve()
+  await a
+  await b
+  expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
+  expect(r.requests.map(q => q.bytes[0])).not.toContain(3)
 })
 
-it("an older manual ticket never writes behind a newer local write that has not settled yet", async () => {
+it("an older manual ticket never writes behind a newer local write that has not settled yet", async ({ onTestFinished }) => {
   // A can confirm independently of C. B must fail visibly while C is
   // pending, leaving the newer edit recoverable after the write lands.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
@@ -321,32 +326,35 @@ it("an older manual ticket never writes behind a newer local write that has not 
   const journal = { ...base, async confirm() {} }
   const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
   const writes = stagedWrites(r)
-  try {
-    r.edit(2)
-    const a = r.controller.save()
-    await writes.sending.promise
-    const b = writes.saveManual()
-    await writes.manualStored.promise
-    const c = writes.saveNewer()
-    const rowC = await writes.newerStarted.promise
-
-    await vi.advanceTimersByTimeAsync(50)
-    writes.commit.resolve()
-    await a
-    await vi.advanceTimersByTimeAsync(60)
-    await c
-    expect(await b).toBe("storage")
-    expect(r.requests).toHaveLength(1)
-
-    writes.land.resolve()
-    await writes.landed.promise
-    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
-  } finally {
+  onTestFinished(async () => {
     writes.commit.resolve()
     writes.land.resolve()
     vi.useRealTimers()
     await r.controller.close()
-  }
+  })
+
+  r.edit(2)
+  const a = r.controller.save()
+  await writes.sending.promise
+  expect(r.requests).toHaveLength(1)
+  const b = writes.saveManual()
+  await writes.manualStored.promise
+  expect(store.put).toHaveBeenCalledTimes(2)
+  const c = writes.saveNewer()
+  const rowC = await writes.newerStarted.promise
+  expect(store.put).toHaveBeenCalledTimes(3)
+
+  await vi.advanceTimersByTimeAsync(50)
+  writes.commit.resolve()
+  await a
+  await vi.advanceTimersByTimeAsync(60)
+  await c
+  expect(await b).toBe("storage")
+  expect(r.requests).toHaveLength(1)
+
+  writes.land.resolve()
+  await writes.landed.promise
+  expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
 })
 
 // A frozen page outlives the save deadline even when the reply is on its way
