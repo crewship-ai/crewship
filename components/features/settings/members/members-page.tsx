@@ -482,7 +482,7 @@ export function MembersPage() {
               )}
               <SettingsCard icon={Users} title="People" hideHeader>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-2.5" data-slot="members-toolbar">
-                  {shown.length < members.length && (
+                  {activeFilters > 0 && (
                     <b className="text-control font-semibold tabular-nums">
                       {shown.length} of {members.length} people
                     </b>

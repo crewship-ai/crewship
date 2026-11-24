@@ -172,14 +172,13 @@ test.describe("desktop", () => {
     const response = await verify
     expect(response.ok()).toBe(true)
     const result = await response.json()
-    expect(typeof result.ok).toBe("boolean")
-    const heading = result.ok ? "Record intact" : "Record broken"
-    const dialog = page.getByRole("dialog").filter({ has: page.locator("[data-slot=journal-integrity-dialog]") })
-    await expect(dialog).toBeVisible()
-    await expect(dialog).toHaveAccessibleName(new RegExp(`^(Record integrity|${heading})$`))
-    await expect(dialog.getByRole("heading", { name: heading, exact: true })).toBeVisible()
-    await expect(dialog.getByText("Entries checked", { exact: true })).toBeVisible()
-    await expect(line).toHaveAttribute("data-state", result.ok ? "ok" : "broken")
+    expect(result.ok).toBe(true)
+    expect(Number.isInteger(result.count)).toBe(true)
+    const dialog = page.getByRole("dialog", { name: "Record intact" })
+    await expect(dialog.getByRole("heading", { name: "Record intact", exact: true })).toBeVisible()
+    const entries = dialog.locator("[data-slot=settings-row]").filter({ hasText: "Entries checked" })
+    await expect(entries.getByText(result.count.toLocaleString("en-US"), { exact: true })).toBeVisible()
+    await expect(line).toHaveAttribute("data-state", "ok")
   })
 
   // ── #3487 finishing items ────────────────────────────────────────────
@@ -289,6 +288,21 @@ test.describe("desktop", () => {
       await expect(copy).toHaveCount(1)
       await expect(head.getByText(description, { exact: true })).toBeVisible()
     }
+  })
+
+  test("members show a match count when a filter includes the entire roster", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.route("**/api/v1/workspaces/*/members?workspace_id=*", async (route) => {
+      const response = await route.fetch()
+      expect(response.ok()).toBe(true)
+      const members = await response.json()
+      expect(members.length).toBeGreaterThan(0)
+      await route.fulfill({ response, json: members.map((member: object) => ({ ...member, access_mode: "full" })) })
+    })
+    await page.goto("/settings/members?reach=whole")
+    const toolbar = page.locator("[data-slot=members-toolbar]")
+    await expect(toolbar.getByRole("button", { name: "Remove filter Reach: Whole workspace" })).toBeVisible()
+    await expect(toolbar.getByText(/^(\d+) of \1 people$/)).toBeVisible()
   })
 
   test("SET-07 kit DrillPage: the top bar is the path; the panel has Back above the toolbar, then facets, then views", async ({ page }) => {
@@ -495,13 +509,13 @@ test.describe("v67 parity", () => {
       test("PAR-107/109 crew links: CLI hint and New link, one Works with card, no KPI strip or map", async ({ page }) => {
         await seed(page, PINNED)
         await page.goto("/settings/crew-links")
+        await expect(page.getByRole("button", { name: "New link" })).toBeVisible()
         const cliHint = page.getByRole("button", { name: "Command line" })
         if (width < 768) {
           await expect(cliHint).toBeHidden()
         } else {
           await expect(cliHint).toBeVisible()
         }
-        await expect(page.getByRole("button", { name: "New link" })).toBeVisible()
         await expect(page.locator("[data-slot=crew-links-summary]")).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Link map" })).toHaveCount(0)
         const works = page.getByRole("region", { name: "Works with" })
