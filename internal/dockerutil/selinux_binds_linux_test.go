@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 func TestPodmanSELinuxRejectsForwardedSocket(t *testing.T) {
@@ -25,6 +28,18 @@ func TestPodmanSELinuxRejectsForwardedSocket(t *testing.T) {
 	if conn, err := dialPodmanBinds(context.Background(), socket, []string{"/tmp:/mnt:rw,z"}); err == nil {
 		conn.Close()
 		t.Fatal("a forwarding process with Podman headers authenticated as the local service")
+	}
+	cli, err := client.New(client.WithHost("unix://" + socket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	_, err = CreateCrewContainer(context.Background(), cli, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: "test"},
+		HostConfig: &container.HostConfig{Binds: []string{"/tmp:/mnt:rw,z"}, OomScoreAdj: 1},
+	})
+	if err == nil || !strings.Contains(err.Error(), "installed Podman executable") || client.IsErrConnectionFailed(err) {
+		t.Fatalf("connected peer failed validation, got %v", err)
 	}
 }
 
