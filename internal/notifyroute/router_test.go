@@ -222,7 +222,7 @@ func TestRouter_Route_ApprovalsBypassRateGate(t *testing.T) {
 	r := newTestRouter(db, nil, limiter)
 
 	r.route(context.Background(), notify.CategoryAgentsApproval, inbox.Item{
-		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-approve-1", TargetUserID: "u_member", Title: "Approve",
+		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-approve-1", Payload: map[string]any{"pipeline_run_id": "run"}, TargetUserID: "u_member", Title: "Approve",
 	})
 
 	var retained int

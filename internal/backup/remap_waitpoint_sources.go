@@ -102,6 +102,8 @@ func normalizeWaitpointIdentities(dump *DBDump, restore bool) *DBDump {
 			normalized.Tables[table] = append([]map[string]any(nil), rows...)
 		}
 	}
+	type sourceKey struct{ workspace, token string }
+	migrated := map[sourceKey]string{}
 	for i, row := range normalized.Tables["pipeline_waitpoints"] {
 		old, _ := row["token"].(string)
 		ws, _ := row["workspace_id"].(string)
@@ -112,6 +114,7 @@ func normalizeWaitpointIdentities(dump *DBDump, restore bool) *DBDump {
 		if !strings.HasPrefix(old, pipeline.WaitpointIDPrefix) {
 			id := pipeline.LegacyWaitpointPublicID(ws, old)
 			updated["token"] = id
+			migrated[sourceKey{ws, old}] = id
 		}
 		// Restoring an older snapshot must not reactivate a rotated callback.
 		// Additive restore leaves the digest of an existing current row alone.
@@ -127,7 +130,7 @@ func normalizeWaitpointIdentities(dump *DBDump, restore bool) *DBDump {
 		}
 		old, _ := row["source_id"].(string)
 		ws, _ := row["workspace_id"].(string)
-		id := pipeline.PublicWaitpointID(ws, old)
+		id := migrated[sourceKey{ws, old}]
 		if id == "" || id == old {
 			continue
 		}

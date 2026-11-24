@@ -177,11 +177,19 @@ UPDATE pipeline_waitpoints SET callback_token_hash = ?
 	if err != nil {
 		return "", false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return "", false, err
-	}
 	if id != oldID {
-		s.moveLegacyListener(oldID, id)
+		// Serialize the rename with a decision delivered immediately after COMMIT.
+		s.mu.Lock()
+		err = tx.Commit()
+		if err == nil {
+			s.moveLegacyListenerLocked(oldID, id)
+		}
+		s.mu.Unlock()
+	} else {
+		err = tx.Commit()
+	}
+	if err != nil {
+		return "", false, err
 	}
 	if notify != nil {
 		notify()
@@ -470,11 +478,15 @@ func (s *SQLWaitpointStore) migrateLegacyTokens() {
 
 func (s *SQLWaitpointStore) moveLegacyListener(old, id string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.moveLegacyListenerLocked(old, id)
+}
+
+func (s *SQLWaitpointStore) moveLegacyListenerLocked(old, id string) {
 	if ch, ok := s.listeners[old]; ok {
 		delete(s.listeners, old)
 		s.listeners[id] = ch
 	}
-	s.mu.Unlock()
 }
 
 // tokenDigestFingerprint is a log-safe handle for a legacy (secret) token.

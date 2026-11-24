@@ -131,7 +131,7 @@ func (r *Router) notifyItem(ctx context.Context, category string, item inbox.Ite
 // every failure is logged and skipped, never propagated — there is no
 // caller left to propagate to once NotifyInboxItem's goroutine started.
 func (r *Router) route(ctx context.Context, category string, item inbox.Item) {
-	if item.Kind == inbox.KindWaitpoint {
+	if run, _ := item.Payload["pipeline_run_id"].(string); item.Kind == inbox.KindWaitpoint && run != "" {
 		item.SourceID = pipeline.PublicWaitpointID(item.WorkspaceID, item.SourceID)
 	}
 
