@@ -15,7 +15,7 @@ import (
 )
 
 func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
-	var crossHostRequests atomic.Int32
+	var unexpectedTargetRequests atomic.Int32
 	var sameHostPosts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -26,11 +26,13 @@ func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 				sameHostPosts.Add(1)
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case "/rewrite":
+			http.Redirect(w, r, "/target", http.StatusFound)
 		case "/cross":
 			target := "http://" + strings.Replace(r.Host, "127.0.0.1", "localhost", 1) + "/target"
 			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 		case "/target":
-			crossHostRequests.Add(1)
+			unexpectedTargetRequests.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.WriteHeader(http.StatusUnauthorized)
@@ -44,6 +46,7 @@ func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 		wantError bool
 	}{
 		{path: "/same"},
+		{path: "/rewrite", wantError: true},
 		{path: "/cross", wantError: true},
 		{path: "/refused", wantError: true},
 	} {
@@ -57,8 +60,8 @@ func TestShoutrrrWebhookRedirectsAndHTTPStatus(t *testing.T) {
 	if posts := sameHostPosts.Load(); posts != 1 {
 		t.Errorf("same-host redirects preserved POST %d times, want 1", posts)
 	}
-	if requests := crossHostRequests.Load(); requests != 0 {
-		t.Errorf("cross-host target received %d requests", requests)
+	if requests := unexpectedTargetRequests.Load(); requests != 0 {
+		t.Errorf("blocked redirect target received %d requests", requests)
 	}
 }
 
@@ -77,6 +80,7 @@ func (d localDiscordTransport) RoundTrip(req *http.Request) (*http.Response, err
 
 func TestShoutrrrDiscordRequiresExplicitMentions(t *testing.T) {
 	type payload struct {
+		Content         string
 		AllowedMentions *struct {
 			Parse []string
 			Users []string
@@ -114,15 +118,20 @@ func TestShoutrrrDiscordRequiresExplicitMentions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			service, err := r.Locate("discord://test-token@123456789012345678" + tc.query)
+			deliveryURL := ServiceURLForDelivery("discord://test-token@123456789012345678" + tc.query)
+			service, err := r.Locate(deliveryURL)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := service.Send("@everyone <@123456789012345680>", nil); err != nil {
+			const message = "@everyone <@123456789012345680>"
+			if err := service.Send(message, nil); err != nil {
 				t.Fatal(err)
 			}
 			select {
 			case body := <-received:
+				if !strings.Contains(body.Content, message) {
+					t.Fatalf("plain Discord body lost message text: %q", body.Content)
+				}
 				mentions := body.AllowedMentions
 				if mentions == nil || len(mentions.Parse) != 0 || len(mentions.Roles) != 0 || strings.Join(mentions.Users, ",") != tc.wantUser {
 					t.Fatalf("unexpected allowed mentions: %+v", mentions)
