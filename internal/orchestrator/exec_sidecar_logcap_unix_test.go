@@ -262,6 +262,10 @@ func TestSidecarStartupReadiness(t *testing.T) {
 	for _, mode := range []string{"slow", "dead", "hung"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
+			realSleep, err := exec.LookPath("sleep")
+			if err != nil {
+				t.Fatal(err)
+			}
 			for name, body := range map[string]string{
 				"crewship-sidecar": `if [ "$1" = --health-check ]; then
                     if [ "$MODE" = hung ]; then sleep 30; fi
@@ -270,6 +274,10 @@ func TestSidecarStartupReadiness(t *testing.T) {
                 echo startup-diagnostic >&2
                 if [ "$MODE" = dead ]; then exit 1; fi
                 sleep 1; touch ready; exec sleep 30`,
+				// A loaded host can resume each poll late. Its latency must not
+				// accumulate into the readiness deadline.
+				"sleep": `if [ "$MODE" = hung ] && [ "$1" = 0.1 ]; then set -- 0.2; fi
+exec "$REAL_SLEEP" "$@"`,
 				"wget": "exit 1", "curl": "exit 1",
 			} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0700); err != nil {
@@ -279,7 +287,7 @@ func TestSidecarStartupReadiness(t *testing.T) {
 			cmd := exec.Command("sh")
 			cmd.Dir = dir
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "MODE="+mode)
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "MODE="+mode, "REAL_SLEEP="+realSleep)
 			cmd.Stdin = strings.NewReader(strings.ReplaceAll(sidecarLaunchScript(""), sidecarLogPath, "sidecar.log"))
 			start := time.Now()
 			out, err := cmd.CombinedOutput()

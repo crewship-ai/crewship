@@ -152,10 +152,13 @@ func sidecarLaunchScript(credsB64 string) string {
 			// as fallbacks: a container may still be running an older
 			// bind-mounted sidecar that predates --health-check, and on that
 			// binary the flag exits non-zero as an unknown flag.
-			`ticks=100
+			// One elapsed-time deadline covers all probes, including a stuck one.
+			// Counting polling sleeps also counts fork and scheduler delays.
+			`sleep 10 </dev/null >/dev/null 2>&1 &
+deadline_pid=$!
+trap 'kill "$deadline_pid" 2>/dev/null; wait "$deadline_pid" 2>/dev/null' 0
 pause() {
-  [ "$ticks" -gt 0 ] && kill -0 "$SIDECAR_PID" 2>/dev/null || return 1
-  ticks=$((ticks - 1))
+  kill -0 "$deadline_pid" 2>/dev/null && kill -0 "$SIDECAR_PID" 2>/dev/null || return 1
   sleep 0.1
 }
 probe() {
@@ -1163,7 +1166,7 @@ type SidecarNetworkPolicy struct {
 func startSidecar(
 	ctx context.Context,
 	container provider.ContainerProvider,
-	containerID string,
+	containerID, runID string,
 	creds []Credential,
 	memoryCfg *SidecarMemoryConfig,
 	ipcCfg *SidecarIPCConfig,
@@ -1303,7 +1306,7 @@ func startSidecar(
 	}
 	if !running && exitCode != 0 {
 		redactor := scrubber.New()
-		values := collectSecretValues(AgentRunRequest{Credentials: creds})
+		values := collectSecretValues(AgentRunRequest{RunID: runID, Credentials: creds})
 		if ipcCfg != nil {
 			values = append(values, ipcCfg.Token, ipcCfg.AgentToken, ipcCfg.AgentRunKey)
 		}
