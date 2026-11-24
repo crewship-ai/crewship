@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       suite:
-        description: Targeted browser suite
+        description: Isolated verification suite
         required: true
         type: choice
-        options: [harbor, settings, runtime, chat, restricted, graphs]
+        options: [harbor, settings, runtime, chat, restricted, graphs, dependencies]
 
 permissions:
   contents: read
@@ -58,6 +58,17 @@ jobs:
           export BROWSER_EVIDENCE="$RUNNER_TEMP/browser-evidence"
           mkdir -p "$BROWSER_EVIDENCE"
           case "$SUITE" in
+            dependencies)
+              printf 'CANDIDATE %s\n' "$CANDIDATE"
+              node --version
+              (cd tools/docs-service && pnpm install --frozen-lockfile && pnpm test)
+              pnpm install --frozen-lockfile
+              pnpm prisma generate
+              make build
+              test -x crewship && test -x crewship-sidecar && test -x crewship-agent-cli
+              ./crewship version
+              exit
+              ;;
             harbor) route=/; specs=(harbor2-dashboard.spec.ts harbor2-workspace-default.spec.ts) ;;
             settings) route=/settings/members; specs=(settings-h2.spec.ts) ;;
             runtime) route=/crews; specs=(shell-overflow.spec.ts) ;;
