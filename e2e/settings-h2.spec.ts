@@ -297,12 +297,14 @@ test.describe("desktop", () => {
       expect(response.ok()).toBe(true)
       const members = await response.json()
       expect(members.length).toBeGreaterThan(0)
-      await route.fulfill({ response, json: members.map((member: object) => ({ ...member, access_mode: "full" })) })
+      await route.fulfill({ response, json: members.map((member: object) => ({ ...member, access_mode: "trusted" })) })
     })
+    const roster = page.waitForResponse("**/api/v1/workspaces/*/members?workspace_id=*")
     await page.goto("/settings/members?reach=whole")
+    const { length: count } = await (await roster).json()
     const toolbar = page.locator("[data-slot=members-toolbar]")
     await expect(toolbar.getByRole("button", { name: "Remove filter Reach: Whole workspace" })).toBeVisible()
-    await expect(toolbar.getByText(/^(\d+) of \1 people$/)).toBeVisible()
+    await expect(toolbar.getByText(`${count} of ${count} people`, { exact: true })).toBeVisible()
   })
 
   test("SET-07 kit DrillPage: the top bar is the path; the panel has Back above the toolbar, then facets, then views", async ({ page }) => {

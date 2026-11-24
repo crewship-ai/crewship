@@ -310,6 +310,7 @@ export function MembersPage() {
   const pick = (next: Partial<MemberFilters>) => setFilters({ ...next, status: "" })
   const toggle = <K extends "area" | "cap" | "reach">(key: K, value: MemberFilters[K]) => pick({ [key]: filters[key] === value ? "" : value } as Partial<MemberFilters>)
   const activeFilters = activeFilterCount(filters, capsReadable) - Number(Boolean(filters.status))
+  const waitingForFilteredCapabilities = capsReadable && !caps && Boolean(filters.cap || filters.area || filters.flag)
   const toolbar = (
     <>
       <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search name or email…" aria-label="Search members" />
@@ -482,7 +483,7 @@ export function MembersPage() {
               )}
               <SettingsCard icon={Users} title="People" hideHeader>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-2.5" data-slot="members-toolbar">
-                  {activeFilters > 0 && (
+                  {activeFilters > 0 && !waitingForFilteredCapabilities && (
                     <b className="text-control font-semibold tabular-nums">
                       {shown.length} of {members.length} people
                     </b>
