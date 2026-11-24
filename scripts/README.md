@@ -74,7 +74,7 @@ independent native worker release context: authenticated upstream bytes, runner,
 recipe and license bundle. It performs downloads and Go builds, never Docker
 publication or provider calls. The main-only `Native Worker Release` workflow
 owns candidate publication and signing; see the
-[release procedure](../docs/guides/restricted-native-codex.md#independent-release-candidates).
+[release procedure](../docs/guides/restricted-native-codex.mdx#independent-release-candidates).
 
 `ci/prepare-text-release.sh /absolute/new/context-directory` prepares the
 `responses_text` runner, pinned image recipe, binary checksum, source identity
