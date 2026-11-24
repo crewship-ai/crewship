@@ -198,6 +198,9 @@ func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
 		VALUES(?,?,'old-run','gate','approval','2099-01-01'),('wp_current',?,'current-run','gate','approval','2099-01-01')`, old, ws, ws); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.db.Exec("UPDATE pipeline_waitpoints SET callback_token_hash='source-digest' WHERE token='wp_current'"); err != nil {
+		t.Fatal(err)
+	}
 	bundle := f.create(t, true)
 	dir := filepath.Join(t.TempDir(), "restored")
 	if _, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: dir, Actor: "u_admin"}); err != nil {
@@ -214,5 +217,39 @@ func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
 	}
 	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE token=?", old).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("legacy identifier remained after startup: %d (%v)", n, err)
+	}
+}
+
+func TestWaitpointRestoreRejectsInvalidIdentity(t *testing.T) {
+	for _, field := range []string{"token", "workspace_id"} {
+		for _, op := range []string{"additive", "fork"} {
+			t.Run(op+"/"+field, func(t *testing.T) {
+				db := openMigratedDB(t)
+				ws := seedWorkspace(t, db)
+				if _, err := db.Exec(`INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at,callback_token_hash) VALUES('wp_target',?,'existing','gate','approval','2099-01-01','target-digest')`, ws); err != nil {
+					t.Fatal(err)
+				}
+				row := func(id string) map[string]any {
+					return map[string]any{"token": id, "workspace_id": ws, "pipeline_run_id": id, "step_id": "gate", "kind": "approval", "timeout_at": "2099-01-01", "callback_token_hash": "bundle-digest"}
+				}
+				invalid := row("invalid")
+				invalid[field] = float64(42)
+				dump := &backup.DBDump{Tables: map[string][]map[string]any{"pipeline_waitpoints": {row("wp_valid"), invalid}}}
+				var err error
+				switch op {
+				case "additive":
+					err = backup.RestoreDump(t.Context(), db, dump)
+				case "fork":
+					err = backup.RemapIDs(t.Context(), db, dump)
+				}
+				if err == nil {
+					t.Error("accepted invalid waitpoint identity")
+				}
+				var total, original int
+				if err := db.QueryRow(`SELECT count(*),count(*) FILTER(WHERE token='wp_target' AND callback_token_hash='target-digest') FROM pipeline_waitpoints`).Scan(&total, &original); err != nil || total != 1 || original != 1 {
+					t.Fatalf("target changed: rows=%d original=%d err=%v", total, original, err)
+				}
+			})
+		}
 	}
 }
