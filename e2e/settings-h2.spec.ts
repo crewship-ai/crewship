@@ -246,12 +246,25 @@ test.describe("desktop", () => {
 
   test("SET-04 T09 ?card= marks the card with a 2 px outline that follows its corners", async ({ page }) => {
     await seed(page, PINNED)
+    // Sample the three computed properties on the frame in which the mark
+    // appears. Separate assertions can straddle its 1.5-second lifetime.
+    await page.addInitScript(() => {
+      const observer = new MutationObserver(records => {
+        for (const { target } of records) {
+          if (!(target instanceof HTMLElement) || target.id !== "settings-card-identity" || target.dataset.focused !== "true") continue
+          const { outlineStyle, outlineWidth, borderTopLeftRadius } = getComputedStyle(target)
+          target.dataset.testHighlight = JSON.stringify({ outlineStyle, outlineWidth, borderTopLeftRadius })
+          observer.disconnect()
+          return
+        }
+      })
+      observer.observe(document, { subtree: true, attributeFilter: ["data-focused"] })
+    })
     await page.goto("/settings?tab=general&card=identity")
     const card = page.getByRole("region", { name: "Identity" })
-    await expect(card).toHaveAttribute("data-focused", "true")
-    await expect(card).toHaveCSS("outline-style", "solid")
-    await expect(card).toHaveCSS("outline-width", "2px")
-    await expect(card).toHaveCSS("border-top-left-radius", "10px")
+    await expect(card).toHaveAttribute("data-test-highlight", JSON.stringify({
+      outlineStyle: "solid", outlineWidth: "2px", borderTopLeftRadius: "10px",
+    }))
     await expect(card).not.toHaveAttribute("data-focused", "true", { timeout: 2500 })
   })
 
