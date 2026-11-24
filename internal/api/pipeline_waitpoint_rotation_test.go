@@ -90,3 +90,33 @@ func TestCallbackConcurrentMintReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCallbackChainFailurePreservesPreviousGrant(t *testing.T) {
+	h, user, ws := newPipelineHandlerForCRUDTest(t)
+	store, id := seedPendingWaitpoint(t, h, ws)
+	previous, _, err := store.MintCallbackToken(t.Context(), ws, id, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.db.Exec(`CREATE TRIGGER reject_grant_chain BEFORE INSERT ON journal_entries
+		WHEN json_extract(NEW.payload,'$.action')='waitpoint.callback_token.minted'
+		BEGIN SELECT RAISE(ABORT,'journal unavailable'); END`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret, _, err := store.MintCallbackToken(t.Context(), ws, id, user); err == nil || secret != "" {
+		t.Error("rotation returned a grant without its chained receipt")
+	}
+	if active, _, err := store.ResolveCallbackToken(t.Context(), previous); err != nil || active != id {
+		t.Errorf("previous grant lost: %v", err)
+	}
+	for _, q := range []string{
+		`SELECT count(*) FROM audit_logs WHERE action='waitpoint.callback_token.minted' AND entity_id=?`,
+		`SELECT count(*) FROM journal_entries WHERE json_extract(payload,'$.action')='waitpoint.callback_token.minted' AND json_extract(refs,'$.entity_id')=?`,
+	} {
+		var count int
+		if err := h.db.QueryRow(q, id).Scan(&count); err != nil || count != 1 {
+			t.Errorf("committed receipts=%d (%v)", count, err)
+		}
+	}
+}
