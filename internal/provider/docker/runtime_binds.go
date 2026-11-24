@@ -74,11 +74,17 @@ func stageRuntimeArtifacts(cfg Config, logger *slog.Logger) Config {
 	sidecarSource := cfg.SidecarBinaryPath
 	cfg.SidecarBinaryPath, cfg.EntrypointPath = runtimestage.Artifacts(
 		cfg.OutputBasePath, cfg.SidecarBinaryPath, cfg.EntrypointPath, logger)
+	if cfg.OutputBasePath != "" {
+		dir := filepath.Join(cfg.OutputBasePath, runtimestage.DirName)
+		cfg.stagedSidecar = cfg.SidecarBinaryPath == filepath.Join(dir, runtimestage.SidecarFileName)
+		cfg.stagedEntrypoint = cfg.EntrypointPath == filepath.Join(dir, runtimestage.EntrypointFileName)
+	}
 	// Stage an immutable launcher for new runtimes even when no crew has opted
 	// in yet. This grants no sandbox authority and changes no adapter selection.
 	{
 		if immutable, err := stageManagedLauncher(sidecarSource, cfg.OutputBasePath); err == nil {
 			cfg.SidecarBinaryPath = immutable
+			cfg.stagedSidecar = true
 		} else {
 			logger.Warn("managed launcher staging failed; pilot admission will refuse unqualified binds", "error", err)
 		}
@@ -242,6 +248,61 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 		"socket", p.detected.Socket,
 		"error", p.explainBindFailure(createErr).Error(),
 	)
+}
+
+func (p *Provider) relabelCrewBinds() bool {
+	return p.detected.Runtime == "podman" && p.selinuxEnabled
+}
+
+// sharedCrewBind encodes Podman's shared relabel option, which the Docker
+// structured Mount API cannot express. Only call it for Crewship-owned
+// sources. Resolve the configured base once per bind and reject symlinks
+// below it: relabeling a redirected source would change another host tree.
+func sharedCrewBind(base, source, target, access string) (string, error) {
+	root, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(base, source)
+	// Immutable agent CLI staging returns a canonical absolute path.
+	if err != nil || !filepath.IsLocal(rel) {
+		rel, err = filepath.Rel(root, source)
+	}
+	if err != nil || !filepath.IsLocal(rel) || rel == "." || path != filepath.Join(root, rel) ||
+		!filepath.IsAbs(path) || strings.Contains(path+target, ":") {
+		return "", fmt.Errorf("unsafe Crewship SELinux bind source %q for %q", source, target)
+	}
+	return path + ":" + target + ":" + access + ",z", nil
+}
+
+// The caller supplies buildMounts' own set, before adding any feature
+// mounts. Operator-configured install paths can survive failed staging and
+// must keep their original label.
+func (p *Provider) stagedArtifactBinds(mounts []mount.Mount) ([]mount.Mount, []string, error) {
+	if !p.relabelCrewBinds() {
+		return mounts, nil, nil
+	}
+	remaining := mounts[:0]
+	var binds []string
+	for _, m := range mounts {
+		staged := (p.cfg.stagedSidecar && m.Target == "/usr/local/bin/crewship-sidecar") ||
+			(p.cfg.stagedEntrypoint && m.Target == "/usr/local/bin/entrypoint.sh") ||
+			(p.cfg.agentCLIArtifact != nil && m.Target == agentCLIExecutable)
+		if !staged || m.Type != mount.TypeBind || !m.ReadOnly {
+			remaining = append(remaining, m)
+			continue
+		}
+		bind, err := sharedCrewBind(p.cfg.OutputBasePath, m.Source, m.Target, "ro")
+		if err != nil {
+			return nil, nil, err
+		}
+		binds = append(binds, bind)
+	}
+	return remaining, binds, nil
 }
 
 // A digest-addressed bind source is never replaced. Docker archive reads mount

@@ -114,13 +114,14 @@ func TestDetectCgroupVersion(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name string
-		body string
-		want string
+		name    string
+		body    string
+		want    string
+		selinux bool
 	}{
-		{"daemon reports v2", `{"CgroupVersion":"2","DockerRootDir":"/var/lib/docker"}`, "2"},
-		{"daemon reports v1", `{"CgroupVersion":"1","DockerRootDir":"/var/lib/docker"}`, "1"},
-		{"daemon omits the field", `{"DockerRootDir":"/var/lib/docker"}`, ""},
+		{"daemon reports v2", `{"CgroupVersion":"2","DockerRootDir":"/var/lib/docker","SecurityOptions":["name=rootless","name=selinux"]}`, "2", true},
+		{"daemon reports v1", `{"CgroupVersion":"1","DockerRootDir":"/var/lib/docker"}`, "1", false},
+		{"daemon omits the field", `{"DockerRootDir":"/var/lib/docker"}`, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -133,8 +134,8 @@ func TestDetectCgroupVersion(t *testing.T) {
 				w.WriteHeader(http.StatusNotFound)
 			})
 			defer cleanup()
-			if got := detectCgroupVersion(context.Background(), p.client); got != tc.want {
-				t.Errorf("detectCgroupVersion = %q, want %q", got, tc.want)
+			if got, enabled := detectMountEnvironment(context.Background(), p.client); got != tc.want || enabled != tc.selinux {
+				t.Errorf("detectMountEnvironment = (%q, %t), want (%q, %t)", got, enabled, tc.want, tc.selinux)
 			}
 		})
 	}
@@ -145,7 +146,7 @@ func TestDetectCgroupVersion(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		})
 		defer cleanup()
-		if got := detectCgroupVersion(context.Background(), p.client); got != "" {
+		if got, enabled := detectMountEnvironment(context.Background(), p.client); got != "" || enabled {
 			t.Errorf("detectCgroupVersion on a failing daemon = %q, want \"\"", got)
 		}
 	})
