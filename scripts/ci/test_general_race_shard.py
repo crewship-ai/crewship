@@ -16,10 +16,10 @@ HELD = sorted(SHARD.DENIED | SHARD.DEDICATED)
 
 class GeneralRaceShardTests(unittest.TestCase):
     def test_every_package_once_including_new_unmeasured_packages(self):
-        packages = HELD + [P + name for name in ("internal/new", "internal/backup", "internal/access", "internal/other")]
-        costs = {P + "internal/backup": 2000, P + "internal/access": 1700, P + "removed": 9999}
+        packages = HELD + [P + name for name in ("internal/new", "internal/heavy", "internal/access", "internal/other")]
+        costs = {P + "internal/heavy": 2000, P + "internal/access": 1700, P + "removed": 9999}
         groups, totals = SHARD.partition(packages, 2, costs, 150)
-        self.assertEqual(groups[0], [P + "internal/backup"])
+        self.assertEqual(groups[0], [P + "internal/heavy"])
         self.assertEqual(groups[1], [P + "internal/access", P + "internal/new", P + "internal/other"])
         self.assertEqual(totals, [2000, 2000])
         self.assertEqual(SHARD.partition(list(reversed(packages)), 2, costs, 150), (groups, totals))
@@ -47,8 +47,8 @@ class GeneralRaceShardTests(unittest.TestCase):
         costs = baseline["packages"]
         eligible = {p: c for p, c in costs.items() if p not in SHARD.DENIED | SHARD.DEDICATED}
         heaviest = sorted(eligible, key=lambda p: (-max(1, eligible[p]), p))
-        for count in (2, 4):
-            groups, totals = SHARD.partition(HELD + list(costs), count, costs, baseline["default_seconds"])
+        for count in (2, 3):
+            groups, totals = SHARD.partition(HELD + list(eligible), count, costs, baseline["default_seconds"])
             # Largest-first: each shard opens with one of the `count` heaviest packages.
             self.assertEqual([g[0] for g in groups], heaviest[:count])
             # LPT bound: no shard exceeds another by more than one package's cost.

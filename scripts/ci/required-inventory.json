@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "123c487d1962c2a7aeb6d33cccfd678f40eca75d1ca47da1eae0b65ab5a76cd8",
+    ".github/workflows/ci.yml": "c023691f9a9fd91158a8ebcb28b46c6427d80f09b5cae8ffccf4f5d98a34c2f1",
     ".github/workflows/security.yml": "524bfd3b795eafa4bfb391b2970e13fd83526b46a7fd9b9446610823910a5f39",
     ".github/workflows/codeql.yml": "f09dc28205bf4fdeca83a7638db3fdd028b2006149b83907bbaeb304dc04d0b8",
     "scripts/ci/plan.py": "73d74490ca98a8029b3f3781e93a955f5a52e51948e1d8dcb50108f67d366aa7",
-    "scripts/ci/verdict.py": "f4fe254c500b8879100154d08387f02e7b7650cfb32611610c7218e9dbe289d0"
+    "scripts/ci/verdict.py": "e989334e36b0ebb2bd33bc9d0924e1a5f6a071f84f82384b7615c900709881ea"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
@@ -31,6 +31,7 @@
         "go-race-api",
         "go-race-api-shards",
         "go-race-api-template",
+        "go-race-backup",
         "go-race-cli",
         "go-race-cli-shards",
         "go-shuffle",
