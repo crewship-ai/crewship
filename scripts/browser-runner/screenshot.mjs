@@ -25,7 +25,7 @@ try {
         await page.getByText("Docker is not running.", { exact: true }).waitFor()
         await page.locator("textarea[data-slot=input-group-control]").waitFor()
       } else if (route === "/settings/members") {
-        await page.locator("tr[data-member]").first().waitFor()
+        await page.getByText("Demo User", { exact: true }).filter({ visible: true }).first().waitFor()
       }
       const screenshot = await page.screenshot({ animations: "disabled", type: "jpeg", quality: 65 })
       await writeFile(join(process.env.BROWSER_EVIDENCE, name + ".jpg"), screenshot)
