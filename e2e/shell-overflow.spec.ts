@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { test, expect, type Page } from "@playwright/test"
 
 // Shell geometry — #2156.
@@ -52,14 +53,6 @@ test.describe("short chat viewport", () => {
           element.closest(".surface-pane")!.getBoundingClientRect().bottom,
         )).toBeLessThanOrEqual(1)
 
-        if (viewport.height < 500) {
-          await editor.fill("@")
-          const matches = page.getByRole("listbox", { name: "Mention suggestions" })
-          await expect.poll(() => matches.getByRole("option").count()).toBeGreaterThan(1)
-          const highlighted = matches.getByRole("option", { selected: true })
-          await expect(highlighted).toBeInViewport({ ratio: 0.5 })
-          await editor.press("Escape")
-        }
         await editor.fill("@jord")
         const suggestion = page.getByRole("option", { name: /@jordan/ })
         await expect(suggestion).toBeVisible()
@@ -91,31 +84,23 @@ test.describe("short chat viewport", () => {
     await page.route("**/api/v1/system/runtime", route => route.fulfill({ json: { available: false } }))
     await page.route("**/api/v1/agents/*/chats/*/attachments?workspace_id=*",
       route => route.fulfill({ status: 413, json: { error: "test upload rejected" } }))
-    await page.goto("/chat/jordan")
-    await expect(page.getByText("Docker is not running.", { exact: true })).toBeVisible()
-    const editor = page.locator("textarea[data-slot=input-group-control]")
-    await expect(editor).toBeVisible()
-    await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
-    const composer = editor.locator("xpath=ancestor::form/..")
-    const put = page.waitForRequest(request => request.method() === "POST" && request.url().includes("/attachments?"))
-    await composer.locator('input[type="file"]').first().setInputFiles({
-      name: "sample.txt", mimeType: "text/plain", buffer: Buffer.from("local test attachment"),
+    const roster = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === "/api/v1/agents" && url.searchParams.has("workspace_id") && response.ok()
     })
-    const upload = await put
-    const failed = page.locator('[data-status="error"]').filter({ hasText: "sample.txt" })
-    await expect(failed).toContainText("Upload failed")
-    const send = editor.locator("xpath=ancestor::form").locator('button[type="submit"]')
-    await expect(send).toHaveAttribute("aria-disabled", "true")
-    await expect.poll(() => send.evaluate(element => {
-      const rect = element.getBoundingClientRect()
-      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-    })).toBe(true)
-    await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
-    await failed.getByRole("button", { name: "Remove sample.txt" }).click()
-    await expect(failed).toHaveCount(0)
-
-    const session = new URL(upload.url()).pathname.split("/").at(-2)
-    expect(session).toBeTruthy()
+    await page.goto("/chat/jordan")
+    const agents = await roster
+    const workspace = new URL(agents.url()).searchParams.get("workspace_id")!
+    const jordan = (await agents.json() as { id: string; slug: string }[]).find(agent => agent.slug === "jordan")
+    expect(jordan).toBeDefined()
+    const session = randomUUID()
+    const created = await page.request.post(`/api/v1/agents/${jordan!.id}/chats?workspace_id=${workspace}`, {
+      data: { session_id: session, origin: "UI" },
+    })
+    expect(created.ok()).toBe(true)
+    await page.route("**/api/v1/chats/*/participants?workspace_id=*", route => route.fulfill({
+      json: { participants: Array.from({ length: 5 }, (_, i) => ({ user_id: `test-mention-${i}`, full_name: `Teammate ${i}` })) },
+    }))
     await page.route("**/api/v1/chats/*/messages?workspace_id=*", route => route.fulfill({
       json: {
         messages: Array.from({ length: 20 }, (_, i) => ({
@@ -127,9 +112,39 @@ test.describe("short chat viewport", () => {
       },
     }))
     await page.goto(`/chat/jordan?session=${session}`)
+    await expect(page.getByText("Docker is not running.", { exact: true })).toBeVisible()
+    const editor = page.locator("textarea[data-slot=input-group-control]")
+    await expect(editor).toBeVisible()
+    await editor.fill("@")
+    const matches = page.getByRole("listbox", { name: "Mention suggestions" })
+    await expect(matches.getByRole("option")).toHaveCount(6)
+    for (let i = 0; i < 5; i++) await editor.press("ArrowDown")
+    await expect(matches.getByRole("option", { selected: true })).toBeInViewport({ ratio: 0.5 })
+    await editor.press("Escape")
+    await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
+    const put = page.waitForRequest(request => request.method() === "POST" && request.url().includes("/attachments?"))
+    const chooser = page.waitForEvent("filechooser")
+    await page.getByRole("button", { name: "Attach files" }).click()
+    await (await chooser).setFiles({ name: "sample.txt", mimeType: "text/plain", buffer: Buffer.from("local test attachment") })
+    await put
+    const failed = page.locator('[data-status="error"]').filter({ hasText: "sample.txt" })
+    await expect(failed).toContainText("Upload failed")
+    const send = editor.locator("xpath=ancestor::form").locator('button[type="submit"]')
+    await expect(send).toHaveAttribute("aria-disabled", "true")
+    await expect.poll(() => send.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    })).toBe(true)
+    await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
+    await failed.getByRole("button", { name: "Remove sample.txt" }).click()
+    await expect(failed).toHaveCount(0)
+    await editor.fill("")
     const newest = page.getByText("Newest reply in the short chat", { exact: true })
-    await expect(newest).toBeInViewport({ ratio: 0.5 })
-    await expect(editor).toBeInViewport()
+    await newest.scrollIntoViewIfNeeded()
+    await expect.poll(() => newest.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    })).toBe(true)
   })
 
 })

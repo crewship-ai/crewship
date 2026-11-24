@@ -625,8 +625,12 @@ export function ChatComposer({
     return (
       <EnsureChatSessionProvider ensureSession={ensureSessionForUpload ?? ensureSession}>
       {askSheet}
-      <div className="p-3 shrink-0">
-        <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips} chipListClassName="max-h-[16dvh] overflow-y-auto">
+      <div className="shrink-0 p-3">
+        <div className="max-h-[20dvh] overflow-y-auto">
+          {blockReason}
+          {refusalAlert}
+        </div>
+        <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips} chipsBeforeInput chipListClassName="max-h-[16dvh] overflow-y-auto">
           <MentionAutocomplete
             text={input}
             textareaRef={mentionTextareaRef}
@@ -639,7 +643,7 @@ export function ChatComposer({
               value={input}
               onChange={(e) => updateInput(e.target.value)}
               placeholder={placeholder}
-              className="min-h-[44px] [@media(max-height:520px)]:max-h-[18dvh]"
+              className="min-h-[44px] [@media(max-height:640px)]:max-h-[18dvh]"
             />
             <PromptInputFooter className="justify-between p-2 gap-2">
               <div className="flex min-w-0 items-center gap-1">
@@ -651,10 +655,6 @@ export function ChatComposer({
             </PromptInputFooter>
           </PromptInput>
         </AttachmentZone>
-        <div className="max-h-[20dvh] overflow-y-auto empty:hidden">
-          {blockReason}
-          {refusalAlert}
-        </div>
       </div>
       </EnsureChatSessionProvider>
     )

@@ -94,7 +94,16 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
     if (!ta || !trigger || !matches.length) return
     ta.setAttribute("aria-autocomplete", "list")
     ta.setAttribute("aria-controls", listId)
-    ta.setAttribute("aria-activedescendant", `${listId}-${selected}`)
+    const selectedId = `${listId}-${selected}`
+    ta.setAttribute("aria-activedescendant", selectedId)
+    const list = document.getElementById(listId)
+    const option = document.getElementById(selectedId)
+    if (list && option) {
+      const visible = list.getBoundingClientRect()
+      const active = option.getBoundingClientRect()
+      if (active.top < visible.top) list.scrollTop -= visible.top - active.top
+      else if (active.bottom > visible.bottom) list.scrollTop += active.bottom - visible.bottom
+    }
     return () => {
       ta.removeAttribute("aria-autocomplete")
       ta.removeAttribute("aria-controls")
