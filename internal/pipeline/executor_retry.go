@@ -225,8 +225,11 @@ func resolveBackoff(bp *BackoffPolicy) (minDelay, maxDelay time.Duration, factor
 // is cancelled during the wait. Injectable via e.sleepFn so tests drive
 // the backoff schedule without real wall-clock delays.
 func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	if e.sleepFn != nil {
-		return e.sleepFn(ctx, d)
+		return e.sleepFn(ctx, d) && ctx.Err() == nil
 	}
 	if d <= 0 {
 		return ctx.Err() == nil
@@ -237,7 +240,8 @@ func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	case <-t.C:
-		return true
+		// Both channels can be ready when the goroutine resumes.
+		return ctx.Err() == nil
 	}
 }
 

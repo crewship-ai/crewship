@@ -177,6 +177,23 @@ func TestRetrySleepWithHalfJitter_CancelledContext(t *testing.T) {
 	}
 }
 
+func TestRetrySleepCancellationAtWakeup(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	e := &Executor{sleepFn: func(context.Context, time.Duration) bool {
+		calls++
+		cancel()
+		return true // The timer fired while cancellation was also ready.
+	}}
+	if e.retrySleep(ctx, time.Second) {
+		t.Fatal("reported a completed backoff after cancellation")
+	}
+	if e.retrySleep(ctx, time.Second) || calls != 1 {
+		t.Fatal("an already cancelled retry entered the wait")
+	}
+}
+
 func TestApplyJitter_Distributions(t *testing.T) {
 	t.Parallel()
 	e := &Executor{}
