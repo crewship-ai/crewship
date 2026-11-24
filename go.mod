@@ -31,7 +31,7 @@ require (
 	github.com/moby/moby/api v1.57.0
 	github.com/moby/moby/client v0.6.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/nicholas-fedor/shoutrrr v0.24.0
+	github.com/nicholas-fedor/shoutrrr v0.25.0
 	github.com/phpdave11/gofpdi v1.0.16
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/robfig/cron/v3 v3.0.1
