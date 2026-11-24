@@ -60,6 +60,7 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 func newDriftFixtureState(t *testing.T, containerName, runningImage string, state map[string]any) (*Provider, *driftCallLog) {
 	t.Helper()
 	calls := &driftCallLog{}
+	var runtimeContract string
 	const staleID = "stale-cid-0123456789ab"
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +90,8 @@ func newDriftFixtureState(t *testing.T, containerName, runningImage string, stat
 				"State": state,
 				"Image": "sha256:" + strings.Repeat("a", 64),
 				"Config": map[string]any{
-					"Image": runningImage,
+					"Image":  runningImage,
+					"Labels": map[string]string{crewRuntimeContractLabel: runtimeContract},
 				},
 				"Mounts": []map[string]any{
 					{"Destination": "/crew"},
@@ -197,6 +199,7 @@ func newDriftFixtureState(t *testing.T, containerName, runningImage string, stat
 		srv.Close()
 	})
 
+	runtimeContract = p.crewRuntimeContractDigest()
 	return p, calls
 }
 
