@@ -213,3 +213,12 @@ func TestCovCT3_IsValidCLIToken_NoAuditSideEffects(t *testing.T) {
 		t.Errorf("cli_token_uses rows = %d after 5 IsValidCLIToken calls, want 0 (no audit side effects)", uses)
 	}
 }
+
+func TestWaitpointInboxAuditPath(t *testing.T) {
+	const path = "/api/v1/inbox/ibx_ws_waitpoint_legacysecret"
+	for _, suffix := range []string{"", "/act"} {
+		if got := cliUseAuditPath(path + suffix); got != "/api/v1/inbox/{id}"+suffix {
+			t.Fatalf("unexpected Inbox audit path")
+		}
+	}
+}

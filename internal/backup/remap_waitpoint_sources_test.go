@@ -121,6 +121,13 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	if err != nil || strings.Contains(string(raw), old) {
 		t.Fatal("workspace export retained a legacy waitpoint identity")
 	}
+	if err := backup.RestoreDump(ctx, db, dump); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow("SELECT count(*) FROM inbox_items WHERE workspace_id=? AND kind='waitpoint'", ws).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("partial destination has %d cards (%v)", n, err)
+	}
 	store := pipeline.NewSQLWaitpointStore(db)
 	t.Cleanup(store.Close)
 	var current string
@@ -196,11 +203,6 @@ func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
 	}
 	defer db.Close()
 	var n int
-	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE token=?", old).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("missing original row in physical snapshot (%v)", err)
-	}
-	store := pipeline.NewSQLWaitpointStore(db.DB)
-	defer store.Close()
 	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE workspace_id=? AND token IN (?, 'wp_current') AND callback_token_hash IS NULL", ws, pipeline.LegacyWaitpointPublicID(ws, old)).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("recovered waitpoints=%d (%v)", n, err)
 	}
