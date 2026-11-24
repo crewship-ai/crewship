@@ -1,0 +1,1 @@
+- **API rate limiter workers could linger after server shutdown.** The router now signals all four workers to exit and release their timers.
