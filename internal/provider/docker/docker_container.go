@@ -1372,7 +1372,7 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		if err != nil {
 			return err
 		}
-		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets, p.relabelCrewBinds())
+		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets, p.detected.Runtime == "podman")
 		initResp, initErr := dockerutil.CreateCrewContainer(ctx, p.client, client.ContainerCreateOptions{
 			Config: &container.Config{
 				Image:      runtimeImage,
@@ -1383,8 +1383,8 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		})
 		if initErr == nil {
 			_, startErr := p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{})
-			if startErr != nil && p.relabelCrewBinds() {
-				return errors.Join(fmt.Errorf("start SELinux crew bind preparation: %w", startErr), p.removeOwnershipHelper(ctx, initResp.ID, true))
+			if startErr != nil && p.detected.Runtime == "podman" {
+				return errors.Join(fmt.Errorf("start Podman crew bind preparation: %w", startErr), p.removeOwnershipHelper(ctx, initResp.ID, true))
 			}
 			// ContainerWait returns two channels; drain one of them (or
 			// cancel) so we do not leak a goroutine inside the docker client

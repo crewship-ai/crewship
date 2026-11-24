@@ -62,3 +62,17 @@ func TestPodmanSELinuxOrdinaryBindsAndServiceIdentity(t *testing.T) {
 		t.Fatal("podman forwarding process accepted as the local service")
 	}
 }
+
+func TestPodmanSELinuxRefusesReplaceableSource(t *testing.T) {
+	parent := t.TempDir()
+	source := filepath.Join(parent, "staged")
+	if err := os.WriteFile(source, nil, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRelabelSources("/", []string{source + ":/mnt:ro,z"}); err == nil {
+		t.Fatal("accepted a source that another user can replace")
+	}
+}

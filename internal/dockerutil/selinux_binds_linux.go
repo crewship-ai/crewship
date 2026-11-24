@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -110,10 +111,37 @@ func verifyRelabelSources(serviceRoot string, binds []string) error {
 		if err != nil {
 			return err
 		}
-		remote, err := root.Stat(strings.TrimPrefix(src, "/"))
-		if err != nil || !os.SameFile(local, remote) {
-			return fmt.Errorf("cannot establish the local Podman service sees the same SELinux bind source %q", src)
+		// The engine opens this pathname again at start. Each parent must
+		// protect its child from replacement by other host users, including
+		// through a different parent in the service's mount namespace.
+		for child := src; ; {
+			relative := strings.TrimPrefix(child, "/")
+			if relative == "" {
+				relative = "."
+			}
+			remote, err := root.Lstat(relative)
+			if err != nil || !os.SameFile(local, remote) {
+				return fmt.Errorf("Podman sees a different SELinux bind path at %q", child)
+			}
+			if child == "/" {
+				break
+			}
+			parent := filepath.Dir(child)
+			info, err := os.Lstat(parent)
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() || !trustedRelabelOwner(info) ||
+				(info.Mode().Perm()&0022 != 0 && (info.Mode()&os.ModeSticky == 0 || !trustedRelabelOwner(local))) {
+				return fmt.Errorf("SELinux bind path %q can be replaced in %q", child, parent)
+			}
+			child, local = parent, info
 		}
 	}
 	return nil
+}
+
+func trustedRelabelOwner(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && (stat.Uid == 0 || int(stat.Uid) == os.Geteuid())
 }
