@@ -7,6 +7,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,5 +249,31 @@ func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
 				t.Fatal("failed SDK preflight was advertised as a ready runtime")
 			}
 		})
+	}
+}
+
+func TestAgentCLIPodmanSuccessfulAdmissionWithoutArchive(t *testing.T) {
+	p, daemon, _ := newSidecarRefreshFixture(t, "", "running")
+	fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
+	p.cfg.agentCLIArtifact = fixture.agentCLIArtifact
+	p.cfg.ExpectedAgentCLICommit = strings.Repeat("b", 40)
+	p.cfg.RequiredAgentCLICommands = []string{"version"}
+	p.detected.Runtime = "podman"
+	p.selinuxEnabled = true
+	daemon.containers[refreshOldID].labels["crewship.agent-cli-sha256"] = fixture.agentCLIArtifact.SHA256
+	daemon.sdk = &agentSDKFake{t: t, artifact: fixture.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, fault: "podman-local-archive"}
+	host, err := os.Stat(fixture.agentCLIArtifact.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	// The fake daemon has no kernel init process. Stand in only for the
+	// procfs lookup; exercise admission through the final executable probe.
+	verify := func(_ context.Context, cli *client.Client, c container.InspectResponse, _ map[string]bool, target string, staged os.FileInfo) error {
+		checked = cli == p.client && c.ID == refreshOldID && target == agentCLIExecutable && os.SameFile(staged, host)
+		return nil
+	}
+	if err := p.qualifyInspectedAgentCLI(t.Context(), p.client, refreshOldID, verify); err != nil || !checked {
+		t.Fatalf("local Podman admission: mount checked=%v, error=%v", checked, err)
 	}
 }

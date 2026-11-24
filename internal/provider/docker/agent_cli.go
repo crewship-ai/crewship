@@ -130,7 +130,6 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
-	denied := errors.New("native agent CLI requires its current read-only mount in a qualified crew runtime")
 	cli, err := p.runtimeInspectionClient()
 	if err != nil {
 		return err
@@ -138,6 +137,13 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if cli != p.client {
 		defer cli.Close()
 	}
+	return p.qualifyInspectedAgentCLI(ctx, cli, id, verifyPodmanMountedFile)
+}
+
+type mountedFileVerifier func(context.Context, *client.Client, container.InspectResponse, map[string]bool, string, os.FileInfo) error
+
+func (p *Provider) qualifyInspectedAgentCLI(ctx context.Context, cli *client.Client, id string, verifyMount mountedFileVerifier) error {
+	denied := errors.New("native agent CLI requires its current read-only mount in a qualified crew runtime")
 	got, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("inspect native agent CLI runtime: %w", err)
@@ -185,15 +191,17 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if err := p.hostMountTreeHidden(ctx, writable, filepath.Dir(p.cfg.agentCLIArtifact.Path), true); err != nil {
 		return fmt.Errorf("native agent CLI staging is not private from writable crew mounts: %w", err)
 	}
-	if err := runtimestage.VerifyAgentCLIArtifact(p.cfg.agentCLIArtifact); err != nil {
+	file, err := runtimestage.OpenVerifiedAgentCLI(p.cfg.agentCLIArtifact)
+	if err != nil {
 		return err
 	}
+	defer file.Close()
 	if p.relabelCrewBinds() {
-		host, err := os.Lstat(p.cfg.agentCLIArtifact.Path)
+		host, err := file.Stat()
 		if err != nil {
 			return err
 		}
-		if err := verifyPodmanMountedFile(ctx, cli, c, nil, executable, host); err != nil {
+		if err := verifyMount(ctx, cli, c, nil, executable, host); err != nil {
 			return fmt.Errorf("verify mounted agent CLI: %w", err)
 		}
 	} else if err := p.verifyAgentCLIArchivePaths(ctx, id); err != nil {
