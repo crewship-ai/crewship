@@ -229,20 +229,20 @@ func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
 		return false
 	}
 	if e.sleepFn != nil {
-		return e.sleepFn(ctx, d) && ctx.Err() == nil
+		if !e.sleepFn(ctx, d) {
+			return false
+		}
+	} else if d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-t.C:
+		}
 	}
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		// Both channels can be ready when the goroutine resumes.
-		return ctx.Err() == nil
-	}
+	// Cancellation and timer expiry can both be ready at wakeup.
+	return ctx.Err() == nil
 }
 
 // jitterMode selects the jitter distribution applyJitter draws from.

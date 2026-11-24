@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Cancelled pipelines could continue past retry backoff.** The executor now checks cancellation before waiting and again when the retry timer wakes.
+- **Retry backoff could report success after a pipeline was cancelled.** The executor now checks cancellation before waiting and again when the retry timer wakes.
 
 - **Workflow, activity and routine graphs use React Flow 13.** The graph styles follow the selected light or dark theme, and fit-to-view keeps the existing proportional margins.
 
