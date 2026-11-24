@@ -237,90 +237,116 @@ it("an identity switch while a row retirement hangs: the deadline afterwards cap
   expect(r.requests).toHaveLength(1)
 })
 
+// Signal the actual I/O milestones before moving the fake controller clock.
+function stagedWrites(r: Rig) {
+  const sending = Promise.withResolvers<void>()
+  const commit = Promise.withResolvers<void>()
+  r.send.mockImplementationOnce(async request => {
+    sending.resolve()
+    await commit.promise
+    return receipt(request)
+  })
+
+  const manualStored = Promise.withResolvers<void>()
+  function saveManual() {
+    store.put.mockImplementationOnce(async row => {
+      rows.set(row.id, row)
+      manualStored.resolve()
+    })
+    return r.controller.save("ticket-b").then(() => "sent", (error: Error) => error.message)
+  }
+
+  const newerStarted = Promise.withResolvers<DocumentDraft>()
+  const land = Promise.withResolvers<void>()
+  const landed = Promise.withResolvers<void>()
+  function saveNewer() {
+    store.put.mockImplementationOnce(async row => {
+      newerStarted.resolve(row)
+      await land.promise
+      rows.set(row.id, row)
+      landed.resolve()
+    })
+    r.edit(3)
+    return r.controller.save()
+  }
+
+  return { sending, commit, manualStored, saveManual, newerStarted, land, landed, saveNewer }
+}
+
 it("a timed-out persist that lands late is never overwritten or retired by an older queued manual ticket", async () => {
-  // Codex review of #4887, blocker 1. A is in flight; manual ticket B is
-  // captured and waits behind A; newer edit C's local write misses the
-  // controller deadline but lands later, before A's confirmation (which
-  // queues behind it in the journal) answers. B must then neither rebase over
-  // C's newer row nor retire it: a reload must still find C.
-  // Only the controller's timers are faked, so each deadline is placed exactly.
+  // A is in flight while manual ticket B queues behind it. Newer edit C
+  // misses the deadline, then lands before A retires its journal row.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-  const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(resolve => setImmediate(resolve)); expect(done()).toBe(true) }
   const base = await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
-  const journal = { ...base, confirm: vi.fn((d: NativeDraft) => base.confirm(d)) }
+  const confirming = Promise.withResolvers<void>()
+  const journal = { ...base, confirm(d: NativeDraft) { confirming.resolve(); return base.confirm(d) } }
   const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
-  let releaseA!: () => void
-  r.send.mockImplementationOnce(req => new Promise(resolve => { releaseA = () => resolve(receipt(req)) }))
+  const writes = stagedWrites(r)
   try {
     r.edit(2)
     const a = r.controller.save()
-    await settle(() => r.requests.length === 1)
+    await writes.sending.promise
     let bDone = false
-    const b = r.controller.save("ticket-b").then(() => "sent", (error: Error) => error.message).finally(() => { bDone = true })
-    await settle(() => store.put.mock.calls.length === 2)
-    // C: a newer edit whose IndexedDB write hangs past the controller deadline.
-    let landC!: () => void, rowC: DocumentDraft | undefined
-    store.put.mockImplementationOnce((row: DocumentDraft) => new Promise<void>(resolve => { rowC = row; landC = () => { rows.set(row.id, row); resolve() } }))
-    r.edit(3)
-    let cDone = false
-    void r.controller.save().finally(() => { cDone = true })
-    await settle(() => store.put.mock.calls.length === 3)
+    const b = writes.saveManual().finally(() => { bDone = true })
+    await writes.manualStored.promise
+    const c = writes.saveNewer()
+    const rowC = await writes.newerStarted.promise
+
     await vi.advanceTimersByTimeAsync(50)
-    // A commits; its confirmation queues in the journal behind C's write.
-    releaseA()
-    await settle(() => journal.confirm.mock.calls.length === 1)
-    // C's controller deadline passes (A's confirmation still has 50 ms) ...
+    writes.commit.resolve()
+    await confirming.promise
+    // C expires while A is still waiting for the queued journal confirmation.
     await vi.advanceTimersByTimeAsync(60)
-    await settle(() => cDone)
+    await c
     expect(bDone).toBe(false)
-    // ... and only then does C's write land, before A's confirmation deadline.
-    landC()
+
+    writes.land.resolve()
     await a
-    await settle(() => bDone)
     await b
-    // Whatever B did, C's newer content stays recoverable from this browser.
-    expect(rowC).toBeDefined()
-    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC!.snapshot])
+    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
     expect(r.requests.map(q => q.bytes[0])).not.toContain(3)
-  } finally { vi.useRealTimers(); await r.controller.close() }
+  } finally {
+    writes.commit.resolve()
+    writes.land.resolve()
+    vi.useRealTimers()
+    await r.controller.close()
+  }
 })
 
 it("an older manual ticket never writes behind a newer local write that has not settled yet", async () => {
-  // Same interleaving, but C's write is still in the journal when B rebases:
-  // B cannot know whether C will land, so it fails visibly instead of queueing
-  // an older row behind C. Nothing is sent for B; C lands and stays.
+  // A can confirm independently of C. B must fail visibly while C is
+  // pending, leaving the newer edit recoverable after the write lands.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-  const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(resolve => setImmediate(resolve)); expect(done()).toBe(true) }
   const base = await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
-  // A's confirmation answers on its own; it is not queued behind C here.
-  const journal = { ...base, confirm: vi.fn(async () => {}) }
+  const journal = { ...base, async confirm() {} }
   const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
-  let releaseA!: () => void
-  r.send.mockImplementationOnce(req => new Promise(resolve => { releaseA = () => resolve(receipt(req)) }))
-  let landC: (() => void) | undefined, rowC: DocumentDraft | undefined
+  const writes = stagedWrites(r)
   try {
     r.edit(2)
     const a = r.controller.save()
-    await settle(() => r.requests.length === 1)
-    let bOutcome: string | undefined
-    const b = r.controller.save("ticket-b").then(() => "sent", (error: Error) => error.message).then(outcome => { bOutcome = outcome })
-    await settle(() => store.put.mock.calls.length === 2)
-      store.put.mockImplementationOnce((row: DocumentDraft) => new Promise<void>(resolve => { rowC = row; landC = () => { rows.set(row.id, row); resolve() } }))
-    r.edit(3)
-    let cDone = false
-    void r.controller.save().finally(() => { cDone = true })
-    await settle(() => store.put.mock.calls.length === 3)
+    await writes.sending.promise
+    const b = writes.saveManual()
+    await writes.manualStored.promise
+    const c = writes.saveNewer()
+    const rowC = await writes.newerStarted.promise
+
     await vi.advanceTimersByTimeAsync(50)
-    releaseA()
+    writes.commit.resolve()
     await a
     await vi.advanceTimersByTimeAsync(60)
-    await settle(() => cDone && bOutcome !== undefined)
-    await b
-    expect(bOutcome).toBe("storage")
+    await c
+    expect(await b).toBe("storage")
     expect(r.requests).toHaveLength(1)
-    landC!()
-    await settle(() => rows.size === 1 && [...rows.values()][0].snapshot === rowC?.snapshot)
-  } finally { landC?.(); vi.useRealTimers(); await r.controller.close() }
+
+    writes.land.resolve()
+    await writes.landed.promise
+    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC.snapshot])
+  } finally {
+    writes.commit.resolve()
+    writes.land.resolve()
+    vi.useRealTimers()
+    await r.controller.close()
+  }
 })
 
 // A frozen page outlives the save deadline even when the reply is on its way
