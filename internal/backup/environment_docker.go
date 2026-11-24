@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -239,7 +240,15 @@ func (m *MobyDockerOps) CommitContainer(ctx context.Context, containerID, ref st
 	if err != nil {
 		return "", fmt.Errorf("backup: docker commit %s: %w", containerID, err)
 	}
-	return dockerutil.VerifiedCommitID(ctx, m.Client, res.ID)
+	id, err := dockerutil.VerifiedCommitID(ctx, m.Client, res.ID)
+	if err != nil {
+		// Commit succeeded, so the capture owns its unique temporary tag even
+		// when inspect fails. The caller has not yet taken over its cleanup.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		return "", errors.Join(err, m.RemoveImage(cleanup, ref))
+	}
+	return id, nil
 }
 
 // ImagePlatform implements EnvironmentOps.

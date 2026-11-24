@@ -36,11 +36,22 @@ func TestProvisionCacheReturnsImmutableIdentity(t *testing.T) {
 
 type podmanCommitMock struct {
 	identityCommitClient
-	commitID string
+	commitID  string
+	inspected string
+	committed bool
 }
 
 func (m *podmanCommitMock) ContainerCommit(context.Context, string, client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
+	m.committed = true
 	return client.ContainerCommitResult{ID: m.commitID}, nil
+}
+
+func (m *podmanCommitMock) ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	if !m.committed {
+		return m.identityCommitClient.ImageInspect(ctx, ref, opts...)
+	}
+	m.inspected = ref
+	return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: strings.TrimPrefix(fixtureImageID, "sha256:")}}, nil
 }
 
 func TestPodmanCommitIdentity(t *testing.T) {
@@ -59,6 +70,9 @@ func TestPodmanCommitIdentity(t *testing.T) {
 			cfg := &Config{Image: offlineBaseImage, ContainerEnv: map[string]string{"TEST": "identity"}}
 			inst := NewInstaller(&mockDockerClient{}, testLogger())
 			result, err := NewProvisioner(m, inst, nil, testLogger()).Provision(context.Background(), cfg.Image, cfg, "")
+			if tc.ok && m.inspected != fixtureImageID {
+				t.Fatalf("inspected %q, want immutable config ID", m.inspected)
+			}
 			if tc.ok && (err != nil || result.CachedImage != fixtureImageID) {
 				t.Fatalf("wanted verified config ID, got %+v, %v", result, err)
 			}

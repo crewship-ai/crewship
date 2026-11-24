@@ -4,4 +4,4 @@ package dockerutil
 
 import "context"
 
-func rootlessPodmanOOMScoreAdj(context.Context, string) (int, error) { return 0, nil }
+func rootlessPodmanOOMScoreAdj(context.Context, any, string) (int, error) { return 0, nil }

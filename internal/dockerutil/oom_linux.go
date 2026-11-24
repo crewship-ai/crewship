@@ -13,16 +13,21 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
+// Reuse a confirmed Docker socket until its inode changes. A Podman
+// service's PID and OOM setting can change on every socket activation.
+var dockerSocket atomic.Pointer[os.FileInfo]
+
 // With systemd socket activation SO_PEERCRED can identify the user manager
 // that opened the listener. SCM_CREDENTIALS identifies the process that
 // actually wrote the HTTP response, including on an inherited listener.
-func rootlessPodmanOOMScoreAdj(ctx context.Context, endpoint string) (int, error) {
+func rootlessPodmanOOMScoreAdj(ctx context.Context, cli any, endpoint string) (int, error) {
 	path, local := strings.CutPrefix(endpoint, "unix://")
 	if !local {
 		return 0, nil
@@ -36,41 +41,65 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, endpoint string) (int, error
 		return 0, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	if prior := dockerSocket.Load(); prior != nil && os.SameFile(*prior, st) && (*prior).ModTime() == st.ModTime() {
+		return 0, nil
+	}
+	isPodman, identified := podmanVersion(ctx, cli)
+	if identified && !isPodman {
+		dockerSocket.Store(&st)
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
-		return 0, nil
-	} // let create report daemon connectivity errors
+		return 0, err
+	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
-	conn.SetDeadline(deadline)
+	if err := conn.SetDeadline(deadline); err != nil {
+		return 0, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	sock := conn.(*net.UnixConn)
 	raw, err := sock.SyscallConn()
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	var optErr error
-	if err = raw.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil || optErr != nil {
-		return 0, nil
+	if err = raw.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil {
+		return 0, err
+	}
+	if optErr != nil {
+		return 0, optErr
 	}
 	if _, err = io.WriteString(sock, "GET /info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-		return 0, nil
+		return 0, err
 	}
 	var first [1]byte
 	oob := make([]byte, unix.CmsgSpace(unix.SizeofUcred))
 	n, control, _, _, err := sock.ReadMsgUnix(first[:], oob)
-	if err != nil || n != 1 {
-		return 0, nil
+	if err != nil {
+		return 0, err
+	}
+	if n != 1 {
+		return 0, io.ErrUnexpectedEOF
 	}
 	reader := bufio.NewReader(io.LimitReader(io.MultiReader(bytes.NewReader(first[:]), sock), 1<<20))
 	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK || response.Header.Get("Libpod-Api-Version") == "" {
+	if response.Header.Get("Libpod-Api-Version") == "" {
+		if isPodman {
+			return 0, fmt.Errorf("Podman info missing Libpod API version")
+		}
 		return 0, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("Podman info: %s", response.Status)
 	}
 	var info struct{ SecurityOptions []string }
 	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {

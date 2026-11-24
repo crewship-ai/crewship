@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -102,7 +103,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	name := imageReferenceName(p.owner, img.ID)
 	existing, err := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err == nil {
-		return img.ID, p.validate(existing, img.ID)
+		return img.ID, p.validate(ctx, existing, img)
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect environment reference: %w", err)
@@ -141,23 +142,30 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		if inspectErr != nil {
 			return "", fmt.Errorf("retain exact environment %s: %w", img.ID, err)
 		}
-		return img.ID, p.validate(existing, img.ID)
+		return img.ID, p.validate(ctx, existing, img)
 	}
 	existing, err = p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("confirm environment reference: %w", err)
 	}
-	return img.ID, p.validate(existing, img.ID)
+	return img.ID, p.validate(ctx, existing, img)
 }
 
-func (p *ImageReferences) validate(result client.ContainerInspectResult, id string) error {
+func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, img client.ImageInspectResult) error {
 	c := result.Container
+	id := dockerutil.ConfigImageID(img.ID)
 	raw, idErr := hex.DecodeString(c.ID)
 	if idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
-		id == "" || dockerutil.ConfigImageID(c.Image) != id || dockerutil.ConfigImageID(c.Config.Image) != id ||
+		id == "" || dockerutil.ConfigImageID(c.Image) != id ||
 		c.Config.Labels[imageReferenceOwnerLabel] != p.owner || c.Config.Labels[imageReferenceIDLabel] != id ||
 		strings.TrimPrefix(c.Name, "/") != imageReferenceName(p.owner, id) {
 		return fmt.Errorf("environment reference identity/state mismatch for %q; retaining conflicting container", c.ID)
+	}
+	// Podman may report a display tag in Config.Image even when create used
+	// the config ID. Require both the immutable Container.Image above and
+	// confirmation that this exact inspected image carries the display tag.
+	if dockerutil.ConfigImageID(c.Config.Image) != id && !(slices.Contains(img.RepoTags, c.Config.Image) && dockerutil.IsPodman(ctx, p.client)) {
+		return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
 	}
 	for _, m := range c.Mounts {
 		if m.Type == "volume" || m.Type == "bind" {
@@ -216,11 +224,14 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 		return err
 	}
 	id := dockerutil.ConfigImageID(c.Container.Image)
-	if err := p.validate(c, id); err != nil {
-		return err
+	if id == "" {
+		return fmt.Errorf("image reference has invalid config ID")
 	}
 	img, err := p.client.ImageInspect(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := p.validate(ctx, c, img); err != nil {
 		return err
 	}
 	if img.Config == nil {

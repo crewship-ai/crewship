@@ -12,11 +12,18 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/moby/moby/api/types/system"
+	"github.com/moby/moby/client"
 )
 
 type rootlessCommitMock struct {
 	mockCommitClient
 	socket string
+}
+
+func (*rootlessCommitMock) ServerVersion(context.Context, client.ServerVersionOptions) (client.ServerVersionResult, error) {
+	return client.ServerVersionResult{Components: []system.ComponentVersion{{Name: "Podman Engine"}}}, nil
 }
 
 func (m *rootlessCommitMock) DaemonHost() string { return "unix://" + m.socket }
