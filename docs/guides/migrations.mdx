@@ -814,12 +814,13 @@ Existing rows are converted in Go when the waitpoint store is constructed,
 before anything serves, and again on every 30 s sweep (so a pre-upgrade row
 that a restore brings back into a running server is converted too). For each
 row whose `token` does not start with `wp_`, in one transaction, the old value
-is replaced by a fresh `wp_` id **everywhere it was copied**:
+is replaced by a fresh `wp_` id in the following identity references:
 `pipeline_waitpoints.token`; `inbox_items.source_id` **and** `inbox_items.id`
 (the inbox writer derives the id as `ibx_<workspace>_waitpoint_<source_id>`);
 `inbox_item_reads.inbox_item_id`; `notification_deliveries.source_id` and
-`dedup_key`; and `audit_logs.entity_id`. No trace of the old value is left in
-the database. A row that fails (lock contention) is left exactly as it was,
+`dedup_key`; and `audit_logs.entity_id`. Historical ADMIN CLI request paths in `cli_token_uses.path` can retain the
+old identifier. These audit records remain intact. The old value no longer
+authorizes a callback. A row that fails (lock contention) is left exactly as it was,
 logged with a digest fingerprint rather than the token, and retried on the
 next sweep.
 

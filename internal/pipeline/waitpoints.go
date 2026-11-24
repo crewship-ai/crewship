@@ -696,26 +696,45 @@ func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, t
 }
 
 func (s *SQLWaitpointStore) completeApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string, clock func() time.Time) error {
-	decision, err := func() (*WaitpointDecision, error) {
-		tx, err := s.db.Conn(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("waitpoints: update: %w", err)
-		}
-		defer tx.Close()
-		if _, err = tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-			return nil, err
-		}
-		defer func() { _, _ = tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-		decision, err := s.decideTxClock(ctx, tx, workspaceID, token, approved, WaitpointDecider{Kind: DeciderUser, ID: deciderUserID}, payload, clock)
-		if decision != nil && decision.Applied {
-			if _, commitErr := tx.ExecContext(ctx, "COMMIT"); commitErr != nil {
-				return nil, commitErr
-			}
-		}
-		return decision, err
-	}()
-	s.AfterDecide(ctx, decision)
+	err := s.commitDecision(ctx, func(tx *sql.Conn) (*WaitpointDecision, error) {
+		return s.decideTxClock(ctx, tx, workspaceID, token, approved, WaitpointDecider{Kind: DeciderUser, ID: deciderUserID}, payload, clock)
+	})
 	return err
+}
+
+func (s *SQLWaitpointStore) withWaitpointWriter(ctx context.Context, apply func(*sql.Conn) error) error {
+	tx, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Close()
+	if _, err := tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	defer func() { _, _ = tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
+	if err := apply(tx); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "COMMIT")
+	return err
+}
+
+func (s *SQLWaitpointStore) commitDecision(ctx context.Context, apply func(*sql.Conn) (*WaitpointDecision, error)) error {
+	var decision *WaitpointDecision
+	var decisionErr error
+	err := s.withWaitpointWriter(ctx, func(tx *sql.Conn) error {
+		decision, decisionErr = apply(tx)
+		// An expired decision commits its timeout and returns ErrAlreadyDecided.
+		if decision != nil && decision.Applied {
+			return nil
+		}
+		return decisionErr
+	})
+	if err != nil {
+		return err
+	}
+	s.AfterDecide(ctx, decision)
+	return decisionErr
 }
 
 // CancelWaitpointsForRun flips every still-pending waitpoint belonging to a

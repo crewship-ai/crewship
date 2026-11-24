@@ -118,7 +118,7 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	if err := db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE workspace_id=?`, ws).Scan(&current); err != nil {
 		t.Fatal(err)
 	}
-	secret, _, err := store.MintCallbackToken(ctx, ws, current)
+	secret, _, err := store.MintCallbackToken(ctx, ws, current, "u_admin")
 	if err != nil {
 		t.Fatal(err)
 	}

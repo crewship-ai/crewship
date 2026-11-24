@@ -19,10 +19,10 @@ func (atomicCallbackStore) ResolveCallbackToken(context.Context, string) (string
 }
 
 func TestCallbackUsesAtomicDecision(t *testing.T) {
-	h, _, ws := newPipelineHandlerForCRUDTest(t)
+	h, user, ws := newPipelineHandlerForCRUDTest(t)
 	store, id := seedPendingWaitpoint(t, h, ws)
 	h.SetWaitpointStore(atomicCallbackStore{store})
-	secret, _, err := store.MintCallbackToken(t.Context(), ws, id)
+	secret, _, err := store.MintCallbackToken(t.Context(), ws, id, user)
 	if err != nil {
 		t.Fatal(err)
 	}

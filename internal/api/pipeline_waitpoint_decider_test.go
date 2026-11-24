@@ -143,9 +143,9 @@ func TestApproveWaitpoint_PersonDecides_AfterPeerWasRefused(t *testing.T) {
 }
 
 func TestCompleteWaitpointToken_ExternalHolderDecides(t *testing.T) {
-	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	h, user, wsID := newPipelineHandlerForCRUDTest(t)
 	store, tok := seedPendingWaitpoint(t, h, wsID)
-	secret, _, err := store.MintCallbackToken(t.Context(), wsID, tok)
+	secret, _, err := store.MintCallbackToken(t.Context(), wsID, tok, user)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}

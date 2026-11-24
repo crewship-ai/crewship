@@ -92,12 +92,27 @@ func CallbackOffered(stepID, decisionFormJSON string) bool {
 // workspaceID, stores only its digest and returns the secret — the one and
 // only time it exists outside the caller. A previous secret is replaced
 // (rotated reports that), so re-minting is also how a leaked URL is revoked.
-func (s *SQLWaitpointStore) MintCallbackToken(ctx context.Context, workspaceID, id string) (secret string, rotated bool, err error) {
+func (s *SQLWaitpointStore) MintCallbackToken(ctx context.Context, workspaceID, id, actorID string) (secret string, rotated bool, err error) {
 	if workspaceID == "" || id == "" {
 		return "", false, ErrWaitpointNotFound
 	}
+	if actorID == "" {
+		return "", false, errors.New("waitpoints: missing mint actor")
+	}
+	err = s.withWaitpointWriter(ctx, func(tx *sql.Conn) error {
+		var mintErr error
+		secret, rotated, mintErr = mintCallbackTokenTx(ctx, tx, workspaceID, id, actorID)
+		return mintErr
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return secret, rotated, nil
+}
+
+func mintCallbackTokenTx(ctx context.Context, tx *sql.Conn, workspaceID, id, actorID string) (secret string, rotated bool, err error) {
 	var status, stepID, form, prior string
-	err = s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT status, step_id, decision_form_json, COALESCE(callback_token_hash, '')
   FROM pipeline_waitpoints WHERE workspace_id = ? AND token = ? AND kind = 'approval'`,
 		workspaceID, id).Scan(&status, &stepID, &form, &prior)
@@ -117,18 +132,28 @@ SELECT status, step_id, decision_form_json, COALESCE(callback_token_hash, '')
 	if err != nil {
 		return "", false, err
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 UPDATE pipeline_waitpoints SET callback_token_hash = ?
  WHERE workspace_id = ? AND token = ? AND status = 'pending'`,
 		HashCapabilityToken(secret), workspaceID, id)
 	if err != nil {
 		return "", false, fmt.Errorf("waitpoints: store callback digest: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Decided between the read and the write.
-		return "", false, ErrAlreadyDecided
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return "", false, errors.Join(ErrAlreadyDecided, err)
 	}
-	return secret, prior != "", nil
+	rotated = prior != ""
+	res, err = tx.ExecContext(ctx, `INSERT INTO audit_logs
+		(id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+		VALUES (lower(hex(randomblob(16))), ?, ?, 'waitpoint.callback_token.minted', 'waitpoint', ?, ?, ?)`,
+		workspaceID, actorID, id, fmt.Sprintf(`{"rotated":%t}`, rotated), time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return "", false, fmt.Errorf("waitpoints: audit callback mint: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return "", false, errors.Join(errors.New("waitpoints: missing callback mint audit"), err)
+	}
+	return secret, rotated, nil
 }
 
 // ResolveCallbackToken maps a value presented at the public callback to the
@@ -137,12 +162,16 @@ UPDATE pipeline_waitpoints SET callback_token_hash = ?
 // the cleartext is never compared and never stored. A stored digest, a
 // redaction marker or a public waitpoint id all resolve to nothing.
 func (s *SQLWaitpointStore) ResolveCallbackToken(ctx context.Context, presented string) (id, workspaceID string, err error) {
+	return resolveCallbackToken(ctx, s.db, presented)
+}
+
+func resolveCallbackToken(ctx context.Context, tx DecisionDBTX, presented string) (id, workspaceID string, err error) {
 	digest := CapabilityLookupDigest(presented)
 	if digest == "" {
 		return "", "", nil
 	}
 	var stored string
-	err = s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE callback_token_hash = ?`,
 		digest).Scan(&id, &workspaceID, &stored)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -157,6 +186,31 @@ SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE c
 		return "", "", nil
 	}
 	return id, workspaceID, nil
+}
+
+// DecideCallback authenticates the grant while holding the same SQLite writer
+// reservation as rotation and the final decision. Only committed decisions notify listeners.
+func (s *SQLWaitpointStore) DecideCallback(ctx context.Context, presented string, approved bool, payload string) (id, workspaceID string, err error) {
+	decider := WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}
+	err = s.commitDecision(ctx, func(tx *sql.Conn) (*WaitpointDecision, error) {
+		var lookupErr error
+		id, workspaceID, lookupErr = resolveCallbackToken(ctx, tx, presented)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if id == "" {
+			return nil, ErrAlreadyDecided
+		}
+		return s.DecideTx(ctx, tx, workspaceID, id, approved, decider, payload)
+	})
+	if errors.Is(err, ErrDeciderNotAllowed) {
+		reason := refusalReasonDecider
+		if errors.Is(err, ErrHeldActionDeciderNotAllowed) {
+			reason = refusalReasonHeldAction
+		}
+		s.recordRefusal(ctx, workspaceID, id, approved, decider, reason)
+	}
+	return id, workspaceID, err
 }
 
 // ---------------------------------------------------------------------------
@@ -177,8 +231,8 @@ SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE c
 // working because they key on the new id.
 //
 // For each row whose token is not a public id, in ONE transaction, the old
-// value is replaced by a fresh public id everywhere it was copied, so no
-// trace of it is left in the database:
+// value is replaced by a fresh public id in the following identity references. Historical ADMIN CLI request paths
+// can retain the invalidated token:
 //
 //   - pipeline_waitpoints.token;
 //   - inbox_items.source_id AND inbox_items.id, which the inbox writer derives

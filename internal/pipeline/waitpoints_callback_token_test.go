@@ -65,7 +65,7 @@ func TestWaitpointCallback_MintStoresOnlyDigestAndRotates(t *testing.T) {
 	ctx := context.Background()
 	id := createTestApproval(t, store, "ws_a", "run_1", "gate", "")
 
-	secret, rotated, err := store.MintCallbackToken(ctx, "ws_a", id)
+	secret, rotated, err := store.MintCallbackToken(ctx, "ws_a", id, "u_1")
 	if err != nil || rotated {
 		t.Fatalf("first mint: secret=%t rotated=%t err=%v", secret != "", rotated, err)
 	}
@@ -89,7 +89,7 @@ func TestWaitpointCallback_MintStoresOnlyDigestAndRotates(t *testing.T) {
 		t.Fatalf("a wrong secret resolved a waitpoint")
 	}
 
-	second, rotated, err := store.MintCallbackToken(ctx, "ws_a", id)
+	second, rotated, err := store.MintCallbackToken(ctx, "ws_a", id, "u_1")
 	if err != nil || !rotated || second == secret {
 		t.Fatalf("re-mint: rotated=%t same=%t err=%v", rotated, second == secret, err)
 	}
@@ -122,7 +122,7 @@ func TestWaitpointCallback_MintRefusals(t *testing.T) {
 		{"held action", "ws_a", held, ErrCallbackNotOffered},
 		{"decided", "ws_a", decided, ErrAlreadyDecided},
 	} {
-		if _, _, err := store.MintCallbackToken(ctx, tc.ws, tc.id); !errors.Is(err, tc.want) {
+		if _, _, err := store.MintCallbackToken(ctx, tc.ws, tc.id, "u_1"); !errors.Is(err, tc.want) {
 			t.Errorf("%s: err=%v, want %v", tc.name, err, tc.want)
 		}
 	}
@@ -203,7 +203,7 @@ func TestWaitpointCallback_LegacyRowsMigrate_NoTraceLeft(t *testing.T) {
 		t.Fatalf("foreign key check after migration: %d (%v)", fkProblems, err)
 	}
 	// The authed path keys on the new id, and a new URL can be minted.
-	if _, _, err := store.MintCallbackToken(ctx, "ws_a", id); err != nil {
+	if _, _, err := store.MintCallbackToken(ctx, "ws_a", id, "u_1"); err != nil {
 		t.Fatalf("cannot mint for a migrated waitpoint: %v", err)
 	}
 	if err := store.CompleteApproval(ctx, "ws_a", id, true, "u_1", ""); err != nil {

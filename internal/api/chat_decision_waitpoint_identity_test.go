@@ -55,7 +55,7 @@ func TestChatDecisionWaitpointIdentityNeverGrantsCallbackAuthority(t *testing.T)
 	}
 	// … only a minted secret is, and it never reaches the card.
 	store := d.r.PipelinesHandler.waitpoints.(*pipeline.SQLWaitpointStore)
-	secret, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token)
+	secret, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token, d.f.user)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}

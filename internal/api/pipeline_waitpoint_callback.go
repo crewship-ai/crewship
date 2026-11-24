@@ -67,47 +67,18 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 		payload = string(body.Payload)
 	}
 
-	wp, ok := h.waitpoints.(waitpointDecideDoor)
+	store, ok := h.waitpoints.(interface {
+		DecideCallback(context.Context, string, bool, string) (string, string, error)
+	})
 	if !ok {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
 	}
-	// The path carries the CALLBACK SECRET, not the waitpoint id (#1910).
-	// It is hashed and the digest looked up; the result is the waitpoint's
-	// public id and its own workspace, which are what the decide door and
-	// the resume path key on. The workspace is the row's own, so this
-	// cannot reject a legitimate holder — it keeps this call site on the
-	// same workspace-scoped UPDATE as the authed path (#1415).
-	//
-	// Anything that is not a live secret — the public id, a stored digest,
-	// a waitpoint nobody minted a URL for, garbage — resolves to nothing
-	// and gets the same 409 an unknown token always got, so the endpoint
-	// does not say which of those it was.
-	resolver, ok := h.waitpoints.(waitpointCallbackResolver)
-	if !ok {
-		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
-		return
-	}
-	id, workspaceID, err := resolver.ResolveCallbackToken(r.Context(), secret)
+	id, workspaceID, err := store.DecideCallback(r.Context(), secret, approved, payload)
 	if err != nil {
-		h.logger.Error("waitpoint callback: resolve", "error", err, "token", tokenFingerprint(secret))
-		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
-		return
-	}
-	if id == "" {
-		replyError(w, http.StatusConflict, pipeline.ErrAlreadyDecided.Error())
-		return
-	}
-	// The decider is the EXTERNAL secret holder, attributed to the
-	// "external-callback" sentinel: no human user, the secret is the
-	// authority. Audit queries can distinguish callback completions from
-	// inbox approvals by this sentinel. This is not an agent door (B14,
-	// #2388): an agent is never handed a callback secret — only a MANAGER
-	// can mint one, and it is shown to them once — so the only way one
-	// reaches this route is a person choosing to give it away.
-	if err := wp.Decide(r.Context(), workspaceID, id, approved,
-		pipeline.WaitpointDecider{Kind: pipeline.DeciderExternal, ID: "external-callback"}, payload); err != nil {
-		err = explainDecideError(r.Context(), wp, workspaceID, id, err)
+		if id != "" {
+			err = explainDecideError(r.Context(), store, workspaceID, id, err)
+		}
 		replyWaitpointDecideError(w, h.logger, "waitpoint callback complete", id, err)
 		return
 	}
@@ -127,15 +98,9 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": approved})
 }
 
-// waitpointCallbackResolver maps a presented callback secret to the waitpoint
-// it authorises. *pipeline.SQLWaitpointStore implements it.
-type waitpointCallbackResolver interface {
-	ResolveCallbackToken(ctx context.Context, presented string) (id, workspaceID string, err error)
-}
-
 // waitpointCallbackMinter mints a waitpoint's callback secret.
 type waitpointCallbackMinter interface {
-	MintCallbackToken(ctx context.Context, workspaceID, id string) (secret string, rotated bool, err error)
+	MintCallbackToken(ctx context.Context, workspaceID, id, actorID string) (secret string, rotated bool, err error)
 }
 
 // MintWaitpointCallbackToken mints the public callback URL for one pending
@@ -162,7 +127,12 @@ func (h *PipelineHandler) MintWaitpointCallbackToken(w http.ResponseWriter, r *h
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	secret, rotated, err := minter.MintCallbackToken(r.Context(), workspaceID, id)
+	actor := UserFromContext(r.Context())
+	if actor == nil || actor.ID == "" {
+		replyError(w, http.StatusForbidden, "authenticated manager required")
+		return
+	}
+	secret, rotated, err := minter.MintCallbackToken(r.Context(), workspaceID, id, actor.ID)
 	switch {
 	case errors.Is(err, pipeline.ErrWaitpointNotFound):
 		replyError(w, http.StatusNotFound, "waitpoint not found")
@@ -178,7 +148,6 @@ func (h *PipelineHandler) MintWaitpointCallbackToken(w http.ResponseWriter, r *h
 		replyError(w, http.StatusInternalServerError, "Failed to mint callback token")
 		return
 	}
-	auditFromRequest(r, h.db, "waitpoint.callback_token.minted", "waitpoint", id, map[string]interface{}{"rotated": rotated})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token":        id,
 		"callback_url": InstanceURLFromRequest(r, "") + "/api/v1/waitpoint-tokens/" + secret,
