@@ -504,11 +504,18 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 func TestStartSidecarRedactsBeforeTakingExcerpt(t *testing.T) {
 	const secret = "opaque-value-with-sensitive-suffix"
 	for _, padding := range []int{2032, sidecarDiagnosticLimit} {
+		inspections := 0
 		c := &covContainer{
 			route: func(provider.ExecConfig) (*provider.ExecResult, error) {
 				return covResult("sidecar-start", secret+strings.Repeat(".", padding)+"failure"), nil
 			},
-			inspect: func(string) (bool, int, error) { return false, 1, nil },
+			inspect: func(string) (bool, int, error) {
+				inspections++
+				if inspections == 1 {
+					return true, 0, nil
+				}
+				return false, 1, nil
+			},
 		}
 		err := startSidecar(t.Context(), c, "container", "run", []Credential{{PlainValue: secret}}, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 		if err == nil || strings.Contains(err.Error(), "suffix") || len(err.Error()) > 2200 {

@@ -1301,17 +1301,16 @@ func startSidecar(
 	output, readErr := io.ReadAll(io.LimitReader(result.Reader, sidecarDiagnosticLimit+1))
 	result.Reader.Close()
 
-	// Check if the health check script exited with an error
-	running, exitCode, inspErr := container.ExecInspect(ctx, result.ExecID)
+	// A partial diagnostic can split a secret. It also does not prove the
+	// launcher completed, so reject it before consulting the exit status.
+	if readErr != nil || len(output) > sidecarDiagnosticLimit {
+		return fmt.Errorf("sidecar health check failed: incomplete or oversized startup log")
+	}
+	exitCode, inspErr := provider.WaitExecExit(ctx, container, result.ExecID, execProbeTimeout)
 	if inspErr != nil {
 		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
 	}
-	if !running && exitCode != 0 {
-		// A truncated read may start or end inside a secret. Scrub complete
-		// diagnostics before taking the user-facing excerpt.
-		if readErr != nil || len(output) > sidecarDiagnosticLimit {
-			return fmt.Errorf("sidecar health check failed (exit %d): incomplete or oversized startup log", exitCode)
-		}
+	if exitCode != 0 {
 		redactor := scrubber.New()
 		values := collectSecretValues(AgentRunRequest{RunID: runID, Credentials: creds})
 		if ipcCfg != nil {
