@@ -501,6 +501,28 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 	}
 }
 
+func TestStartSidecarRedactsBeforeTakingExcerpt(t *testing.T) {
+	const secret = "opaque-value-with-sensitive-suffix"
+	for _, padding := range []int{2032, sidecarDiagnosticLimit} {
+		c := &covContainer{
+			route: func(provider.ExecConfig) (*provider.ExecResult, error) {
+				return covResult("sidecar-start", secret+strings.Repeat(".", padding)+"failure"), nil
+			},
+			inspect: func(string) (bool, int, error) { return false, 1, nil },
+		}
+		err := startSidecar(t.Context(), c, "container", "run", []Credential{{PlainValue: secret}}, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
+		if err == nil || strings.Contains(err.Error(), "suffix") || len(err.Error()) > 2200 {
+			t.Fatalf("unexpected diagnostic, padding %d", padding)
+		}
+		if padding == 2032 && !strings.HasSuffix(err.Error(), "failure") {
+			t.Fatal("lost bounded log excerpt")
+		}
+		if padding == sidecarDiagnosticLimit && !strings.Contains(err.Error(), "oversized") {
+			t.Fatal("returned a partial diagnostic")
+		}
+	}
+}
+
 // covBase64BlobRE finds base64-alphabet runs long enough to plausibly be an
 // encoded payload, so the argv-leak test below can decode ANY such run in Cmd
 // rather than hard-coding the pre-fix `echo '<b64>' | base64 -d` shape — the

@@ -271,6 +271,9 @@ func TestSidecarStartupReadiness(t *testing.T) {
                     if [ "$MODE" = hung ]; then sleep 30; fi
                     test -f ready; exit $?
                 fi
+                if [ "$MODE" = dead ]; then
+                    printf 'opaque-credential-at-boundary%2040s\n' x >&2
+                fi
                 echo startup-diagnostic >&2
                 if [ "$MODE" = dead ]; then exit 1; fi
                 sleep 1; touch ready; exec sleep 30`,
@@ -295,6 +298,9 @@ exec "$REAL_SLEEP" "$@"`,
 				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			}
 			elapsed := time.Since(start)
+			if mode == "dead" && !strings.Contains(string(out), "opaque-credential-at-boundary") {
+				t.Fatalf("startup log was cut before the host could redact it")
+			}
 			if mode == "slow" {
 				if err != nil {
 					t.Fatalf("slow startup: %v: %s", err, out)

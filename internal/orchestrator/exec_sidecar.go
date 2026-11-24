@@ -42,7 +42,8 @@ import (
 // TestSidecarLogTrim_* proves the trim against a real 2 MiB file rather than
 // against the script's text — the tighter of the two guards.
 const (
-	sidecarLogPath = "/tmp/sidecar.log"
+	sidecarLogPath         = "/tmp/sidecar.log"
+	sidecarDiagnosticLimit = 32 << 10
 
 	sidecarLogMaxBytes  = 1 << 20 // trim once the log passes this
 	sidecarLogKeepBytes = 1 << 18 // …down to this much of the NEWEST output
@@ -185,13 +186,14 @@ else
   echo "sidecar exited before readiness" >&2
 fi
 if [ -f %[2]s ] && [ ! -L %[2]s ] && [ -O %[2]s ]; then
-  tail -c 2048 %[2]s >&2
+  head -c %[5]d %[2]s >&2
 fi
 exit 1`,
 		credsB64,
 		sidecarLogPath,
 		"  "+strings.ReplaceAll(sidecarLogTrimOnce(sidecarLogPath), "\n", "\n  "),
 		sidecarLogTrimEveryStr,
+		sidecarDiagnosticLimit+1,
 	)
 }
 
@@ -1296,7 +1298,7 @@ func startSidecar(
 		return fmt.Errorf("start sidecar: %w", err)
 	}
 
-	output, readErr := io.ReadAll(result.Reader)
+	output, readErr := io.ReadAll(io.LimitReader(result.Reader, sidecarDiagnosticLimit+1))
 	result.Reader.Close()
 
 	// Check if the health check script exited with an error
@@ -1305,6 +1307,11 @@ func startSidecar(
 		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
 	}
 	if !running && exitCode != 0 {
+		// A truncated read may start or end inside a secret. Scrub complete
+		// diagnostics before taking the user-facing excerpt.
+		if readErr != nil || len(output) > sidecarDiagnosticLimit {
+			return fmt.Errorf("sidecar health check failed (exit %d): incomplete or oversized startup log", exitCode)
+		}
 		redactor := scrubber.New()
 		values := collectSecretValues(AgentRunRequest{RunID: runID, Credentials: creds})
 		if ipcCfg != nil {
@@ -1326,8 +1333,8 @@ func startSidecar(
 		}
 		redactor.AddSecretValues(values...)
 		msg := redactor.Scrub(strings.TrimSpace(string(output)))
-		if readErr != nil {
-			msg += fmt.Sprintf(" (read error: %v)", readErr)
+		if len(msg) > 2048 {
+			msg = msg[len(msg)-2048:]
 		}
 		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, msg)
 	}
