@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // ---------------------------------------------------------------------------
@@ -99,18 +101,16 @@ func (s *SQLWaitpointStore) MintCallbackToken(ctx context.Context, workspaceID, 
 	if actorID == "" {
 		return "", false, errors.New("waitpoints: missing mint actor")
 	}
-	err = s.withWaitpointWriter(ctx, func(tx *sql.Conn) error {
-		var mintErr error
-		secret, rotated, mintErr = mintCallbackTokenTx(ctx, tx, workspaceID, id, actorID)
-		return mintErr
-	})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", false, err
 	}
-	return secret, rotated, nil
-}
-
-func mintCallbackTokenTx(ctx context.Context, tx *sql.Conn, workspaceID, id, actorID string) (secret string, rotated bool, err error) {
+	defer tx.Rollback()
+	// Reserve the SQLite writer before reading the previous digest, including
+	// on connections configured with deferred transactions.
+	if _, err := tx.ExecContext(ctx, `UPDATE pipeline_waitpoints SET callback_token_hash=NULL WHERE 0`); err != nil {
+		return "", false, err
+	}
 	var status, stepID, form, prior string
 	err = tx.QueryRowContext(ctx, `
 SELECT status, step_id, decision_form_json, COALESCE(callback_token_hash, '')
@@ -153,6 +153,28 @@ UPDATE pipeline_waitpoints SET callback_token_hash = ?
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return "", false, errors.Join(errors.New("waitpoints: missing callback mint audit"), err)
 	}
+	entry := journal.Entry{
+		WorkspaceID: workspaceID, ActorType: journal.ActorUser, ActorID: actorID,
+		Type: journal.EntryAuditEntityUpdated, Severity: journal.SeverityNotice,
+		Summary: "Waitpoint callback URL minted",
+		Payload: map[string]any{"action": "waitpoint.callback_token.minted", "rotated": rotated},
+		Refs:    map[string]any{"entity_type": "waitpoint", "entity_id": id},
+	}
+	var notify func()
+	if s.auditJournal != nil {
+		notify, err = s.auditJournal.AppendTx(ctx, tx, entry)
+	} else {
+		notify, err = journal.AppendTx(ctx, tx, entry)
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	if notify != nil {
+		notify()
+	}
 	return secret, rotated, nil
 }
 
@@ -191,6 +213,13 @@ SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE c
 // DecideCallback authenticates the grant while holding the same SQLite writer
 // reservation as rotation and the final decision. Only committed decisions notify listeners.
 func (s *SQLWaitpointStore) DecideCallback(ctx context.Context, presented string, approved bool, payload string) (id, workspaceID string, err error) {
+	// Reject unknown grants without reserving a database writer. The writer
+	// repeats the digest lookup below before authorizing any state change.
+	if candidate, _, err := s.ResolveCallbackToken(ctx, presented); err != nil {
+		return "", "", err
+	} else if candidate == "" {
+		return "", "", ErrAlreadyDecided
+	}
 	decider := WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}
 	err = s.commitDecision(ctx, func(tx *sql.Conn) (*WaitpointDecision, error) {
 		var lookupErr error

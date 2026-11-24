@@ -705,7 +705,7 @@ func (s *SQLWaitpointStore) completeApproval(ctx context.Context, workspaceID, t
 func (s *SQLWaitpointStore) withWaitpointWriter(ctx context.Context, apply func(*sql.Conn) error) error {
 	tx, err := s.db.Conn(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("waitpoints: update: %w", err)
 	}
 	defer tx.Close()
 	if _, err := tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {

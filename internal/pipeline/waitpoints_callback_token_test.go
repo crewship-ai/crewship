@@ -60,8 +60,13 @@ func TestWaitpointCallback_IDIsNotACapability(t *testing.T) {
 }
 
 func TestWaitpointCallback_MintStoresOnlyDigestAndRotates(t *testing.T) {
-	store, cleanup := openWaitpointsTestDB(t)
-	defer cleanup()
+	db := testutil.MigratedSQLDB(t)
+	if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('ws_a','A','a');
+		INSERT INTO users(id,email,full_name) VALUES('u_1','mint@example.test','Manager')`); err != nil {
+		t.Fatal(err)
+	}
+	store := NewSQLWaitpointStore(db)
+	t.Cleanup(store.Close)
 	ctx := context.Background()
 	id := createTestApproval(t, store, "ws_a", "run_1", "gate", "")
 

@@ -12,7 +12,6 @@ func openWaitpointsTestDB(t *testing.T) (*SQLWaitpointStore, func()) {
 	t.Helper()
 	db := openStoreTestDB(t) // existing helper opens :memory: with single conn
 	if _, err := db.ExecContext(context.Background(), `
-CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY,workspace_id TEXT,user_id TEXT,action TEXT,entity_type TEXT,entity_id TEXT,metadata TEXT,created_at TEXT);
 CREATE TABLE IF NOT EXISTS pipeline_waitpoints (
     token              TEXT PRIMARY KEY,
     workspace_id       TEXT NOT NULL,
