@@ -260,6 +260,26 @@ func TestRouter_Shutdown_IsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRouter_Shutdown_StopsRateLimiterSweeps(t *testing.T) {
+	r, err := NewRouter(setupTestDB(t), "this-is-a-32-char-test-secret-pad", newTestLogger())
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	t.Cleanup(r.Shutdown)
+
+	r.Shutdown()
+	for name, limiter := range map[string]*RateLimiter{
+		"auth": r.authRL, "api": r.apiRL,
+		"credential test": r.credTestRL, "credential reveal": r.credRevealRL,
+	} {
+		select {
+		case <-limiter.stop:
+		default:
+			t.Errorf("%s rate limiter sweep is still active", name)
+		}
+	}
+}
+
 // ---- keeperWSBroadcaster ----
 
 func TestKeeperWSBroadcaster_NilHubIsSafe(t *testing.T) {
