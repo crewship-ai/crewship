@@ -675,7 +675,7 @@ async function installRestrictedArtifactCatalog(page: Page) {
   return { forbidden, seen, main: page.locator("main, [data-slot=content-column]").first() }
 }
 
-test("restricted member's Artifacts shows their old Pages catalog and authorized links", async ({ page }) => {
+test("restricted member's Artifacts shows exactly their old Pages catalog and authorized links", async ({ page }) => {
   const { forbidden, seen, main } = await installRestrictedArtifactCatalog(page)
 
   // The catalog home: the same artifacts, each opening the same actions.
@@ -727,6 +727,13 @@ test("restricted member's Artifacts shows their old Pages catalog and authorized
 
 test("restricted member's Artifacts hides ungranted items and preserves the sidebar link", async ({ page }) => {
   const { forbidden, seen, main } = await installRestrictedArtifactCatalog(page)
+
+  // Prime the same browser with granted titles before following denied links.
+  await page.goto("/artifacts?workspace_id=ws-a")
+  const shared = page.getByRole("region", { name: /Shared with you/ })
+  await expect(shared.getByRole("link", { name: /Launch plan/ })).toBeVisible()
+  await shared.getByRole("link", { name: /Brief/ }).click()
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible()
 
   // Anything not granted: the gate, never the address's or another artifact's name.
   for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a", "/pages/craft/editor?page_id=page-secret&workspace_id=ws-a"]) {
