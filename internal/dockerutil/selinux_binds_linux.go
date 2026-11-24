@@ -82,9 +82,6 @@ func verifyPodmanBindPeer(control []byte, binds []string) error {
 	if !localPodmanServiceCommand(args) {
 		return errors.New("SELinux relabel peer is not a local Podman system service")
 	}
-	// The leader may stay in a container mount namespace after an archive
-	// operation. Its namespace alone cannot distinguish a parked leader from
-	// one that can still handle create. This check currently uses its root.
 	if err := verifyRelabelSources(filepath.Join(dir, "root"), binds); err != nil {
 		slog.Warn("Podman SELinux bind validation failed", "error", err,
 			"crewship", relabelMountView("/proc/self", os.Getpid(), binds),
@@ -146,9 +143,6 @@ func localPodmanServiceCommand(cmdline []byte) bool {
 	return len(args) >= 2 && args[0] == "system" && args[1] == "service"
 }
 
-// verifyRelabelSources checks path identities in serviceRoot at inspection time.
-// The create request carries pathnames. Podman resolves them again for relabeling,
-// so the later operation is not bound to the inodes observed here.
 func verifyRelabelSources(serviceRoot string, binds []string) error {
 	root, err := os.OpenRoot(serviceRoot)
 	if err != nil {
