@@ -248,7 +248,8 @@ jobs:
     needs: [merge-conflict-markers]
     name: Shell
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Include the pinned Go setup and bounded Actionlint module download.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,8 +265,14 @@ jobs:
           gh api "repos/$REPO/codeowners/errors?ref=$SHA" > "$RUNNER_TEMP/codeowners-errors.json"
           jq '.errors' "$RUNNER_TEMP/codeowners-errors.json"
           jq -e '.errors | type == "array" and length == 0' "$RUNNER_TEMP/codeowners-errors.json"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        timeout-minutes: 2
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
       - name: Prime the Actionlint module cache
-        run: python3 scripts/ci/prime-go-modules.py --attempt-timeout 15 github.com/rhysd/actionlint@v1.7.7
+        timeout-minutes: 2
+        run: python3 scripts/ci/prime-go-modules.py --attempt-timeout 20 --tool github.com/rhysd/actionlint@v1.7.7
       - name: Validate GitHub workflow syntax and expressions
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
       - name: CI gate regression tests
@@ -2944,6 +2951,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Prime the Go module cache
+        timeout-minutes: 4
         run: python3 scripts/ci/prime-go-modules.py
       - name: Install and run both packages through the server
         timeout-minutes: 15
