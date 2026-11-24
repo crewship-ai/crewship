@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
 )
 
@@ -262,5 +263,41 @@ func TestImageReferencesRetainUnlabelledLegacySelectionsWithoutClaimingOwnership
 	}
 	if len(f.images[id].Config.Labels) != 0 {
 		t.Fatal("reference changed source image provenance")
+	}
+}
+
+type podmanReferenceFake struct{ *referenceFake }
+
+func (*podmanReferenceFake) ServerVersion(context.Context, client.ServerVersionOptions) (client.ServerVersionResult, error) {
+	return client.ServerVersionResult{Components: []system.ComponentVersion{{Name: "Podman Engine"}}}, nil
+}
+func TestPodmanReferenceWithDisplayTag(t *testing.T) {
+	f, id := referenceFixture(t)
+	tag := "localhost/crewship-cache:sample"
+	img := f.images[id]
+	img.RepoTags = []string{tag}
+	f.images[id] = img
+	refs := []resourcelifecycle.ImageReference{{Ref: id, Required: true}}
+	p := NewImageReferences(&podmanReferenceFake{f}, referenceBorrower)
+	if _, err := p.Preserve(t.Context(), refs); err != nil {
+		t.Fatal(err)
+	}
+	for key, ref := range f.containers {
+		ref.Container.Image = strings.TrimPrefix(id, "sha256:")
+		ref.Container.Config.Image = tag
+		f.containers[key] = ref
+	}
+	if _, err := p.Preserve(t.Context(), refs); err != nil {
+		t.Fatalf("verified image with Podman display tag: %v", err)
+	}
+	if _, err := NewImageReferences(f, referenceBorrower).Preserve(t.Context(), refs); err == nil {
+		t.Fatal("accepted display tag without Podman evidence")
+	}
+	for key, ref := range f.containers {
+		ref.Container.Image = strings.Repeat("b", 64)
+		f.containers[key] = ref
+	}
+	if _, err := p.Preserve(t.Context(), refs); err == nil {
+		t.Fatal("display tag overrode immutable image mismatch")
 	}
 }
