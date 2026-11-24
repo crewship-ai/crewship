@@ -379,12 +379,18 @@ class WorkflowContracts(unittest.TestCase):
 
     def test_race_partition_workers_and_complete_evidence_are_required(self):
         ci = self.text('ci.yml')
-        for job, indices in [('go-race', '[0, 1, 2, 3]'), ('go-race-api-shards', '[0, 1, 2, 3, 4, 5]'), ('go-race-cli-shards', '[0, 1, 2]')]:
+        for job, indices in [('go-race', '[0, 1, 2]'), ('go-race-backup', '[0, 1]'), ('go-race-api-shards', '[0, 1, 2, 3, 4, 5]'), ('go-race-cli-shards', '[0, 1, 2]')]:
             worker = self.job(ci, job)
             self.assertIn('fail-fast: false', worker)
             self.assertIn('shard: ' + indices, worker)
             self.assertNotIn('continue-on-error:', worker)
             self.assertIn('${{ matrix.shard }}-${{ github.sha }}', worker)
+        backup = self.job(ci, 'go-race-backup')
+        self.assertIn('RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/internal/backup', backup)
+        self.assertIn('api-race-shard.py run "$SHARD_INDEX" 2 2100', backup)
+        result = self.job(ci, 'result')
+        self.assertIn("if: needs.go-race-backup.result == 'success'", result)
+        self.assertIn('pattern: timings-go-race-backup-*-${{ github.sha }}', result)
         api = self.job(ci, 'go-race-api')
         self.assertIn('name: Go Race (internal/api)', api)
         self.assertIn('needs: [changes, go-race-api-template, go-race-api-shards]', api)

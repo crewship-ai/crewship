@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Fail closed on missing or non-successful jobs; permit only planned skips."""
+import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
 
-GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
+GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-backup', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
 CODE = {'mooring-actual', 'mooring', 'image', 'binary', 'frontend', 'frontend-test', 'frontend-test-types', 'frontend-test-shards', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
 # Word and Sheet packages and their browser gate (#5362): required with any code change.
 CRAFT = {'craft-packages-build', 'craft-packages'}
@@ -13,7 +14,7 @@ PARITY = {'go-parity': 'go_parity', 'frontend-parity': 'frontend_parity', 'docs-
 ALWAYS = {'changes', 'merge-conflict-markers', 'shell'}
 # Expensive lanes a pull request may skip (plan output full=false, #4752).
 # Any other event must plan and pass them: a reduced plan fails closed there.
-FULL = {'go-platforms', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api-shards', 'go-race-api', 'cli-subprocess-race', 'go-shuffle', 'mooring-actual'}
+FULL = {'go-platforms', 'go-race', 'go-race-backup', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api-shards', 'go-race-api', 'cli-subprocess-race', 'go-shuffle', 'mooring-actual'}
 
 
 def failures(needs, event=None):
@@ -70,15 +71,33 @@ def require_native_coverage(directory, expected_sha, run_id):
         print(f"{platform}: all {len(inventory)} packages covered exactly once")
 
 
+def require_backup_coverage(directory, expected_sha, run_id):
+    if not expected_sha or not run_id:
+        raise ValueError('missing workflow identity')
+    path = Path(__file__).with_name('api-race-shard.py')
+    spec = importlib.util.spec_from_file_location('race_shard', path)
+    shard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shard)
+    receipts = [json.loads(path.read_text()) for path in sorted(directory.rglob('api-race-shard.json'))]
+    _, total = shard.validate_manifests(receipts, 2, expected_sha,
+                                        expected_package=shard.BACKUP_PACKAGE, run_id=run_id)
+    print(f'internal/backup: all {total} top-level tests covered exactly once')
+
+
 if __name__ == '__main__':
     needs = json.loads(os.environ['CI_NEEDS'])
     errors = failures(needs, os.environ.get('GITHUB_EVENT_NAME'))
-    if not errors and needs['go-platforms']['result'] == 'success':
-        try:
-            require_native_coverage(Path('.ci-native-platforms'), os.environ['GITHUB_SHA'],
-                                    os.environ['GITHUB_RUN_ID'])
-        except (KeyError, OSError, TypeError, ValueError) as error:
-            errors.append(f'go-platforms: {error}')
+    if not errors:
+        for job, directory, verify in (
+            ('go-platforms', '.ci-native-platforms', require_native_coverage),
+            ('go-race-backup', '.ci-backup-race', require_backup_coverage),
+        ):
+            if needs[job]['result'] != 'success':
+                continue
+            try:
+                verify(Path(directory), os.environ['GITHUB_SHA'], os.environ['GITHUB_RUN_ID'])
+            except (KeyError, OSError, TypeError, ValueError) as error:
+                errors.append(f'{job}: {error}')
     for error in errors:
         print(f'::error::{error}')
     sys.exit(bool(errors))

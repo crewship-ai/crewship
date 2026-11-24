@@ -2,13 +2,14 @@
   "source_runs": [
     45333298955,
     45371822592,
-    45392295249
+    45392295249,
+    45435196258
   ],
   "upper_starts": [
-    "TestCollaborationSessionPumpChild",
-    "TestCreateCrew_AllowedCap_Accepted",
-    "TestHumanInboxDisabledRejectsMarkedStartAndChannelWithoutMutation",
-    "TestPageGrants_RevokingAStrangerIsStillNotFound",
-    "TestRunScopeDocumentReach_DuplicatePurposeLinesAreNotTheViewRead"
+    "TestCollaborationAgentDispatchNoPublicationOnSQLFailure",
+    "TestCraftNativeSessionSurvivesUnrelatedWorkspaceAuthorityChanges",
+    "TestGridCraftEditorSessionFollowsSignInThroughRouter",
+    "TestPageCatalogQueryLegacyKindsAndPlainText",
+    "TestRunAudit_WritesOncePerArtifactCreatesEachTime"
   ]
 }
