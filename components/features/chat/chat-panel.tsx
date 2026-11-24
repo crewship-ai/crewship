@@ -1602,8 +1602,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-        {/* Let headers and the conversation scroll together when the composer needs the remaining height. */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
           {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
           <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
@@ -1631,9 +1629,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             </span>
           </div>
           {artifactLibrary}
-          <div className="flex min-h-24 flex-1 flex-col overflow-hidden">
-            {conversationEl}
-          </div>
+          {conversationEl}
+          <div className="max-h-[20dvh] shrink-0 overflow-y-auto empty:hidden">
           {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
           {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
           {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
@@ -1649,8 +1646,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             </div>
           )}
         </div>
-        <div className="flex max-h-[80%] shrink-0 flex-col">
-          <div className="min-h-0 overflow-y-auto">
+        <div className="shrink-0">
+          <div className="max-h-[20dvh] overflow-y-auto empty:hidden">
             {unavailableNotice}
             {prepareProjectInputs}
             {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}

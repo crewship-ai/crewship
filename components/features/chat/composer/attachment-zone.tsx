@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useRef } from "react"
+import { cn } from "@/lib/utils"
 import { Camera } from "lucide-react"
 import { toast } from "@/lib/toast"
 
@@ -89,6 +90,7 @@ interface AttachmentZoneProps {
    * the sheet, next to the field that asked for it.
    */
   showChips?: boolean
+  chipListClassName?: string
 }
 
 function isAbortError(err: unknown): boolean {
@@ -405,6 +407,7 @@ export function AttachmentZone({
   sessionId,
   children,
   showChips = true,
+  chipListClassName,
 }: AttachmentZoneProps) {
   // Subscribe only to THIS session's attachment list — the whole-store
   // subscription re-rendered every mounted zone on any session's draft or
@@ -467,7 +470,7 @@ export function AttachmentZone({
           onRemove={handleRemove}
           onRetry={handleRetry}
           onCancel={cancel}
-          className="px-2"
+          className={cn("px-2", chipListClassName)}
         />
       )}
     </div>

@@ -29,7 +29,7 @@ const VIEWPORT = { width: 1600, height: 950 }
 test.describe("short chat viewport", () => {
   test.use({ hasTouch: true, isMobile: true })
 
-  for (const viewport of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 667, height: 375 }, { width: 844, height: 390 }, { width: 915, height: 412 }, { width: 390, height: 844 }]) {
     for (const available of [true, false]) {
       test(`the chat composer fits at ${viewport.width}×${viewport.height} with Docker ${available ? "available" : "unavailable"}`, async ({ page }) => {
         await page.setViewportSize(viewport)
@@ -78,6 +78,47 @@ test.describe("short chat viewport", () => {
       })
     }
   }
+  test("a short chat keeps failed upload actions and the latest reply reachable", async ({ page }) => {
+    await page.setViewportSize({ width: 667, height: 375 })
+    await page.route("**/api/v1/system/runtime", route => route.fulfill({ json: { available: false } }))
+    await page.route("**/api/v1/agents/*/chats/*/attachments?workspace_id=*",
+      route => route.fulfill({ status: 413, json: { error: "test upload rejected" } }))
+    await page.goto("/chat/jordan")
+    await expect(page.getByText("Docker is not running.", { exact: true })).toBeVisible()
+    const editor = page.locator("textarea[data-slot=input-group-control]")
+    await expect(editor).toBeVisible()
+    await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
+    const composer = editor.locator("xpath=ancestor::form/..")
+    const put = page.waitForRequest(request => request.method() === "POST" && request.url().includes("/attachments?"))
+    await composer.locator('input[type="file"]').first().setInputFiles({
+      name: "sample.txt", mimeType: "text/plain", buffer: Buffer.from("local test attachment"),
+    })
+    const upload = await put
+    const failed = page.locator('[data-status="error"]').filter({ hasText: "sample.txt" })
+    await expect(failed).toContainText("Upload failed")
+    await expect(editor.locator("xpath=ancestor::form").locator('button[type="submit"]')).toHaveAttribute("aria-disabled", "true")
+    await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
+    await failed.getByRole("button", { name: "Remove sample.txt" }).click()
+    await expect(failed).toHaveCount(0)
+
+    const session = new URL(upload.url()).pathname.split("/").at(-2)
+    expect(session).toBeTruthy()
+    await page.route("**/api/v1/chats/*/messages?workspace_id=*", route => route.fulfill({
+      json: {
+        messages: Array.from({ length: 20 }, (_, i) => ({
+          id: `short-chat-message-${i}`,
+          role: i % 2 === 0 ? "user" : "assistant",
+          content: i === 19 ? "Newest reply in the short chat" : `Earlier chat message ${i + 1}`,
+          ts: new Date(Date.UTC(2026, 10, 24, 9, i)).toISOString(),
+        })),
+      },
+    }))
+    await page.goto(`/chat/jordan?session=${session}`)
+    const newest = page.getByText("Newest reply in the short chat", { exact: true })
+    await expect(newest).toBeInViewport({ ratio: 0.5 })
+    await expect(editor).toBeInViewport()
+  })
+
 })
 
 /** Every route that renders inside the shell and is reachable on demo data. */
