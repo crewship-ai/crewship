@@ -260,6 +260,10 @@ func TestRouter_Shutdown_IsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRouter_Shutdown_BeforeRateLimiterInitialization(t *testing.T) {
+	(&Router{}).Shutdown()
+}
+
 func TestRouter_Shutdown_StopsRateLimiterSweeps(t *testing.T) {
 	r, err := NewRouter(setupTestDB(t), "this-is-a-32-char-test-secret-pad", newTestLogger())
 	if err != nil {
