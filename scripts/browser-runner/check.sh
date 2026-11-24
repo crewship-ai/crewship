@@ -17,6 +17,7 @@ pnpm exec playwright install --with-deps chromium
 if [ "$route" = "/graph-check" ]; then
   mkdir -p "app/(dashboard)/graph-check"
   cp "$harness_dir/graph-fixture.tsx" "app/(dashboard)/graph-check/page.tsx"
+  sed -i '/export const APP_ROUTE_PATTERNS = \[/a\  "/graph-check",' lib/app-routes.ts
 fi
 pnpm build
 bash scripts/embed-web-out.sh sync
