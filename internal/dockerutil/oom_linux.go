@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -53,7 +54,7 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, endpoint string) (int, error
 	if err = raw.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1) }); err != nil || optErr != nil {
 		return 0, nil
 	}
-	if _, err = io.WriteString(sock, "GET /libpod/info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
+	if _, err = io.WriteString(sock, "GET /info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
 		return 0, nil
 	}
 	var first [1]byte
@@ -68,13 +69,14 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, endpoint string) (int, error
 		return 0, nil
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusOK || response.Header.Get("Libpod-Api-Version") == "" {
 		return 0, nil
 	}
-	var info struct {
-		Host struct{ Security struct{ Rootless bool } }
+	var info struct{ SecurityOptions []string }
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		return 0, err
 	}
-	if err := json.NewDecoder(response.Body).Decode(&info); err != nil || !info.Host.Security.Rootless {
+	if !slices.Contains(info.SecurityOptions, "name=rootless") {
 		return 0, nil
 	}
 	messages, err := unix.ParseSocketControlMessage(oob[:control])

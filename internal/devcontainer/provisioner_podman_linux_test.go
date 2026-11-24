@@ -44,11 +44,12 @@ func TestRootlessPodmanProvisionCreate(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Fatal(http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/libpod/info" {
+			if r.URL.Path != "/info" {
 				http.NotFound(w, r)
 				return
 			}
-			fmt.Fprint(w, `{"host":{"security":{"rootless":true}}}`)
+			w.Header().Set("Libpod-Api-Version", "6.2.0")
+			fmt.Fprint(w, `{"SecurityOptions":["name=rootless"]}`)
 		})))
 	}
 	current, err := os.ReadFile("/proc/self/oom_score_adj")
