@@ -17,6 +17,7 @@ import {
   type OnNodeDrag,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
+import { legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 import { Workflow } from "lucide-react"
 import { EmptyState } from "@/components/layout/empty-state"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -73,14 +74,14 @@ const edgeTypes: EdgeTypes = {
 // (still LR, its own node components) and keeps its own fit behaviour —
 // this is a fix for the step tree, and widening it to a surface with a
 // different topology would be guessing.
-const FIT_VIEW = { padding: 0.18, minZoom: 0.62, maxZoom: 1.15 } as const
+const FIT_VIEW = { padding: legacyFitViewPadding(0.18), minZoom: 0.62, maxZoom: 1.15 } as const
 
 // Opening view, when initialFocus="start". Tighter padding and a higher
 // ceiling than FIT_VIEW because it is fitting two ranks, not a whole
 // routine: the first thing a reader sees should be legible at a glance,
 // not a correct-but-tiny overview they have to zoom into before they
 // can read a single node.
-const START_FIT = { padding: 0.12, minZoom: 0.62, maxZoom: 1.6 } as const
+const START_FIT = { padding: legacyFitViewPadding(0.12), minZoom: 0.62, maxZoom: 1.6 } as const
 
 // Fallbacks for centring a node before React Flow has measured it —
 // the first click can land before measurement, and half of an
@@ -255,7 +256,7 @@ function OverviewInner({
   useEffect(() => {
     setNodes(overview?.nodes ?? [])
     setEdges(overview?.edges ?? [])
-    const t = setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 50)
+    const t = setTimeout(() => fitView({ padding: legacyFitViewPadding(0.25), duration: 300 }), 50)
     return () => clearTimeout(t)
   }, [overview, setNodes, setEdges, fitView])
 
@@ -294,8 +295,9 @@ function OverviewInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
+        elevateEdgesOnSelect={false}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: legacyFitViewPadding(0.3) }}
         minZoom={0.1}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
@@ -592,6 +594,7 @@ function CanvasInner({
         onMoveEnd={(_, vp) => {
           if (viewportRef) viewportRef.current = vp
         }}
+        elevateEdgesOnSelect={false}
         fitView
         fitViewOptions={FIT_VIEW}
         minZoom={zoomFloor}

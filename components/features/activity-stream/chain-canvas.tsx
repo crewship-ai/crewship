@@ -21,6 +21,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
+import { legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 
 import { overviewNodeTypes } from "@/components/features/activity/overview-nodes"
 import { CHAIN_FIT_PADDING } from "@/lib/trace/build-chain-graph"
@@ -37,7 +38,7 @@ export interface ChainCanvasProps {
  * the thing. `maxZoom: 1` keeps a two-node chain from being blown up to
  * billboard size.
  */
-const FIT_OPTIONS = { padding: CHAIN_FIT_PADDING, maxZoom: 1 } as const
+const FIT_OPTIONS = { padding: legacyFitViewPadding(CHAIN_FIT_PADDING), maxZoom: 1 } as const
 
 /** The one thing this component needs back from the instance. */
 type Fitter = Pick<ReactFlowInstance, "fitView">
@@ -139,6 +140,7 @@ export function ChainCanvas({ nodes, edges, onOpenNode }: ChainCanvasProps) {
         onNodeClick={handleNodeClick}
         onInit={handleInit}
         onMoveEnd={handleMoveEnd}
+        elevateEdgesOnSelect={false}
         fitView
         fitViewOptions={FIT_OPTIONS}
         minZoom={0.35}
