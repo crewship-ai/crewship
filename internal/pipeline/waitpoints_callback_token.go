@@ -128,6 +128,14 @@ SELECT status, step_id, decision_form_json, COALESCE(callback_token_hash, '')
 	if status != "pending" {
 		return "", false, ErrAlreadyDecided
 	}
+	oldID := id
+	id = PublicWaitpointID(workspaceID, oldID)
+	if id != oldID {
+		if err := rewriteLegacyWaitpoints(ctx, tx, nil, []legacyWaitpoint{{old: oldID, id: id, workspace: workspaceID}}); err != nil {
+			// Constraint diagnostics may include the pre-conversion identifier.
+			return "", false, errors.New("waitpoints: callback identity conversion failed")
+		}
+	}
 	secret, err = newWaitpointCallbackSecret()
 	if err != nil {
 		return "", false, err
@@ -171,6 +179,9 @@ UPDATE pipeline_waitpoints SET callback_token_hash = ?
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, err
+	}
+	if id != oldID {
+		s.moveLegacyListener(oldID, id)
 	}
 	if notify != nil {
 		notify()
@@ -288,6 +299,15 @@ func LegacyWaitpointPublicID(workspaceID, old string) string {
 	return WaitpointIDPrefix + hex.EncodeToString(sum[:16])
 }
 
+// PublicWaitpointID returns the durable identity used by boot conversion,
+// notification receipts and scoped exports even while a row awaits migration.
+func PublicWaitpointID(workspace, id string) string {
+	if id == "" || strings.HasPrefix(id, WaitpointIDPrefix) {
+		return id
+	}
+	return LegacyWaitpointPublicID(workspace, id)
+}
+
 var legacyWaitpointRefTables = []struct{ table, stmt string }{
 	{"inbox_item_reads", `UPDATE inbox_item_reads AS r SET inbox_item_id = replace(r.inbox_item_id, l.old, l.id)
  FROM legacy AS l JOIN inbox_items AS i ON i.workspace_id = l.workspace AND i.source_id = l.old AND i.kind = 'waitpoint'
@@ -387,7 +407,18 @@ func migrateLegacyWaitpointBatch(ctx context.Context, db *sql.DB, present map[st
 			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 		}
 	}()
-	if _, err := conn.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
+	if err := rewriteLegacyWaitpoints(ctx, conn, present, batch); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func rewriteLegacyWaitpoints(ctx context.Context, tx DecisionDBTX, present map[string]bool, batch []legacyWaitpoint) error {
+	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 		return err
 	}
 
@@ -396,21 +427,17 @@ func migrateLegacyWaitpointBatch(ctx context.Context, db *sql.DB, present map[st
 		args = append(args, l.old, l.id, l.workspace)
 	}
 	cte := "WITH legacy(old, id, workspace) AS (VALUES " + strings.Repeat("(?,?,?),", len(batch)-1) + "(?,?,?)) "
-	if _, err := conn.ExecContext(ctx, cte+`UPDATE pipeline_waitpoints AS w SET token = l.id, callback_token_hash = NULL
+	if _, err := tx.ExecContext(ctx, cte+`UPDATE pipeline_waitpoints AS w SET token = l.id, callback_token_hash = NULL
  FROM legacy AS l WHERE w.token = l.old AND w.workspace_id = l.workspace`, args...); err != nil {
 		return err
 	}
 	for _, ref := range legacyWaitpointRefTables {
-		if present[ref.table] {
-			if _, err := conn.ExecContext(ctx, cte+ref.stmt, args...); err != nil {
+		if present == nil || present[ref.table] {
+			if _, err := tx.ExecContext(ctx, cte+ref.stmt, args...); err != nil {
 				return fmt.Errorf("%s: %w", ref.table, err)
 			}
 		}
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return err
-	}
-	committed = true
 	return nil
 }
 
@@ -431,14 +458,7 @@ func ensureWaitpointDigestColumn(db *sql.DB) {
 func (s *SQLWaitpointStore) migrateLegacyTokens() {
 	ctx, cancel := context.WithTimeout(s.sweepContext(), 30*time.Second)
 	defer cancel()
-	migrated, remaining, err := migrateLegacyWaitpointTokens(ctx, s.db, func(old, id string) {
-		s.mu.Lock()
-		if ch, ok := s.listeners[old]; ok {
-			delete(s.listeners, old)
-			s.listeners[id] = ch
-		}
-		s.mu.Unlock()
-	})
+	migrated, remaining, err := migrateLegacyWaitpointTokens(ctx, s.db, s.moveLegacyListener)
 	switch {
 	case err != nil:
 		slog.Error("waitpoint tokens: legacy migration failed", "migrated", migrated, "error", err)
@@ -446,6 +466,15 @@ func (s *SQLWaitpointStore) migrateLegacyTokens() {
 		slog.Warn("waitpoint tokens: legacy waitpoints given public ids; their old callback URLs no longer work — mint new ones with `crewship routine waitpoints callback-url`",
 			"rows", migrated, "remaining", remaining)
 	}
+}
+
+func (s *SQLWaitpointStore) moveLegacyListener(old, id string) {
+	s.mu.Lock()
+	if ch, ok := s.listeners[old]; ok {
+		delete(s.listeners, old)
+		s.listeners[id] = ch
+	}
+	s.mu.Unlock()
 }
 
 // tokenDigestFingerprint is a log-safe handle for a legacy (secret) token.

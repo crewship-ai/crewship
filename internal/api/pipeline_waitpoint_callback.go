@@ -144,12 +144,12 @@ func (h *PipelineHandler) MintWaitpointCallbackToken(w http.ResponseWriter, r *h
 		replyError(w, http.StatusConflict, pipeline.ErrAlreadyDecided.Error())
 		return
 	case err != nil:
-		h.logger.Error("waitpoint callback token mint", "error", err, "waitpoint", id)
+		h.logger.Error("waitpoint callback token mint", "error", err, "waitpoint", pipeline.PublicWaitpointID(workspaceID, id))
 		replyError(w, http.StatusInternalServerError, "Failed to mint callback token")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"token":        id,
+		"token":        pipeline.PublicWaitpointID(workspaceID, id),
 		"callback_url": InstanceURLFromRequest(r, "") + "/api/v1/waitpoint-tokens/" + secret,
 		"rotated":      rotated,
 	})

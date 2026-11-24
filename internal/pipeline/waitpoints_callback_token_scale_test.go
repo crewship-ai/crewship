@@ -145,3 +145,50 @@ func TestWaitpointCallbackPartialMigrationRestart(t *testing.T) {
 	}
 	assertNoPlaintext(t, db, old)
 }
+
+func TestWaitpointLegacyDecisionReceipts(t *testing.T) {
+	for _, outcome := range []string{"approved", "denied", "timed_out", "refused"} {
+		t.Run(outcome, func(t *testing.T) {
+			db := testutil.MigratedSQLDB(t)
+			store := NewSQLWaitpointStore(db)
+			defer store.Close()
+			const old = "a8c928f787df42e69d62e4c5f0321a63"
+			if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('ws','W','w');
+				INSERT INTO users(id,email,full_name) VALUES('user','user@example.test','User');
+				INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at) VALUES(?,'ws','run','review','approval','2099-01-01');
+				INSERT INTO inbox_items(id,workspace_id,kind,source_id,title) VALUES('card','ws','waitpoint',?,'Review')`, old, old); err != nil {
+				t.Fatal(err)
+			}
+			switch outcome {
+			case "timed_out":
+				if _, err := db.Exec("UPDATE pipeline_waitpoints SET timeout_at='2000-01-01' WHERE token=?", old); err != nil {
+					t.Fatal(err)
+				}
+				store.sweepOnce()
+			case "refused":
+				err := store.Decide(t.Context(), "ws", old, true, WaitpointDecider{Kind: DeciderAgent, ID: "agent"}, "")
+				if !errors.Is(err, ErrDeciderNotAllowed) {
+					t.Fatalf("refusal: %v", err)
+				}
+				var n int
+				if err := db.QueryRow("SELECT count(*) FROM audit_logs WHERE entity_id=?", old).Scan(&n); err != nil || n != 0 {
+					t.Fatalf("legacy id in refusal receipt (%v)", err)
+				}
+			default:
+				if err := store.Decide(t.Context(), "ws", old, outcome == "approved", WaitpointDecider{Kind: DeciderUser, ID: "user"}, "reviewed"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store.migrateLegacyTokens()
+			want := outcome
+			if outcome == "refused" {
+				want = "pending"
+			}
+			var status string
+			if err := db.QueryRow("SELECT status FROM pipeline_waitpoints WHERE token=?", LegacyWaitpointPublicID("ws", old)).Scan(&status); err != nil || status != want {
+				t.Fatalf("status=%q (%v)", status, err)
+			}
+			assertNoPlaintext(t, db, old)
+		})
+	}
+}

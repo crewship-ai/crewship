@@ -819,10 +819,12 @@ is replaced by a fresh `wp_` id in the following identity references:
 (the inbox writer derives the id as `ibx_<workspace>_waitpoint_<source_id>`);
 `inbox_item_reads.inbox_item_id`; `notification_deliveries.source_id` and
 `dedup_key`; and `audit_logs.entity_id`. Historical ADMIN CLI request paths in `cli_token_uses.path` can retain the
-old identifier. These audit records remain intact. The old value no longer
+old identifier. These historical audit records remain intact. New CLI usage records omit the waitpoint identifier from these paths. The old value no longer
 authorizes a callback. A row that fails (lock contention) is left exactly as it was,
 logged with a digest fingerprint rather than the token, and retried on the
 next sweep.
+
+Full-instance backups are point-in-time database copies, including backups made while conversion is in progress. Treat them with the same sensitivity as the database. Starting the restored service resumes conversion of pending rows.
 
 **Old secrets are not carried forward.** Before this change any workspace
 member could read a waitpoint's callback URL from the pending list, so a

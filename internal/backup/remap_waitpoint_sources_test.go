@@ -3,7 +3,11 @@ package backup_test
 import (
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"strings"
+
+	"filippo.io/age"
+	"github.com/crewship-ai/crewship/internal/database"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -170,5 +174,37 @@ func TestRestoreWaitpointInboxRetainsHireAndAutonomySources(t *testing.T) {
 	if err := target.QueryRow(`SELECT count(*) FROM inbox_items WHERE workspace_id=? AND kind='waitpoint'
 		AND source_id IN ('hire-agent','crew-autonomy')`, ws).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("unrelated Inbox sources restored=%d err=%v, want 2", n, err)
+	}
+}
+
+func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
+	f := newInstanceFixture(t)
+	const ws = "ws_e2e_1"
+	const old = "b7e26627108a4149a8d17dcc40dbe7bb"
+	if _, err := f.db.Exec(`INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at)
+		VALUES(?,?,'old-run','gate','approval','2099-01-01'),('wp_current',?,'current-run','gate','approval','2099-01-01')`, old, ws, ws); err != nil {
+		t.Fatal(err)
+	}
+	bundle := f.create(t, true)
+	dir := filepath.Join(t.TempDir(), "restored")
+	if _, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: dir, Actor: "u_admin"}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open("file:" + filepath.Join(dir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE token=?", old).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("missing original row in physical snapshot (%v)", err)
+	}
+	store := pipeline.NewSQLWaitpointStore(db.DB)
+	defer store.Close()
+	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE workspace_id=? AND token IN (?, 'wp_current') AND callback_token_hash IS NULL", ws, pipeline.LegacyWaitpointPublicID(ws, old)).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("recovered waitpoints=%d (%v)", n, err)
+	}
+	if err := db.QueryRow("SELECT count(*) FROM pipeline_waitpoints WHERE token=?", old).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("legacy identifier remained after startup: %d (%v)", n, err)
 	}
 }

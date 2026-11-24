@@ -451,6 +451,9 @@ func ResolveBySource(ctx context.Context, db *sql.DB, logger *slog.Logger, kind,
 		logger = slog.Default()
 	}
 	if _, err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID); err != nil {
+		if kind == KindWaitpoint {
+			sourceID = "[waitpoint]"
+		}
 		logger.Warn("inbox resolve", "error", err, "kind", kind, "source_id", sourceID)
 	}
 }

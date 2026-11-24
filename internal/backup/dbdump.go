@@ -796,7 +796,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 	if dump.scope, err = reconcileWorkspaceScopeTx(ctx, tx, workspaceID, dump, filters); err != nil {
 		dump.scope = &ScopeReconciliation{SkipReason: err.Error()}
 	}
-	return dump, nil
+	return normalizeWaitpointIdentities(dump, false), nil
 }
 
 // tableRowCounts reduces a DBDump to how many rows each table carries —
@@ -952,7 +952,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		_ = rows.Close()
 		dump.Tables[f.table] = out
 	}
-	return dump, nil
+	return normalizeWaitpointIdentities(dump, false), nil
 }
 
 // normalizeScan converts raw sql.Scan values into JSON-friendly Go

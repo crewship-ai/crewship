@@ -91,6 +91,10 @@ func remapWaitpointSources(dump *DBDump, ids map[string]map[string]string) error
 // and repeated same-ID restores. Make copies so a failed restore leaves the
 // caller's decoded bundle intact and can be retried.
 func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
+	return normalizeWaitpointIdentities(dump, true)
+}
+
+func normalizeWaitpointIdentities(dump *DBDump, restore bool) *DBDump {
 	normalized := *dump
 	normalized.Tables = maps.Clone(dump.Tables)
 	for _, table := range []string{"pipeline_waitpoints", "inbox_items", "inbox_item_reads"} {
@@ -98,8 +102,6 @@ func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
 			normalized.Tables[table] = append([]map[string]any(nil), rows...)
 		}
 	}
-	type sourceKey struct{ workspace, token string }
-	migrated := map[sourceKey]string{}
 	for i, row := range normalized.Tables["pipeline_waitpoints"] {
 		old, _ := row["token"].(string)
 		ws, _ := row["workspace_id"].(string)
@@ -109,12 +111,13 @@ func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
 		updated := maps.Clone(row)
 		if !strings.HasPrefix(old, pipeline.WaitpointIDPrefix) {
 			id := pipeline.LegacyWaitpointPublicID(ws, old)
-			migrated[sourceKey{ws, old}] = id
 			updated["token"] = id
 		}
 		// Restoring an older snapshot must not reactivate a rotated callback.
 		// Additive restore leaves the digest of an existing current row alone.
-		updated["callback_token_hash"] = nil
+		if restore || old != updated["token"] {
+			updated["callback_token_hash"] = nil
+		}
 		normalized.Tables["pipeline_waitpoints"][i] = updated
 	}
 	inboxIDs := map[string]string{}
@@ -124,8 +127,8 @@ func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
 		}
 		old, _ := row["source_id"].(string)
 		ws, _ := row["workspace_id"].(string)
-		id := migrated[sourceKey{ws, old}]
-		if id == "" {
+		id := pipeline.PublicWaitpointID(ws, old)
+		if id == "" || id == old {
 			continue
 		}
 		updated := maps.Clone(row)

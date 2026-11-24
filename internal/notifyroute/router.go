@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // PresenceChecker reports whether a user currently has a live subscription
@@ -118,7 +119,7 @@ func (r *Router) notifyItem(ctx context.Context, category string, item inbox.Ite
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
-				r.logger.Error("notifyroute: panic in fan-out goroutine", "panic", p, "kind", item.Kind, "source_id", item.SourceID)
+				r.logger.Error("notifyroute: panic in fan-out goroutine", "kind", item.Kind)
 			}
 		}()
 		r.route(context.Background(), category, item)
@@ -130,6 +131,10 @@ func (r *Router) notifyItem(ctx context.Context, category string, item inbox.Ite
 // every failure is logged and skipped, never propagated — there is no
 // caller left to propagate to once NotifyInboxItem's goroutine started.
 func (r *Router) route(ctx context.Context, category string, item inbox.Item) {
+	if item.Kind == inbox.KindWaitpoint {
+		item.SourceID = pipeline.PublicWaitpointID(item.WorkspaceID, item.SourceID)
+	}
+
 	recipients, err := r.resolveAudience(ctx, item)
 	if err != nil {
 		r.logger.Warn("notifyroute: resolve audience", "error", err, "kind", item.Kind, "source_id", item.SourceID)
