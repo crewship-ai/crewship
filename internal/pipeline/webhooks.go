@@ -30,12 +30,9 @@ import (
 // backup, a copied `.db`, or any read primitive handed the reader live,
 // working URLs.
 //
-// (pipeline_waitpoints.token is the same kind of secret and is deliberately
-// NOT covered: it is that table's primary key, the handle carried by
-// inbox_items.source_id and a WAITING run's waitpoint_token, and the value
-// GET …/pipelines/waitpoints reads back out of the column to rebuild the
-// public callback URL on demand. It is a retrievable shared secret by
-// contract, so hashing it means redesigning that contract first.)
+// (pipeline_waitpoints followed in #1910 with a contract change rather than a
+// storage change: its token column became a public id and the callback
+// capability moved to callback_token_hash — see waitpoints_callback_token.go.)
 //
 // cli_tokens has solved this since Patch J and the shape is copied from there:
 // keep a digest, look the digest up, never read the cleartext back.
@@ -120,6 +117,12 @@ func CapabilityDigestEqual(a, b string) bool {
 // cannot find its lookup column would fail every capability check closed
 // rather than degrade. Idempotent and cheap: one PRAGMA per store lifetime.
 func ensureTokenHashColumn(ctx context.Context, db *sql.DB, table string) error {
+	return ensureCapabilityDigestColumn(ctx, db, table, "token_hash")
+}
+
+// ensureCapabilityDigestColumn is ensureTokenHashColumn for a named digest
+// column (pipeline_waitpoints keeps its digest in callback_token_hash, #1910).
+func ensureCapabilityDigestColumn(ctx context.Context, db *sql.DB, table, column string) error {
 	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return err
@@ -133,7 +136,7 @@ func ensureTokenHashColumn(ctx context.Context, db *sql.DB, table string) error 
 			return err
 		}
 		found = true
-		if name == "token_hash" {
+		if name == column {
 			present = true
 		}
 	}
@@ -145,11 +148,11 @@ func ensureTokenHashColumn(ctx context.Context, db *sql.DB, table string) error 
 		// is not this helper's problem to report.
 		return nil
 	}
-	if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN token_hash TEXT`); err != nil {
+	if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` TEXT`); err != nil {
 		return err
 	}
 	_, err = db.ExecContext(ctx,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_`+table+`_token_hash ON `+table+` (token_hash) WHERE token_hash IS NOT NULL`)
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_`+table+`_`+column+` ON `+table+` (`+column+`) WHERE `+column+` IS NOT NULL`)
 	return err
 }
 

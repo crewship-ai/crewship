@@ -3,6 +3,8 @@ package backup
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // Forks need independent source identities, including the token primary key
@@ -17,11 +19,17 @@ func remapWaitpointSources(dump *DBDump, ids map[string]map[string]string) error
 		if !ok || old == "" {
 			continue
 		}
-		token, err := mintHexToken(32)
+		token, err := mintHexToken(16)
 		if err != nil {
 			return fmt.Errorf("backup: remint waitpoint identity: %w", err)
 		}
-		row["token"] = "tok_" + token
+		// A public waitpoint id (#1910), not a capability. The fork does not
+		// inherit the source's callback capability either (#2274's rule for
+		// every capability table): the digest is dropped, so no URL that
+		// completes the source's gate completes the copy, and the unique
+		// digest index cannot collide when the fork lands beside its source.
+		row["token"] = pipeline.WaitpointIDPrefix + token
+		row["callback_token_hash"] = nil
 		tokens[old] = row["token"].(string)
 		for column, table := range map[string]string{"pipeline_run_id": "pipeline_runs", "invoking_crew_id": "crews"} {
 			if old, ok := row[column].(string); ok {

@@ -61,6 +61,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/import`](#import-pipeline-bundle) | Create a pipeline from a bundle |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints`](#list-pending-waitpoints) | Pending approval waitpoints |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve`](#approve-reject-waitpoint) | Approve / reject a waitpoint |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token`](#mint-a-waitpoint-callback-url) | Mint (or rotate) a waitpoint's public callback URL, shown once |
 | `POST` | [`/api/v1/waitpoint-tokens/{token}`](#complete-a-waitpoint-by-token-public-callback) | Public token callback — complete a waitpoint with no JWT |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#list-schedules) | Cron schedules |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipeline-schedules`](#create-schedule) | Create a schedule |
@@ -1524,8 +1525,9 @@ unauthorized actor, and `409` means the decision was already answered or expired
 The accepted JSON answer is the wait step output for downstream steps.
 
 Typed decisions require an authenticated workspace member with `MANAGER`+;
-the public token callback returns `403` even for a well-formed form answer.
-Their pending-list rows carry `decision_form` and omit `callback_url`.
+no callback URL can be minted for them (`422`), so the public callback cannot
+complete them. Their pending-list rows carry `decision_form` and
+`callback_available: false`.
 Legacy binary approvals retain the public callback and their historical output.
 Identity comes from authentication, never from an answer's data fields.
 
@@ -1549,10 +1551,16 @@ Returns up to 200 pending waitpoints across the workspace, newest first.
     "prompt": "Approve the drafted changelog before publishing.",
     "invoking_crew_id": "crew_eng",
     "timeout_at": "2026-05-19T10:00:00Z",
-    "created_at": "2026-05-19T08:00:18Z"
+    "created_at": "2026-05-19T08:00:18Z",
+    "callback_available": true
   }
 ]
 ```
+
+`token` is the waitpoint's **public id** (`wp_…`), not a credential: it is what
+the inbox card, a WAITING run's `waitpoint_token` and the approve route carry,
+and it completes nothing on its own. The list never contains a callback URL —
+`callback_available` says whether one [can be minted](#mint-a-waitpoint-callback-url).
 
 ### Approve / reject waitpoint
 
@@ -1596,6 +1604,27 @@ that JSON. Rejected decisions follow the wait step's failure behavior.
 | `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
 
+### Mint a waitpoint callback URL
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token
+```
+
+Mints the secret the [public callback](#complete-a-waitpoint-by-token-public-callback) takes and returns the full URL **once**. Crewship stores only a SHA-256 digest of it, so it cannot be listed or read back; minting again returns a new URL and **revokes** the previous one. Requires MANAGER+ (`update`), the approve route's own tier, because the URL can release the gate without authentication. Each mint is audited as `waitpoint.callback_token.minted`. No request body. CLI: `crewship routine waitpoints callback-url <token>`.
+
+**Response:** `201 Created`
+
+```json
+{ "token": "wp_8f3c1...", "callback_url": "https://crewship.example.com/api/v1/waitpoint-tokens/wpt_5d0e...", "rotated": false }
+```
+
+| Status | Condition |
+|---|---|
+| `404` | No waitpoint with this token in the caller's workspace |
+| `409` | The waitpoint is no longer pending |
+| `422` | The waitpoint can only be decided by an authenticated person: it has a `decision_form`, or it holds a routine action (OWNER/ADMIN only) |
+| `503` | Waitpoint store not wired |
+
 #### Defaults differ from the public callback — intentionally
 
 This authed endpoint and the [public token callback](#complete-a-waitpoint-by-token-public-callback) below both accept an optional `approved` field, but they resolve a missing field in opposite directions:
@@ -1611,11 +1640,11 @@ Both defaults are deliberate for their own caller population, not a shared contr
 POST /api/v1/waitpoint-tokens/{token}
 ```
 
-The **public** sibling of the approve endpoint (`trigger.dev` `wait.forToken` parity). An external system holding a waitpoint token completes the wait via an HTTP callback — **no workspace JWT required**: the high-entropy `token` in the path is the auth surface, the same model as the [public webhook dispatch endpoint](/api-reference/webhooks). This lets a human-in-the-loop or external-task wait be resolved by a third party (approval service, CI job, vendor webhook) rather than only through the inbox. The token and its `callback_url` are surfaced on the pending-waitpoints listing (`internal/api/router_pipelines.go:127-131`).
+The **public** sibling of the approve endpoint (`trigger.dev` `wait.forToken` parity). An external system holding a waitpoint's callback URL completes the wait via an HTTP callback — **no workspace JWT required**: the high-entropy secret in the path (`wpt_…`) is the auth surface, the same model as the [public webhook dispatch endpoint](/api-reference/webhooks). This lets a human-in-the-loop or external-task wait be resolved by a third party (approval service, CI job, vendor webhook) rather than only through the inbox. The URL comes only from [minting it](#mint-a-waitpoint-callback-url); the waitpoint's public `token` (`wp_…`) is **not** accepted here.
 
-**Auth:** none — the path token is the credential. The completion is attributed to the sentinel decider `external-callback` (not a user id) so audit queries can distinguish callback completions from inbox approvals (`internal/api/pipeline_waitpoint_callback.go`).
+**Auth:** none — the path secret is the credential. It is hashed and the digest is looked up; Crewship never stores the secret itself. The completion is attributed to the sentinel decider `external-callback` (not a user id) so audit queries can distinguish callback completions from inbox approvals (`internal/api/pipeline_waitpoint_callback.go`).
 
-This is not an agent door. The token travels only to person-facing surfaces — the inbox card, the pending-waitpoints listing, the CLI — and is never handed to an agent, so the only way an agent could reach this route is a person choosing to give the token away. The resolve door behind it is the same one the authed endpoint uses and refuses an agent actor by kind.
+This is not an agent door. Only a MANAGER can mint the secret, and it is shown to them once, so the only way an agent could reach this route is a person choosing to give the URL away. The resolve door behind it is the same one the authed endpoint uses and refuses an agent actor by kind.
 
 **Request body:** optional. A bare `POST` with no body means "the external task finished, continue the run".
 
@@ -1642,7 +1671,7 @@ On success the parked run is resumed via the same path as the authed approve han
 | Status | Condition |
 |---|---|
 | `400` | Missing `token`, or an unparseable request body (`internal/api/pipeline_waitpoint_callback.go:26-42`) |
-| `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
+| `409` | The path is not a live callback secret (a public token, a rotated-out secret, a waitpoint nobody minted a URL for), or the waitpoint was already decided, timed out, or its run was cancelled. An unrecognised secret gets `waitpoint: already decided or expired`, so the response does not say which |
 | `500` | Completion failed for any other reason (`internal/api/pipeline_waitpoint_callback.go:69-71`) |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion (`internal/api/pipeline_waitpoint_callback.go:22-24,56-59`) |
 

@@ -163,6 +163,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// handler body, so they are declared here.
 	// openapi: responses 200,400,401,403,409,500,503
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", roleCreate, pipes.ApproveWaitpoint)
+	// Mint (or rotate) a waitpoint's public callback URL, shown once (#1910).
+	// The approve route's own tier: the URL can release the gate without auth.
+	// openapi: responses 201,400,401,403,404,409,422,500,503
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/callback-token", roleCreate, pipes.MintWaitpointCallbackToken)
 	// Health table (ODCH-RT-07): last 20 outcomes, success rate and a rolling
 	// window of runs and spend per routine. Its own path, not under
 	// /pipelines/, so no routine slug can shadow it.
@@ -301,9 +305,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}/github-pull-request", pipes.FireGitHubPullRequest)
 	// Public waitpoint completion — an external system completes a wait
-	// via callback URL with no workspace JWT (the high-entropy token is
-	// the auth, same model as webhook dispatch). Surfaced as callback_url
-	// on the pending-waitpoints list.
+	// via callback URL with no workspace JWT (the high-entropy secret is
+	// the auth, same model as webhook dispatch). The secret is minted by
+	// …/waitpoints/{token}/callback-token and stored only as a digest (#1910).
 	// openapi: responses 200,400,409,500,503
 	r.mux.HandleFunc("POST /api/v1/waitpoint-tokens/{token}", pipes.CompleteWaitpointToken)
 	// Internal /api/v1/internal/pipelines/save route is registered
