@@ -110,6 +110,18 @@ helper() {
     --mount "type=volume,src=$volume,dst=/store" \
     --entrypoint sh "$image" -ec "set -o pipefail; $*"
 }
+archive_helper() {
+  local volume=$1
+  shift
+  # Use the pinned Debian GNU tar for both passes. BusyBox tar restores
+  # archived symlinks but leaves their ownership as the extracting user.
+  docker run --rm -i --name "$prefix-storage-helper" --platform "$platform" \
+    --network none --read-only --user 0:0 --cap-drop ALL \
+    --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+    --security-opt no-new-privileges --pids-limit 64 --memory 256m \
+    --mount "type=volume,src=$volume,dst=/store" \
+    --entrypoint tar "$crew_image" -C /store --numeric-owner "$@"
+}
 db_marker() {
   docker run --rm --name "$prefix-storage-helper" --platform "$platform" \
     --network none --read-only --user 1001:1001 --cap-drop ALL \
@@ -176,15 +188,9 @@ if [ -n "$previous" ]; then
   root_metadata=$(helper "$prefix-a" 'stat -c "%a:%u:%g" /store')
   IFS=: read -r root_mode root_uid root_gid <<<"$root_metadata"
   [[ "$root_mode" =~ ^[0-7]{3,4}$ && "$root_uid" =~ ^[0-9]+$ && "$root_gid" =~ ^[0-9]+$ ]]
-  helper "$prefix-a" 'tar -C /store -cpf - .' >"$work/backup.tar"
-  # Restore numerically owned files and modes into a fresh private volume.
+  archive_helper "$prefix-a" -cpf - . >"$work/backup.tar"
   docker volume create "$prefix-a-restored" >/dev/null
-  docker run --rm -i --name "$prefix-storage-helper" --platform "$platform" \
-    --network none --read-only --user 0:0 --cap-drop ALL \
-    --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
-    --security-opt no-new-privileges --pids-limit 64 --memory 256m \
-    --mount "type=volume,src=$prefix-a-restored,dst=/store" \
-    --entrypoint sh "$image" -ec 'tar -C /store -xpf -' <"$work/backup.tar"
+  archive_helper "$prefix-a-restored" --same-owner -xpf - <"$work/backup.tar"
   # The existing volume mountpoint can retain Docker's initial owner and
   # mode when tar extracts the archive's "." directory into it.
   helper "$prefix-a-restored" "chown $root_uid:$root_gid /store && chmod $root_mode /store"
