@@ -60,3 +60,22 @@ func TestWaitpointBootMigrationCrash(t *testing.T) {
 		t.Fatalf("restart count %d: %v", n, err)
 	}
 }
+
+func TestWaitpointDecisionWorkspaceProjection(t *testing.T) {
+	db := testutil.MigratedSQLDB(t)
+	store := NewSQLWaitpointStore(db)
+	defer store.Close()
+	if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('a','A','a'),('b','B','b');
+ INSERT INTO users(id,email,full_name) VALUES('user','user@example.test','User');
+ INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at) VALUES('wp_gate','a','run','gate','approval','2099-01-01');
+ INSERT INTO inbox_items(id,workspace_id,kind,source_id,title) VALUES('a_gate','a','waitpoint','wp_gate','Review'),('b_gate','b','waitpoint','wp_gate','Review')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteApproval(t.Context(), "a", "wp_gate", true, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow("SELECT count(*) FROM inbox_items WHERE (id='a_gate' AND state='resolved') OR (id='b_gate' AND state!='resolved')").Scan(&n); err != nil || n != 2 {
+		t.Fatalf("workspace projection: %d (%v)", n, err)
+	}
+}
