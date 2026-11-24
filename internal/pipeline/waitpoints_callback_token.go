@@ -3,11 +3,13 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -195,47 +197,49 @@ SELECT token, workspace_id, callback_token_hash FROM pipeline_waitpoints WHERE c
 // probes, not a table scan.
 const legacyWaitpointPredicate = `(token < 'wp_' OR token >= 'wp` + "`" + `')`
 
-// legacyWaitpointRefTables are the copies of a waitpoint's identity outside
-// its own row, in the order they must be rewritten (children before the
-// inbox_items row whose id they reference). Each statement binds ?1 = new id,
-// ?2 = old value, ?3 = the row's workspace.
-var legacyWaitpointRefTables = []struct{ table, stmt string }{
-	{"inbox_item_reads", `UPDATE inbox_item_reads SET inbox_item_id = replace(inbox_item_id, ?2, ?1)
- WHERE inbox_item_id IN (SELECT id FROM inbox_items WHERE source_id = ?2 AND workspace_id = ?3 AND kind = 'waitpoint')`},
-	{"inbox_items", `UPDATE inbox_items SET id = replace(id, ?2, ?1), source_id = ?1 WHERE source_id = ?2 AND workspace_id = ?3 AND kind = 'waitpoint'`},
-	{"notification_deliveries", `UPDATE notification_deliveries SET source_id = ?1, dedup_key = replace(dedup_key, ?2, ?1) WHERE source_id = ?2 AND workspace_id = ?3 AND source_kind = 'waitpoint'`},
-	{"audit_logs", `UPDATE audit_logs SET entity_id = ?1 WHERE entity_id = ?2 AND workspace_id = ?3 AND entity_type = 'waitpoint'`},
+// LegacyWaitpointPublicID converts a legacy identity to the same public ID
+// during boot and restore. The space-separated domain is private to this
+// identity transform. The old bearer token cannot open a callback.
+func LegacyWaitpointPublicID(workspaceID, old string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("crewship waitpoint identity v1 %d:%s%s", len(workspaceID), workspaceID, old)))
+	return WaitpointIDPrefix + hex.EncodeToString(sum[:16])
 }
 
-// migrateLegacyWaitpointTokens converts every legacy row, pending ones first
-// (a live gate matters more than history if the budget runs out). Returns how
-// many it converted and how many are still legacy afterwards. onMigrated, when
-// set, is told each (old, new) pair after its commit.
+var legacyWaitpointRefTables = []struct{ table, stmt string }{
+	{"inbox_item_reads", `UPDATE inbox_item_reads AS r SET inbox_item_id = replace(r.inbox_item_id, l.old, l.id)
+ FROM legacy AS l JOIN inbox_items AS i ON i.workspace_id = l.workspace AND i.source_id = l.old AND i.kind = 'waitpoint'
+ WHERE r.inbox_item_id = i.id`},
+	{"inbox_items", `UPDATE inbox_items AS i SET id = replace(i.id, l.old, l.id), source_id = l.id FROM legacy AS l
+ WHERE i.workspace_id = l.workspace AND i.source_id = l.old AND i.kind = 'waitpoint'`},
+	{"notification_deliveries", `UPDATE notification_deliveries AS n SET source_id = l.id, dedup_key = replace(n.dedup_key, l.old, l.id)
+ FROM legacy AS l WHERE n.workspace_id = l.workspace AND n.source_id = l.old AND n.source_kind = 'waitpoint'`},
+	{"audit_logs", `UPDATE audit_logs AS a SET entity_id = l.id FROM legacy AS l
+ WHERE a.workspace_id = l.workspace AND a.entity_id = l.old AND a.entity_type = 'waitpoint'`},
+}
+
+type legacyWaitpoint struct{ old, id, workspace string }
+
 func migrateLegacyWaitpointTokens(ctx context.Context, db *sql.DB, onMigrated func(old, id string)) (migrated, remaining int, err error) {
 	rows, err := db.QueryContext(ctx, `SELECT token, workspace_id FROM pipeline_waitpoints WHERE `+
 		legacyWaitpointPredicate+` ORDER BY status <> 'pending'`)
 	if err != nil {
 		return 0, 0, err
 	}
-	type legacy struct{ token, workspaceID string }
-	var todo []legacy
+	var todo []legacyWaitpoint
 	for rows.Next() {
-		var l legacy
-		if err := rows.Scan(&l.token, &l.workspaceID); err != nil {
+		var l legacyWaitpoint
+		if err := rows.Scan(&l.old, &l.workspace); err != nil {
 			rows.Close()
 			return 0, 0, err
 		}
+		l.id = LegacyWaitpointPublicID(l.workspace, l.old)
 		todo = append(todo, l)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(todo) == 0 {
 		return 0, 0, err
 	}
-	rows.Close()
-	if len(todo) == 0 {
-		return 0, 0, nil
-	}
-
 	present := map[string]bool{}
 	for _, ref := range legacyWaitpointRefTables {
 		var n int
@@ -246,40 +250,53 @@ func migrateLegacyWaitpointTokens(ctx context.Context, db *sql.DB, onMigrated fu
 		present[ref.table] = n > 0
 	}
 
-	for i, l := range todo {
-		if cerr := ctx.Err(); cerr != nil {
-			return migrated, len(todo) - i, nil
+	// A malformed row must not stall an otherwise healthy batch. Split only
+	// failed batches and preserve per-row rollback for the exceptional case.
+	var migrate func([]legacyWaitpoint)
+	migrate = func(batch []legacyWaitpoint) {
+		if ctx.Err() != nil {
+			remaining += len(batch)
+			return
 		}
-		id, err := migrateLegacyWaitpointRow(ctx, db, present, l.token, l.workspaceID)
-		if err != nil {
-			remaining++
-			// The old value may be a live secret: log a fingerprint only.
-			slog.Error("waitpoint tokens: migrating a legacy row failed — retried on the next sweep",
-				"workspace_id", l.workspaceID, "token", tokenDigestFingerprint(l.token), "error", err)
-			continue
+		if err := migrateLegacyWaitpointBatch(ctx, db, present, batch); err != nil {
+			if len(batch) > 1 && ctx.Err() == nil {
+				mid := len(batch) / 2
+				migrate(batch[:mid])
+				migrate(batch[mid:])
+				return
+			}
+			remaining += len(batch)
+			// A SQLite constraint error can contain the sensitive row value.
+			if ctx.Err() == nil {
+				slog.Error("waitpoint tokens: legacy row deferred for retry",
+					"workspace_id", batch[0].workspace, "token", tokenDigestFingerprint(batch[0].old))
+			}
+			return
 		}
-		if id != "" {
-			migrated++
-			if onMigrated != nil {
-				onMigrated(l.token, id)
+		migrated += len(batch)
+		if onMigrated != nil {
+			for _, l := range batch {
+				onMigrated(l.old, l.id)
 			}
 		}
+	}
+	const batchSize = 128
+	for len(todo) > 0 {
+		end := min(batchSize, len(todo))
+		migrate(todo[:end])
+		todo = todo[end:]
 	}
 	return migrated, remaining, nil
 }
 
-func migrateLegacyWaitpointRow(ctx context.Context, db *sql.DB, present map[string]bool, old, workspaceID string) (string, error) {
-	id, err := newWaitpointID()
-	if err != nil {
-		return "", err
-	}
+func migrateLegacyWaitpointBatch(ctx context.Context, db *sql.DB, present map[string]bool, batch []legacyWaitpoint) error {
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return "", err
+		return err
 	}
 	committed := false
 	defer func() {
@@ -287,34 +304,31 @@ func migrateLegacyWaitpointRow(ctx context.Context, db *sql.DB, present map[stri
 			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 		}
 	}()
-	// inbox_item_reads references inbox_items(id), which is rewritten in the
-	// same transaction; check the constraint at COMMIT, when both agree.
-	// Resets itself when the transaction ends.
 	if _, err := conn.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
-		return "", err
+		return err
 	}
-	res, err := conn.ExecContext(ctx, `
-UPDATE pipeline_waitpoints SET token = ?, callback_token_hash = NULL
- WHERE token = ? AND `+legacyWaitpointPredicate, id, old)
-	if err != nil {
-		return "", err
+
+	var args []any
+	for _, l := range batch {
+		args = append(args, l.old, l.id, l.workspace)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return "", nil // migrated concurrently
+	cte := "WITH legacy(old, id, workspace) AS (VALUES " + strings.Repeat("(?,?,?),", len(batch)-1) + "(?,?,?)) "
+	if _, err := conn.ExecContext(ctx, cte+`UPDATE pipeline_waitpoints AS w SET token = l.id, callback_token_hash = NULL
+ FROM legacy AS l WHERE w.token = l.old AND w.workspace_id = l.workspace`, args...); err != nil {
+		return err
 	}
 	for _, ref := range legacyWaitpointRefTables {
-		if !present[ref.table] {
-			continue
-		}
-		if _, err := conn.ExecContext(ctx, ref.stmt, id, old, workspaceID); err != nil {
-			return "", fmt.Errorf("%s: %w", ref.table, err)
+		if present[ref.table] {
+			if _, err := conn.ExecContext(ctx, cte+ref.stmt, args...); err != nil {
+				return fmt.Errorf("%s: %w", ref.table, err)
+			}
 		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return "", err
+		return err
 	}
 	committed = true
-	return id, nil
+	return nil
 }
 
 // ensureWaitpointDigestColumn makes sure callback_token_hash exists (hand-rolled
@@ -332,7 +346,7 @@ func ensureWaitpointDigestColumn(db *sql.DB) {
 // row's in-memory listener, if any, follows it to the new id, so a waiter
 // parked on the old value is still woken by a decision on the new one.
 func (s *SQLWaitpointStore) migrateLegacyTokens() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.sweepContext(), 30*time.Second)
 	defer cancel()
 	migrated, remaining, err := migrateLegacyWaitpointTokens(ctx, s.db, func(old, id string) {
 		s.mu.Lock()

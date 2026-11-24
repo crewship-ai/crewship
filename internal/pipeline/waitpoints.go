@@ -48,10 +48,12 @@ type SQLWaitpointStore struct {
 	// chain key (waitpoints_decider.go).
 	auditJournal journal.TransactionEmitter
 
-	mu        sync.Mutex
-	listeners map[string]chan waitDecision
-	sweeperWg sync.WaitGroup
-	stopCh    chan struct{}
+	mu          sync.Mutex
+	listeners   map[string]chan waitDecision
+	sweeperWg   sync.WaitGroup
+	stopCh      chan struct{}
+	sweepCtx    context.Context
+	cancelSweep context.CancelFunc
 
 	// resumer, when wired, is invoked with a waitpoint's pipeline_run_id
 	// the moment a timeout sweep flips it terminal (#1425). Without it a
@@ -106,11 +108,14 @@ type waitDecision struct {
 // sweeper. Caller must call Close() to stop the sweeper goroutine
 // at process shutdown.
 func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
+	sweepCtx, cancelSweep := context.WithCancel(context.Background())
 	s := &SQLWaitpointStore{
-		db:        db,
-		listeners: make(map[string]chan waitDecision),
-		stopCh:    make(chan struct{}),
-		trust:     NewTrustGrantStore(db),
+		db:          db,
+		listeners:   make(map[string]chan waitDecision),
+		stopCh:      make(chan struct{}),
+		sweepCtx:    sweepCtx,
+		cancelSweep: cancelSweep,
+		trust:       NewTrustGrantStore(db),
 	}
 	// Before anything can read a waitpoint: give legacy rows a fresh public
 	// id and a NULL callback digest. Their old secrets are not carried
@@ -206,6 +211,9 @@ func (s *SQLWaitpointStore) Close() {
 		return
 	default:
 		close(s.stopCh)
+		if s.cancelSweep != nil {
+			s.cancelSweep()
+		}
 	}
 	s.mu.Unlock()
 	s.sweeperWg.Wait()
@@ -873,8 +881,15 @@ func (s *SQLWaitpointStore) sweeper() {
 	}
 }
 
+func (s *SQLWaitpointStore) sweepContext() context.Context {
+	if s.sweepCtx != nil {
+		return s.sweepCtx
+	}
+	return context.Background()
+}
+
 func (s *SQLWaitpointStore) sweepOnce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.sweepContext(), 10*time.Second)
 	defer cancel()
 	// timeout_at is RFC3339Nano (set by CreateApproval); we compare
 	// against the same format. SQLite's `datetime('now','subsec')`

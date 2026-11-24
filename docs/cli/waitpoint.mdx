@@ -23,9 +23,10 @@ The `pipeline` alias works in place of `routine`.
 | Command | API behavior |
 |---|---|
 | `list` | `GET /api/v1/workspaces/{workspace}/pipelines/waitpoints`; lists pending waitpoints. |
-| `show <token>` | Reads the pending list and prints full prompt and metadata for the exact token. |
-| `approve <token>` | `POST /api/v1/workspaces/{workspace}/pipelines/waitpoints/{token}/approve` with `approved: true`. |
-| `reject <token>` | The same endpoint with `approved: false`. |
+| `show <id>` | Reads the pending list and prints full prompt and metadata for the public waitpoint ID. |
+| `approve <id>` | `POST /api/v1/workspaces/{workspace}/pipelines/waitpoints/{id}/approve` with `approved: true`. |
+| `callback-url <id>` | Mint a new external completion URL for a pending waitpoint. |
+| `reject <id>` | The same endpoint with `approved: false`. |
 
 ### `list`
 
@@ -35,31 +36,42 @@ crewship routine waitpoints list --format json
 ```
 
 Human output columns are `TOKEN RUN ID STEP KIND CREATED TIMEOUT PROMPT`.
-The full token is shown because it is required by `approve` and `reject`; the
-run ID is shortened only in the human table. An empty pending list prints
-`No pending waitpoints.` in table mode and `[]` in JSON mode. `--json` is a
-deprecated alias for `--format json`; YAML and NDJSON are also supported.
+The TOKEN column shows a public `wp_` waitpoint ID. You can use it with
+`show`, `approve` or `reject`. The human table shortens the run ID. An empty
+pending list prints `No pending waitpoints.` or `[]` in JSON mode.
+`--json` is a deprecated alias for `--format json`. YAML and NDJSON are also supported.
 
-### `show <token>`
+### `show <id>`
 
 ```bash
-crewship routine waitpoints show wpt_abc123
+crewship routine waitpoints show wp_069f7add83c04c7bbc306f8c8bb85c10
 ```
 
-Prints token, run ID, step, kind, optional invoking crew, created/timeout
-timestamps, optional callback URL, and the full prompt. A missing, expired, or
-already-decided token returns a not-found error. If the server supplied a
-callback URL, the command also prints the unauthenticated external completion
-example; treat that URL as a secret. The server omits the callback URL for a
-waitpoint that declares a `decision_form` — a typed decision is made through
-`approve`/`reject` only — and `--format json` then carries the form and the
-`inbox_item_id` of the card that shows it.
+Prints the public ID, run, step, kind, timestamps and full prompt. A missing,
+expired or decided ID returns a not-found error. Typed decision forms and their
+Inbox card IDs appear in JSON output. Make the decision through the authenticated
+route or Inbox.
+
+### `callback-url <id>`
+
+A workspace manager can mint a callback URL on demand for an eligible pending
+waitpoint. The CLI displays the secret once. Minting a replacement invalidates
+the previous URL. Store the URL in your integration's secret store and keep
+it out of logs and messages. Typed decision forms require an authenticated
+decision.
+
+When upgrading from a version that used the ID as a callback secret, stop the
+old service before starting the new one. Start one new instance on the database
+and let the ID migration finish before serving traffic. Existing pending
+waitpoints retain their status, but all pre-upgrade callback URLs expire.
+List pending waitpoints and mint and distribute new URLs for the integrations
+that still need them.
 
 ### `approve` and `reject`
 
 ```bash
-crewship routine waitpoints approve wpt_abc123 --comment "LGTM"
-crewship routine waitpoints reject wpt_abc123 --comment "Needs revision"
+crewship routine waitpoints approve wp_069f7add83c04c7bbc306f8c8bb85c10 --comment "LGTM"
+crewship routine waitpoints reject wp_069f7add83c04c7bbc306f8c8bb85c10 --comment "Needs revision"
 ```
 
 Both commands accept `--comment` (default empty). The comment is forwarded to

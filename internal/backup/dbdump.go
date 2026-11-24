@@ -1298,6 +1298,15 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// re-keyed table degenerates the statement into a NOT NULL violation
 	// that OR IGNORE then swallows. Counted here, reported to the operator
 	// by the caller. See dropped_columns.go.
+	if len(dump.Tables["pipeline_waitpoints"]) > 0 || len(dump.Tables["inbox_items"]) > 0 {
+		columns, err := tableColumns(ctx, tx, "pipeline_waitpoints")
+		if err != nil {
+			return stats, fmt.Errorf("backup: probe waitpoint identity schema: %w", err)
+		}
+		if columns["callback_token_hash"] {
+			dump = normalizeLegacyWaitpointRestore(dump)
+		}
+	}
 	var dropped droppedColumnTally
 	restoredMissions := map[string]bool{}
 	hasIssueWork, err := tableExistsTx(ctx, tx, "issue_work")

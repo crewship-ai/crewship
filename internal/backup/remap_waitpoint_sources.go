@@ -3,6 +3,8 @@ package backup
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -83,4 +85,60 @@ func remapWaitpointSources(dump *DBDump, ids map[string]map[string]string) error
 		row["payload_json"] = string(encoded)
 	}
 	return nil
+}
+
+// normalizeLegacyWaitpointRestore preserves identity across a boot migration
+// and repeated same-ID restores. Make copies so a failed restore leaves the
+// caller's decoded bundle intact and can be retried.
+func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
+	normalized := *dump
+	normalized.Tables = maps.Clone(dump.Tables)
+	for _, table := range []string{"pipeline_waitpoints", "inbox_items", "inbox_item_reads"} {
+		if rows, ok := dump.Tables[table]; ok {
+			normalized.Tables[table] = append([]map[string]any(nil), rows...)
+		}
+	}
+	rekey := func(row map[string]any, column string) (string, string) {
+		old, _ := row[column].(string)
+		ws, _ := row["workspace_id"].(string)
+		if old == "" || ws == "" || strings.HasPrefix(old, pipeline.WaitpointIDPrefix) {
+			return "", ""
+		}
+		return old, pipeline.LegacyWaitpointPublicID(ws, old)
+	}
+
+	for i, row := range normalized.Tables["pipeline_waitpoints"] {
+		if _, id := rekey(row, "token"); id != "" {
+			updated := maps.Clone(row)
+			updated["token"] = id
+			updated["callback_token_hash"] = nil
+			normalized.Tables["pipeline_waitpoints"][i] = updated
+		}
+	}
+	inboxIDs := map[string]string{}
+	for i, row := range normalized.Tables["inbox_items"] {
+		if row["kind"] != "waitpoint" {
+			continue
+		}
+		old, id := rekey(row, "source_id")
+		if id == "" {
+			continue
+		}
+		updated := maps.Clone(row)
+		updated["source_id"] = id
+		if oldID, ok := row["id"].(string); ok {
+			newID := strings.ReplaceAll(oldID, old, id)
+			updated["id"] = newID
+			inboxIDs[oldID] = newID
+		}
+		normalized.Tables["inbox_items"][i] = updated
+	}
+	for i, row := range normalized.Tables["inbox_item_reads"] {
+		if oldID, ok := row["inbox_item_id"].(string); ok && inboxIDs[oldID] != "" {
+			updated := maps.Clone(row)
+			updated["inbox_item_id"] = inboxIDs[oldID]
+			normalized.Tables["inbox_item_reads"][i] = updated
+		}
+	}
+	return &normalized
 }
