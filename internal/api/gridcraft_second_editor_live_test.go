@@ -165,7 +165,6 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.db))
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
-	go hub.Run(ctx)
 	router, err := NewRouter(f.db, "this-is-a-32-char-test-secret-pad", newTestLogger(), WithHub(hub))
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +182,29 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	unaffected := openEditorSession(t, f, ann, second)
 	observer := hub.AddObserver("page:owner-changing", "ann-audit", 16)
 	t.Cleanup(func() { hub.RemoveObserver("page:owner-changing", observer) })
+	// Start delivery only after the observer is attached. The import queued
+	// both revision-one notifications before the ownership change; consume
+	// them explicitly so the first closure check cannot race those frames.
+	go hub.Run(ctx)
+	importDeadline := time.After(5 * time.Second)
+	for _, kind := range []string{"workbook.committed", "mooring.committed"} {
+		select {
+		case raw := <-observer.Frames():
+			var frame struct {
+				Type    string `json:"type"`
+				Channel string `json:"channel"`
+				Payload struct {
+					Rev int64 `json:"rev"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(raw, &frame) != nil || frame.Type != kind ||
+				frame.Channel != "page:owner-changing" || frame.Payload.Rev != 1 {
+				t.Fatalf("want queued %s revision one, got %s", kind, raw)
+			}
+		case <-importDeadline:
+			t.Fatalf("missing queued %s revision one", kind)
+		}
+	}
 	// Simulate the durable ownership boundary without invoking the grant handler.
 	start := time.Now()
 	mustExec(t, f.db, `UPDATE pages SET owner_user_id='bob-successor' WHERE id='owner-changing'`)
@@ -191,8 +213,16 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	}
 	select {
 	case raw := <-observer.Frames():
-		var frame ws.ServerMessage
-		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" {
+		var frame struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ArtifactID string   `json:"artifact_id"`
+				SessionIDs []string `json:"session_ids"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" ||
+			frame.Payload.ArtifactID != "owner-changing" || len(frame.Payload.SessionIDs) != 1 ||
+			frame.Payload.SessionIDs[0] != affected.SessionID {
 			t.Fatalf("writer closure control: %s", raw)
 		}
 	case <-time.After(5 * time.Second):
