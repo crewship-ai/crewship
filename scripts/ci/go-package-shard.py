@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "github.com/crewship-ai/crewship/"
@@ -91,13 +92,16 @@ def verify_api_execution(directory, selected):
     return _api_race_shard().completed_seconds(Path(directory), selected)
 
 
-def run(index, count, extra, split_api=False):
+def run(index, count, extra, split_api=False, profile=None):
     if not 0 <= index < count:
         raise ValueError("require 0 <= index < count")
     if split_api and any(a.startswith("-") and _flag(a) in SELECTION_FLAGS for a in extra):
         raise ValueError("--split-api owns test selection and build flags; drop " + "/".join(SELECTION_FLAGS))
     baseline = json.loads((ROOT / "scripts/ci/general-race-costs.json").read_text())
     costs = dict(baseline["packages"], **EXTRA_COSTS)
+    if profile == "shuffle":
+        baseline = json.loads((ROOT / "scripts/ci/go-platform-costs.json").read_text())
+        costs = baseline["platforms"]["shuffle"]
     listed = subprocess.run(["go", "list", "./..."], cwd=ROOT, text=True, stdout=subprocess.PIPE, check=True)
     packages = listed.stdout.split()
     if not split_api:
@@ -145,12 +149,63 @@ def run(index, count, extra, split_api=False):
     return code or api_code
 
 
+def run_platform(platform, index, count):
+    if platform not in {"macos-arm64", "linux-arm64"} or count != 3 or not 0 <= index < count:
+        raise ValueError("expected macos-arm64 or linux-arm64 and a shard index in [0, 3)")
+    goos = "darwin" if platform == "macos-arm64" else "linux"
+    target = subprocess.check_output(["go", "env", "GOOS", "GOARCH"], cwd=ROOT, text=True).split()
+    if target != [goos, "arm64"]:
+        raise ValueError(f"{platform}: unexpected Go target {target}")
+    source_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    if source_sha != os.environ.get("GITHUB_SHA") or not os.environ.get("GITHUB_RUN_ID"):
+        raise ValueError("native shard checkout does not match the workflow identity")
+    results = ROOT / ".ci-results"
+    results.mkdir(exist_ok=True)
+    receipt = results / "platform-shard.json"
+    receipt.unlink(missing_ok=True)
+    baseline = json.loads((ROOT / "scripts/ci/go-platform-costs.json").read_text())
+    inventory = subprocess.check_output(["go", "list", "./..."], cwd=ROOT, text=True).split()
+    groups, _ = partition(inventory, count, baseline["platforms"][platform], baseline["default_seconds"])
+    selected = groups[index]
+    cli_build = PREFIX + "cmd/crewship" in selected
+    started = time.monotonic()
+    if cli_build:
+        subprocess.run(["go", "build", "./cmd/crewship"], cwd=ROOT, check=True)
+    built = time.monotonic()
+    subprocess.run(["bash", "scripts/ci/go-test.sh", *selected, "-count=1", "-timeout", "30m"],
+                   cwd=ROOT, env=dict(os.environ, CI_RESULTS_DIR=str(results)), check=True)
+    finished = time.monotonic()
+    completed = []
+    with (results / "go-test.jsonl").open() as stream:
+        for line in stream:
+            event = json.loads(line)
+            if event.get("Action") in {"pass", "skip"} and "Test" not in event:
+                completed.append(event["Package"])
+    if sorted(completed) != sorted(selected):
+        raise ValueError(f"{platform} shard {index}: Go events do not cover its assignment exactly once")
+    receipt.write_text(json.dumps({
+        "source_sha": source_sha, "run_id": os.environ["GITHUB_RUN_ID"],
+        "platform": platform, "index": index, "count": count, "inventory": sorted(inventory),
+        "selected": selected, "completed": completed, "cli_build": cli_build,
+        "build_seconds": round(built - started, 3), "test_step_seconds": round(finished - built, 3),
+    }, indent=2) + "\n")
+    return 0
+
+
+def main(args):
+    if len(args) == 4 and args[0] == "native":
+        return run_platform(args[1], int(args[2]), int(args[3]))
+    if len(args) < 3 or args[0] not in {"run", "shuffle"}:
+        raise ValueError("usage: go-package-shard.py {run|shuffle} INDEX COUNT [--split-api] [go test args...]")
+    split = len(args) > 3 and args[3] == "--split-api"
+    if args[0] == "shuffle" and split:
+        raise ValueError("the shuffle lane must keep whole Go packages")
+    return run(int(args[1]), int(args[2]), args[4 if split else 3:], split_api=split, profile=args[0])
+
+
 if __name__ == "__main__":
     try:
-        if len(sys.argv) < 4 or sys.argv[1] != "run":
-            raise ValueError("usage: go-package-shard.py run INDEX COUNT [--split-api] [go test args...]")
-        split = len(sys.argv) > 4 and sys.argv[4] == "--split-api"
-        sys.exit(run(int(sys.argv[2]), int(sys.argv[3]), sys.argv[5 if split else 4:], split_api=split))
+        sys.exit(main(sys.argv[1:]))
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
-        print(f"::error::{error}", file=sys.stderr)
+        print(f"::error::{error}")
         sys.exit(1)

@@ -106,7 +106,7 @@ func TestInspectToolchainNeverStartsImageAndCleansScratch(t *testing.T) {
 			docker := &inventoryDocker{archive: toolchainArchive(t, files)}
 			p := NewProvisioner(docker, nil, nil, testLogger())
 			got := p.inspectToolchain(context.Background(), "mutable:tag", []string{"codex"})
-			if got.ImageID != "sha256:immutable" {
+			if got.ImageID != fixtureImageID {
 				t.Fatalf("identity=%q", got.ImageID)
 			}
 			if !malformed && got.Tools[0].Version != "0.153.2" {
@@ -122,7 +122,7 @@ func TestInspectToolchainNeverStartsImageAndCleansScratch(t *testing.T) {
 				t.Fatal("inspection leaked its scratch container")
 			}
 			created := docker.createdContainers[0]
-			if created.config.Image != "sha256:immutable" || created.hostCfg.NetworkMode != "none" || !created.hostCfg.ReadonlyRootfs {
+			if created.config.Image != fixtureImageID || created.hostCfg.NetworkMode != "none" || !created.hostCfg.ReadonlyRootfs {
 				t.Fatalf("unsafe image inspection: %+v", created)
 			}
 		})
@@ -135,7 +135,7 @@ type inventoryDocker struct {
 }
 
 func (d *inventoryDocker) ImageInspect(context.Context, string, ...client.ImageInspectOption) (client.ImageInspectResult, error) {
-	return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: "sha256:immutable"}}, nil
+	return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: fixtureImageID}}, nil
 }
 func (d *inventoryDocker) CopyFromContainer(context.Context, string, client.CopyFromContainerOptions) (client.CopyFromContainerResult, error) {
 	return client.CopyFromContainerResult{Content: io.NopCloser(bytes.NewReader(d.archive))}, nil

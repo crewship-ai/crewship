@@ -158,7 +158,7 @@ export default function DashboardLayout({
                 version is the dot on the Crewship sail in the top bar, not a
                 banner (#5552). */}
             {trusted && <RuntimeBanner />}
-            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
+            <div ref={scrollRef} data-slot="app-content" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
               <WorkspaceAvailabilityBoundary enabled={!independentPage}>
               {unknownPath
                 ? <NotFoundInShell />

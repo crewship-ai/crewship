@@ -248,7 +248,8 @@ jobs:
     needs: [merge-conflict-markers]
     name: Shell
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Include the pinned Go setup and bounded Actionlint module download.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,7 +265,16 @@ jobs:
           gh api "repos/$REPO/codeowners/errors?ref=$SHA" > "$RUNNER_TEMP/codeowners-errors.json"
           jq '.errors' "$RUNNER_TEMP/codeowners-errors.json"
           jq -e '.errors | type == "array" and length == 0' "$RUNNER_TEMP/codeowners-errors.json"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        timeout-minutes: 2
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Prime the Actionlint module cache
+        timeout-minutes: 2
+        run: python3 scripts/ci/prime-go-modules.py --attempt-timeout 20 --tool github.com/rhysd/actionlint@v1.7.7
       - name: Validate GitHub workflow syntax and expressions
+        timeout-minutes: 2
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
       - name: CI gate regression tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
@@ -444,6 +454,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build server and CLI from this commit
         run: go build -o crewship ./cmd/crewship
       - name: Generate ephemeral instance secrets
@@ -807,6 +818,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build CLI from this commit
         run: go build -o crewship ./cmd/crewship
       - name: Run C1 command breadth smoke
@@ -843,6 +855,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Runtime facts
         run: docker version
       # Asserts, inside a real container built from the product's own default
@@ -866,6 +879,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Prepare pinned synthetic fixture
         timeout-minutes: 3
         run: |
@@ -967,6 +981,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -1362,6 +1377,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Check documented provider order and frontend vocabularies
         timeout-minutes: 10
         run: python3 scripts/ci/parity.py
@@ -1435,6 +1451,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Install pinned Rust and WASM target
         timeout-minutes: 5
         run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
@@ -1487,6 +1504,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Require documentation contract evidence without the Go matrix
         timeout-minutes: 10
         run: timeout --kill-after=30s 8m go run ./scripts/docs-inventory -strict
@@ -1822,6 +1840,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go vet
         run: go vet ./...
@@ -2002,6 +2021,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Go test (package partition + internal/api slice)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
@@ -2056,6 +2076,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go test (shuffled)
         # go test prints the chosen seed per package as `-test.shuffle N`.
@@ -2070,7 +2091,7 @@ jobs:
         # cover `go list ./...` exactly once.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 30m
+        run: python3 scripts/ci/go-package-shard.py shuffle "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 30m
 
   # ── Go: race detector ──
   #
@@ -2268,6 +2289,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Require instrumented CLI and named acceptance scenarios
         timeout-minutes: 15
         run: python3 scripts/ci/cli-subprocess-race.py
@@ -2307,6 +2329,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Go test (race, CLI partition)
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
@@ -2371,18 +2394,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2]
     runs-on: ubuntu-latest
-    # Run 37145916427 needed 61m22s for this package group. Two balanced
-    # groups kept internal/backup (2028.5s) and internal/access (1725.3s)
-    # on separate runners; with those fixed, each shard was bound by total
-    # work (~90 packages on 4 vCPUs, 30-35 min), so there are now four.
-    # Costs come from main run 37455853260 plus measured post-fix values.
-    # Fresh go list inventory includes new packages;
-    # timings affect placement only, never whether a package executes.
-    # Keep the 35m per-binary hang bound and 75m job cap unchanged. The
-    # structural database exclusion and dedicated API/CLI coverage above
-    # retain their distinct meanings; stale exclusions fail enumeration.
+    # Complete packages are balanced by measured costs. API, CLI and backup
+    # are verified separately. Keep the 35m per-binary and 75m job caps.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2392,6 +2407,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Go test (race)
         # No -shuffle here on purpose: `go-shuffle` owns order-dependence
@@ -2399,7 +2415,7 @@ jobs:
         # is reproducible from the log without also having to replay a seed.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 4 2100
+        run: python3 scripts/ci/general-race-shard.py run "$SHARD_INDEX" 3 2100
 
       - name: Upload test timings and event stream
         if: always()
@@ -2411,6 +2427,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+
+  go-race-backup:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
+    name: Go Race (internal/backup shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
+      - name: Go test (race, internal/backup partition)
+        env:
+          RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/internal/backup
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" 2 2100
+      - name: Upload test timings and partition evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: timings-go-race-backup-${{ matrix.shard }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   # ── Go race: the internal/api shard ──
   #
@@ -2447,6 +2496,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Build and measure genuine race migration template
         run: python3 scripts/ci/api-race-shard.py bootstrap .ci-api-template 4600
       - name: Upload template and actual execution evidence
@@ -2479,6 +2529,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - name: Download this run's measured template
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2573,51 +2624,54 @@ jobs:
   go-platforms:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
-    name: Go (${{ matrix.name }})
+    name: Go (${{ matrix.platform }}, shard ${{ matrix.shard }})
     runs-on: ${{ matrix.runner }}
-    #
-    # ⚠ Same invariant as `go`: cap MUST exceed (pre-test overhead) +
-    #   (`go test -timeout`), with daylight, so Go's goroutine dump wins the
-    #   race against GitHub's opaque cancel.
-    #
-    # Was 25 against a `go test -timeout 20m`, which left the arithmetic with
-    # only whatever is not spent on checkout, the Go SDK download and a cold
-    # build — and these are the macOS and arm64 runners, the two slowest and
-    # least predictable in the fleet. That is the exact shape the `go` job's
-    # comment above warns about: a bound that works on a quiet machine and is
-    # decided by a busy one (#1998, item 3). 30 restores the ≥5 min of daylight
-    # the `go` job's invariant asks for.
-    # 45 since 2026-11-01: `go test ./...` here is unpartitioned, and on a busy
-    # macOS runner internal/api alone took 1146-1200 s; the 30m cap cancelled a
-    # run whose packages had all passed, and the 20m package timeout then fired
-    # at 1200.5 s. Package timeout 30m, job cap 45m (this lane runs only in the
-    # merge queue and on main, #4752).
+    # Keep the existing 30-minute package bound and 45-minute job cap.
+    # Complete packages retain their native process and test ordering.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        platform: [macos-arm64, linux-arm64]
+        shard: [0, 1, 2]
         include:
-          - name: macos-arm64
+          - platform: macos-arm64
             runner: macos-15
-          - name: linux-arm64
+          - platform: linux-arm64
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Go build
-        run: go build ./cmd/crewship
-
-      - name: Go test
-        # -short would defeat the purpose; run the full suite. 30m test
-        # timeout: macOS runners are much slower than ubuntu for the
-        # SQLite-heavy internal/api package (1200 s observed 2026-11-01).
-        run: go test ./... -count=1 -timeout 30m
+          prime-modules: 'true'
+      - name: Build and test native package shard
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: python3 scripts/ci/go-package-shard.py native "$PLATFORM" "$SHARD_INDEX" 3
+      - name: Upload exact native package coverage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-coverage-${{ matrix.platform }}-${{ matrix.shard }}-${{ github.sha }}
+          path: .ci-results/platform-shard.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload native Go timings and events
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: timings-native-${{ matrix.platform }}-${{ matrix.shard }}-${{ github.sha }}
+          path: |
+            .ci-results/platform-shard.json
+            .ci-results/timings.json
+            .ci-results/go-test.jsonl
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   # ── Go lint: golangci-lint ──
   go-lint:
@@ -2643,6 +2697,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       - name: Preserve already shipped migrations
         env:
@@ -2806,6 +2861,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
 
       # Wipe the embed dir before pulling the artifact so a stale checkout
       # copy of web/out cannot satisfy the embed directive if the
@@ -2895,6 +2951,9 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Prime the Go module cache
+        timeout-minutes: 4
+        run: python3 scripts/ci/prime-go-modules.py
       - name: Install and run both packages through the server
         timeout-minutes: 15
         env:
@@ -2969,13 +3028,25 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-template, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey, craft-packages-build, craft-packages]
+    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-backup, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-template, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey, craft-packages-build, craft-packages]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Read native shard receipts
+        if: needs.go-platforms.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: native-coverage-*-${{ github.sha }}
+          path: .ci-native-platforms
+      - name: Read backup race shard receipts
+        if: needs.go-race-backup.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: timings-go-race-backup-*-${{ github.sha }}
+          path: .ci-backup-race
       - name: Require every planned check
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
@@ -2995,6 +3066,7 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+          prime-modules: 'true'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: nextjs-static-export

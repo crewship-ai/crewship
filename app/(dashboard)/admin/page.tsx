@@ -240,7 +240,7 @@ function AdminConsole() {
   // the console is read or drawn for them.
   if (instanceAdmin === false && !wsLoading) {
     return (
-      <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
+      <div className="flex h-app-content flex-col">
         <SubBar icon={Shield} title="Admin" ariaLabel="Admin Console" />
         <PageNoAccess
           area="the Admin console"
@@ -367,7 +367,7 @@ function AdminConsole() {
   const wide = WIDE_TABS.has(tab)
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
+    <div className="flex flex-col h-app-content">
       <SubBar
         icon={Shield}
         title="Admin"

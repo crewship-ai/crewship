@@ -267,3 +267,47 @@ test("a wide descendant does not push the shell inset off-screen", async ({ page
       `The inset must shrink and let the descendant overflow inside it, not grow past the rail.`,
   ).toBeLessThanOrEqual(after.viewport)
 })
+
+for (const viewport of [VIEWPORT, { width: 390, height: 844 }]) {
+  for (const available of [true, false]) {
+    test(`Crews fits at ${viewport.width}px with Docker ${available ? "available" : "unavailable"}`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await page.route("**/api/v1/system/runtime", (route) => route.fulfill({ json: { available } }))
+      const runtime = page.waitForResponse("**/api/v1/system/runtime")
+      await page.goto("/crews")
+      await runtime
+      await expect(page.getByRole("textbox", { name: /Search crews and agents/ })).toBeVisible()
+      const banner = page.getByText("Docker is not running.", { exact: true })
+      if (available) {
+        await expect(banner).toBeHidden()
+      } else {
+        await expect(banner).toBeVisible()
+      }
+
+      const scroller = page.locator("[data-slot=content-column] > .overflow-y-auto")
+      await expect.poll(() => scroller.evaluate((element) => element.clientHeight)).toBeGreaterThan(viewport.height / 2)
+      const routeShell = scroller.locator(".h-app-content")
+      await expect(routeShell).toHaveCount(1)
+      await expect.poll(() => routeShell.evaluate((element) => {
+        const scroller = element.closest("[data-slot=app-content]")!
+        return Math.abs(element.getBoundingClientRect().height - scroller.clientHeight)
+      })).toBeLessThanOrEqual(1)
+      await expect.poll(() => scroller.evaluate((element) =>
+        element.scrollHeight - element.clientHeight,
+      )).toBeLessThanOrEqual(1)
+
+      const content = page.locator("[data-slot=app-content]")
+      const fixedTop = await content.evaluate((element) => {
+        const probe = document.createElement("div")
+        probe.style.cssText = "position: fixed; top: 0; left: 0; width: 1px; height: 1px"
+        element.appendChild(probe)
+        try {
+          return probe.getBoundingClientRect().top
+        } finally {
+          probe.remove()
+        }
+      })
+      expect(fixedTop, "a fixed overlay must remain anchored to the viewport").toBe(0)
+    })
+  }
+}

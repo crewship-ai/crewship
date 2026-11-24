@@ -80,6 +80,7 @@ type environmentCapture struct {
 	snap      ContainerSnapshot
 	env       *Environment
 	committed bool
+	imageID   string
 }
 
 // CollectEnvironment captures one crew container's complete environment:
@@ -211,10 +212,12 @@ func (c *environmentCapture) underPause(ctx context.Context) error {
 			env = append(env, n+"=")
 		}
 	}
-	if _, err := c.ops.CommitContainer(ctx, c.crew.ContainerID, c.env.ImageRef, env); err != nil {
+	id, err := c.ops.CommitContainer(ctx, c.crew.ContainerID, c.env.ImageRef, env)
+	if err != nil {
 		return err
 	}
 	c.committed = true
+	c.imageID = id
 	if c.opts.Payload == nil {
 		return nil
 	}
@@ -251,7 +254,7 @@ func (c *environmentCapture) abort() {
 func (c *environmentCapture) finish(ctx context.Context) (*Environment, error) {
 	defer c.abort()
 	env := c.env
-	p, err := c.ops.ImagePlatform(ctx, env.ImageRef)
+	p, err := c.ops.ImagePlatform(ctx, c.imageID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +289,8 @@ func (c *environmentCapture) finish(ctx context.Context) (*Environment, error) {
 // archive becomes a blob; directories and symlinks are recorded as entries
 // so the archive can be reassembled exactly.
 func (c *environmentCapture) ingest(ctx context.Context) error {
+	// Keep the unique capture tag in the archive: restore verifies that
+	// docker load recreated that tag before it permits container creation.
 	rc, err := c.ops.SaveImage(ctx, c.env.ImageRef)
 	if err != nil {
 		return err

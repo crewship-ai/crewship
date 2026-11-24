@@ -110,7 +110,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
-    "@xyflow/react": "^12.12.1",
+    "@xyflow/react": "^13.0.2",
     "ai": "^7.0.179",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

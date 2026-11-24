@@ -355,7 +355,7 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 		{Name: "local", Transport: "stdio", Command: "npx"},
 	}
 
-	err := startSidecar(context.Background(), c, "container-abcdef123456", creds, memCfg, ipcCfg, routeAuth, members, policy, servers, "config-fp", covQuietLogger())
+	err := startSidecar(context.Background(), c, "container-abcdef123456", "test-run", creds, memCfg, ipcCfg, routeAuth, members, policy, servers, "config-fp", covQuietLogger())
 	if err != nil {
 		t.Fatalf("startSidecar: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestStartSidecar_MemoryPrepFailuresAreNonFatal(t *testing.T) {
 		return covResult("sidecar-start", ""), nil
 	}}
 	mem := &SidecarMemoryConfig{Enabled: true, BasePath: "/crew/agents/x/.memory"}
-	if err := startSidecar(context.Background(), c1, "ctr-123456789012", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
+	if err := startSidecar(context.Background(), c1, "ctr-123456789012", "test-run", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
 		t.Fatalf("prep exec error must not fail startSidecar: %v", err)
 	}
 
@@ -457,7 +457,7 @@ func TestStartSidecar_MemoryPrepFailuresAreNonFatal(t *testing.T) {
 			return false, 0, nil
 		},
 	}
-	if err := startSidecar(context.Background(), c2, "ctr-123456789012", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
+	if err := startSidecar(context.Background(), c2, "ctr-123456789012", "test-run", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
 		t.Fatalf("prep non-zero exit must not fail startSidecar: %v", err)
 	}
 }
@@ -467,7 +467,7 @@ func TestStartSidecar_ExecError(t *testing.T) {
 	c := &covContainer{route: func(_ provider.ExecConfig) (*provider.ExecResult, error) {
 		return nil, errors.New("no such container")
 	}}
-	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr1", "test-run", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "start sidecar") {
 		t.Fatalf("expected start sidecar error, got %v", err)
 	}
@@ -478,7 +478,7 @@ func TestStartSidecar_InspectError(t *testing.T) {
 	c := &covContainer{
 		inspect: func(_ string) (bool, int, error) { return false, 0, errors.New("inspect broken") },
 	}
-	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr1", "test-run", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "inspect sidecar exec") {
 		t.Fatalf("expected inspect error, got %v", err)
 	}
@@ -492,12 +492,41 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 		},
 		inspect: func(_ string) (bool, int, error) { return false, 1, nil },
 	}
-	err := startSidecar(context.Background(), c, "ctr-123456789012", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr-123456789012", "test-run", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "sidecar health check failed (exit 1)") {
 		t.Fatalf("expected health check failure, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "sidecar health check failed") {
 		t.Errorf("error must carry the captured output: %v", err)
+	}
+}
+
+func TestStartSidecarRedactsBeforeTakingExcerpt(t *testing.T) {
+	const secret = "opaque-value-with-sensitive-suffix"
+	for _, padding := range []int{2032, sidecarDiagnosticLimit} {
+		inspections := 0
+		c := &covContainer{
+			route: func(provider.ExecConfig) (*provider.ExecResult, error) {
+				return covResult("sidecar-start", secret+strings.Repeat(".", padding)+"failure"), nil
+			},
+			inspect: func(string) (bool, int, error) {
+				inspections++
+				if inspections == 1 {
+					return true, 0, nil
+				}
+				return false, 1, nil
+			},
+		}
+		err := startSidecar(t.Context(), c, "container", "run", []Credential{{PlainValue: secret}}, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
+		if err == nil || strings.Contains(err.Error(), "suffix") || len(err.Error()) > 2200 {
+			t.Fatalf("unexpected diagnostic, padding %d", padding)
+		}
+		if padding == 2032 && !strings.HasSuffix(err.Error(), "failure") {
+			t.Fatal("lost bounded log excerpt")
+		}
+		if padding == sidecarDiagnosticLimit && !strings.Contains(err.Error(), "oversized") {
+			t.Fatal("returned a partial diagnostic")
+		}
 	}
 }
 
@@ -526,7 +555,7 @@ func TestStartSidecar_CredentialsNeverInArgv(t *testing.T) {
 	creds := []Credential{
 		{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: marker, Priority: 1},
 	}
-	if err := startSidecar(context.Background(), c, "ctr-123456789012", creds, nil, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
+	if err := startSidecar(context.Background(), c, "ctr-123456789012", "test-run", creds, nil, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
 		t.Fatalf("startSidecar: %v", err)
 	}
 

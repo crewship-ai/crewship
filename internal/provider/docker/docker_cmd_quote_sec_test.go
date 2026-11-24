@@ -74,7 +74,7 @@ func TestSecDockerCmdBuildChownInitCmd(t *testing.T) {
 	// Volume mount points are interpolated too, so they carry an
 	// injection payload of their own here.
 	volumeTargets := []string{"/home/agent`id`"}
-	cmd := buildChownInitCmd(dirs, crewPath, volumeTargets)
+	cmd := buildChownInitCmd(dirs, crewPath, volumeTargets, false)
 
 	if !strings.Contains(cmd, "chown -R 1001:1001") {
 		t.Fatalf("buildChownInitCmd missing chown: %q", cmd)

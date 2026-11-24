@@ -24,6 +24,15 @@ var agentRuntimeProbeCmd = &cobra.Command{
 		// has no credential input and never kills another process or the crew.
 		deadline := time.AfterFunc(15*time.Second, func() { os.Exit(124) })
 		defer deadline.Stop()
+		requireEmpty, err := cmd.Flags().GetBool("require-empty-capabilities")
+		if err != nil {
+			return err
+		}
+		if requireEmpty {
+			if err := buildinfo.RequireEmptyProcessCapabilities(); err != nil {
+				return err
+			}
+		}
 		probe, err := buildinfo.ProbeAgentRuntime(version, commit, date, agentSDKCommandPaths(rootCmd))
 		if err != nil {
 			return err
@@ -46,4 +55,7 @@ func agentSDKCommandPaths(root *cobra.Command) []string {
 	return paths
 }
 
-func init() { rootCmd.AddCommand(agentRuntimeProbeCmd) }
+func init() {
+	agentRuntimeProbeCmd.Flags().Bool("require-empty-capabilities", false, "Require empty Linux process capability sets")
+	rootCmd.AddCommand(agentRuntimeProbeCmd)
+}

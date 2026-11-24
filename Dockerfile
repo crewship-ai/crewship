@@ -25,6 +25,7 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 RUN npm install -g corepack@0.34.1 && corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ ./patches/
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 # Generate types and legal inventory before app sources: a UI edit must not

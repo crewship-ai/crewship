@@ -15,20 +15,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"iter"
-
+	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
 // covCommitClient is a minimal devcontainer.CommitClient fake.
@@ -73,7 +73,10 @@ func (c *covCommitClient) ImageList(_ context.Context, _ client.ImageListOptions
 func (c *covCommitClient) ImagePull(_ context.Context, _ string, _ client.ImagePullOptions) (client.ImagePullResponse, error) {
 	return covImagePullResponse{io.NopCloser(strings.NewReader(""))}, nil
 }
-func (c *covCommitClient) ImageInspect(_ context.Context, _ string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+func (c *covCommitClient) ImageInspect(_ context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	if ref == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: ref}}, nil
+	}
 	return client.ImageInspectResult{}, errors.New("no such image")
 }
 

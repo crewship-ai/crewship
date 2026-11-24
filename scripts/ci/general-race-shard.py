@@ -9,9 +9,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "github.com/crewship-ai/crewship/"
-# Structural migration-fixture exclusion; API and CLI are required separate jobs.
+# Structural migration-fixture exclusion; API, CLI and backup have separate jobs.
 DENIED = {PREFIX + "internal/database"}
-DEDICATED = {PREFIX + "internal/api", PREFIX + "cmd/crewship"}
+DEDICATED = {PREFIX + "internal/api", PREFIX + "cmd/crewship", PREFIX + "internal/backup"}
 
 
 def partition(packages, count, costs, default):

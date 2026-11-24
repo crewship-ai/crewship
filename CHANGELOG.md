@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Workflow, activity and routine graphs use React Flow 13.** The graph styles follow the selected light or dark theme, and fit-to-view keeps the existing proportional margins.
+
 - **Docs now say what the code does for delegation limits and learned rules (#1781, #1783).** Delegation depth and fan-out are limits per instance (`delegation.max_depth`, `delegation.max_fanout`); the per-agent `delegation_timeout_s`, `max_delegation_depth` and `max_parallel_delegates` columns are unused and the guide says so. Learned rules (`learned-*.md`) are written for operator review and are not delivered to any agent, and hand-written `topics/*.md` files are not returned by memory search. The consolidate guide's path and rule format are corrected, and the Memory guide no longer says consolidation rewrites `AGENT.md` / `CREW.md`. Delivering these to agents is tracked as post-1.0 work.
 - **The Crewship sail moved to the top bar and the update banner is gone (#5552).** "Crewship X is available" no longer takes a row under the top bar of every page. The sail now sits after Activity and Inbox on every page and on phones, in the same lit blue tile it had at the foot of the rail. A newer release puts a dot on it; its panel names the version, links the release notes, can mark that version as seen, and keeps Documentation, What's new, Report a problem and About Crewship. The rail ends with its navigation.
 
@@ -570,6 +572,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Guests can publish an exact shared routine draft through API and CLI.** Validation is structural only; publication checks live explicit rights and commits immutable authority plus audit without starting a run. Stale/busy snapshots return 409, existing triggers 422 and null descriptions 400. Generic callers and triggers cannot use bounded publication authority; manual execution remains a separate slice.
 
 - **Routine Publish is an explicit share.** Member policies, invitations and provisioning accept `publish` only together with `edit` for the same routine; otherwise they return 422 without writes. View and Run stay separate. Preset changes preserve this dependency. Bounded publication archives retain their authority across backup/restore and cannot enter generic runs or triggers.
+- **Dashboard banners leave room for route content.** Split panes size to the space below the runtime or connection banner, so their bottom controls stay reachable.
+
 - **Harbor 2: the rail on one axis.** Every icon, the workspace mark, Search, the Crewship sail and your avatar are centred on the same line in the folded and the open rail; icons are 18 px, and the workspace, the sail and you are all 28 px. Search is an icon like any other row in the folded rail and a borderless field in the open one. The open workspace card shows your role under the name. The app list scrolls between a fixed top and foot with a fade at the edge, and groups (Work, Build) fold in the open rail and stay folded on this device. The sail stays Crewship blue in every style.
 - **The Crewship sail is always in the rail.** It ends the rail, just above the footer's rule, in its own lit blue tile, and stays when the rail folds to icons; the top of the rail is the workspace switcher and Search. It opens **About Crewship**: what Crewship is, the edition and build, and links to the documentation, what's new and reporting a problem.
 - **Linked issues appear in a new chat without a reload.** After the first message of a new conversation, the chat used to show a bare **Unavailable** line and no linked issue, proposal or decision cards until the page was reloaded; it now checks access as soon as the conversation exists.
@@ -645,6 +649,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Prepare a strict Document-to-DOCX converter for validated saved content; export delivery and Microsoft 365 compatibility remain unqualified.
 
 - **Workspace default look.** An owner or admin can set a default style, accent and theme for the workspace (Settings › Appearance › Workspace default, `crewship workspace update --appearance-default`, `PATCH /api/v1/workspaces/{id}` field `appearance_default`). Members inherit every value they have not chosen themselves; Appearance shows which is which and offers Use workspace default. Appearance sync now saves only values you changed, instead of your whole look. Personal appearance changes save as you make them and the last one can be undone from the toast that follows.
+
+- **Member Settings removes the repeated roster count from the unfiltered table toolbar.** Applying a filter still shows how many people match.
 
 - **Harbor 2: Settings details.** Appearance › Sidebar now uses the rail's own names (Expanded, Expand on hover, Collapsed). An old `/settings?tab=audit` link opened by a Member or Manager lands on the Audit log page, which says who may read it, instead of silently showing Profile. The Account security page for restricted sessions uses the same 820 px column as the rest of Settings. The CLI calls behind Members, Crew links and the journal check are now covered by acceptance tests.
 

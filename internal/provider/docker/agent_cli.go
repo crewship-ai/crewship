@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -129,8 +130,21 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
+	cli, err := p.runtimeInspectionClient()
+	if err != nil {
+		return err
+	}
+	if cli != p.client {
+		defer cli.Close()
+	}
+	return p.qualifyInspectedAgentCLI(ctx, cli, id, verifyPodmanMountedFile)
+}
+
+type mountedFileVerifier func(context.Context, *client.Client, container.InspectResponse, map[string]bool, string, os.FileInfo) error
+
+func (p *Provider) qualifyInspectedAgentCLI(ctx context.Context, cli *client.Client, id string, verifyMount mountedFileVerifier) error {
 	denied := errors.New("native agent CLI requires its current read-only mount in a qualified crew runtime")
-	got, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	got, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("inspect native agent CLI runtime: %w", err)
 	}
@@ -138,10 +152,19 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if c.ID != id || c.Config == nil || c.HostConfig == nil || !c.HostConfig.ReadonlyRootfs || c.State == nil || !c.State.Running || c.State.Paused || c.State.Restarting || provider.IsPrivilegedExecUser(c.Config.User) {
 		return denied
 	}
-	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || !slices.Contains(c.HostConfig.CapDrop, "ALL") || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
+	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
 		return denied
 	}
 	const executable = agentCLIExecutable
+	probeCmd := []string{executable, "agent-runtime-probe"}
+	if !slices.Contains(c.HostConfig.CapDrop, "ALL") {
+		// Podman expands ALL in compat inspect. The list alone cannot prove
+		// that exec inherits empty sets; require the verified binary to check.
+		if len(c.HostConfig.CapDrop) == 0 || p.detected.Runtime != "podman" {
+			return denied
+		}
+		probeCmd = append(probeCmd, "--require-empty-capabilities")
+	}
 	bound := false
 	var writable []container.MountPoint
 	for _, m := range c.Mounts {
@@ -168,21 +191,21 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if err := p.hostMountTreeHidden(ctx, writable, filepath.Dir(p.cfg.agentCLIArtifact.Path), true); err != nil {
 		return fmt.Errorf("native agent CLI staging is not private from writable crew mounts: %w", err)
 	}
-	if err := runtimestage.VerifyAgentCLIArtifact(p.cfg.agentCLIArtifact); err != nil {
+	file, err := runtimestage.OpenVerifiedAgentCLI(p.cfg.agentCLIArtifact)
+	if err != nil {
 		return err
 	}
-	for _, target := range []string{"/usr", "/usr/local", "/usr/local/bin", executable} {
-		stat, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: target})
-		if err != nil || stat.Stat.LinkTarget != "" {
-			return denied
+	defer file.Close()
+	if p.relabelCrewBinds() {
+		host, err := file.Stat()
+		if err != nil {
+			return err
 		}
-		if target == executable {
-			if !stat.Stat.Mode.IsRegular() || stat.Stat.Mode.Perm() != 0555 {
-				return denied
-			}
-		} else if !stat.Stat.Mode.IsDir() {
-			return denied
+		if err := verifyMount(ctx, cli, c, nil, executable, host); err != nil {
+			return fmt.Errorf("verify mounted agent CLI: %w", err)
 		}
+	} else if err := p.verifyAgentCLIArchivePaths(ctx, id); err != nil {
+		return err
 	}
 	image, err := p.client.ImageInspect(ctx, c.Image)
 	if err != nil {
@@ -191,7 +214,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if image.Os != "linux" || image.Architecture != p.cfg.agentCLIArtifact.Arch {
 		return errors.New("native agent CLI companion does not match the crew image platform")
 	}
-	result, err := p.Exec(ctx, provider.ExecConfig{ContainerID: id, Cmd: []string{executable, "agent-runtime-probe"}, WorkingDir: "/", User: c.Config.User, Env: []string{"CREWSHIP_CONFIG=/dev/null", "CREWSHIP_PROFILE=", "GODEBUG="}})
+	result, err := p.Exec(ctx, provider.ExecConfig{ContainerID: id, Cmd: probeCmd, WorkingDir: "/", User: c.Config.User, Env: []string{"CREWSHIP_CONFIG=/dev/null", "CREWSHIP_PROFILE=", "GODEBUG="}})
 	if err != nil {
 		return fmt.Errorf("native agent CLI probe could not start: %w", err)
 	}
@@ -227,4 +250,22 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 		return errors.New("native agent CLI returned an invalid probe protocol")
 	}
 	return validateAgentCLIProbe(probe, p.cfg.agentCLIArtifact, p.cfg.ExpectedAgentCLICommit, p.cfg.RequiredAgentCLICommands)
+}
+
+func (p *Provider) verifyAgentCLIArchivePaths(ctx context.Context, id string) error {
+	const executable = agentCLIExecutable
+	for _, target := range []string{"/usr", "/usr/local", "/usr/local/bin", executable} {
+		stat, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: target})
+		if err != nil || !p.unaliasedPath(stat.Stat, target) {
+			return errors.New("unqualified native agent CLI path")
+		}
+		if target == executable {
+			if !stat.Stat.Mode.IsRegular() || stat.Stat.Mode.Perm() != 0555 {
+				return errors.New("unqualified native agent CLI path")
+			}
+		} else if !stat.Stat.Mode.IsDir() {
+			return errors.New("unqualified native agent CLI path")
+		}
+	}
+	return nil
 }

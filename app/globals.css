@@ -1,3 +1,4 @@
+@layer theme, base, xyflow, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
 /* Brand colours per accent theme — see the header of that file. */
@@ -7,6 +8,13 @@
 @import "./styles/packs.generated.css";
 
 @custom-variant dark (&:is(.dark *));
+
+@layer components {
+  /* Keep the Crewship background palette visible through the graph canvas. */
+  .react-flow {
+    --xy-background-color: transparent;
+  }
+}
 
 /* Touch sizing belongs to the input device, not to the window width.
  *
@@ -31,6 +39,22 @@
  * inset too tall — visible only once installed, which is where `display:
  * standalone` in app/manifest.ts now puts it. */
 :root { --app-header-h: calc(48px + env(safe-area-inset-top)); }
+
+/* The shell scroller has a definite flex height, including when a banner
+ * takes space. Percentages keep fixed overlays anchored to the viewport. */
+@utility h-app-content {
+  height: calc(100dvh - var(--app-header-h) - var(--mobile-tab-bar-h));
+  :where([data-slot="app-content"]) & {
+    height: 100%;
+  }
+}
+
+@utility min-h-app-content {
+  min-height: calc(100dvh - var(--app-header-h) - var(--mobile-tab-bar-h));
+  :where([data-slot="app-content"]) & {
+    min-height: 100%;
+  }
+}
 
 /* Harbor 2 control heights: 24 / 28 / 32 px at Compact text size (a 13/14
  * root), so the same tokens grow with Standard and Large like everything else.
