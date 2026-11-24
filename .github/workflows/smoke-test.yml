@@ -348,6 +348,8 @@ jobs:
           test -x /usr/bin/crewship
           test -x /usr/bin/crewship-sidecar
           test -f /usr/libexec/crewship/entrypoint.sh
+          test -f /usr/libexec/crewship/crewship-agent-cli
+          test -x /usr/libexec/crewship/crewship-agent-cli
           test -f /usr/lib/systemd/system/crewship.service
           test -f /etc/crewship/crewship.env
           # #953: the sidecar is bind-mounted into Linux agent containers —
@@ -519,6 +521,8 @@ jobs:
             test -x /usr/bin/crewship
             test -x /usr/bin/crewship-sidecar
             test -f /usr/libexec/crewship/entrypoint.sh
+            test -f /usr/libexec/crewship/crewship-agent-cli
+            test -x /usr/libexec/crewship/crewship-agent-cli
             test -f /usr/lib/systemd/system/crewship.service
             crewship version
             mkdir -p /var/lib/crewship
