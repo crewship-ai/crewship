@@ -73,7 +73,7 @@ export function ActivityWorkspace({ workspaceId }: { workspaceId: string }) {
     router.push(query ? `/activity?${query}` : "/activity", { scroll: false })
   }
 
-  const height = "h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]"
+  const height = "h-app-content"
 
   // Never paint an admin-only surface before the role says so.
   if (journalView !== null && (roleLoading || !admin)) return null

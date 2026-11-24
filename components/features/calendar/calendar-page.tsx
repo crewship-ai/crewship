@@ -260,7 +260,7 @@ export function CalendarPage({ workspaceId }: { workspaceId: string }) {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       <SubBar icon={CalendarDays} title="Calendar" section={scopeTitle} heading={false} ariaLabel="Calendar" actions={isMobile ? addDate : undefined} />
       <div className="relative flex flex-1 overflow-hidden">
         <SecondaryPanel id="calendar" label="Calendar views and filters">

@@ -527,7 +527,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
     </div>
   }
 
-  return <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col bg-background">
+  return <div className="flex h-app-content min-h-0 flex-col bg-background">
     {subBar}
     <div className="@container relative flex min-h-0 flex-1 overflow-hidden">
       {!loading && !(error && !items.length) && <SecondaryPanel id="artifacts" label="Artifacts" collapsed={panelCollapsed} onCollapsedChange={shut => setPanelOpen(!shut)}>
