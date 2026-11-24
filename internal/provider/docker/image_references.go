@@ -22,6 +22,7 @@ import (
 )
 
 const imageReferenceOwnerLabel = "crewship.image.reference.instance-id"
+const imageReferenceTagsLabel = "crewship.image.reference.config-tags"
 const imageReferenceIDLabel = "crewship.image.reference.image-id"
 const imageReferenceNamePrefix = "crewship-image-ref-"
 
@@ -118,17 +119,23 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		tmpfs[destination] = "ro,nosuid,nodev,noexec,size=4096"
 	}
+	referenceLabels := map[string]string{
+		imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
+		resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
+		devcontainer.TempContainerLabelKey: "",
+	}
+	if dockerutil.IsPodman(ctx, p.client) {
+		// Retagging the image does not change Config.Image of an existing
+		// reference container. Keep the names inspected at creation.
+		referenceLabels[imageReferenceTagsLabel] = strings.Join(img.RepoTags, "\n")
+	}
 	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Name: name,
 		Config: &container.Config{
 			Image: img.ID, Entrypoint: []string{"/bin/false"}, Cmd: []string{"crewship-image-reference"},
 			User: "1001:1001", NetworkDisabled: true,
 			Healthcheck: &container.HealthConfig{Test: []string{"NONE"}},
-			Labels: map[string]string{
-				imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
-				resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
-				devcontainer.TempContainerLabelKey: "",
-			},
+			Labels:      referenceLabels,
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode: "none", ReadonlyRootfs: true, Tmpfs: tmpfs,
@@ -162,10 +169,14 @@ func (p *ImageReferences) validate(ctx context.Context, result client.ContainerI
 		return fmt.Errorf("environment reference identity/state mismatch for %q; retaining conflicting container", c.ID)
 	}
 	// Podman may report a display tag in Config.Image even when create used
-	// the config ID. Require both the immutable Container.Image above and
-	// confirmation that this exact inspected image carries the display tag.
-	if dockerutil.ConfigImageID(c.Config.Image) != id && !(slices.Contains(img.RepoTags, c.Config.Image) && dockerutil.IsPodman(ctx, p.client)) {
-		return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
+	// the config ID. Accept only names observed on this same image; a cache
+	// rebuild may already have moved the display tag to a later revision.
+	if dockerutil.ConfigImageID(c.Config.Image) != id {
+		display := c.Config.Image
+		recorded := strings.Split(c.Config.Labels[imageReferenceTagsLabel], "\n")
+		if display == "" || !dockerutil.IsPodman(ctx, p.client) || !(slices.Contains(img.RepoTags, display) || slices.Contains(recorded, display)) {
+			return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
+		}
 	}
 	for _, m := range c.Mounts {
 		if m.Type == "volume" || m.Type == "bind" {

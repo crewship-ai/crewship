@@ -44,13 +44,13 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, cli any, endpoint string) (i
 	if prior := dockerSocket.Load(); prior != nil && os.SameFile(*prior, st) && (*prior).ModTime() == st.ModTime() {
 		return 0, nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	isPodman, identified := podmanVersion(ctx, cli)
 	if identified && !isPodman {
 		dockerSocket.Store(&st)
 		return 0, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
 		return 0, err

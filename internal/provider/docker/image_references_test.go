@@ -290,6 +290,15 @@ func TestPodmanReferenceWithDisplayTag(t *testing.T) {
 	if _, err := p.Preserve(t.Context(), refs); err != nil {
 		t.Fatalf("verified image with Podman display tag: %v", err)
 	}
+	img.RepoTags = nil
+	f.images[id] = img
+	if _, err := p.Preserve(t.Context(), refs); err != nil {
+		t.Fatalf("retag broke the retained revision: %v", err)
+	}
+	gate := &resourcelifecycle.ImageUse{}
+	if err := p.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) { return refs, nil }); err != nil || len(f.removed) != 0 {
+		t.Fatalf("reconcile retained revision: %v", err)
+	}
 	if _, err := NewImageReferences(f, referenceBorrower).Preserve(t.Context(), refs); err == nil {
 		t.Fatal("accepted display tag without Podman evidence")
 	}
