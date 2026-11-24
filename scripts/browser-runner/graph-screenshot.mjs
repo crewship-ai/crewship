@@ -16,6 +16,7 @@ try {
       await page.evaluate(dark => document.documentElement.classList.toggle("dark", dark), theme === "dark")
       for (const [index, name] of ["Activity chain", "Activity overview", "Routine step trace", "Workflow graph"].entries()) {
         const graph = page.getByRole("region", { name })
+        await graph.scrollIntoViewIfNeeded()
         const pane = graph.locator(".react-flow")
         const first = graph.locator(".react-flow__node").first()
         const edge = graph.locator(".react-flow__edge").first()

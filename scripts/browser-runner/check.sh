@@ -15,8 +15,8 @@ pnpm install --frozen-lockfile
 pnpm prisma generate
 pnpm exec playwright install --with-deps chromium
 if [ "$route" = "/graph-check" ]; then
-  mkdir -p app/graph-check
-  cp "$harness_dir/graph-fixture.tsx" app/graph-check/page.tsx
+  mkdir -p "app/(dashboard)/graph-check"
+  cp "$harness_dir/graph-fixture.tsx" "app/(dashboard)/graph-check/page.tsx"
 fi
 pnpm build
 bash scripts/embed-web-out.sh sync
