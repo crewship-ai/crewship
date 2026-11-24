@@ -60,7 +60,7 @@ jobs:
           case "$SUITE" in
             settings) route=/settings/members; spec=settings-h2.spec.ts ;;
             runtime) route=/crews; spec=shell-overflow.spec.ts ;;
-            chat) route=/chat; spec=shell-overflow.spec.ts ;;
+            chat) route=/chat/jordan; spec=shell-overflow.spec.ts ;;
             graphs) route=/graph-check; spec=harbor2-shell.spec.ts ;;
             *) exit 2 ;;
           esac
@@ -69,6 +69,9 @@ jobs:
         if: always()
         with:
           name: browser-${{ inputs.suite }}-${{ inputs.candidate }}
-          path: ${{ runner.temp }}/browser-evidence/
+          path: |
+            ${{ runner.temp }}/browser-evidence/
+            candidate/test-results/
+            candidate/playwright-nightly-report.json
           if-no-files-found: warn
           retention-days: 14
