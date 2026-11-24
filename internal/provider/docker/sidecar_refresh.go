@@ -169,7 +169,7 @@ func (p *Provider) recycleStaleSidecarRuntime(ctx context.Context, cfg provider.
 		return keep("runtime in use", nil)
 	}
 	defer unlock()
-	if err := p.verifyUnusedCrewRuntime(ctx, cfg.ID, pending.ContainerID); err != nil {
+	if err := p.verifyUnusedCrewRuntime(ctx, cfg.ID, pending.ContainerID, &cfg); err != nil {
 		return keep("idle not confirmed", err)
 	}
 	if err := p.StopCrewRuntime(ctx, pending.ContainerID); err != nil {

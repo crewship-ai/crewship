@@ -46,8 +46,8 @@ func rootlessPodmanOOMScoreAdj(ctx context.Context, cli any, endpoint string) (i
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	isPodman, identified := podmanVersion(ctx, cli)
-	if identified && !isPodman {
+	isPodman, versionErr := DetectPodman(ctx, cli)
+	if versionErr == nil && !isPodman {
 		dockerSocket.Store(&st)
 		return 0, nil
 	}

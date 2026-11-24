@@ -27,3 +27,29 @@ reports are ignored build output, not an operational procedure.
 
 - [Assignment work ownership upgrade](assignment-work-upgrade.md) — queue cutover, ambiguous legacy exec refusal, cancellation and terminal projection.
 - [Pull-request credential diagnostics](pull-request-credentials.md): distinguish local credential preconditions from provider failures without exposing secrets.
+
+## Recover a pending crew runtime update
+
+1. Use the support reference from chat to find the server log entry with
+   `phase=runtime_admission`. Confirm the workspace and crew IDs before
+   opening the crew journal. The chat message ID also appears on runtime
+   upgrade events even when agent execution has yet to start.
+2. Inspect `crewship crew container-status <crew>` in that workspace. Check
+   run state, open terminal sessions, exposed ports and detached work with
+   the crew owner. An empty run list alone cannot establish that the runtime
+   is idle. Keep the container running while occupancy is uncertain.
+3. For a failed census, use the underlying exec or fence error from the
+   server log to restore the existing provider connection or fence helper.
+   After correction, a new request repeats admission against the observed
+   container. Check whether the original request has already produced a run
+   before submitting it again.
+4. If the crew uses a custom process tree and its owner has confirmed a
+   maintenance window, an administrator can run
+   `crewship crew restart-agents <crew>` followed by `crewship crew start <crew>` in the same workspace.
+   Verify a current runtime contract, the required egress fence and a
+   successful synthetic agent turn. Investigate provider authentication
+   errors separately after runtime admission succeeds.
+5. Before rollout, retain the previous signed release and a restorable
+   backup. Reverting the server can introduce another runtime contract
+   mismatch. Qualify that direction with a retained crew and verify the
+   previous release's database compatibility before rollback.

@@ -285,3 +285,62 @@ func (s *Store) FinishHostChat(ctx context.Context, runID string, r HostChatResu
 	}
 	return tx.Commit()
 }
+
+// RecoverPreparingChat runs before admission on the installation writer. A
+// start journal entry or a requested exec transfers custody to run recovery.
+// An unacknowledged, unrequested admission can release its reserved capacity.
+func (s *Store) RecoverPreparingChat(ctx context.Context, run, chat, agent string) (admitted bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND agent_id=? AND entry_type='run.started')`, run, agent).Scan(&admitted); err != nil {
+		return admitted, err
+	}
+	var id, phase string
+	var gen int64
+	err = tx.QueryRowContext(ctx, `SELECT work_id,generation,runtime_phase FROM work_attempts WHERE run_id=?`, run).Scan(&id, &gen, &phase)
+	if errors.Is(err, sql.ErrNoRows) {
+		return admitted, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	it, err := getItemTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if it.DomainKind != DomainHostChatTurn || it.Source != SourceChat || it.DomainID != run || it.SessionID != chat || it.AgentID != agent || gen != it.Generation {
+		return false, ErrNotBound
+	}
+	if phase != runtimePhaseStarting && phase != runtimePhasePlanned {
+		return true, nil
+	}
+	if it.State.Terminal() {
+		return false, nil
+	}
+	if !CanTransition(it.State, StateFailed) {
+		return false, ErrIllegalTransition
+	}
+	now := s.now().UTC()
+	const reason = "host restarted before chat admission was acknowledged"
+	if err = s.setStateTx(ctx, tx, it, StateFailed, run, gen, reason, now); err != nil {
+		return false, err
+	}
+	// Only a journaled start has a terminal result to project.
+	var result any
+	if admitted {
+		message := "The server restarted before the agent was launched."
+		data, err := json.Marshal(RunResult{CompletedAt: tsformat.Format(now), ErrorMessage: &message})
+		if err != nil {
+			return false, err
+		}
+		result = string(data)
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE work_attempts SET ended_at=COALESCE(ended_at,?),end_reason=?,exit_evidence='creation_not_requested',run_status='FAILED',run_result_json=? WHERE run_id=? AND work_id=? AND generation=?`, tsformat.Format(now), reason, result, run, id, gen)
+	if err != nil {
+		return false, err
+	}
+	return false, tx.Commit()
+}

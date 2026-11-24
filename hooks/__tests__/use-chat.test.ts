@@ -404,6 +404,23 @@ describe("useChat", () => {
     expect(statusParts[0].content).toBe("task_progress")
   })
 
+  it("replaces the upgrade wait with preparation and displays the failure reference", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+    function emit(type: string, content: string) {
+      act(() => onMessage({ type: "chat_event", channel: "session:s1", payload: { type, content } }))
+    }
+    for (const content of ["Waiting for existing work before updating the environment.", "Preparing the updated environment."]) {
+      emit("status", content)
+      expect(result.current.turns.at(-1)?.parts.filter(p => p.type === "status").map(p => p.content)).toEqual([content])
+    }
+    const failure = "The environment update could not finish safely. Contact support with reference test-id."
+    emit("error", failure)
+    expect(result.current.turns.at(-1)?.parts.some(p => p.type === "error" && p.content === failure)).toBe(true)
+  })
+
   it("renders a broadcast user_message from another participant, attributed", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),

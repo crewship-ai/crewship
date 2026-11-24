@@ -21,7 +21,9 @@ var _ resourcelifecycle.BindVolumeRuntime = (*cleanupRuntime)(nil)
 
 // eligibleBindVolume excludes managed storage, named history volumes and
 // unattributed legacy records. Removing a local bind volume only drops its
-// metadata: its device directory remains on the host.
+// metadata: its device directory remains on the host. Podman may report an
+// anonymous managed volume with empty Options and Labels. It can hold the
+// only copy of workspace data; a hex name or attachment history cannot qualify it.
 func eligibleBindVolume(v volume.Volume, instance string) bool {
 	if instance == "" || v.Labels[resourcelifecycle.InstanceLabel] != instance ||
 		v.Labels[crewKindLabel] != noexecBindVolumeKind || v.Labels[crewCrewIDLabel] == "" ||

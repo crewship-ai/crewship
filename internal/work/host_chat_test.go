@@ -302,3 +302,58 @@ func TestAgentInboxDisabledHostChatDoesNotReadFlagOrSourceTables(t *testing.T) {
 		t.Fatalf("ordinary host chat depended on inbox state: fresh=%v err=%v", fresh, err)
 	}
 }
+
+func TestPreparationRecoveryDuringCreateRun(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		requested, expired, started bool
+	}{
+		{"reserved", false, false, false}, {"expired reservation", false, true, false}, {"exec requested", true, false, true}, {"journaled before exec", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db, clock := newTestStore(t)
+			ctx := t.Context()
+			first := hostChatRequest("interrupted")
+			if _, _, err := s.BeginHostChat(ctx, first); err != nil {
+				t.Fatal(err)
+			}
+			if tc.started {
+				if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('ws1','Test','test');
+                  INSERT INTO agents(id,workspace_id,name,slug) VALUES('a1','ws1','Agent','agent')`); err != nil {
+					t.Fatal(err)
+				}
+				_, err := db.Exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,ts,entry_type,severity,actor_type,summary,payload,refs,trace_id,priority) VALUES('start',?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'run.started','info','sidecar','started','{}','{}',?,'normal')`, first.WorkspaceID, first.AgentID, first.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.requested {
+				if err := s.HostChatPhase(ctx, first.RunID, "request"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.expired {
+				clock.Advance(LeaseDuration + time.Second)
+				if _, err := s.RecoverExpiredLeases(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < 2; i++ {
+				admitted, err := s.RecoverPreparingChat(ctx, first.RunID, first.ChatID, first.AgentID)
+				if err != nil || admitted != tc.requested {
+					t.Fatalf("custody %v: %v", admitted, err)
+				}
+			}
+			if tc.started && !tc.requested {
+				projection, owned, err := s.RunProjection(ctx, first.RunID)
+				if err != nil || !owned || !projection.Ready || projection.Status != "FAILED" {
+					t.Fatalf("projection: %+v, %v", projection, err)
+				}
+			}
+			_, _, err := s.BeginHostChat(ctx, hostChatRequest("next"))
+			if tc.requested && !errors.Is(err, ErrNoWork) || !tc.requested && err != nil {
+				t.Fatalf("next admission: %v", err)
+			}
+		})
+	}
+}

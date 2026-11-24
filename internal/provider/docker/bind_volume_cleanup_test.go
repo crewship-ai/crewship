@@ -201,6 +201,11 @@ func TestReconcileTeardownRemovalFailureFakeAPI(t *testing.T) {
 	for _, status := range []int{http.StatusNoContent, http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/container/json") {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"Id":"container","Mounts":[]}`))
+					return
+				}
 				if r.Method == http.MethodPost {
 					http.Error(w, `{"message":"stop failed"}`, 500)
 					return

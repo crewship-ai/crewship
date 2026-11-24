@@ -21,7 +21,7 @@ func contractSpec(t *testing.T, p *Provider) (*container.Config, *container.Host
 	cfg, hostCfg, err := p.assembleCrewSpec(
 		provider.CrewConfig{ID: contractCrewID, Slug: contractCrewSlug},
 		"", p.ociRuntime(), contractMemoryMB, contractCPUs,
-		crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
+		crewDirs{contractSnapshot: true, output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
 		[]string{"CREWSHIP_CREW_ID=" + contractCrewID}, nil,
 	)
 	if err != nil {

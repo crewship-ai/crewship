@@ -99,7 +99,7 @@ func (p *Provider) crewRuntimeContractDigest() string {
 			p.ociRuntime(),
 			contractMemoryMB,
 			contractCPUs,
-			crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
+			crewDirs{contractSnapshot: true, output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
 			[]string{"CREWSHIP_CREW_ID=" + contractCrewID},
 			nil, // no image ENV: applyDefaultEnv/applyAgentLoginPath both tolerate it
 		)

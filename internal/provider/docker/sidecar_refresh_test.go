@@ -48,13 +48,16 @@ type fakeCrewContainer struct {
 // really removes and create really creates, so a test can drive a full
 // stop -> remove -> create cycle and observe the end state.
 type sidecarFakeDaemon struct {
-	sdk        *agentSDKFake
-	mu         sync.Mutex
-	containers map[string]*fakeCrewContainer
-	order      []string
-	calls      []string
-	seq        int
-	crewName   string
+	sdk         *agentSDKFake
+	mu          sync.Mutex
+	containers  map[string]*fakeCrewContainer
+	order       []string
+	calls       []string
+	seq         int
+	crewName    string
+	crewSource  string
+	homeVolume  string
+	toolsVolume string
 }
 
 func (d *sidecarFakeDaemon) record(s string) {
@@ -157,9 +160,9 @@ func (d *sidecarFakeDaemon) handler() http.HandlerFunc {
 					"Labels": labels,
 				},
 				"Mounts": []map[string]any{
-					{"Destination": "/crew", "Type": "volume"},
-					{"Destination": "/home/agent", "Type": "volume"},
-					{"Destination": "/opt/crew-tools", "Type": "volume"},
+					{"Destination": "/crew", "Type": "volume", "Name": "fixture-crew-bind"},
+					{"Destination": "/home/agent", "Type": "volume", "Name": d.homeVolume},
+					{"Destination": "/opt/crew-tools", "Type": "volume", "Name": d.toolsVolume},
 				},
 				"HostConfig": map[string]any{"Tmpfs": map[string]string{"/secrets": secretsTmpfsSpec}},
 			})
@@ -195,6 +198,8 @@ func (d *sidecarFakeDaemon) handler() http.HandlerFunc {
 				d.record(fmt.Sprintf("remove %s force=%v", id, force == "1" || force == "true"))
 			}
 			delete(d.containers, id)
+		case strings.HasSuffix(path, "/volumes/fixture-crew-bind") && r.Method == http.MethodGet:
+			writeJSON(map[string]any{"Name": "fixture-crew-bind", "Driver": "local", "Options": map[string]string{"type": "none", "device": d.crewSource, "o": noexecBindMountOpts}})
 		case strings.HasSuffix(path, "/volumes") && r.Method == http.MethodGet:
 			writeJSON(map[string]any{"Volumes": []any{}, "Warnings": nil})
 		case strings.HasSuffix(path, "/volumes/create"):
@@ -260,6 +265,9 @@ func newSidecarRefreshFixture(t *testing.T, stamp, status string) (*Provider, *s
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		digestResolver: dockerutil.NewDigestResolver(0, 0),
 	}
+	d.crewSource = p.crewDataSource(refreshCrewID, "/crew")
+	d.homeVolume = p.homeVolumeName(refreshCrewID, refreshCrewSlug)
+	d.toolsVolume = p.toolsVolumeName(refreshCrewID, refreshCrewSlug)
 	d.crewName = p.CrewContainerName(refreshCrewID, refreshCrewSlug)
 	// The host bind dirs a stopped container's restart checks for.
 	for _, dir := range []string{
@@ -274,6 +282,7 @@ func newSidecarRefreshFixture(t *testing.T, stamp, status string) (*Provider, *s
 	labels := map[string]string{
 		resourcelifecycle.InstanceLabel: refreshInstance,
 		crewCrewIDLabel:                 refreshCrewID,
+		crewCrewLabel:                   refreshCrewSlug,
 		crewKindLabel:                   crewRuntimeKind,
 	}
 	// Current in every other respect, so only the sidecar can trigger a

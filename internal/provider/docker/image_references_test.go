@@ -29,6 +29,10 @@ type referenceFake struct {
 	afterList  func()
 }
 
+func (*referenceFake) ServerVersion(context.Context, client.ServerVersionOptions) (client.ServerVersionResult, error) {
+	return client.ServerVersionResult{Components: []system.ComponentVersion{{Name: "Engine"}}}, nil
+}
+
 func referenceFixture(t *testing.T) (*referenceFake, string) {
 	t.Helper()
 	id := "sha256:" + strings.Repeat("1", 64)
@@ -377,5 +381,69 @@ func TestPodmanReferenceWithDisplayTag(t *testing.T) {
 	}
 	if _, err := p.Preserve(t.Context(), refs); err == nil {
 		t.Fatal("display tag overrode immutable image mismatch")
+	}
+}
+
+// Reproduce the compat engine returning a display name on the first
+// post-create inspect. Only the version probe before create can complete.
+type slowReferencePodman struct {
+	*referenceFake
+	initialErr error
+	probes     int
+	display    string
+}
+
+func (f *slowReferencePodman) ServerVersion(context.Context, client.ServerVersionOptions) (client.ServerVersionResult, error) {
+	f.probes++
+	if f.initialErr != nil {
+		return client.ServerVersionResult{}, f.initialErr
+	}
+	if f.probes > 1 {
+		return client.ServerVersionResult{}, context.DeadlineExceeded
+	}
+	return client.ServerVersionResult{Components: []system.ComponentVersion{{Name: "Podman Engine"}}}, nil
+}
+
+func (f *slowReferencePodman) ContainerInspect(ctx context.Context, id string, opts client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	c, err := f.referenceFake.ContainerInspect(ctx, id, opts)
+	if err == nil {
+		cfg := *c.Container.Config
+		cfg.Image = f.display
+		c.Container.Config = &cfg
+	}
+	return c, err
+}
+
+func TestPodmanReferenceConfirmationAfterSlowCreate(t *testing.T) {
+	f, id := referenceFixture(t)
+	const display = "docker.io/library/crewship-cache:synthetic"
+	img := f.images[id]
+	img.RepoTags = []string{display}
+	f.images[id] = img
+	daemon := &slowReferencePodman{referenceFake: f, display: display}
+	p := NewImageReferences(daemon, referenceBorrower)
+	result, err := p.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}})
+	if err != nil || result[id] != id || daemon.probes != 1 || len(f.creates) != 1 {
+		t.Fatalf("confirmation: %v probes=%d creates=%d: %v", result, daemon.probes, len(f.creates), err)
+	}
+}
+
+func TestPodmanReferenceInitialProbeFailureLeavesNoContainer(t *testing.T) {
+	f, id := referenceFixture(t)
+	const tag = "docker.io/library/crewship-cache:probe-retry"
+	img := f.images[id]
+	img.RepoTags = []string{tag}
+	f.images[id] = img
+	offline := errors.New("version service unavailable")
+	daemon := &slowReferencePodman{referenceFake: f, display: tag, initialErr: offline}
+	p := NewImageReferences(daemon, referenceBorrower)
+	refs := []resourcelifecycle.ImageReference{{Ref: id, Required: true}}
+	if _, err := p.Preserve(t.Context(), refs); !errors.Is(err, offline) || len(f.creates) != 0 {
+		t.Fatalf("initial probe: creates=%d err=%v", len(f.creates), err)
+	}
+	daemon.initialErr = nil
+	daemon.probes = 0
+	if _, err := p.Preserve(t.Context(), refs); err != nil || len(f.creates) != 1 || f.creates[0].Config.Labels[imageReferenceTagsLabel] != tag {
+		t.Fatalf("retry: creates=%d err=%v", len(f.creates), err)
 	}
 }

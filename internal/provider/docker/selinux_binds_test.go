@@ -40,9 +40,21 @@ func TestPodmanSELinuxCrewBinds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := source + ":/usr/local/bin/entrypoint.sh:ro,z"
-		if slices.Contains(host.Binds, want) != tc.want || len(host.Binds) > 1 {
-			t.Fatalf("%s SELinux=%t: binds %v", tc.runtimeName, tc.enabled, host.Binds)
+		var expected []string
+		if tc.want {
+			expected = append(expected, source+":/usr/local/bin/entrypoint.sh:ro,z")
+		}
+		if tc.runtimeName == "podman" {
+			mode := ":rw,noexec,nosuid"
+			if tc.enabled {
+				mode = ":rw,z,noexec,nosuid"
+			}
+			expected = append(expected, contractCrewDir+":/crew"+mode, contractOutputDir+":/output"+mode, contractWorkingDir+":/workspace"+mode)
+		}
+		slices.Sort(expected)
+		slices.Sort(host.Binds)
+		if !slices.Equal(host.Binds, expected) {
+			t.Fatalf("%s SELinux=%t: binds %v, want %v", tc.runtimeName, tc.enabled, host.Binds, expected)
 		}
 		// Unstaged, operator-supplied sidecar paths must keep structured binds.
 		if !slices.ContainsFunc(host.Mounts, func(m mount.Mount) bool {
@@ -165,8 +177,17 @@ func TestPodmanSELinuxStagedToolsAndFeatureMount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(host.Binds) != 2 {
+	if len(host.Binds) != 5 {
 		t.Fatalf("unexpected shared binds: %v", host.Binds)
+	}
+	for src, target := range map[string]string{dirs.crew: "/crew", dirs.workspace: "/workspace", dirs.output: "/output"} {
+		canonical, err := filepath.EvalSymlinks(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(host.Binds, canonical+":"+target+":rw,z,noexec,nosuid") {
+			t.Fatalf("missing protected data bind for %s", target)
+		}
 	}
 	for src, target := range map[string]string{cfg.SidecarBinaryPath: "/usr/local/bin/crewship-sidecar", cfg.AgentCLIBinaryPath: agentCLIExecutable} {
 		canonical, err := filepath.EvalSymlinks(src)

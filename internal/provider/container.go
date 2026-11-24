@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -15,6 +16,11 @@ import (
 // the current runtime may still contain work. Callers must not force-retry by
 // deleting it; stop/restart is an explicit operator action until drain exists.
 var ErrRuntimeImageUpdatePending = errors.New("image update pending: wait for current work to finish, then explicitly stop or restart the crew")
+
+var ErrRuntimeOccupied = errors.New("runtime occupied")
+var ErrRuntimeStorageUnverified = fmt.Errorf("%w: runtime storage could not be verified", ErrRuntimeImageUpdatePending)
+
+var ErrRuntimeObservation = errors.New("runtime occupancy unknown")
 
 // RuntimeImageUpdatePendingError identifies the runtime that needs activation.
 // Identity is evidence for an admission controller, never permission to stop it.
