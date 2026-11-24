@@ -60,7 +60,18 @@ func newDriftFixture(t *testing.T, containerName, runningImage string) (*Provide
 func newDriftFixtureState(t *testing.T, containerName, runningImage string, state map[string]any) (*Provider, *driftCallLog) {
 	t.Helper()
 	calls := &driftCallLog{}
-	var runtimeContract string
+	p := &Provider{
+		cfg: Config{
+			RuntimeImage:      "default/runtime:latest",
+			Network:           "crewship-test-net",
+			OutputBasePath:    t.TempDir(),
+			SidecarBinaryPath: "/fake/sidecar",
+			EntrypointPath:    "/fake/entrypoint.sh",
+		},
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		digestResolver: dockerutil.NewDigestResolver(0, 0),
+	}
+	runtimeContract := p.crewRuntimeContractDigest()
 	const staleID = "stale-cid-0123456789ab"
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -181,25 +192,13 @@ func newDriftFixtureState(t *testing.T, containerName, runningImage string, stat
 		t.Fatalf("docker client: %v", err)
 	}
 
-	p := &Provider{
-		client: cli,
-		cfg: Config{
-			RuntimeImage:      "default/runtime:latest",
-			Network:           "crewship-test-net",
-			OutputBasePath:    t.TempDir(),
-			SidecarBinaryPath: "/fake/sidecar",
-			EntrypointPath:    "/fake/entrypoint.sh",
-		},
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		digestResolver: dockerutil.NewDigestResolver(0, 0),
-	}
+	p.client = cli
 
 	t.Cleanup(func() {
 		_ = cli.Close()
 		srv.Close()
 	})
 
-	runtimeContract = p.crewRuntimeContractDigest()
 	return p, calls
 }
 
