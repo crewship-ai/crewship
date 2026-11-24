@@ -514,28 +514,29 @@ func TestDaemonPathChecksRefuseUnavailableConfiguredMapping(t *testing.T) {
 
 func TestMappedFeatureVolumeAdmissionPrecedesContainerStart(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		driver     string
-		mountpoint string
-		options    map[string]string
-		status     int
-		allowed    bool
+		name, destination, volume, mountpoint string
+		driver                                string
+		status                                int
+		allowed                               bool
 	}{
-		{name: "ordinary local", driver: "local", mountpoint: "/daemon/volumes/ordinary/_data", status: 200, allowed: true},
-		{name: "mapped storage alias", driver: "local", mountpoint: "/daemon/volumes/crewship/_data", status: 200},
-		{name: "mapped storage ancestor", driver: "local", mountpoint: "/daemon/volumes", status: 200},
-		{name: "bind backed local", driver: "local", mountpoint: "/daemon/volumes/ordinary/_data", options: map[string]string{"type": "none", "o": "bind"}, status: 200},
-		{name: "plugin", driver: "plugin", mountpoint: "/daemon/volumes/ordinary/_data", status: 200},
-		{name: "uninspectable", status: 403},
-		{name: "missing at start", status: 404},
+		{name: "own home", destination: "/home/agent", volume: "crewship-home-slug-own", mountpoint: "/daemon/volumes/own/_data", driver: "local", status: 200, allowed: true},
+		{name: "server private volume", destination: "/feature", volume: "server-db", mountpoint: "/daemon/volumes/db/_data", driver: "local", status: 200},
+		{name: "other crew home", destination: "/home/agent", volume: "crewship-home-slug-other", mountpoint: "/daemon/volumes/other/_data", driver: "local", status: 200},
+		{name: "mapped storage alias", destination: "/home/agent", volume: "crewship-home-slug-own", mountpoint: "/daemon/volumes/storage/_data", driver: "local", status: 200},
+		{name: "driver plugin", destination: "/home/agent", volume: "crewship-home-slug-own", mountpoint: "/daemon/volumes/own/_data", driver: "plugin", status: 200},
+		{name: "uninspectable at start", destination: "/home/agent", volume: "crewship-home-slug-own", mountpoint: "/daemon/volumes/own/_data", driver: "local", status: 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var starts atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
-				case strings.HasSuffix(r.URL.Path, "/volumes/fixture"):
+				case strings.HasSuffix(r.URL.Path, "/volumes/"+tc.volume):
 					w.WriteHeader(tc.status)
-					_ = json.NewEncoder(w).Encode(map[string]any{"Name": "fixture", "Driver": tc.driver, "Mountpoint": tc.mountpoint, "Options": tc.options})
+					_ = json.NewEncoder(w).Encode(map[string]any{"Name": tc.volume, "Driver": tc.driver, "Mountpoint": tc.mountpoint})
+				case strings.HasSuffix(r.URL.Path, "/containers/crew/json"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"Mounts": []container.MountPoint{{
+						Type: mount.TypeVolume, Destination: tc.destination, Name: tc.volume, Source: tc.mountpoint,
+					}}})
 				case strings.HasSuffix(r.URL.Path, "/containers/crew/start"):
 					starts.Add(1)
 					w.WriteHeader(http.StatusNoContent)
@@ -550,16 +551,19 @@ func TestMappedFeatureVolumeAdmissionPrecedesContainerStart(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = cli.Close() })
-			p := &Provider{client: cli, pathMap: &daemonPathMap{local: "/app/storage", daemon: "/daemon/volumes/crewship/_data"}}
-			team := provider.CrewConfig{ExtraMounts: []provider.CrewMount{{Source: "fixture", Type: "volume", Target: "/feature"}}}
-			if tc.status == 404 {
-				if err := p.checkMappedFeatureVolumes(t.Context(), team, true); err != nil {
-					t.Fatalf("before create, Docker may provision a missing volume: %v", err)
-				}
-			}
+			p := &Provider{client: cli, pathMap: &daemonPathMap{local: "/app/storage", daemon: "/daemon/volumes/storage/_data"}}
+			team := provider.CrewConfig{ID: "own", Slug: "slug"}
 			err = p.startMappedCrewContainer(t.Context(), "crew", team)
 			if got := err == nil; got != tc.allowed || (starts.Load() == 1) != tc.allowed {
 				t.Fatalf("allowed=%v starts=%d err=%v, want allowed=%v", got, starts.Load(), err, tc.allowed)
+			}
+			team.ExtraMounts = []provider.CrewMount{{Source: "feature", Type: "volume", Target: "/extra"}}
+			if err := p.checkMappedFeatureVolumes(team); err == nil {
+				t.Fatal("mapped runtime must reject feature-declared volume")
+			}
+			p.pathMap = nil
+			if err := p.checkMappedFeatureVolumes(team); err != nil {
+				t.Fatalf("unmapped runtime changed its feature rules: %v", err)
 			}
 		})
 	}

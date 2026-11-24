@@ -62,7 +62,14 @@ under storage are rejected by container inspection; place required files under a
 single shared storage root. The configured storage root must be canonical
 (without symlink ancestors) when mapping is enabled. Bind sources outside the configured root, traversal
 and symlinks escaping it are refused. Feature mounts from the existing explicit
-allowlist (such as the daemon socket) remain daemon-side resources.
+allowlist remain daemon-side resources. The daemon socket is excluded from the
+workload allowlist.
+
+Mapped runtimes reject feature-declared named volumes because a feature name
+does not establish ownership on the shared daemon. The provider admits its
+own crew data, home and tools volumes by verifying the mounts returned by
+Docker before start or reuse. Inspect any reported legacy volume before
+recreating a runtime. No volume is removed by this admission check.
 
 Only Docker request sources are translated. Local reads, writes, staging, file
 hashes and cleanup keep their local paths. Runtime binaries stay read-only;

@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
-	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // daemonPathMap is immutable after startup. Only request paths are translated;
@@ -218,33 +217,75 @@ func (p *Provider) RuntimeReady(ctx context.Context) error {
 	return err
 }
 
-// Feature-declared names are caller input. Only ordinary Docker-managed local
-// volumes are admitted for a mapped server. A driver device or mountpoint that
-// aliases server storage must never reach the workload or its startup hooks.
-func (p *Provider) checkMappedFeatureVolumes(ctx context.Context, team provider.CrewConfig, allowMissing bool) error {
+// Mapped runtimes share a daemon with the server's private volumes. A
+// feature's arbitrary volume name carries no ownership proof on that daemon.
+func (p *Provider) checkMappedFeatureVolumes(team provider.CrewConfig) error {
+	if p.pathMap != nil {
+		for _, m := range team.ExtraMounts {
+			if strings.EqualFold(m.Type, "volume") {
+				return fmt.Errorf("feature-declared named volumes are unavailable with mapped Docker storage")
+			}
+		}
+	}
+	return nil
+}
+
+// Check the mounts returned by Docker, not a fresh projection of the request.
+// A cached or restarted runtime may have been created under older rules.
+func (p *Provider) checkMappedRuntimeVolumes(ctx context.Context, mounts []container.MountPoint, team provider.CrewConfig) error {
 	if p.pathMap == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	for _, m := range team.ExtraMounts {
-		if !strings.EqualFold(m.Type, "volume") || !devcontainer.IsAllowedMountSource(m.Source) {
+	bindTargets := map[string]string{
+		"/workspace": filepath.Join(p.pathMap.local, "workspaces", team.ID),
+		"/output":    filepath.Join(p.pathMap.local, team.ID),
+		"/crew":      filepath.Join(p.pathMap.local, "crews", team.ID),
+	}
+	for _, m := range mounts {
+		if m.Type != mount.TypeVolume {
 			continue
 		}
-		res, err := p.client.VolumeInspect(ctx, m.Source, client.VolumeInspectOptions{})
-		if errdefs.IsNotFound(err) && allowMissing {
-			continue // Docker can create an ordinary local volume for a new name.
+		managedPath := bindTargets[m.Destination]
+		switch m.Destination {
+		case "/home/agent":
+			if team.Slug == "" || m.Name != p.homeVolumeName(team.ID, team.Slug) {
+				return errors.New("mapped runtime has an unexpected home volume")
+			}
+		case "/opt/crew-tools":
+			if team.Slug == "" || m.Name != p.toolsVolumeName(team.ID, team.Slug) {
+				return errors.New("mapped runtime has an unexpected tools volume")
+			}
+		default:
+			if managedPath == "" {
+				return errors.New("mapped runtime contains an unowned volume")
+			}
 		}
+		result, err := p.client.VolumeInspect(ctx, m.Name, client.VolumeInspectOptions{})
 		if err != nil {
-			return fmt.Errorf("inspect feature volume %q: %w", m.Source, err)
+			return fmt.Errorf("validate mapped runtime volume: %w", err)
 		}
-		v := res.Volume
-		if v.Name != m.Source || v.Driver != "local" || len(v.Options) != 0 || !cleanAbsolutePath(v.Mountpoint) {
-			return fmt.Errorf("feature volume %q is not an ordinary local Docker volume", m.Source)
+		v := result.Volume
+		if v.Name != m.Name || v.Driver != "local" || !cleanAbsolutePath(v.Mountpoint) || v.Mountpoint != m.Source {
+			return errors.New("mapped runtime volume cannot be authenticated")
+		}
+		if managedPath != "" {
+			device, err := p.daemonPathForLocal(managedPath)
+			if err != nil {
+				return err
+			}
+			if v.Labels[crewCrewIDLabel] != team.ID || v.Labels[crewKindLabel] != noexecBindVolumeKind ||
+				v.Labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || v.Options["type"] != "none" ||
+				v.Options["o"] != noexecBindMountOpts || v.Options["device"] != device {
+				return errors.New("mapped runtime data volume does not match the crew's storage")
+			}
+		} else if len(v.Options) != 0 {
+			return errors.New("mapped runtime home or tools volume is not daemon managed")
 		}
 		for _, root := range []string{p.pathMap.local, p.pathMap.daemon} {
 			if pathContains(root, v.Mountpoint) || pathContains(v.Mountpoint, root) {
-				return errors.New("feature volume overlaps server storage")
+				return errors.New("mapped runtime volume overlaps server storage")
 			}
 		}
 	}
@@ -252,8 +293,14 @@ func (p *Provider) checkMappedFeatureVolumes(ctx context.Context, team provider.
 }
 
 func (p *Provider) startMappedCrewContainer(ctx context.Context, id string, team provider.CrewConfig) error {
-	if err := p.checkMappedFeatureVolumes(ctx, team, false); err != nil {
-		return err
+	if p.pathMap != nil {
+		result, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+		if err != nil {
+			return fmt.Errorf("inspect mapped runtime before start: %w", err)
+		}
+		if err := p.checkMappedRuntimeVolumes(ctx, result.Container.Mounts, team); err != nil {
+			return err
+		}
 	}
 	_, err := p.client.ContainerStart(ctx, id, client.ContainerStartOptions{})
 	return err

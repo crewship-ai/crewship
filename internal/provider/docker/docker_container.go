@@ -494,6 +494,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
+	if err := p.checkMappedFeatureVolumes(team); err != nil {
+		return "", err
+	}
+
 	mu := p.lockForCrew(team.ID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -527,6 +531,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		if state.Status != container.StateRunning {
 			p.evictWarm(team.ID)
 		} else {
+			if err := p.checkMappedRuntimeVolumes(ctx, inspected.Container.Mounts, team); err != nil {
+				p.evictWarm(team.ID)
+				return "", err
+			}
 			// Revalidate the fence too: a restart inside the warm TTL
 			// (daemon, restart policy, operator) drops the fence, and the warm
 			// path would otherwise hand the next step an unfenced container.
@@ -688,9 +696,6 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
-	if err := p.checkMappedFeatureVolumes(ctx, team, true); err != nil {
-		return "", err
-	}
 	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config:           containerCfg,
 		HostConfig:       hostConfig,
@@ -803,6 +808,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
 				inspect := inspectResult.Container
+				if err := p.checkMappedRuntimeVolumes(ctx, inspect.Mounts, team); err != nil {
+					return "", false, err
+				}
 				// The list is an older snapshot. A stop/start between list and
 				// inspect must not reuse a stopped runtime or tear down a live one.
 				if inspect.State == nil || inspect.State.Status == "" {
