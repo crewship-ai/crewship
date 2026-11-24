@@ -459,7 +459,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const checksOptions = ["GitHub signature", "Crewship signature"].map((label) => ({ label, count: tRows.filter((r) => r.checks === label).length })).filter((o) => o.count > 0)
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       <SubBar
         icon={Plug}
         title="Integrations"

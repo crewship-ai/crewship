@@ -266,7 +266,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion, hosted }: {
    }
   } })
  }
- return <main className={hosted ? "flex min-h-0 flex-1 flex-col" : "flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col"}>
+ return <main className={hosted ? "flex min-h-0 flex-1 flex-col" : "flex h-app-content min-h-0 flex-col"}>
   <header className="flex flex-wrap items-center gap-3 border-b p-4">
    {!hosted && <Link href={`/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="inline-flex items-center text-sm underline coarse:min-h-[44px]">Back to Page</Link>}
    {hosted ? <span className="mr-auto" /> : <h1 className="mr-auto text-lg font-semibold">{slug} · {slidesMode === "slides" ? "Slides" : "Artifact project"}</h1>}

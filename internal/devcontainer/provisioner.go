@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 // CommitClient is the subset of the Docker API needed for image provisioning.
@@ -530,7 +531,8 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if err != nil {
 			return fail(ProvStepStart, fmt.Errorf("resolve cached artifact: %w", err))
 		}
-		if !dockerutil.IsLocalImageID(inspected.ID) {
+		inspected.ID = dockerutil.ConfigImageID(inspected.ID)
+		if inspected.ID == "" {
 			return fail(ProvStepStart, fmt.Errorf("cached artifact has no valid immutable image identity"))
 		}
 		p.logger.Info("using cached image", "tag", tag)
@@ -784,13 +786,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))
 	}
-	if !dockerutil.IsLocalImageID(committed.ID) {
-		return fail("commit", fmt.Errorf("committed artifact has no valid immutable image identity"))
+	imageID, err := dockerutil.VerifiedCommitID(ctx, p.docker, committed.ID)
+	if err != nil {
+		return fail("commit", err)
 	}
 	// New crewship-cache:* tag is now present locally — drop cached list.
 	p.invalidateImageListCache()
 
-	requirements.Toolchain = p.inspectToolchain(ctx, committed.ID, o.requiredBinaries)
+	requirements.Toolchain = p.inspectToolchain(ctx, imageID, o.requiredBinaries)
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
 		"privileged", requirements.Privileged,
@@ -799,7 +802,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	)
 	emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
 	return &ProvisionResult{
-		CachedImage:  committed.ID,
+		CachedImage:  imageID,
 		ConfigHash:   hash,
 		Requirements: requirements,
 		Features:     featureRecords(resolvedFeatures),

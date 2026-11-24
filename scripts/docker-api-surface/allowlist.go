@@ -94,7 +94,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ContainerCreate", HTTP: "POST /containers/create", ProxyVars: []string{"CONTAINERS", proxyVarPOST},
-		Tier: TierCore, Packages: []string{"internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
+		Tier: TierCore, Packages: []string{"internal/dockerutil", "scripts/ci/installer-qualification"},
 		Why: "creates every agent, sidecar and provisioning container",
 	},
 	{
@@ -189,7 +189,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ImageInspect", HTTP: "GET /images/{name}/json", ProxyVars: []string{"IMAGES"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/dockerutil", "internal/provider/docker"},
 		Why: "checks an image is present locally and reads its baked-in env",
 	},
 	{
@@ -264,7 +264,7 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "ServerVersion", HTTP: "GET /version", ProxyVars: []string{"VERSION"},
-		Tier: TierCore, Packages: []string{"internal/backup", "internal/provider/docker"},
+		Tier: TierCore, Packages: []string{"internal/backup", "internal/dockerutil", "internal/provider/docker"},
 		Why: "distinguishes dockerd from a nerdctl-style shim during detection",
 	},
 	{
@@ -322,6 +322,7 @@ var declaredPackages = []string{
 	"internal/api",
 	"internal/backup",
 	"internal/devcontainer",
+	"internal/dockerutil",
 	"internal/provider/docker",
 	// Standalone release acceptance executable, never imported by the server or
 	// shipped in runtime archives. Uses only the five existing container APIs

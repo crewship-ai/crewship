@@ -109,7 +109,7 @@ export function DrillPage<S extends string = string>({
   return (
     // One Save for the nested page, as in Settings (components/ui/page-save-bar).
     <PageSaveProvider>
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
+    <div className="flex h-app-content flex-col">
       {/* The path: "Settings / Members". On a phone the top bar already names
           the area and the arrow is the way back, so the page is just its title. */}
       <SubBar

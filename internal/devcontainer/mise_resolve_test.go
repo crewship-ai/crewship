@@ -116,12 +116,12 @@ func TestMiseResolverAuditRejectsWeakenedBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pids := int64(128)
-			c := container.InspectResponse{Image: "sha256:fixture", Config: &container.Config{User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"360"}, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{"crewship.mise-resolver": "fixture"}}, HostConfig: &container.HostConfig{NetworkMode: "bridge", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 512 << 20, MemorySwap: 512 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/tmp": "rw,nosuid,nodev,size=268435456,uid=1001,gid=1001,mode=0700"}}}
-			if e := auditMiseResolver(c, "sha256:fixture", "fixture"); e != nil {
+			c := container.InspectResponse{Image: fixtureImageID, Config: &container.Config{User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"360"}, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{"crewship.mise-resolver": "fixture"}}, HostConfig: &container.HostConfig{NetworkMode: "bridge", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 512 << 20, MemorySwap: 512 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/tmp": "rw,nosuid,nodev,size=268435456,uid=1001,gid=1001,mode=0700"}}}
+			if e := auditMiseResolver(c, fixtureImageID, "fixture"); e != nil {
 				t.Fatal(e)
 			}
 			tc.edit(&c)
-			if auditMiseResolver(c, "sha256:fixture", "fixture") == nil {
+			if auditMiseResolver(c, fixtureImageID, "fixture") == nil {
 				t.Fatal("weakened builder accepted")
 			}
 		})

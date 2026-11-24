@@ -841,7 +841,7 @@ export default function CredentialsPage() {
   const isPage = Boolean(detail && workspaceId && !loading && !loadError)
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-app-content flex-col bg-background">
       {subBar}
       <div className="relative flex flex-1 overflow-hidden">
         {!loadError && (

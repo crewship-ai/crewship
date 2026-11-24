@@ -97,7 +97,7 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
   }
   const active = submitting || !!run && ["SCHEDULED", "DEDUPED", "pending", "running"].includes(run.status)
   const notice = catalogState === "runtime_missing" || catalogState === "unavailable" || (catalogState === "ready" && catalog.length === 0)
-  return <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+  return <div className="flex h-app-content flex-col bg-background">
     <SubBar icon={Workflow} title="Private routines" ariaLabel="Private routines" description={catalogState === "ready" ? `${catalog.length} available to you` : "Restricted access"} actions={<SubBarSecondary icon={RotateCw} disabled={catalogState === "loading" || active || !!request.current} onClick={() => setReload(n => n + 1)}>Check again</SubBarSecondary>} />
     <div className="min-h-0 flex-1 overflow-auto p-4">
     <div className={notice ? "space-y-5" : "mx-auto w-full max-w-3xl space-y-5"}>

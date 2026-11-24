@@ -740,7 +740,7 @@ export function InboxV2() {
   ) : null
 
   return (
-    <div className="relative flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col overflow-hidden bg-background">
+    <div className="relative flex h-app-content min-h-0 flex-col overflow-hidden bg-background">
       {/* The one page header (SHL-05): Inbox › {kind}, live state, and the
           item's navigation. Counts live in the Overview and the spaces. */}
       <SubBar

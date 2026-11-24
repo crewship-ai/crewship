@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 // EnvironmentOps is the Docker access a complete container environment needs
@@ -237,7 +240,15 @@ func (m *MobyDockerOps) CommitContainer(ctx context.Context, containerID, ref st
 	if err != nil {
 		return "", fmt.Errorf("backup: docker commit %s: %w", containerID, err)
 	}
-	return res.ID, nil
+	id, err := dockerutil.VerifiedCommitID(ctx, m.Client, res.ID)
+	if err != nil {
+		// Commit succeeded, so the capture owns its unique temporary tag even
+		// when inspect fails. The caller has not yet taken over its cleanup.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		return "", errors.Join(err, m.RemoveImage(cleanup, ref))
+	}
+	return id, nil
 }
 
 // ImagePlatform implements EnvironmentOps.
@@ -357,7 +368,7 @@ func (m *MobyDockerOps) CreateContainer(ctx context.Context, spec ContainerCreat
 	if err != nil {
 		return "", err
 	}
-	res, err := m.Client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	res, err := dockerutil.CreateContainer(ctx, m.Client, client.ContainerCreateOptions{
 		Name: spec.Name, Config: cfg, HostConfig: host,
 	})
 	if err != nil {

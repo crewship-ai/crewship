@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,6 +66,8 @@ type Config struct {
 	RequireAgentCLI          bool
 	agentCLIArtifact         *runtimestage.AgentCLIArtifact
 	agentCLIError            error
+	stagedSidecar            bool
+	stagedEntrypoint         bool
 
 	// Admission holds a container start until the host can afford it (#1668).
 	// nil disables admission control entirely, which is the pre-#1668
@@ -137,6 +140,7 @@ type Provider struct {
 	cfg              Config
 	logger           *slog.Logger
 	detected         DetectResult
+	selinuxEnabled   bool
 
 	// digestResolver short-circuits repeated HEAD requests to the registry
 	// for the runtime image. Shared helper (see internal/dockerutil) so the
@@ -639,7 +643,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		// Docker Desktop on Linux is VM-backed too, so a host-OS check would
 		// false-positive there.
 		checkVolumeMountpoint: daemonSharesHostFS(ctx, cli),
-		cgroupVersion:         detectCgroupVersion(ctx, cli),
+	}
+	p.cgroupVersion, p.selinuxEnabled, err = detectMountEnvironment(ctx, cli, detected.Runtime)
+	if err != nil {
+		_ = cli.Close()
+		return nil, err
 	}
 
 	logger.Info("container runtime detected",
@@ -1778,18 +1786,25 @@ func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
 	return false
 }
 
-// detectCgroupVersion asks the daemon which cgroup generation the host runs.
+// detectMountEnvironment reads the daemon's cgroup generation and SELinux
+// status. A remote engine may differ from the machine running Crewship.
 // Returns "1", "2", or "" — and "" specifically means "could not be
 // determined", never a guess. Callers must treat the empty case as "do not send
 // cgroup-v1-only fields": a field that is merely useless on v2 costs nothing to
 // omit, while sending one that is fatal on v2 (MemorySwappiness, under
 // podman/crun) kills every crew on a host we failed to identify.
-func detectCgroupVersion(ctx context.Context, cli *client.Client) string {
+func detectMountEnvironment(ctx context.Context, cli *client.Client, runtimeName string) (string, bool, error) {
 	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
-		return ""
+		if runtimeName == "podman" {
+			return "", false, fmt.Errorf("determine Podman SELinux status: %w", err)
+		}
+		return "", false, nil
 	}
-	return strings.TrimSpace(info.Info.CgroupVersion)
+	if runtimeName == "podman" && info.Info.SecurityOptions == nil {
+		return "", false, errors.New("Podman info did not report security options")
+	}
+	return strings.TrimSpace(info.Info.CgroupVersion), slices.Contains(info.Info.SecurityOptions, "name=selinux"), nil
 }
 
 // ensureVolume creates a Docker named volume if it doesn't already

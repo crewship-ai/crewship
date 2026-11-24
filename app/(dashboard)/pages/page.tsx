@@ -49,7 +49,7 @@ function PagesEntry() {
 
   if (wsLoading || !workspaceId || accessMode === "loading" || toLibrary) {
     return (
-      <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
+      <div className="flex h-app-content flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />
         <div className="flex flex-1 gap-3">
           <Skeleton className="h-full w-60" />

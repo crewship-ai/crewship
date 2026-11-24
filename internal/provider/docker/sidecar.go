@@ -66,6 +66,7 @@ import (
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/quota"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -759,7 +760,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 		}
 	}
 
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:           cfg,
 		HostConfig:       hostCfg,
 		NetworkingConfig: networkCfg,

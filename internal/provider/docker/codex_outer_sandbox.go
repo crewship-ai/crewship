@@ -12,6 +12,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -44,14 +45,14 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 	}
 	c := got.Container
 	h := c.HostConfig
-	if c.ID != id || c.Image != d.ImageID || c.State == nil || !c.State.Running || c.Config == nil || h == nil {
+	if c.ID != id || dockerutil.ConfigImageID(c.Image) != d.ImageID || c.State == nil || !c.State.Running || c.Config == nil || h == nil {
 		return denied
 	}
 	labels := c.Config.Labels
 	if labels[crewCrewIDLabel] != crew || labels[crewKindLabel] != crewRuntimeKind || labels[resourcelifecycle.InstanceLabel] != p.cfg.InstanceID || c.Config.User != "1001:1001" {
 		return denied
 	}
-	if !h.ReadonlyRootfs || h.Privileged || len(h.CapAdd) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || !slices.Contains(h.CapDrop, "ALL") || len(h.VolumesFrom) != 0 {
+	if !h.ReadonlyRootfs || h.Privileged || len(h.CapAdd) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || len(h.VolumesFrom) != 0 {
 		return denied
 	}
 	if h.PidMode != "" || (h.IpcMode != "" && h.IpcMode != "private") || h.UTSMode != "" || h.UsernsMode != "" || h.CgroupnsMode == "host" || h.NetworkMode == "host" || strings.HasPrefix(string(h.NetworkMode), "container:") {
@@ -162,6 +163,14 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 		if !seen[destination] {
 			return denied
 		}
+	}
+	if !slices.Contains(h.CapDrop, "ALL") {
+		// This stronger profile also requires empty capabilities. Admission
+		// checks the running native CLI only when an artifact is configured.
+		if p.cfg.agentCLIArtifact == nil {
+			return denied
+		}
+		return p.qualifyAgentCLI(ctx, id)
 	}
 	return nil
 }
