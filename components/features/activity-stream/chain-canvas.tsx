@@ -21,7 +21,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
+import { controlsFitViewOptions, legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 
 import { overviewNodeTypes } from "@/components/features/activity/overview-nodes"
 import { CHAIN_FIT_PADDING } from "@/lib/trace/build-chain-graph"
@@ -157,6 +157,7 @@ export function ChainCanvas({ nodes, edges, onOpenNode }: ChainCanvasProps) {
             artifact rather than a control. Every other canvas in the repo
             overrides it; this one shipped with only a position. */}
         <Controls
+          fitViewOptions={controlsFitViewOptions}
           showInteractive={false}
           className="!bottom-2 !left-2 !bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
         />

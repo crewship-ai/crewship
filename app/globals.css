@@ -9,6 +9,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@layer components {
+  /* Keep the Crewship background palette visible through the graph canvas. */
+  .react-flow {
+    --xy-background-color: transparent;
+  }
+}
+
 /* Touch sizing belongs to the input device, not to the window width.
  *
  * The repo's touch-target rules were written as `max-sm:` (below 640px), while

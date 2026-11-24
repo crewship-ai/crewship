@@ -17,7 +17,7 @@ import {
   type OnNodeDrag,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
+import { controlsFitViewOptions, legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 import { Workflow } from "lucide-react"
 import { EmptyState } from "@/components/layout/empty-state"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -310,6 +310,7 @@ function OverviewInner({
           color="rgba(100, 116, 139, 0.12)"
         />
         <Controls
+          fitViewOptions={controlsFitViewOptions}
           showInteractive={false}
           className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
         />
@@ -538,6 +539,7 @@ function CanvasInner({
   }, [focusStepId, centerNode])
 
   const onPaneClick = useCallback(() => {
+    userMovedRef.current = true
     onStepSelect(null)
   }, [onStepSelect])
 
@@ -610,6 +612,7 @@ function CanvasInner({
           color="rgba(100, 116, 139, 0.15)"
         />
         <Controls
+          fitViewOptions={controlsFitViewOptions}
           showInteractive={false}
           className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
         />

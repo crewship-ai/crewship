@@ -3,3 +3,5 @@
 export function legacyFitViewPadding(padding: number): `${number}%` {
   return `${(50 * padding) / (1 + padding)}%`
 }
+
+export const controlsFitViewOptions = { padding: legacyFitViewPadding(0.1) }

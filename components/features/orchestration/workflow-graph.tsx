@@ -17,7 +17,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
+import { controlsFitViewOptions, legacyFitViewPadding } from "@/lib/trace/fit-view-padding"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
@@ -388,6 +388,7 @@ function WorkflowGraphInner(
             color="rgba(100, 116, 139, 0.15)"
           />
           <Controls
+            fitViewOptions={controlsFitViewOptions}
             showInteractive={false}
             className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
           />
