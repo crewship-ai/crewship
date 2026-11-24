@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -250,12 +252,12 @@ func (p *Provider) checkMappedRuntimeMounts(ctx context.Context, mounts []contai
 		"/usr/local/bin/crewship-sidecar": p.cfg.SidecarBinaryPath,
 		"/usr/local/bin/entrypoint.sh":    p.cfg.EntrypointPath,
 	}
-	if p.cfg.agentCLIArtifact != nil {
-		helperBinds[agentCLIExecutable] = p.cfg.agentCLIArtifact.Path
-	}
 	for _, m := range mounts {
 		switch m.Type {
 		case mount.TypeBind:
+			if !m.RW && m.Destination == agentCLIExecutable && p.matchesMappedAgentCLIGeneration(m.Source) {
+				continue
+			}
 			if local := helperBinds[m.Destination]; local == "" || m.RW || !p.matchesDaemonPath(m.Source, local) {
 				return fmt.Errorf("%w: unexpected or writable helper bind", errMappedRuntimeMount)
 			}
@@ -312,6 +314,29 @@ func (p *Provider) checkMappedRuntimeMounts(ctx context.Context, mounts []contai
 	return nil
 }
 
+// Existing runs can keep a previous immutable generation. The runtime
+// reconciler decides when to replace it through the idle gate.
+func (p *Provider) matchesMappedAgentCLIGeneration(source string) bool {
+	current := p.cfg.agentCLIArtifact
+	if current == nil {
+		return false
+	}
+	if p.matchesDaemonPath(source, current.Path) {
+		return true
+	}
+	name := filepath.Base(source)
+	digest, ok := strings.CutPrefix(name, "crewship-agent-cli-")
+	if _, err := hex.DecodeString(digest); !ok || len(digest) != 64 || err != nil {
+		return false
+	}
+	local := filepath.Join(filepath.Dir(current.Path), name)
+	if !p.matchesDaemonPath(source, local) {
+		return false
+	}
+	previous := &runtimestage.AgentCLIArtifact{Path: local, SHA256: digest, Arch: current.Arch}
+	return runtimestage.VerifyAgentCLIArtifact(previous) == nil
+}
+
 func (p *Provider) mappedVolumeOverlapsStorage(path string) bool {
 	for _, root := range []string{p.pathMap.local, p.pathMap.daemon} {
 		if pathContains(root, path) || pathContains(path, root) {
@@ -338,7 +363,7 @@ func (p *Provider) checkMappedManagedVolume(v volume.Volume, name, crewID string
 // Transient daemon/inspect errors remain fail-closed without stopping work.
 func (p *Provider) stopMappedRuntimeOnRefusal(ctx context.Context, team provider.CrewConfig, inspected container.InspectResponse, cause error) error {
 	if !errors.Is(cause, errMappedRuntimeMount) || p.cfg.InstanceID == "" || inspected.Config == nil ||
-		inspected.ID == "" || inspected.State == nil || (!inspected.State.Running && !inspected.State.Restarting) {
+		inspected.ID == "" || inspected.State == nil {
 		return cause
 	}
 	labels := inspected.Config.Labels
@@ -352,6 +377,9 @@ func (p *Provider) stopMappedRuntimeOnRefusal(ctx context.Context, team provider
 	p.fenced.Delete(inspected.ID)
 	policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
 	_, updateErr := p.client.ContainerUpdate(ctx, inspected.ID, client.ContainerUpdateOptions{RestartPolicy: &policy})
+	if !inspected.State.Running && !inspected.State.Restarting {
+		return errors.Join(cause, updateErr)
+	}
 	timeout := 5
 	_, stopErr := p.client.ContainerStop(ctx, inspected.ID, client.ContainerStopOptions{Timeout: &timeout})
 	return errors.Join(cause, updateErr, stopErr)

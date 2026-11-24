@@ -681,7 +681,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	var crewVolumes []string
 	if team.Slug != "" {
 		for _, name := range []string{p.homeVolumeName(team.ID, team.Slug), p.toolsVolumeName(team.ID, team.Slug)} {
-			if err := p.ensureVolume(ctx, name); err != nil {
+			var labels map[string]string
+			if p.pathMap != nil {
+				labels = resourcelifecycle.WithInstanceLabel(map[string]string{crewCrewIDLabel: team.ID}, p.cfg.InstanceID)
+			}
+			if err := p.ensureVolumeLabeled(ctx, name, labels); err != nil {
 				return "", err
 			}
 			if p.pathMap != nil {
@@ -722,7 +726,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err := p.startMappedCrewContainer(ctx, resp.ID, team); err != nil {
 		if errors.Is(err, errMappedRuntimeMount) {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			_, removeErr := p.client.ContainerRemove(cleanup, resp.ID, client.ContainerRemoveOptions{RemoveVolumes: false})
+			// This create has never run. Docker removes only its anonymous
+			// volumes here and keeps every explicitly named volume.
+			_, removeErr := p.client.ContainerRemove(cleanup, resp.ID, client.ContainerRemoveOptions{RemoveVolumes: true})
 			cancel()
 			err = errors.Join(err, removeErr)
 		}
