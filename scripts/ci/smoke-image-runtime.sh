@@ -121,7 +121,7 @@ db_marker() {
 # Commands below are intentionally expanded inside the isolated helper.
 # shellcheck disable=SC2016
 manifest() {
-  helper "$1" 'find /store -print | LC_ALL=C sort | while IFS= read -r path; do stat -c "%F %a %u %g %n" "$path"; if [ -L "$path" ]; then readlink "$path"; elif [ -f "$path" ]; then sha256sum "$path"; fi; done | sha256sum'
+  helper "$1" 'find /store -print | LC_ALL=C sort | while IFS= read -r path; do stat -c "%F %a %u %g %n" "$path"; if [ -L "$path" ]; then readlink "$path"; elif [ -f "$path" ]; then sha256sum "$path"; fi; done'
 }
 # shellcheck disable=SC2016
 identity() {
@@ -172,7 +172,10 @@ if [ -n "$previous" ]; then
   echo 'Reading the baseline installation identity'
   original_identity=$(identity "$prefix-a")
   echo 'Measuring the baseline volume before backup'
-  before=$(manifest "$prefix-a")
+  manifest "$prefix-a" >"$work/before.manifest"
+  root_metadata=$(helper "$prefix-a" 'stat -c "%a:%u:%g" /store')
+  IFS=: read -r root_mode root_uid root_gid <<<"$root_metadata"
+  [[ "$root_mode" =~ ^[0-7]{3,4}$ && "$root_uid" =~ ^[0-9]+$ && "$root_gid" =~ ^[0-9]+$ ]]
   helper "$prefix-a" 'tar -C /store -cpf - .' >"$work/backup.tar"
   # Restore numerically owned files and modes into a fresh private volume.
   docker volume create "$prefix-a-restored" >/dev/null
@@ -182,9 +185,12 @@ if [ -n "$previous" ]; then
     --security-opt no-new-privileges --pids-limit 64 --memory 256m \
     --mount "type=volume,src=$prefix-a-restored,dst=/store" \
     --entrypoint sh "$image" -ec 'tar -C /store -xpf -' <"$work/backup.tar"
-  restored=$(manifest "$prefix-a-restored")
-  printf 'Baseline volume manifest %s; restored manifest %s\n' "$before" "$restored"
-  [ "$restored" = "$before" ]
+  # The existing volume mountpoint can retain Docker's initial owner and
+  # mode when tar extracts the archive's "." directory into it.
+  helper "$prefix-a-restored" "chown $root_uid:$root_gid /store && chmod $root_mode /store"
+  manifest "$prefix-a-restored" >"$work/restored.manifest"
+  printf 'Baseline volume manifest %s; restored manifest %s\n' "$(sha256sum <"$work/before.manifest")" "$(sha256sum <"$work/restored.manifest")"
+  diff -u "$work/before.manifest" "$work/restored.manifest"
   db_marker "$prefix-a-restored" check
   data_volume_a="$prefix-a-restored"
   echo "Offline archive/restore bytes, paths, permissions and ownership verified: baseline=$previous source=$previous_sha"
@@ -236,7 +242,8 @@ if [ -n "$previous" ]; then
   stop_server
   db_marker "$data_volume_a" check
   [ "$(identity "$data_volume_a")" = "$original_identity" ]
-  [ "$(manifest "$prefix-a")" = "$before" ]
+  manifest "$prefix-a" >"$work/original-after-rollback.manifest"
+  diff -u "$work/before.manifest" "$work/original-after-rollback.manifest"
   echo "Cross-version upgrade/restart/recreate/rollback preserved database, HOME identity, data and backup: candidate=$image baseline=$previous"
   echo 'Rollback retained the original runtime path defect; it is not a runtime repair'
 fi
