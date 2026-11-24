@@ -1,0 +1,1 @@
+- **API router cleanup during shutdown** now stops the four rate limiter workers and releases their timers when the router shuts down.
