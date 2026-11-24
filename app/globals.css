@@ -32,23 +32,19 @@
  * standalone` in app/manifest.ts now puts it. */
 :root { --app-header-h: calc(48px + env(safe-area-inset-top)); }
 
-/* Use the space the shell actually gives the route, after any banners.
- * Shared pages keep their viewport sizing when rendered outside this shell. */
-[data-slot="app-content"] {
-  container: app-content / size;
-}
-
+/* The shell scroller has a definite flex height, including when a banner
+ * takes space. Percentages keep fixed overlays anchored to the viewport. */
 @utility h-app-content {
   height: calc(100dvh - var(--app-header-h) - var(--mobile-tab-bar-h));
-  @container app-content (height >= 0px) {
-    height: 100cqh;
+  :where([data-slot="app-content"]) & {
+    height: 100%;
   }
 }
 
 @utility min-h-app-content {
   min-height: calc(100dvh - var(--app-header-h) - var(--mobile-tab-bar-h));
-  @container app-content (height >= 0px) {
-    min-height: 100cqh;
+  :where([data-slot="app-content"]) & {
+    min-height: 100%;
   }
 }
 
