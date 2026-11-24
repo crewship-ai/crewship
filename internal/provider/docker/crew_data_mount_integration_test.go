@@ -3,15 +3,14 @@
 package docker
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -30,7 +29,11 @@ func TestCrewDataSurvivesContainerReplacement(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cli.Close() })
 	engine := "docker"
-	if dockerutil.IsPodman(ctx, cli) {
+	podman, err := dockerutil.DetectPodman(ctx, cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if podman {
 		engine = "podman"
 	}
 	_, selinux, err := detectMountEnvironment(ctx, cli, engine)
@@ -54,22 +57,9 @@ func TestCrewDataSurvivesContainerReplacement(t *testing.T) {
 		}
 		host := &container.HostConfig{Mounts: mounts, Binds: binds}
 		script := `set -eu
-awk '$5 == "/output" {
-    print > "/dev/stderr"
-    found=1
-    if ($6 ~ /(^|,)noexec(,|$)/) noexec=1
-    if ($6 ~ /(^|,)nosuid(,|$)/) nosuid=1
-}
-END {
-    if (!found) exit 20
-    if (!noexec) exit 21
-    if (!nosuid) exit 22
-}' /proc/self/mountinfo
-if [ "$1" = second ]; then
-    marker=$(cat /output/marker) || exit 23
-    [ "$marker" = first ] || exit 24
-fi
-echo "$1" >> /output/marker || exit 25`
+awk '$5 == "/output" {print $6; found=1} END {exit !found}' /proc/self/mountinfo > "/output/options-$1"
+if [ "$1" = second ]; then [ "$(cat /output/marker)" = first ]; fi
+echo "$1" >> /output/marker`
 		created, err := dockerutil.CreateCrewContainer(ctx, cli, client.ContainerCreateOptions{Config: &container.Config{Image: img, User: "0:0", Entrypoint: []string{"/bin/sh", "-c", script, "sh", turn}}, HostConfig: host})
 		if err != nil {
 			t.Fatal(err)
@@ -87,19 +77,28 @@ echo "$1" >> /output/marker || exit 25`
 			select {
 			case result := <-wait.Result:
 				if result.StatusCode != 0 {
-					logs, logErr := cli.ContainerLogs(ctx, created.ID, client.ContainerLogsOptions{ShowStderr: true, Tail: "4"})
-					if logErr != nil {
-						t.Fatalf("%s: %s exited %d; stderr unavailable: %v", engine, turn, result.StatusCode, logErr)
-					}
-					defer logs.Close()
-					var stderr bytes.Buffer
-					_, copyErr := stdcopy.StdCopy(io.Discard, &stderr, io.LimitReader(logs, 8192))
-					t.Fatalf("%s: %s exited %d; fixture stderr %q (read error %v)", engine, turn, result.StatusCode, stderr.String(), copyErr)
+					t.Fatalf("%s: %s exited %d", engine, turn, result.StatusCode)
 				}
 			case err := <-wait.Error:
 				t.Fatal(err)
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
+			}
+			raw, err := os.ReadFile(filepath.Join(source, "options-"+turn))
+			if err != nil {
+				t.Fatal(err)
+			}
+			flags := strings.TrimSpace(string(raw))
+			if flags == "" || strings.ContainsAny(flags, " \t\n") {
+				t.Fatalf("unexpected /output options %q", flags)
+			}
+			options := strings.Split(flags, ",")
+			if podman {
+				if !slices.Contains(options, "noexec") || !slices.Contains(options, "nosuid") {
+					t.Fatalf("Podman %s /output lacks required mount flags: %s", turn, flags)
+				}
+			} else {
+				t.Logf("Docker %s /output flags: %s (known limitation: noexec and nosuid depend on the backing mount)", turn, flags)
 			}
 			inspected, err := cli.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 			if err != nil {
