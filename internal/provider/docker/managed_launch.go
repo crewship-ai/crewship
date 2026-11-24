@@ -10,12 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
+
+// Podman can echo the requested path for regular files and directories.
+func (p *Provider) unaliasedPath(stat container.PathStat, target string) bool {
+	return stat.Mode&os.ModeSymlink == 0 && (stat.LinkTarget == "" || (p.detected.Runtime == "podman" && stat.LinkTarget == target))
+}
 
 func covers(a, b string) bool {
 	return a == b || strings.HasPrefix(b, a+"/") || strings.HasPrefix(a, b+"/") || a == "/"
@@ -90,7 +96,7 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	for dir := range parents {
 		st, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: dir})
-		if err != nil || !st.Stat.Mode.IsDir() || st.Stat.LinkTarget != "" {
+		if err != nil || !st.Stat.Mode.IsDir() || !p.unaliasedPath(st.Stat, dir) {
 			return denied
 		}
 	}

@@ -18,7 +18,7 @@ import (
 )
 
 func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
-	for _, which := range []string{"valid", "writable-root", "wrong-image", "privileged", "binary-overlay", "readonly-overlay", "launcher-overlay", "missing-launcher", "symlink-parent", "dynamic-launcher", "stale-launcher", "launcher-symlink", "launcher-duplicate", "fixed-launcher", "tmpfs-binary", "tmpfs-launcher", "tmpfs-root", "tmpfs-noncanonical", "tmpfs-unrelated"} {
+	for _, which := range []string{"valid", "docker-self-path", "self-path", "self-symlink", "writable-root", "wrong-image", "privileged", "binary-overlay", "readonly-overlay", "launcher-overlay", "missing-launcher", "symlink-parent", "dynamic-launcher", "stale-launcher", "launcher-symlink", "launcher-duplicate", "fixed-launcher", "tmpfs-binary", "tmpfs-launcher", "tmpfs-root", "tmpfs-noncanonical", "tmpfs-unrelated"} {
 		t.Run(which, func(t *testing.T) {
 			image := "sha256:" + strings.Repeat("a", 64)
 			launcherDir, err := filepath.EvalSymlinks(t.TempDir())
@@ -83,6 +83,12 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 			p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "HEAD" || strings.HasSuffix(r.URL.Path, "/archive") {
 					stat := map[string]any{"name": filepath.Base(r.URL.Query().Get("path")), "size": 0, "mode": uint32(os.ModeDir | 0755), "mtime": "2026-10-04T00:00:00Z", "linkTarget": ""}
+					if which == "self-path" || which == "self-symlink" || which == "docker-self-path" {
+						stat["linkTarget"] = r.URL.Query().Get("path")
+						if which == "self-symlink" {
+							stat["mode"] = uint32(os.ModeSymlink | os.ModeDir | 0755)
+						}
+					}
 					if which == "symlink-parent" {
 						stat["linkTarget"] = "/home/agent/alias"
 					}
@@ -117,10 +123,13 @@ func TestManagedLaunchRejectsRuntimeDriftAndMountAliases(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"Id": "c1", "Image": actualImage, "State": map[string]any{"Running": true}, "HostConfig": map[string]any{"Tmpfs": tmpfs, "ReadonlyRootfs": root, "Privileged": privileged, "SecurityOpt": []string{"no-new-privileges"}}, "Mounts": mounts})
 			})
 			defer close()
+			if which == "self-path" || which == "self-symlink" {
+				p.detected.Runtime = "podman"
+			}
 			p.cfg.SidecarBinaryPath = launcher
 			d := managedlaunch.Descriptor{Artifact: managedlaunch.Artifact{Path: "/opt/native/claude", SHA256: strings.Repeat("b", 64), Format: "static_elf"}, ImageID: image, RevisionID: "r1", LockSHA256: strings.Repeat("c", 64), Binary: "claude", Version: "2.1.288"}
 			err = p.attestManagedLaunch(context.Background(), "c1", d, fixtureLauncherOwner, fixtureLauncherDirectory)
-			if which == "valid" || which == "tmpfs-unrelated" {
+			if which == "valid" || which == "self-path" || which == "tmpfs-unrelated" {
 				// Also exercise the actual production entrypoint on this host.
 				productionErr := p.AttestManagedLaunch(context.Background(), "c1", d)
 				if unsupported := managedLauncherServerUIDError(os.Geteuid()); unsupported != nil {

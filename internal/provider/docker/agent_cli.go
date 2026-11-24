@@ -138,10 +138,19 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if c.ID != id || c.Config == nil || c.HostConfig == nil || !c.HostConfig.ReadonlyRootfs || c.State == nil || !c.State.Running || c.State.Paused || c.State.Restarting || provider.IsPrivilegedExecUser(c.Config.User) {
 		return denied
 	}
-	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || !slices.Contains(c.HostConfig.CapDrop, "ALL") || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
+	if c.HostConfig.Privileged || len(c.HostConfig.CapAdd) != 0 || (!slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges") && !slices.Contains(c.HostConfig.SecurityOpt, "no-new-privileges:true")) {
 		return denied
 	}
 	const executable = agentCLIExecutable
+	probeCmd := []string{executable, "agent-runtime-probe"}
+	if !slices.Contains(c.HostConfig.CapDrop, "ALL") {
+		// Podman expands ALL in compat inspect. The list alone cannot prove
+		// that exec inherits empty sets; require the verified binary to check.
+		if len(c.HostConfig.CapDrop) == 0 || p.detected.Runtime != "podman" {
+			return denied
+		}
+		probeCmd = append(probeCmd, "--require-empty-capabilities")
+	}
 	bound := false
 	var writable []container.MountPoint
 	for _, m := range c.Mounts {
@@ -173,7 +182,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	}
 	for _, target := range []string{"/usr", "/usr/local", "/usr/local/bin", executable} {
 		stat, err := p.client.ContainerStatPath(ctx, id, client.ContainerStatPathOptions{Path: target})
-		if err != nil || stat.Stat.LinkTarget != "" {
+		if err != nil || !p.unaliasedPath(stat.Stat, target) {
 			return denied
 		}
 		if target == executable {
@@ -191,7 +200,7 @@ func (p *Provider) qualifyAgentCLI(parent context.Context, id string) error {
 	if image.Os != "linux" || image.Architecture != p.cfg.agentCLIArtifact.Arch {
 		return errors.New("native agent CLI companion does not match the crew image platform")
 	}
-	result, err := p.Exec(ctx, provider.ExecConfig{ContainerID: id, Cmd: []string{executable, "agent-runtime-probe"}, WorkingDir: "/", User: c.Config.User, Env: []string{"CREWSHIP_CONFIG=/dev/null", "CREWSHIP_PROFILE=", "GODEBUG="}})
+	result, err := p.Exec(ctx, provider.ExecConfig{ContainerID: id, Cmd: probeCmd, WorkingDir: "/", User: c.Config.User, Env: []string{"CREWSHIP_CONFIG=/dev/null", "CREWSHIP_PROFILE=", "GODEBUG="}})
 	if err != nil {
 		return fmt.Errorf("native agent CLI probe could not start: %w", err)
 	}
