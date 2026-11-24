@@ -274,6 +274,7 @@ jobs:
         timeout-minutes: 2
         run: python3 scripts/ci/prime-go-modules.py --attempt-timeout 20 --tool github.com/rhysd/actionlint@v1.7.7
       - name: Validate GitHub workflow syntax and expressions
+        timeout-minutes: 2
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
       - name: CI gate regression tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
