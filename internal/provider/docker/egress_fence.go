@@ -15,6 +15,7 @@ import (
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/egressfence"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -167,7 +168,7 @@ func (p *Provider) runFenceHelper(ctx context.Context, team provider.CrewConfig,
 	if _, err := p.client.ContainerRemove(ctx, helperName, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		p.logger.Debug("stale fence helper not removed", "helper", helperName, "error", err)
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Name: helperName,
 		Config: &container.Config{
 			Image:      image,

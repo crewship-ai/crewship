@@ -87,7 +87,8 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		return "", fmt.Errorf("selected environment %q unavailable; restore its image or explicitly rebuild: %w", ref.Ref, err)
 	}
-	if !dockerutil.IsLocalImageID(img.ID) || img.Config == nil {
+	img.ID = dockerutil.ConfigImageID(img.ID)
+	if img.ID == "" || img.Config == nil {
 		return "", fmt.Errorf("image %q has incomplete immutable identity/configuration", ref.Ref)
 	}
 	labels := img.Config.Labels
@@ -116,7 +117,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		}
 		tmpfs[destination] = "ro,nosuid,nodev,noexec,size=4096"
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Name: name,
 		Config: &container.Config{
 			Image: img.ID, Entrypoint: []string{"/bin/false"}, Cmd: []string{"crewship-image-reference"},
@@ -153,7 +154,7 @@ func (p *ImageReferences) validate(result client.ContainerInspectResult, id stri
 	c := result.Container
 	raw, idErr := hex.DecodeString(c.ID)
 	if idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
-		c.Image != id || c.Config.Image != id ||
+		id == "" || dockerutil.ConfigImageID(c.Image) != id || dockerutil.ConfigImageID(c.Config.Image) != id ||
 		c.Config.Labels[imageReferenceOwnerLabel] != p.owner || c.Config.Labels[imageReferenceIDLabel] != id ||
 		strings.TrimPrefix(c.Name, "/") != imageReferenceName(p.owner, id) {
 		return fmt.Errorf("environment reference identity/state mismatch for %q; retaining conflicting container", c.ID)
@@ -214,7 +215,7 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	if err != nil {
 		return err
 	}
-	id := c.Container.Image
+	id := dockerutil.ConfigImageID(c.Container.Image)
 	if err := p.validate(c, id); err != nil {
 		return err
 	}

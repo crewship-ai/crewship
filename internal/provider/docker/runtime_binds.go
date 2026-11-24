@@ -58,6 +58,7 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
@@ -226,7 +227,7 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 	if len(binds) == 0 {
 		return
 	}
-	_, createErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	_, createErr := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:     &container.Config{Image: preflightSentinelImage},
 		HostConfig: &container.HostConfig{Mounts: binds},
 	})

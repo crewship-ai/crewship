@@ -106,6 +106,9 @@ func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ client.Image
 
 func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
 	m.inspectCalls++
+	if ref == fixtureImageID && len(m.committedIDs) > 0 {
+		return client.ImageInspectResult{InspectResponse: image.InspectResponse{ID: fixtureImageID}}, nil
+	}
 	if m.inspectErr != nil {
 		return client.ImageInspectResult{}, m.inspectErr
 	}

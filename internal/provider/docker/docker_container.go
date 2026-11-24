@@ -22,6 +22,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -350,7 +351,7 @@ func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, targe
 			{Type: mount.TypeVolume, Source: target, Target: "/to"},
 		},
 	}
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:     helperCfg,
 		HostConfig: helperHost,
 	})
@@ -683,7 +684,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
-	resp, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	resp, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:           containerCfg,
 		HostConfig:       hostConfig,
 		NetworkingConfig: &dockernetwork.NetworkingConfig{},
@@ -801,7 +802,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					return "", false, fmt.Errorf("%w: inspect existing container %s: missing state", provider.ErrRuntimeImageUpdatePending, containerName)
 				}
 				c.State = inspect.State.Status
-				imageChanged := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && inspect.Image != desiredImage
+				imageChanged := callerSpecifiedImage && inspect.Config != nil && desiredImage != "" && inspect.Config.Image != desiredImage && dockerutil.ConfigImageID(inspect.Image) != desiredImage
 				if inspect.State.Paused || c.State == container.StatePaused {
 					if imageChanged {
 						return "", true, fmt.Errorf("crew runtime %s is paused; unpause it explicitly before retrying: %w", c.ID, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage})
@@ -1376,7 +1377,7 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 			mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
 		}
 		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets)
-		initResp, initErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		initResp, initErr := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 			Config: &container.Config{
 				Image:      runtimeImage,
 				User:       "0:0",

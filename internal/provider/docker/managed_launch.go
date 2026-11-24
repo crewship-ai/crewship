@@ -12,6 +12,7 @@ import (
 
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
@@ -45,7 +46,7 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	}
 	c := got.Container
 	h := c.HostConfig
-	if c.ID != id || c.Image != d.ImageID || c.State == nil || !c.State.Running || h == nil ||
+	if c.ID != id || dockerutil.ConfigImageID(c.Image) != d.ImageID || c.State == nil || !c.State.Running || h == nil ||
 		!h.ReadonlyRootfs || h.Privileged || len(h.CapAdd) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 ||
 		(!slices.Contains(h.SecurityOpt, "no-new-privileges") && !slices.Contains(h.SecurityOpt, "no-new-privileges:true")) {
 		return denied

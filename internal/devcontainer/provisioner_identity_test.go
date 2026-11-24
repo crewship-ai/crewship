@@ -33,3 +33,38 @@ func TestProvisionCacheReturnsImmutableIdentity(t *testing.T) {
 		t.Fatal("published reference is not local image identity")
 	}
 }
+
+type podmanCommitMock struct {
+	identityCommitClient
+	commitID string
+}
+
+func (m *podmanCommitMock) ContainerCommit(context.Context, string, client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
+	return client.ContainerCommitResult{ID: m.commitID}, nil
+}
+
+func TestPodmanCommitIdentity(t *testing.T) {
+	bare := strings.TrimPrefix(fixtureImageID, "sha256:")
+	for _, tc := range []struct {
+		name, id string
+		ok       bool
+	}{
+		{"bare", bare, true}, {"canonical", fixtureImageID, true},
+		{"short", bare[:12], false}, {"uppercase", strings.ToUpper(bare), false},
+		{"other config or manifest digest", "sha256:" + strings.Repeat("b", 64), false},
+		{"registry reference", "example/image@" + fixtureImageID, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &podmanCommitMock{commitID: tc.id}
+			cfg := &Config{Image: offlineBaseImage, ContainerEnv: map[string]string{"TEST": "identity"}}
+			inst := NewInstaller(&mockDockerClient{}, testLogger())
+			result, err := NewProvisioner(m, inst, nil, testLogger()).Provision(context.Background(), cfg.Image, cfg, "")
+			if tc.ok && (err != nil || result.CachedImage != fixtureImageID) {
+				t.Fatalf("wanted verified config ID, got %+v, %v", result, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("accepted %q", tc.id)
+			}
+		})
+	}
+}

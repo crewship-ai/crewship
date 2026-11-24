@@ -45,6 +45,8 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 )
 
 // legacySecretsHelperTimeout bounds how long the sweep waits for the UID-1001
@@ -184,7 +186,7 @@ func (p *Provider) removeLegacySecretsDirViaHelper(ctx context.Context, dirPath 
 		},
 	}
 
-	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
 		Config:     helperCfg,
 		HostConfig: helperHost,
 	})

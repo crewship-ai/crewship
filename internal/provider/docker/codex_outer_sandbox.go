@@ -12,6 +12,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -44,7 +45,7 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 	}
 	c := got.Container
 	h := c.HostConfig
-	if c.ID != id || c.Image != d.ImageID || c.State == nil || !c.State.Running || c.Config == nil || h == nil {
+	if c.ID != id || dockerutil.ConfigImageID(c.Image) != d.ImageID || c.State == nil || !c.State.Running || c.Config == nil || h == nil {
 		return denied
 	}
 	labels := c.Config.Labels
