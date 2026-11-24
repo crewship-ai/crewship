@@ -889,7 +889,7 @@ func (s *SQLWaitpointStore) sweepContext() context.Context {
 }
 
 func (s *SQLWaitpointStore) sweepOnce() {
-	ctx, cancel := context.WithTimeout(s.sweepContext(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// timeout_at is RFC3339Nano (set by CreateApproval); we compare
 	// against the same format. SQLite's `datetime('now','subsec')`

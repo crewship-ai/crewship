@@ -66,6 +66,7 @@ and let the ID migration finish before serving traffic. Existing pending
 waitpoints retain their status, but all pre-upgrade callback URLs expire.
 List pending waitpoints and mint and distribute new URLs for the integrations
 that still need them.
+A backup restore that recreates a waitpoint also requires a new callback URL.
 
 ### `approve` and `reject`
 

@@ -118,11 +118,18 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	if err := db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE workspace_id=?`, ws).Scan(&current); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.MintCallbackToken(ctx, ws, current); err != nil {
+	secret, _, err := store.MintCallbackToken(ctx, ws, current)
+	if err != nil {
 		t.Fatal(err)
 	}
+	// A bundle from before the independent chat source ID could otherwise
+	// also create a second pending waitpoint when inserted beside the first.
+	delete(dump.Tables["pipeline_waitpoints"][0], "chat_source_id")
 	if err := backup.RestoreDump(ctx, db, dump); err != nil {
 		t.Fatal(err)
+	}
+	if id, _, err := store.ResolveCallbackToken(ctx, secret); err != nil || id != current {
+		t.Fatalf("additive restore replaced the live callback: id=%q err=%v", id, err)
 	}
 	var waitpoints, cards, reads int
 	if err := db.QueryRow(`SELECT (SELECT count(*) FROM pipeline_waitpoints WHERE workspace_id=?),
@@ -134,4 +141,29 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 		t.Fatalf("legacy restore added duplicate rows: waitpoints=%d inbox=%d reads=%d", waitpoints, cards, reads)
 	}
 	assertNoFKViolations(t, db, "legacy waitpoint restore")
+}
+
+func TestRestoreWaitpointInboxRetainsHireAndAutonomySources(t *testing.T) {
+	ctx := t.Context()
+	source := openMigratedDB(t)
+	ws := seedWorkspace(t, source)
+	for _, kind := range []struct{ id, title string }{{"hire-agent", "Hire"}, {"crew-autonomy", "Autonomy"}} {
+		if _, err := source.Exec(`INSERT INTO inbox_items(id,workspace_id,kind,source_id,title)
+			VALUES(?,?,'waitpoint',?,?)`, "ibx_"+ws+"_waitpoint_"+kind.id, ws, kind.id, kind.title); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dump, err := backup.DumpWorkspace(ctx, source, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := openMigratedDB(t)
+	if err := backup.RestoreDump(ctx, target, dump); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := target.QueryRow(`SELECT count(*) FROM inbox_items WHERE workspace_id=? AND kind='waitpoint'
+		AND source_id IN ('hire-agent','crew-autonomy')`, ws).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("unrelated Inbox sources restored=%d err=%v, want 2", n, err)
+	}
 }
