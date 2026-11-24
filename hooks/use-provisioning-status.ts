@@ -199,6 +199,8 @@ const STEP_LABELS: Record<string, string> = {
   // onto one row rather than accumulating, and stays "started" until the host
   // frees up. Without a label here the step list rendered the raw wire token.
   capacity_hold: "Waiting for host capacity",
+  runtime_drain: "Waiting for existing work",
+  runtime_upgrade: "Preparing the updated environment",
   container_create: "Creating container",
   containerEnv_apply: "Applying environment",
   ready: "Ready",

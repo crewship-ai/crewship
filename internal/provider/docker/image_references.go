@@ -101,10 +101,14 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	// A reference proves this installation needs bytes, not that it owns
 	// their provenance. Retain exact legacy/unlabelled selections as well.
 
+	// Scope engine evidence to this operation and endpoint. A second version
+	// probe after a slow create can consume the remaining deadline and turn
+	// a verified Podman display tag into a spurious image mismatch.
+	isPodman := sync.OnceValues(func() (bool, error) { return dockerutil.DetectPodman(ctx, p.client) })
 	name := imageReferenceName(p.owner, img.ID)
 	existing, err := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err == nil {
-		return img.ID, p.validate(ctx, existing, img)
+		return img.ID, p.validate(ctx, existing, img, isPodman)
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect environment reference: %w", err)
@@ -124,7 +128,11 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
 		devcontainer.TempContainerLabelKey: "",
 	}
-	if dockerutil.IsPodman(ctx, p.client) {
+	podman, err := isPodman()
+	if err != nil {
+		return "", fmt.Errorf("identify engine before creating environment reference: %w", err)
+	}
+	if podman {
 		// Retagging the image does not change Config.Image of an existing
 		// reference container. Keep the names inspected at creation.
 		referenceLabels[imageReferenceTagsLabel] = strings.Join(img.RepoTags, "\n")
@@ -149,16 +157,16 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		if inspectErr != nil {
 			return "", fmt.Errorf("retain exact environment %s: %w", img.ID, err)
 		}
-		return img.ID, p.validate(ctx, existing, img)
+		return img.ID, p.validate(ctx, existing, img, isPodman)
 	}
 	existing, err = p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("confirm environment reference: %w", err)
 	}
-	return img.ID, p.validate(ctx, existing, img)
+	return img.ID, p.validate(ctx, existing, img, isPodman)
 }
 
-func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, img client.ImageInspectResult) error {
+func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, img client.ImageInspectResult, isPodman func() (bool, error)) error {
 	c := result.Container
 	id := dockerutil.ConfigImageID(img.ID)
 	raw, idErr := hex.DecodeString(c.ID)
@@ -174,7 +182,14 @@ func (p *ImageReferences) validate(ctx context.Context, result client.ContainerI
 	if dockerutil.ConfigImageID(c.Config.Image) != id {
 		display := c.Config.Image
 		recorded := strings.Split(c.Config.Labels[imageReferenceTagsLabel], "\n")
-		if display == "" || !dockerutil.IsPodman(ctx, p.client) || !(slices.Contains(img.RepoTags, display) || slices.Contains(recorded, display)) {
+		podman, err := isPodman()
+		if err != nil {
+			return fmt.Errorf("identify engine for environment reference %q: %w", c.ID, err)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("confirm configured environment image for %q: %w", c.ID, err)
+		}
+		if display == "" || !podman || !(slices.Contains(img.RepoTags, display) || slices.Contains(recorded, display)) {
 			return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
 		}
 	}
@@ -242,7 +257,7 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 	if err != nil {
 		return err
 	}
-	if err := p.validate(ctx, c, img); err != nil {
+	if err := p.validate(ctx, c, img, func() (bool, error) { return dockerutil.DetectPodman(ctx, p.client) }); err != nil {
 		return err
 	}
 	if img.Config == nil {

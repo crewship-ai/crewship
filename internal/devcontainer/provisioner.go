@@ -150,7 +150,9 @@ const (
 	// it) and otherwise on an escalating schedule, so a long wait keeps saying
 	// so without turning into a per-poll line (#1675). It is never terminal —
 	// a held start still ends at ready or provision.failed.
-	ProvStepCapacityHold = "capacity_hold"
+	ProvStepCapacityHold   = "capacity_hold"
+	ProvStepRuntimeDrain   = "runtime_drain"
+	ProvStepRuntimeUpgrade = "runtime_upgrade"
 )
 
 // Stable status constants for ProvisionEvent.Status.

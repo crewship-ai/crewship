@@ -58,7 +58,7 @@ type relabelRefusal struct{ cause error }
 func (e *relabelRefusal) Error() string { return e.cause.Error() }
 
 func sharedCrewRelabel(bind string) bool {
-	return strings.HasSuffix(bind, ":ro,z") || strings.HasSuffix(bind, ":rw,z")
+	return strings.HasSuffix(bind, ":ro,z") || strings.HasSuffix(bind, ":rw,z") || strings.HasSuffix(bind, ":rw,z,noexec,nosuid")
 }
 
 // CreateContainer carries a local rootless Podman service's OOM adjustment into
@@ -84,23 +84,27 @@ func CreateContainer(ctx context.Context, cli containerCreator, opts client.Cont
 }
 
 // IsPodman checks the components reported by the compatible daemon.
-func IsPodman(ctx context.Context, daemon any) bool { ok, _ := podmanVersion(ctx, daemon); return ok }
+func IsPodman(ctx context.Context, daemon any) bool { ok, _ := DetectPodman(ctx, daemon); return ok }
 
-func podmanVersion(ctx context.Context, daemon any) (bool, bool) {
+// DetectPodman reports whether the daemon identifies as Podman and propagates probe failures.
+func DetectPodman(ctx context.Context, daemon any) (bool, error) {
 	cli, ok := daemon.(interface {
 		ServerVersion(context.Context, client.ServerVersionOptions) (client.ServerVersionResult, error)
 	})
 	if !ok {
-		return false, false
+		return false, fmt.Errorf("daemon does not expose server version")
 	}
 	version, err := cli.ServerVersion(ctx, client.ServerVersionOptions{})
 	if err != nil {
-		return false, false
+		return false, err
 	}
 	for _, component := range version.Components {
 		if strings.EqualFold(component.Name, "Podman Engine") {
-			return true, true
+			return true, nil
 		}
 	}
-	return false, len(version.Components) > 0
+	if len(version.Components) == 0 {
+		return false, fmt.Errorf("server version contains no engine components")
+	}
+	return false, nil
 }

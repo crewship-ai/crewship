@@ -343,6 +343,7 @@ func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
 // BridgeConfig holds resource defaults and optional chat capabilities.
 // Document creation is disabled unless explicitly enabled by the host.
 type BridgeConfig struct {
+	RuntimePreparationState provider.StateProvider
 	DocumentCreationEnabled bool
 	ArtifactProjectsEnabled bool
 	DefaultMemoryMB         int
@@ -1135,6 +1136,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		cpuVal = b.cfg.DefaultCPUs
 	}
 
+	runID := generateMsgID()
 	var runtimeUse *provider.RuntimeUse
 	defer func() { runtimeUse.Release() }()
 	if b.container != nil {
@@ -1189,12 +1191,42 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Its job: a start held for host capacity says so on the stream the
 		// person waiting is already watching, instead of leaving
 		// "Starting container..." on screen for up to thirty minutes (#1675).
-		cc.ProvisionSink = capacityHoldSink(streamFn)
+		streamStatus := capacityHoldSink(streamFn)
+		var recordUpgrade func(devcontainer.ProvisionEvent)
+		if source, ok := b.provisioning.(interface {
+			RuntimeProvisionSink(context.Context, string, string) func(devcontainer.ProvisionEvent)
+		}); ok {
+			recordUpgrade = source.RuntimeProvisionSink(ctx, info.CrewID, info.WorkspaceID)
+		}
+		var upgrading bool
+		var receiptErr error
+		prepareCtx, cancelPreparation := context.WithCancel(ctx)
+		defer cancelPreparation()
+		state := b.cfg.RuntimePreparationState
+		upgradeEvent := func(ev devcontainer.ProvisionEvent) {
+			ev.Detail = triggerMessageID
+			if recordUpgrade != nil {
+				recordUpgrade(ev)
+			}
+		}
+		cc.ProvisionSink = func(ev devcontainer.ProvisionEvent) {
+			if ev.Step == devcontainer.ProvStepRuntimeDrain || ev.Step == devcontainer.ProvStepRuntimeUpgrade {
+				if !upgrading && state != nil {
+					receiptErr = (runtimePreparation{Chat: chatID, Agent: info.AgentID, Run: runID}).persist(ctx, state, triggerMessageID)
+					if receiptErr != nil {
+						cancelPreparation()
+					}
+				}
+				upgrading = true
+				upgradeEvent(ev)
+			}
+			streamStatus(ev)
+		}
 
 		// The runtime container and the crew's sidecars come up as one step:
 		// the sidecars start after the runtime (the crew bridge network has to
 		// exist first) and before the crew is reported ready.
-		use, _, err := b.crewStarter().StartUse(ctx, cc, func(n crewstart.Notice) {
+		use, _, err := b.crewStarter().StartUse(prepareCtx, cc, func(n crewstart.Notice) {
 			// Only when the provider's own capability report didn't already
 			// name Services — telling the user the same thing twice reads as
 			// two separate faults.
@@ -1205,8 +1237,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		})
 		runtimeUse = use
 		cID := use.ContainerID()
+		// The receipt and run overlap until the caller returns. After a crash,
+		// recovery checks the durable run before publishing an interruption.
+		if upgrading && state != nil && receiptErr == nil {
+			defer func() {
+				if clearErr := state.Delete(context.WithoutCancel(ctx), preparationBucket, triggerMessageID); clearErr != nil {
+					b.logger.Error("clear runtime preparation", "reference", triggerMessageID, "error", clearErr)
+				}
+			}()
+		}
+		if receiptErr != nil {
+			err = fmt.Errorf("record runtime preparation: %w", receiptErr)
+		}
 		if err != nil {
-			if errors.Is(err, crewstart.ErrSidecarStart) {
+			if !upgrading && errors.Is(err, crewstart.ErrSidecarStart) {
 				streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
 				return fmt.Errorf("ensure crew services: %w", err)
 			}
@@ -1215,7 +1259,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			// "failed to start agent container". The raw error still flows to
 			// logs / the run record via the wrapped return below.
 			code, msg := classifyCrewRuntimeError(err)
-			b.logger.Warn("ensure crew runtime failed", "crew_slug", info.CrewSlug, "code", code, "error", err)
+			if upgrading || errors.Is(err, provider.ErrRuntimeImageUpdatePending) {
+				upgradeEvent(devcontainer.ProvisionEvent{Phase: devcontainer.ProvisionPhase, Step: devcontainer.ProvStepRuntimeUpgrade, Status: devcontainer.ProvStatusFailed})
+				code = "runtime_update_pending"
+				msg = "The environment update could not finish safely. Contact support with reference " + triggerMessageID + "."
+				if errors.Is(err, provider.ErrRuntimeStorageUnverified) {
+					code = "runtime_storage_unverified"
+					msg = "The agent could not be started. The environment update stopped to preserve your crew's files. Ask your workspace administrator to verify the data mounts. Reference " + triggerMessageID + "."
+				}
+			}
+			b.logger.Warn("ensure crew runtime failed", "phase", "runtime_admission", "reference", triggerMessageID, "workspace_id", info.WorkspaceID, "crew_id", info.CrewID, "agent_id", info.AgentID, "crew_slug", info.CrewSlug, "code", code, "error", err)
 			// The daemon has no such image: whatever the provisioner
 			// memoised about the local image set is wrong, and the next
 			// provision must not answer cache_hit from it (#2431).
@@ -1226,6 +1279,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: map[string]any{"code": code}})
 			return fmt.Errorf("ensure team runtime: %w", err)
+		}
+		if upgrading {
+			upgradeEvent(devcontainer.ProvisionEvent{Phase: devcontainer.ProvisionPhase, Step: devcontainer.ProvStepRuntimeUpgrade, Status: devcontainer.ProvStatusCompleted})
 		}
 		containerID = cID
 		b.containerMu.Lock()
@@ -1295,7 +1351,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		},
 	})
 
-	runID := generateMsgID()
 	originalStream := streamFn
 	streamFn = func(event ws.ChatEvent) {
 		metadata := map[string]any{"run_id": runID, "trigger_message_id": triggerMessageID}
@@ -2000,6 +2055,14 @@ func capacityHoldSink(streamFn func(ws.ChatEvent)) func(devcontainer.ProvisionEv
 		return nil
 	}
 	return func(ev devcontainer.ProvisionEvent) {
+		switch ev.Step {
+		case devcontainer.ProvStepRuntimeDrain:
+			streamFn(ws.ChatEvent{Type: "status", Content: "Waiting for existing work before updating the environment."})
+			return
+		case devcontainer.ProvStepRuntimeUpgrade:
+			streamFn(ws.ChatEvent{Type: "status", Content: "Preparing the updated environment."})
+			return
+		}
 		if ev.Step != devcontainer.ProvStepCapacityHold {
 			return
 		}

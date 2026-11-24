@@ -138,6 +138,8 @@ func (p *Provider) installEgressFence(ctx context.Context, team provider.CrewCon
 	p.fenceDests.Store(containerID, key)
 	p.fenced.Store(containerID, startedAt)
 	p.fencedCrew.Store(containerID, team.ID)
+	// A fence record outlives the request and its chat stream.
+	team.ProvisionSink = nil
 	p.fenceTeams.Store(team.ID, team)
 	p.logger.Info("egress fence installed",
 		"crew_id", team.ID,

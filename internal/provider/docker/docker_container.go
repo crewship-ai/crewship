@@ -882,6 +882,9 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					if state == nil || state.Running || state.Paused || state.Restarting || (state.Status != "exited" && state.Status != "created") {
 						return "", false, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
+					if err := p.verifyReplacementVolumes(ctx, inspect.Mounts, team.ID, team.Slug); err != nil {
+						return "", false, err
+					}
 					if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: true}); err != nil {
 						if cerrdefs.IsConflict(err) {
 							return "", false, fmt.Errorf("%w: runtime changed while removing stopped container", provider.ErrRuntimeImageUpdatePending)
@@ -914,7 +917,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					// (noexecBindMount). Containers created before that carry them
 					// as plain, exec-allowed host binds. Recreate so noexec takes
 					// effect and a stale exec-capable foothold cannot linger.
-					if legacyWritableBindNeedsNoexec(m.Destination, m.Type) {
+					if legacyWritableBindNeedsNoexec(m.Destination, m.Type) && !p.verifiedPodmanDataBind(inspect.HostConfig, m, team.ID) {
 						needsRecreate = true
 						p.logger.Info("agent-writable mount is a legacy exec-capable bind, will recreate container for noexec",
 							"container", containerName, "mount", m.Destination, "mount_type", m.Type)
@@ -972,17 +975,22 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				//     run, so it waits for the next recreate and says so
 				//     meanwhile — here, and on `crewship crew
 				//     container-status` via ContainerStatus.
-				if want := p.crewRuntimeContractDigest(); want != "" && runtimeContractOf(inspect.Config) != want {
+				wantContract := p.crewRuntimeContractDigest()
+				contractStale := wantContract != "" && runtimeContractOf(inspect.Config) != wantContract
+				if contractStale {
 					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (runtime configuration predates this build)",
 							"container", containerName,
 							"container_contract", runtimeContractOf(inspect.Config),
-							"build_contract", want,
+							"build_contract", wantContract,
 						)
 						if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
 							return "", false, err
 						}
 						break // fall through to create new container
+					}
+					if managed, _ := ctx.Value(managedRuntimeUseKey{}).(bool); managed && c.State == container.StateRunning {
+						return "", true, &provider.RuntimeImageUpdatePendingError{ContainerID: c.ID, CurrentImageID: inspect.Image, DesiredImage: desiredImage}
 					}
 					p.logger.Warn("crew container predates the current runtime configuration and is still serving; "+
 						"the controls added since it was created are NOT in effect on this crew. It will pick them up "+
@@ -990,7 +998,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"container", containerName,
 						"crew_id", team.ID,
 						"container_contract", runtimeContractOf(inspect.Config),
-						"build_contract", want,
+						"build_contract", wantContract,
 					)
 				}
 				// Per-crew resource drift (#1681). The check above asks whether
@@ -1119,7 +1127,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					// An outdated runtime is not cached as ready: the next start,
 					// even inside the warm TTL, must reconcile and retry the
 					// sidecar refresh.
-					if !sidecarOutdated {
+					if !sidecarOutdated && !contractStale {
 						p.setWarm(team.ID, c.ID, warmImage)
 					}
 					if err := p.qualifyAgentCLI(ctx, c.ID); err != nil {
@@ -1250,10 +1258,11 @@ func (p *Provider) ociRuntime() string {
 // container: the three mount roots plus the full list of directories
 // created (mount roots and crewPath subdirs), in creation order.
 type crewDirs struct {
-	output    string
-	workspace string
-	crew      string
-	all       []string
+	contractSnapshot bool // canonical paths for digest generation only
+	output           string
+	workspace        string
+	crew             string
+	all              []string
 }
 
 // prepareCrewDirs creates the host-side bind-mount directory tree for the
@@ -1661,7 +1670,7 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 	if err != nil {
 		return nil, nil, err
 	}
-	crewMounts, binds, err := p.stagedArtifactBinds(crewMounts)
+	crewMounts, binds, err := p.crewRuntimeBinds(crewMounts, dirs.contractSnapshot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1864,6 +1873,17 @@ func (p *Provider) forceTeardown(ctx context.Context, containerID, crewID string
 	// Docker may remove the container but report a volume-cleanup error.
 	// Invalidate readiness even on failure; the next attempt must inspect.
 	p.evictWarm(crewID)
+	inspect, err := p.client.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	c := inspect.Container
+	if err := p.verifyReplacementVolumes(ctx, c.Mounts, crewID, crewSlugFromInspect(c.Config)); err != nil {
+		return err
+	}
 	timeout := 10
 	if _, err := p.client.ContainerStop(ctx, containerID, client.ContainerStopOptions{Timeout: &timeout}); err != nil && !cerrdefs.IsNotFound(err) {
 		// Force removal is still permitted for crash recovery if graceful

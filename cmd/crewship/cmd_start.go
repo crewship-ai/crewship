@@ -511,6 +511,7 @@ var startCmd = &cobra.Command{
 			srv.LogWriter(),
 			resolver,
 			chatbridge.BridgeConfig{
+				RuntimePreparationState: deps.State,
 				DocumentCreationEnabled: cfg.Documents.Enabled,
 				ArtifactProjectsEnabled: true, // authoritative recorder checks the workspace feature flag for every send
 				DefaultMemoryMB:         cfg.Container.DefaultMemoryMB,

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -121,6 +122,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.db != nil {
 		if err := s.flushRecoveredStops(ctx); err != nil {
 			s.logger.Warn("recover confirmed stop history", "error", err)
+		}
+		if err := chatbridge.RecoverRuntimePreparations(ctx, s.state, s.convStore, s.db); err != nil {
+			s.logger.Error("recover interrupted runtime preparation", "error", err)
 		}
 		s.recoverOrphanedRuns(ctx)
 	}

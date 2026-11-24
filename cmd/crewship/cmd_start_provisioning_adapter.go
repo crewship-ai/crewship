@@ -7,6 +7,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // provisioningAdapter bridges *api.ProvisioningHandler.EnqueueForCrew
@@ -45,4 +46,8 @@ func (a provisioningAdapter) AttachPendingMessage(crewID string, msg chatbridge.
 // enqueuer and the invalidation only ever runs in tests.
 func (a provisioningAdapter) InvalidateImageCache() {
 	a.h.InvalidateImageCache()
+}
+
+func (a provisioningAdapter) RuntimeProvisionSink(ctx context.Context, crewID, workspaceID string) func(devcontainer.ProvisionEvent) {
+	return a.h.RuntimeProvisionSink(ctx, crewID, workspaceID)
 }

@@ -47,7 +47,10 @@ func (g *RuntimeUseGate) notifyLocked() {
 	g.changed = make(chan struct{})
 }
 
-func (g *RuntimeUseGate) Use(ctx context.Context) (func(), error) {
+func (g *RuntimeUseGate) Use(ctx context.Context) (func(), error) { return g.UseNotify(ctx, nil) }
+
+// UseNotify reports a blocked reader once, outside the gate mutex.
+func (g *RuntimeUseGate) UseNotify(ctx context.Context, onWait func()) (func(), error) {
 	g.mu.Lock()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -66,6 +69,10 @@ func (g *RuntimeUseGate) Use(ctx context.Context) (func(), error) {
 		}
 		changed := g.signalLocked()
 		g.mu.Unlock()
+		if onWait != nil {
+			onWait()
+			onWait = nil
+		}
 		select {
 		case <-ctx.Done():
 		case <-changed:

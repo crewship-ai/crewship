@@ -125,7 +125,15 @@ func TestImageChange_RealHeartbeatSurvivesNewImageAdmission(t *testing.T) {
 // rather than an always-true test callback, permits replacement only once the
 // detached process has actually exited.
 func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	testUpgradeOccupancy(t, false)
+}
+
+func TestFencedRuntimeUpgradeAfterServerRestart(t *testing.T) {
+	testUpgradeOccupancy(t, true)
+}
+
+func testUpgradeOccupancy(t *testing.T, fenced bool) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	cli, err := client.New(client.FromEnv)
 	if err != nil {
@@ -145,14 +153,31 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.cfg.EntrypointPath = entrypoint
-	// The fixture never starts the credential sidecar. Supply a real Linux ELF
-	// for the required read-only mount without building or downloading a CLI.
-	p.cfg.SidecarBinaryPath, err = os.Executable()
-	if err != nil {
+	// The helper mount must contain a Linux binary even on a macOS test host.
+	p.cfg.SidecarBinaryPath = filepath.Join(t.TempDir(), "crewship-sidecar")
+	build := exec.CommandContext(ctx, "go", "build", "-o", p.cfg.SidecarBinaryPath, "github.com/crewship-ai/crewship/cmd/crewship-sidecar")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fence helper: %v: %s", err, out)
+	}
+	if fenced {
+		t.Setenv("CREWSHIP_RUNTIME", "runc")
+		crew.NetworkMode = "restricted"
+		p.cfg.EgressFenceCrews = []string{crew.ID}
+	}
+	workspace := filepath.Join(p.cfg.OutputBasePath, "workspaces", crew.ID)
+	if err := os.MkdirAll(workspace, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(workspace, "upgrade-fixture")
+	if err := os.WriteFile(marker, nil, 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(marker, 0666); err != nil {
 		t.Fatal(err)
 	}
 	var replacementID, imageID string
-	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{Name: p.CrewContainerName(crew.ID, crew.Slug), Config: &container.Config{Image: image.ID, User: "1001:1001", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"infinity"}, Labels: map[string]string{resourcelifecycle.InstanceLabel: prefix, crewCrewIDLabel: crew.ID, crewKindLabel: crewRuntimeKind}}, HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}}})
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{Name: p.CrewContainerName(crew.ID, crew.Slug), Config: &container.Config{Image: image.ID, User: "1001:1001", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{"infinity"}, Labels: map[string]string{resourcelifecycle.InstanceLabel: prefix, crewCrewIDLabel: crew.ID, crewKindLabel: crewRuntimeKind}}, HostConfig: &container.HostConfig{Binds: []string{workspace + ":/workspace"}, NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +203,18 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	if _, err = cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	if fenced {
+		// The previous controller installed a real kernel fence. The new
+		// controller shares Docker and the installation identity, but none
+		// of the old controller's in-memory confirmations.
+		previous := &Provider{client: cli, cfg: p.cfg, logger: p.logger}
+		if err := previous.ensureEgressFence(ctx, crew, created.ID, image.ID); err != nil {
+			t.Fatalf("previous controller could not fence its runtime: %v", err)
+		}
+		if _, err := p.guardFencedExec(ctx, created.ID); !errors.Is(err, errFenceNotInPlace) {
+			t.Fatalf("cold controller should require its own fence confirmation: %v", err)
+		}
+	}
 	// Commit only this empty, owned fixture to produce a second immutable
 	// artifact. No production container or credential data is captured.
 	committed, err := cli.ContainerCommit(ctx, created.ID, client.ContainerCommitOptions{})
@@ -188,7 +225,7 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	crew.CachedImage = imageID
 	orch := orchestrator.New(p, idleIntegrationState{}, p.logger)
 	p.SetRuntimeIdleVerifier(orch.VerifyRuntimeIdle)
-	ex, err := cli.ExecCreate(ctx, created.ID, client.ExecCreateOptions{User: "1001:1001", Cmd: []string{"/bin/sleep", "30"}})
+	ex, err := cli.ExecCreate(ctx, created.ID, client.ExecCreateOptions{User: "1001:1001", Cmd: []string{"/bin/sh", "-c", "sleep 4 && echo complete > /workspace/upgrade-fixture"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,9 +239,6 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	if err != nil || !state.Running {
 		t.Fatalf("background process was lost: %v", err)
 	}
-	if out, err := exec.CommandContext(ctx, "docker", "exec", created.ID, "/bin/sh", "-c", `for p in /proc/[0-9]*; do [ "${p##*/}" = 1 ] && continue; [ "$(cat "$p/comm" 2>/dev/null)" = sleep ] && kill -TERM "${p##*/}"; done; true`).CombinedOutput(); err != nil {
-		t.Fatalf("finish fixture: %v %s", err, out)
-	}
 	use, err := p.AcquireCrewRuntimeUse(ctx, crew)
 	if use != nil {
 		replacementID = use.ContainerID()
@@ -212,6 +246,15 @@ func TestImageChange_RealIdleVerifierProtectsDetachedWork(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("idle image activation: %v", err)
+	}
+	result, err := p.Exec(ctx, provider.ExecConfig{ContainerID: replacementID, User: "1001:1001", Cmd: []string{"cat", "/workspace/upgrade-fixture"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(result.Reader)
+	result.Reader.Close()
+	if err != nil || string(data) != "complete\n" {
+		t.Fatalf("replacement could not read completed work: %q %v", data, err)
 	}
 	if replacementID == "" || replacementID == created.ID {
 		t.Fatal("old runtime was not replaced")

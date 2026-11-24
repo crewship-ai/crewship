@@ -152,3 +152,77 @@ func TestRuntimeUseReconcileNeverForceRemoves(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeUpgradeRetriesUnknownOccupancy(t *testing.T) {
+	for _, permanent := range []bool{false, true} {
+		t.Run(map[bool]string{true: "permanent", false: "temporary"}[permanent], func(t *testing.T) {
+			p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
+			old := daemon.containers[refreshOldID]
+			old.labels[crewRuntimeContractLabel] = "previous"
+			old.labels[crewSidecarHashLabel] = hash
+			calls := 0
+			p.SetRuntimeIdleVerifier(func(context.Context, string, string) error {
+				calls++
+				if permanent || calls == 1 {
+					return provider.ErrRuntimeObservation
+				}
+				return nil
+			})
+			use, err := p.AcquireCrewRuntimeUse(t.Context(), refreshCrew())
+			if permanent {
+				if !errors.Is(err, provider.ErrRuntimeObservation) || calls != 3 || daemon.count("stop ") != 0 || daemon.count("remove ") != 0 {
+					t.Fatalf("unknown occupancy: err=%v calls=%d", err, calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer use.Release()
+			if calls != 2 || use.ContainerID() == refreshOldID || daemon.count("stop ") != 1 {
+				t.Fatalf("retry did not converge: calls=%d id=%s", calls, use.ContainerID())
+			}
+		})
+	}
+}
+
+func TestContractUpgradeSharesOneReplacement(t *testing.T) {
+	p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
+	old := daemon.containers[refreshOldID]
+	old.labels[crewRuntimeContractLabel] = "previous"
+	old.labels[crewSidecarHashLabel] = hash
+	p.SetRuntimeIdleVerifier(func(context.Context, string, string) error { return nil })
+	type outcome struct {
+		id  string
+		err error
+	}
+	results := make(chan outcome, 8)
+	for range cap(results) {
+		go func() {
+			use, err := p.AcquireCrewRuntimeUse(t.Context(), refreshCrew())
+			if err != nil {
+				results <- outcome{err: err}
+				return
+			}
+			id := use.ContainerID()
+			use.Release()
+			results <- outcome{id: id}
+		}()
+	}
+	first := ""
+	for range cap(results) {
+		res := <-results
+		if res.err != nil {
+			t.Fatalf("concurrent admission: %v", res.err)
+		}
+		if first == "" {
+			first = res.id
+		}
+		if first == "" || res.id != first || res.id == refreshOldID {
+			t.Fatalf("competing runtimes: %q vs %q", first, res.id)
+		}
+	}
+	if daemon.count("stop ") != 1 || daemon.count("remove ") != 1 {
+		t.Fatal("replacement repeated")
+	}
+}

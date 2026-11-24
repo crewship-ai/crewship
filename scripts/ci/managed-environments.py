@@ -48,6 +48,7 @@ TESTS = {
         'TestCacheEvictionRealDockerRetag',
         'TestImageChange_RealHeartbeatSurvivesNewImageAdmission',
         'TestImageChange_RealIdleVerifierProtectsDetachedWork',
+        'TestFencedRuntimeUpgradeAfterServerRestart',
     },
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},

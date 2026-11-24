@@ -282,17 +282,38 @@ func sharedCrewBind(base, source, target, access string) (string, error) {
 // The caller supplies buildMounts' own set, before adding any feature
 // mounts. Operator-configured install paths can survive failed staging and
 // must keep their original label.
-func (p *Provider) stagedArtifactBinds(mounts []mount.Mount) ([]mount.Mount, []string, error) {
-	if !p.relabelCrewBinds() {
+func (p *Provider) crewRuntimeBinds(mounts []mount.Mount, contractSnapshot bool) ([]mount.Mount, []string, error) {
+	if p.detected.Runtime != "podman" {
 		return mounts, nil, nil
 	}
 	remaining := mounts[:0]
 	var binds []string
 	for _, m := range mounts {
+		// The Podman compat API silently drops the local volume driver's
+		// device/options on ContainerCreate. Its native bind syntax preserves
+		// both the host directory and the kernel's noexec/nosuid flags.
+		if agentWritableNoexecTargets[m.Target] && m.Type == mount.TypeVolume {
+			source := m.VolumeOptions.DriverConfig.Options["device"]
+			if !filepath.IsAbs(source) || strings.Contains(source, ":") {
+				return nil, nil, fmt.Errorf("invalid crew data bind source for %s", m.Target)
+			}
+			bind := source + ":" + m.Target + ":rw"
+			if p.relabelCrewBinds() && contractSnapshot {
+				bind += ",z"
+			} else if p.relabelCrewBinds() {
+				var err error
+				bind, err = sharedCrewBind(p.cfg.OutputBasePath, source, m.Target, "rw")
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			binds = append(binds, bind+",noexec,nosuid")
+			continue
+		}
 		staged := (p.cfg.stagedSidecar && m.Target == "/usr/local/bin/crewship-sidecar") ||
 			(p.cfg.stagedEntrypoint && m.Target == "/usr/local/bin/entrypoint.sh") ||
 			(p.cfg.agentCLIArtifact != nil && m.Target == agentCLIExecutable)
-		if !staged || m.Type != mount.TypeBind || !m.ReadOnly {
+		if !p.relabelCrewBinds() || !staged || m.Type != mount.TypeBind || !m.ReadOnly {
 			remaining = append(remaining, m)
 			continue
 		}
