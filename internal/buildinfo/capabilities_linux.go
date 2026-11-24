@@ -22,10 +22,12 @@ func RequireEmptyProcessCapabilities() error {
 	if caps != [2]unix.CapUserData{} {
 		return denied
 	}
-	// PR_CAPBSET_READ returns EINVAL at the first unsupported capability.
+	// PR_CAPBSET_READ returns EINVAL at the running kernel's first unsupported
+	// capability. CAP_SETFCAP is part of every kernel supporting capget v3.
+	// Newer build headers may know capabilities that this kernel predates.
 	for cap := uintptr(0); cap <= 64; cap++ {
 		set, err := unix.PrctlRetInt(unix.PR_CAPBSET_READ, cap, 0, 0, 0)
-		if err == unix.EINVAL && cap > unix.CAP_LAST_CAP {
+		if err == unix.EINVAL && cap > unix.CAP_SETFCAP {
 			return nil
 		}
 		if err != nil {
