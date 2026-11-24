@@ -121,6 +121,12 @@ func TestRestoreLegacyWaitpointDoesNotRecreateAnUpgradedGate(t *testing.T) {
 	if err != nil || strings.Contains(string(raw), old) {
 		t.Fatal("workspace export retained a legacy waitpoint identity")
 	}
+	// Reconstruct the old on-disk bundle format. The current exporter already
+	// emits public identities, even when pointed at a legacy snapshot.
+	dump.Tables["pipeline_waitpoints"][0]["token"] = old
+	dump.Tables["inbox_items"][0]["source_id"] = old
+	dump.Tables["inbox_items"][0]["id"] = oldInbox
+	dump.Tables["inbox_item_reads"][0]["inbox_item_id"] = oldInbox
 	if err := backup.RestoreDump(ctx, db, dump); err != nil {
 		t.Fatal(err)
 	}

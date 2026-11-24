@@ -7,11 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/database"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -243,38 +243,6 @@ func (s *SQLWaitpointStore) DecideCallback(ctx context.Context, presented string
 	return id, workspaceID, err
 }
 
-// ---------------------------------------------------------------------------
-// Legacy-row migration
-//
-// The SQL half (migrations/20261119180903_waitpoint_callback_token_hash.sql)
-// adds callback_token_hash. The rest runs in Go when the store is constructed
-// — before anything serves a request — and again on every sweep, so a row
-// that failed, or a pre-#1910 row a restore brought back into a running
-// server, is converted within one sweep interval.
-//
-// OLD SECRETS ARE NOT CARRIED FORWARD. Before #1910 every workspace member
-// could read a working callback URL from GET …/pipelines/waitpoints, and the
-// token also sat in the clear in several other tables, so a pre-upgrade secret
-// cannot be presumed private. A legacy row therefore gets NO digest: the
-// public callback refuses it until a MANAGER mints a new URL
-// (`crewship routine waitpoints callback-url`). The authenticated routes keep
-// working because they key on the new id.
-//
-// For each row whose token is not a public id, in ONE transaction, the old
-// value is replaced by a fresh public id in the following identity references. Historical ADMIN CLI request paths
-// can retain the invalidated token:
-//
-//   - pipeline_waitpoints.token;
-//   - inbox_items.source_id AND inbox_items.id, which the inbox writer derives
-//     as "ibx_<workspace>_waitpoint_<source_id>" (internal/inbox/writer.go);
-//   - inbox_item_reads.inbox_item_id, the one foreign key onto inbox_items.id;
-//   - notification_deliveries.source_id and dedup_key ("<category>:<source>");
-//   - audit_logs.entity_id for waitpoint refusals.
-//
-// A row that fails stays exactly as it was (the transaction rolls back) and
-// is retried on the next sweep.
-// ---------------------------------------------------------------------------
-
 // LegacyWaitpointPublicID converts a legacy identity to the same public ID
 // during boot and restore. The space-separated domain is private to this
 // identity transform. The old bearer token cannot open a callback.
@@ -283,7 +251,7 @@ func LegacyWaitpointPublicID(workspaceID, old string) string {
 }
 
 // PublicWaitpointID returns the durable identity used by boot conversion,
-// notification receipts and scoped exports even while a row awaits migration.
+// notification receipts and scoped exports.
 func PublicWaitpointID(workspace, id string) string {
 	if id == "" || strings.HasPrefix(id, WaitpointIDPrefix) {
 		return id

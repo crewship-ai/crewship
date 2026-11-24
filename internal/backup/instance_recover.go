@@ -744,18 +744,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		}
 		// An instance snapshot may already carry the current schema ledger.
 		// Qualify its rows while the recovered directory is still offline.
-		if pending == 0 {
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-			if err := database.ConvertWaitpointIdentities(ctx, tx); err != nil {
-				return fmt.Errorf("backup: convert recovered waitpoints: %w", err)
-			}
-			if err := tx.Commit(); err != nil {
-				return err
-			}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := convertRestoreWaitpoints(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
 

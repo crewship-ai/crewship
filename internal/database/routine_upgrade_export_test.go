@@ -49,7 +49,7 @@ func RoutineUpgradeTestDB(t *testing.T) *sql.DB {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pending_runs WHERE id IN ('pending','cancelled') AND pinned_version IS NULL AND status=id`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("legacy start semantics: %d %v", count, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_waitpoints WHERE token IN ('pending','approved') AND decision_form_json='' AND status=token AND decision_payload='{"legacy":true}'`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_waitpoints WHERE ((token=? AND status='pending') OR (token=? AND status='approved')) AND decision_form_json='' AND decision_payload='{"legacy":true}'`, LegacyWaitpointPublicID("upgrade-ws", "pending"), LegacyWaitpointPublicID("upgrade-ws", "approved")).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("legacy decisions: %d %v", count, err)
 	}
 	must(`UPDATE pipelines SET description='edited after upgrade' WHERE id='one'`)

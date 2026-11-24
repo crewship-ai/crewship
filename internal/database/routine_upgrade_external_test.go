@@ -13,7 +13,7 @@ func TestT4RoutineUpgradePreservesLegacyApproval(t *testing.T) {
 	db := database.RoutineUpgradeTestDB(t)
 	store := pipeline.NewSQLWaitpointStore(db)
 	defer store.Close()
-	// #1910: opening the store re-keys legacy waitpoints (their old token was
+	// #1910: the startup schema migration re-keys legacy waitpoints (their old token was
 	// a callback capability) to a public wp_ id. The pending legacy approval
 	// must still be decidable under that new id.
 	var id string

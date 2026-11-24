@@ -481,7 +481,7 @@ func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, use
 	if tx == nil || kind == "" || sourceID == "" {
 		return 0, nil
 	}
-	return resolveSource(ctx, tx, kind, sourceID, action, userID, "", nil)
+	return resolveSource(ctx, tx, kind, sourceID, action, userID, "")
 }
 
 // ResolveWorkspaceSourceTx addresses an Inbox card by its full unique key.
@@ -489,23 +489,28 @@ func ResolveWorkspaceSourceTx(ctx context.Context, tx DBTX, workspace, kind, sou
 	if workspace == "" || tx == nil || kind == "" || sourceID == "" {
 		return 0, nil
 	}
-	return resolveSource(ctx, tx, kind, sourceID, action, userID, " AND workspace_id = ?", []any{workspace})
+	return resolveSource(ctx, tx, kind, sourceID, action, userID, workspace)
 }
 
-func resolveSource(ctx context.Context, tx DBTX, kind, sourceID, action, userID, scope string, scopeArgs []any) (int64, error) {
+func resolveSource(ctx context.Context, tx DBTX, kind, sourceID, action, userID, workspace string) (int64, error) {
 	// Encoding must stay byte-identical to ResolveBySource below, which this
 	// function was extracted from — otherwise resolved_at carries two formats
 	// depending on which variant wrote the row.
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: matches the autocommit ResolveBySource this was extracted from; resolved_at is read back for display, never compared in SQL
-	res, err := tx.ExecContext(ctx, `
+	query := `
 		UPDATE inbox_items
 		SET state = 'resolved',
 		    resolved_at = COALESCE(resolved_at, ?),
 		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
 		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
 		    updated_at = ?
-		WHERE kind = ? AND source_id = ? AND state != 'resolved'`+scope,
-		append([]any{now, userID, action, now, kind, sourceID}, scopeArgs...)...)
+		WHERE kind = ? AND source_id = ? AND state != 'resolved'`
+	args := []any{now, userID, action, now, kind, sourceID}
+	if workspace != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, workspace)
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}

@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
-	"strings"
 )
 
 // BackupTables is the ordered list of tables exported in workspace /
@@ -1299,17 +1300,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// re-keyed table degenerates the statement into a NOT NULL violation
 	// that OR IGNORE then swallows. Counted here, reported to the operator
 	// by the caller. See dropped_columns.go.
-	if len(dump.Tables["pipeline_waitpoints"]) > 0 || len(dump.Tables["inbox_items"]) > 0 {
-		columns, err := tableColumns(ctx, tx, "pipeline_waitpoints")
-		if err != nil {
-			return stats, fmt.Errorf("backup: probe waitpoint identity schema: %w", err)
-		}
-		if columns["callback_token_hash"] {
-			if err := database.ConvertWaitpointIdentities(ctx, tx); err != nil {
-				return stats, fmt.Errorf("backup: convert destination waitpoints: %w", err)
-			}
-			dump = normalizeLegacyWaitpointRestore(dump)
-		}
+	if current, err := convertRestoreWaitpoints(ctx, tx); err != nil {
+		return stats, err
+	} else if current {
+		dump = normalizeLegacyWaitpointRestore(dump)
 	}
 	var dropped droppedColumnTally
 	restoredMissions := map[string]bool{}
@@ -1843,4 +1837,20 @@ func UnmarshalDump(data []byte) (*DBDump, error) {
 		return nil, fmt.Errorf("backup: unmarshal dump: %w", err)
 	}
 	return &d, nil
+}
+
+// convertRestoreWaitpoints prepares existing identities on the restore transaction.
+// Older recovery targets acquire the digest column in the startup migration.
+func convertRestoreWaitpoints(ctx context.Context, tx *sql.Tx) (bool, error) {
+	cols, err := tableColumns(ctx, tx, "pipeline_waitpoints")
+	if err != nil {
+		return false, fmt.Errorf("backup: probe waitpoint schema: %w", err)
+	}
+	if !cols["callback_token_hash"] {
+		return false, nil
+	}
+	if err := database.ConvertWaitpointIdentities(ctx, tx); err != nil {
+		return false, fmt.Errorf("backup: convert recovered waitpoints: %w", err)
+	}
+	return true, nil
 }
