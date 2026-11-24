@@ -94,7 +94,16 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
     if (!ta || !trigger || !matches.length) return
     ta.setAttribute("aria-autocomplete", "list")
     ta.setAttribute("aria-controls", listId)
-    ta.setAttribute("aria-activedescendant", `${listId}-${selected}`)
+    const selectedId = `${listId}-${selected}`
+    ta.setAttribute("aria-activedescendant", selectedId)
+    const list = document.getElementById(listId)
+    const option = document.getElementById(selectedId)
+    if (list && option) {
+      const visible = list.getBoundingClientRect()
+      const active = option.getBoundingClientRect()
+      if (active.top < visible.top) list.scrollTop -= visible.top - active.top
+      else if (active.bottom > visible.bottom) list.scrollTop += active.bottom - visible.bottom
+    }
     return () => {
       ta.removeAttribute("aria-autocomplete")
       ta.removeAttribute("aria-controls")
@@ -147,7 +156,7 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
           <AtSign className="h-3 w-3" />
           <span>{members.some((m) => m.kind === "human") ? "Mention a participant" : "Mention an agent"}</span>
         </div>
-        <ul id={listId} role="listbox" aria-label="Mention suggestions" className="max-h-64 overflow-y-auto py-1">
+        <ul id={listId} role="listbox" aria-label="Mention suggestions" className="max-h-64 overflow-y-auto py-1 [@media(max-height:640px)]:max-h-[min(16rem,18dvh)]">
           {matches.map((m, i) => (
             <li key={m.id} role="presentation">
               <button
@@ -157,7 +166,7 @@ export function MentionAutocomplete({ text, textareaRef, members, onPick }: Ment
                 aria-selected={i === selected}
                 tabIndex={-1}
                 onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setHighlighted(i)}
+                onMouseMove={() => setHighlighted(i)}
                 onClick={() => {
                   onPick(m, trigger.start)
                   setTrigger(null)

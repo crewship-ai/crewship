@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useRef } from "react"
+import { cn } from "@/lib/utils"
 import { Camera } from "lucide-react"
 import { toast } from "@/lib/toast"
 
@@ -89,6 +90,8 @@ interface AttachmentZoneProps {
    * the sheet, next to the field that asked for it.
    */
   showChips?: boolean
+  chipsBeforeInput?: boolean
+  chipListClassName?: string
 }
 
 function isAbortError(err: unknown): boolean {
@@ -405,6 +408,8 @@ export function AttachmentZone({
   sessionId,
   children,
   showChips = true,
+  chipsBeforeInput = false,
+  chipListClassName,
 }: AttachmentZoneProps) {
   // Subscribe only to THIS session's attachment list — the whole-store
   // subscription re-rendered every mounted zone on any session's draft or
@@ -456,20 +461,18 @@ export function AttachmentZone({
     [storeKey, removeAttachment],
   )
 
+  const chips = showChips && sessionAttachments.length > 0 ? (
+    <Attachments attachments={sessionAttachments} onRemove={handleRemove} onRetry={handleRetry}
+      onCancel={cancel} className={cn("px-2", chipListClassName)} />
+  ) : null
+
   return (
     <div className="flex flex-col gap-2">
+      {chipsBeforeInput && chips}
       <AttachmentDropZone onFiles={handleFiles} onPasteCapture={handlePasteCapture} className="rounded-xl">
         {children}
       </AttachmentDropZone>
-      {showChips && sessionAttachments.length > 0 && (
-        <Attachments
-          attachments={sessionAttachments}
-          onRemove={handleRemove}
-          onRetry={handleRetry}
-          onCancel={cancel}
-          className="px-2"
-        />
-      )}
+      {!chipsBeforeInput && chips}
     </div>
   )
 }

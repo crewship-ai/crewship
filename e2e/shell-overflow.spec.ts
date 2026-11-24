@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { test, expect, type Page } from "@playwright/test"
 
 // Shell geometry — #2156.
@@ -25,6 +26,154 @@ import { test, expect, type Page } from "@playwright/test"
 // navigated page. storageState from global-setup still authenticates it.
 
 const VIEWPORT = { width: 1600, height: 950 }
+
+test.describe("short chat viewport", () => {
+  test.use({ hasTouch: true, isMobile: true })
+
+  for (const viewport of [{ width: 667, height: 375 }, { width: 844, height: 390 }, { width: 915, height: 412 }, { width: 390, height: 844 }]) {
+    for (const available of [true, false]) {
+      test(`the chat composer fits at ${viewport.width}×${viewport.height} with Docker ${available ? "available" : "unavailable"}`, async ({ page }) => {
+        await page.setViewportSize(viewport)
+        await page.route("**/api/v1/system/runtime", (route) => route.fulfill({ json: { available } }))
+        const runtime = page.waitForResponse("**/api/v1/system/runtime")
+        await page.goto("/chat/jordan")
+        await runtime
+        await expect(page.getByRole("button", { name: "New chat" }).first()).toBeVisible()
+        const banner = page.getByText("Docker is not running.", { exact: true })
+        if (available) {
+          await expect(banner).toBeHidden()
+        } else {
+          await expect(banner).toBeVisible()
+        }
+
+        const editor = page.locator("textarea[data-slot=input-group-control]")
+        await expect(editor).toBeVisible()
+        await expect.poll(() => editor.evaluate((element) =>
+          element.closest("[data-slot=input-group]")!.getBoundingClientRect().bottom -
+          element.closest(".surface-pane")!.getBoundingClientRect().bottom,
+        )).toBeLessThanOrEqual(1)
+
+        await editor.fill("@jord")
+        const suggestion = page.getByRole("option", { name: /@jordan/ })
+        await expect(suggestion).toBeVisible()
+        await expect.poll(() => suggestion.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          return !!hit && element.contains(hit)
+        })).toBe(true)
+
+        await suggestion.tap()
+        await expect(editor).toHaveValue(/@jordan/i)
+        await expect(editor).toBeFocused()
+
+        await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
+        const send = page.locator("form").filter({ has: editor }).locator('button[type="submit"]')
+        await expect(send).toBeVisible()
+        await expect.poll(() => send.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          const paneBottom = element.closest(".surface-pane")!.getBoundingClientRect().bottom
+          return rect.bottom <= Math.min(paneBottom, window.innerHeight) + 1 &&
+            !!hit && element.contains(hit)
+        })).toBe(true)
+      })
+    }
+  }
+  test("a short chat keeps failed upload actions and the latest reply reachable", async ({ page }) => {
+    await page.setViewportSize({ width: 667, height: 375 })
+    await page.route("**/api/v1/system/runtime", route => route.fulfill({ json: { available: false } }))
+    await page.route("**/api/v1/agents/*/chats/*/attachments?workspace_id=*",
+      route => route.fulfill({ status: 413, json: { error: "test upload rejected" } }))
+    const roster = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === "/api/v1/agents" && url.searchParams.has("workspace_id") && response.ok()
+    })
+    await page.goto("/chat/jordan")
+    const agents = await roster
+    const workspace = new URL(agents.url()).searchParams.get("workspace_id")!
+    const jordan = (await agents.json() as { id: string; slug: string }[]).find(agent => agent.slug === "jordan")
+    expect(jordan).toBeDefined()
+    const session = randomUUID()
+    const created = await page.request.post(`/api/v1/agents/${jordan!.id}/chats?workspace_id=${workspace}`, {
+      data: { session_id: session, origin: "UI" },
+    })
+    expect(created.ok()).toBe(true)
+    await page.route("**/api/v1/chats/*/participants?workspace_id=*", route => route.fulfill({
+      json: { participants: Array.from({ length: 5 }, (_, i) => ({ user_id: `test-mention-${i}`, full_name: `Teammate ${i}` })) },
+    }))
+    await page.route("**/api/v1/chats/*/messages?workspace_id=*", route => route.fulfill({
+      json: {
+        messages: Array.from({ length: 20 }, (_, i) => ({
+          id: `short-chat-message-${i}`,
+          role: i % 2 === 0 ? "user" : "assistant",
+          content: i === 19 ? "Newest reply in the short chat" : `Earlier chat message ${i + 1}`,
+          ts: new Date(Date.UTC(2026, 10, 24, 9, i)).toISOString(),
+        })),
+      },
+    }))
+    await page.goto(`/chat/jordan?session=${session}`)
+    await expect(page.getByText("Docker is not running.", { exact: true })).toBeVisible()
+    const editor = page.locator("textarea[data-slot=input-group-control]")
+    await expect(editor).toBeVisible()
+    await page.setViewportSize({ width: 667, height: 575 })
+    await editor.fill("@")
+    const matches = page.getByRole("listbox", { name: "Mention suggestions" })
+    await expect(matches.getByRole("option")).toHaveCount(6)
+    for (let i = 0; i < 5; i++) await editor.press("ArrowDown")
+    await expect(matches.getByRole("option", { selected: true })).toBeInViewport({ ratio: 0.5 })
+    await editor.press("Escape")
+    await page.setViewportSize({ width: 667, height: 375 })
+    await editor.fill(Array.from({ length: 12 }, (_, i) => `Draft line ${i + 1}`).join("\n"))
+    const put = page.waitForRequest(request => request.method() === "POST" && request.url().includes("/attachments?"))
+    const chooser = page.waitForEvent("filechooser")
+    await page.getByRole("button", { name: "Attach files" }).click()
+    await (await chooser).setFiles({ name: "sample.txt", mimeType: "text/plain", buffer: Buffer.from("local test attachment") })
+    await put
+    const failed = page.locator('[data-status="error"]').filter({ hasText: "sample.txt" })
+    await expect(failed).toContainText("Upload failed")
+    const send = editor.locator("xpath=ancestor::form").locator('button[type="submit"]')
+    await expect(send).toHaveAttribute("aria-disabled", "true")
+    await expect.poll(() => send.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    })).toBe(true)
+    await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
+    await failed.getByRole("button", { name: "Remove sample.txt" }).click()
+    await expect(failed).toHaveCount(0)
+    await page.setViewportSize({ width: 667, height: 575 })
+    await editor.fill("")
+    const newest = page.getByText("Newest reply in the short chat", { exact: true })
+    await expect(newest).toBeInViewport({ ratio: 0.5 })
+    await expect(editor).toBeInViewport({ ratio: 0.5 })
+
+    const transcript = page.locator('[data-slot="chat-transcript"]').getByRole("log")
+    const history = transcript.locator(":scope > div").first()
+    await expect.poll(() => history.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(80)
+    const pane = page.locator('[data-slot="compact-chat-scroll"]')
+    await expect.poll(() => pane.evaluate(element => element.scrollTop)).toBeCloseTo(0, 0)
+    await history.evaluate(element => { element.scrollTop = 60 })
+    const jumpToLatest = transcript.getByRole("button", { name: "Scroll to bottom" })
+    await expect(jumpToLatest).toBeVisible()
+    await expect(newest).not.toBeInViewport()
+
+    // Model the last turn gaining another block while the user reads upthread.
+    await history.evaluate(element => {
+      const growth = document.createElement("p")
+      growth.dataset.testStreamGrowth = ""
+      growth.style.height = "48px"
+      growth.textContent = "Another block of the latest answer"
+      element.firstElementChild!.appendChild(growth)
+    })
+    await page.setViewportSize({ width: 667, height: 595 })
+    await expect(jumpToLatest).toBeVisible()
+    await expect.poll(() => history.evaluate(element => element.scrollTop)).toBeCloseTo(60, 0)
+    await history.locator("[data-test-stream-growth]").evaluate(element => element.remove())
+    await jumpToLatest.click()
+    await expect(newest).toBeInViewport({ ratio: 0.5 })
+    await expect(editor).toBeInViewport({ ratio: 0.5 })
+  })
+
+})
 
 /** Every route that renders inside the shell and is reachable on demo data. */
 const PAGES = [

@@ -253,7 +253,7 @@ export function AskRail({
           // Grows UPWARD, out of the rail, for the same reason the form sheet
           // does: this rail sits directly above the composer, and a panel that
           // opened downward would cover the input it is offering to fill.
-          className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full max-w-sm overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+          className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full max-w-sm overflow-y-auto rounded-lg border bg-popover p-1 shadow-md [@media(max-height:520px)]:max-h-[min(16rem,22dvh)]"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.stopPropagation()

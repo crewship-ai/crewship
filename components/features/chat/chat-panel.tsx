@@ -1199,7 +1199,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   }, [turns, agentName])
 
   const accessMode = useAccessMode()
-  const isMobile = useIsMobile()
+  const isPhone = useIsMobile()
+  const isMobile = isPhone || mobilePanel !== undefined
   const verifiedChatReadScope = !historyDenied && accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
   // Saved Documents have human Page identity, never an agent file/store target.
   const [documentPreview, setDocumentPreview] = useState<{ target: ViewerTarget; scope: string; activation: number } | null>(null)
@@ -1548,6 +1549,18 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     </Conversation>
   )
 
+  const compactScrollerRef = useRef<HTMLDivElement>(null)
+  const keepDraftControlsVisible = () => {
+    const scroller = compactScrollerRef.current
+    if (!scroller || !window.matchMedia("(max-height: 640px)").matches) return
+    // An editor input can grow its box. Follow explicit typing in the outer
+    // pane, while passive resizes and incoming turns leave both scroll
+    // positions alone.
+    requestAnimationFrame(() => {
+      if (scroller.isConnected) scroller.scrollTop = 0
+    })
+  }
+
   const conversationUnavailable = refusedScopes.has(chatReadScope)
   const unavailableNotice = conversationUnavailable ? (
     <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
@@ -1600,85 +1613,96 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   if (mobilePanel === "chat") {
     return withProjects(
       <div className="relative flex flex-col h-full">
-        <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
+        <div ref={compactScrollerRef} data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto [overflow-anchor:none] [@media(max-height:640px)]:flex-col-reverse" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
+        <div className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-min">
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
-        <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
-        {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
-        <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
-          {isGroupChat && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
-              <Users className="h-3 w-3" />
-              Group · {Object.keys(participantNames).length}
+          <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
+          {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
+          <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
+            {isGroupChat && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary">
+                <Users className="h-3 w-3" />
+                Group · {Object.keys(participantNames).length}
+              </span>
+            )}
+            <span className="ml-auto flex items-center gap-1.5">
+              {/* Search, export and the command palette were mounted in the
+                  desktop branch only, so on a phone they did not exist — not
+                  degraded, absent. The palette's other way in is ⌘/, which a
+                  phone has no way to press. */}
+              <MobileChatAction label="Search this conversation" onClick={() => setSearchOpen(true)}>
+                <Search className="h-4 w-4" />
+              </MobileChatAction>
+              <MobileChatAction label="Export conversation" onClick={() => setExportOpen(true)}>
+                <Download className="h-4 w-4" />
+              </MobileChatAction>
+              <MobileChatAction label={`Chat commands (${CHAT_PALETTE_SHORTCUT})`} onClick={() => setSlashPaletteOpen(true)}>
+                <SlashIcon className="h-4 w-4" />
+              </MobileChatAction>
+              <CopyLinkButton />
             </span>
-          )}
-          <span className="ml-auto flex items-center gap-1.5">
-            {/* Search, export and the command palette were mounted in the
-                desktop branch only, so on a phone they did not exist — not
-                degraded, absent. The palette's other way in is ⌘/, which a
-                phone has no way to press. */}
-            <MobileChatAction label="Search this conversation" onClick={() => setSearchOpen(true)}>
-              <Search className="h-4 w-4" />
-            </MobileChatAction>
-            <MobileChatAction label="Export conversation" onClick={() => setExportOpen(true)}>
-              <Download className="h-4 w-4" />
-            </MobileChatAction>
-            <MobileChatAction label={`Chat commands (${CHAT_PALETTE_SHORTCUT})`} onClick={() => setSlashPaletteOpen(true)}>
-              <SlashIcon className="h-4 w-4" />
-            </MobileChatAction>
-            <CopyLinkButton />
-          </span>
-        </div>
-        {artifactLibrary}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {conversationEl}
-        </div>
-        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
-          <div className="px-4 pb-2 shrink-0">
-            <AskRail
-              questions={defaultSuggestions}
-              forms={askFormList}
-              limit={EMPTY_STATE_CHIP_LIMIT}
-              disabled={isStreaming || creatingSession}
-              onPickQuestion={handleSuggestionClick}
-              onPickForm={handleFormClick}
-            />
           </div>
-        )}
-        {unavailableNotice}
-        {prepareProjectInputs}
-        {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {pageContextChip}
-        {proposalChip}
-        {artifactStrip}
-        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
-        {canChat ? <ChatComposer
-          agentId={agentId}
-          sessionId={sessionId}
-          agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
-          sendRefusal={sendRefusal}
-          variant="mobile"
-          mentionMembers={mentionMembers}
-          isStreaming={isStreaming}
-          connectionStatus={connectionStatus}
-          draftSendable={draftSendable}
-          stopGeneration={stopGeneration}
-          stopping={stopping}
-          ensureSession={ensureSessionForSend}
-          ensureSessionForUpload={ensureSessionForUpload}
-          sendMessage={sendFromComposer}
-          onSend={onSend}
-          onSent={handleSent}
-          initialInput={composerInitialInput}
-          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
-          onContextApplied={() => setArtifactContext(null)}
-          askForm={activeAskForm}
-          onCloseAskForm={closeAskForm}
-          renderAskTemplate={renderAskTemplate}
-        /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
+          {artifactLibrary}
+          {/* Keep the history itself scrollable even when the short pane
+              expands to fit the composer and surrounding controls. */}
+          <div data-slot="chat-transcript" className="flex min-h-0 flex-1 flex-col [@media(max-height:640px)]:min-h-20 [@media(max-height:640px)]:basis-0 [@media(max-height:640px)]:[contain:size]">
+            {conversationEl}
+          </div>
+          <div className="shrink-0 empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
+            {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+            {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          </div>
+          {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
+            <div className="px-4 pb-2 shrink-0">
+              <AskRail
+                questions={defaultSuggestions}
+                forms={askFormList}
+                limit={EMPTY_STATE_CHIP_LIMIT}
+                disabled={isStreaming || creatingSession}
+                onPickQuestion={handleSuggestionClick}
+                onPickForm={handleFormClick}
+              />
+            </div>
+          )}
+        <div className="shrink-0 bg-background" onInputCapture={(event) => {
+          if (event.target instanceof HTMLTextAreaElement) keepDraftControlsVisible()
+        }}>
+          <div className="empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
+            {unavailableNotice}
+            {prepareProjectInputs}
+            {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+            {pageContextChip}
+            {proposalChip}
+            {artifactStrip}
+            {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
+          </div>
+          {canChat ? <ChatComposer
+            agentId={agentId}
+            sessionId={sessionId}
+            agentName={agentName}
+            documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+            artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+            sendRefusal={sendRefusal}
+            variant="mobile"
+            mentionMembers={mentionMembers}
+            isStreaming={isStreaming}
+            connectionStatus={connectionStatus}
+            draftSendable={draftSendable}
+            stopGeneration={stopGeneration}
+            stopping={stopping}
+            ensureSession={ensureSessionForSend}
+            ensureSessionForUpload={ensureSessionForUpload}
+            sendMessage={sendFromComposer}
+            onSend={onSend}
+            onSent={handleSent}
+            initialInput={composerInitialInput}
+            contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+            onContextApplied={() => setArtifactContext(null)}
+            askForm={activeAskForm}
+            onCloseAskForm={closeAskForm}
+            renderAskTemplate={renderAskTemplate}
+          /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
+        </div>
 
         <SlashPalette
           agentSlug={agentSlug}
@@ -1700,6 +1724,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
+        </div>
         </div>
         <div className="absolute inset-0 z-20 min-h-0 bg-background" hidden={!viewerOpen}>{viewerPanel}</div>
       </div>
