@@ -36,6 +36,25 @@ runs:
         go-version: ${{ inputs.go-version }}
         cache: true
 
+    - name: Prime the Go module cache
+      shell: bash
+      run: |
+        python3 - <<'PYTHON'
+        import subprocess
+        import sys
+        import time
+
+        for attempt in range(1, 4):
+            try:
+                subprocess.run(["go", "mod", "download"], timeout=60, check=True)
+                break
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                print(f"Go module download attempt {attempt}/3 failed: {error}", flush=True)
+                if attempt == 3:
+                    sys.exit(1)
+                time.sleep(2 * attempt)
+        PYTHON
+
     # Fail with a sentence instead of `pattern all:out: no matching files
     # found`, which points at web/embed.go and reads like a compile error
     # in whatever the PR actually changed.

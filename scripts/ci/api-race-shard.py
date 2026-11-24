@@ -144,7 +144,7 @@ def fingerprint(names):
     return hashlib.sha256('\n'.join(sorted(names)).encode()).hexdigest()
 
 
-def partition(inventory, count, *, adjacent=False):
+def partition(inventory, count, *, adjacent=False, boundaries=None):
     if not 1 <= count <= 32:
         raise ValueError('require 1 <= shard count <= 32')
     names = []
@@ -159,8 +159,14 @@ def partition(inventory, count, *, adjacent=False):
             raise ValueError('adjacent partitions require the API package')
         # Adjacent names permit small inventory-checked prefix expressions.
         # Keep exactly the same number of processes and every parent/subtest.
-        shards = [names[i * len(names) // count:(i + 1) * len(names) // count]
-                  for i in range(count)]
+        if boundaries is None:
+            indices = [i * len(names) // count for i in range(1, count)]
+        else:
+            if len(boundaries) != count - 1 or sorted(set(boundaries)) != boundaries:
+                raise ValueError('invalid measured API shard boundaries')
+            indices = [bisect_left(names, name) for name in boundaries]
+        edges = [0, *indices, len(names)]
+        shards = [names[start:end] for start, end in zip(edges, edges[1:])]
     else:
         shards = [names[i::count] for i in range(count)]
     # These API parents build the same real CLI. Keep their build/cache reuse
@@ -270,7 +276,11 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
     # compile is reused by the run instead of rebuilding SQLite.
     inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, env=env, text=True)
-    names, shards = partition(inventory, count, adjacent=PACKAGE == MODULE + '/internal/api')
+    api = PACKAGE == MODULE + '/internal/api'
+    boundaries = None
+    if api and count == 6:
+        boundaries = json.loads((ROOT / 'scripts/ci/api-race-cost-boundaries.json').read_text())['upper_starts']
+    names, shards = partition(inventory, count, adjacent=api, boundaries=boundaries)
     selected = shards[index]
     pattern = selection_pattern(selected, names if PACKAGE == MODULE + '/internal/api' else None)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),

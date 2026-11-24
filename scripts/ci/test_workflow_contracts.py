@@ -83,7 +83,7 @@ class WorkflowContracts(unittest.TestCase):
         ci = self.text('ci.yml')
         for name in ('go-test', 'go-shuffle'):
             lane = self.job(ci, name)
-            go_timeout = int(re.search(r'go-package-shard\.py run .*-timeout (\d+)m', lane).group(1))
+            go_timeout = int(re.search(r'go-package-shard\.py (?:run|shuffle) .*-timeout (\d+)m', lane).group(1))
             job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
             self.assertGreaterEqual(go_timeout, 20, name)
             self.assertGreaterEqual(job_cap - go_timeout, 3 + 5, name)  # measured overhead ≤ 3m07s
@@ -100,25 +100,31 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('shard: [0, 1, 2, 3, 4, 5]', plain)
         self.assertRegex(plain, r'go-package-shard\.py run "\$SHARD_INDEX" 6 --split-api ')
         shuffle = self.job(ci, 'go-shuffle')
-        command = re.search(r'^        run: (python3 scripts/ci/go-package-shard\.py run .*)$', shuffle, re.M).group(1)
+        command = re.search(r'^        run: (python3 scripts/ci/go-package-shard\.py shuffle .*)$', shuffle, re.M).group(1)
         self.assertNotIn('--split-api', command)
         self.assertNotRegex(command, r' -(run|skip)\b')
         go_timeout = int(re.search(r'-timeout (\d+)m', command).group(1))
         self.assertGreaterEqual(go_timeout * 60, 1.5 * 1182)
 
-    def test_go_platforms_cap_covers_the_unpartitioned_macos_suite(self):
-        # go-platforms runs `go test ./...` unpartitioned on macOS/arm64. On
-        # 2026-11-01 internal/api alone took 1146 s there and the job was
-        # cancelled at its 30m cap with every package passing (run
-        # 41313229101). The cap must leave room for setup plus the slowest
-        # package chain, not only for one package's -timeout.
-        lane = self.job(self.text('ci.yml'), 'go-platforms')
-        go_timeout = int(re.search(r'go test \./\.\.\. -count=1 -timeout (\d+)m', lane).group(1))
+    def test_go_platforms_require_all_native_packages_and_keep_timeouts(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'go-platforms')
+        self.assertIn('platform: [macos-arm64, linux-arm64]', lane)
+        self.assertIn('shard: [0, 1, 2]', lane)
+        self.assertIn('runner: macos-15', lane)
+        self.assertIn('runner: ubuntu-24.04-arm', lane)
+        self.assertIn('go-package-shard.py native "$PLATFORM" "$SHARD_INDEX" 3', lane)
+        self.assertIn('if-no-files-found: error', lane)
+        native = (ROOT / 'scripts/ci/go-package-shard.py').read_text().split('def run_platform(', 1)[1]
+        self.assertIn('["go", "list", "./..."]', native)
+        self.assertIn('["go", "build", "./cmd/crewship"]', native)
+        go_timeout = int(re.search(r'"-timeout", "(\d+)m"', native).group(1))
         job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
-        # Same run family: internal/api then hit the 20m package timeout on
-        # macOS (1200.5 s, run 41316056668), so the package bound is 30m.
         self.assertGreaterEqual(go_timeout, 30)
         self.assertGreaterEqual(job_cap - go_timeout, 15)
+        result = self.job(ci, 'result')
+        self.assertIn('go-platforms', result)
+        self.assertIn('pattern: native-coverage-*-${{ github.sha }}', result)
 
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()

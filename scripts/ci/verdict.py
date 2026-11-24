@@ -2,6 +2,7 @@
 """Fail closed on missing or non-successful jobs; permit only planned skips."""
 import json
 import os
+from pathlib import Path
 import sys
 
 GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
@@ -39,8 +40,42 @@ def failures(needs, event=None):
     return errors
 
 
+def require_native_coverage(directory, expected_sha=None):
+    receipts = [json.loads(path.read_text()) for path in sorted(directory.rglob("platform-shard.json"))]
+    platforms = {"linux-arm64", "macos-arm64"}
+    if len(receipts) != 6 or {r["platform"] for r in receipts} != platforms:
+        raise ValueError("need six native receipts across both arm64 platforms")
+    if expected_sha and any(r["source_sha"] != expected_sha for r in receipts):
+        raise ValueError("native receipts come from another revision")
+    cli = "github.com/crewship-ai/crewship/cmd/crewship"
+    for platform in sorted(platforms):
+        shards = [r for r in receipts if r["platform"] == platform]
+        if sorted(r["index"] for r in shards) != [0, 1, 2] or any(r["count"] != 3 for r in shards):
+            raise ValueError(f"{platform}: missing or duplicate shard")
+        inventory = shards[0]["inventory"]
+        if len(inventory) < 90 or len(set(inventory)) != len(inventory) or cli not in inventory:
+            raise ValueError(f"{platform}: invalid Go inventory")
+        seen = []
+        for shard in shards:
+            selected = shard["selected"]
+            if shard["inventory"] != inventory or not selected or sorted(shard["completed"]) != sorted(selected):
+                raise ValueError(f"{platform}: inconsistent inventory or completion evidence")
+            if shard["cli_build"] is not (cli in selected):
+                raise ValueError(f"{platform}: unexpected CLI build receipt")
+            seen.extend(selected)
+        if sorted(seen) != sorted(inventory):
+            raise ValueError(f"{platform}: packages are missing or duplicated")
+        print(f"{platform}: all {len(inventory)} packages covered exactly once")
+
+
 if __name__ == '__main__':
-    errors = failures(json.loads(os.environ['CI_NEEDS']), os.environ.get('GITHUB_EVENT_NAME'))
+    needs = json.loads(os.environ['CI_NEEDS'])
+    errors = failures(needs, os.environ.get('GITHUB_EVENT_NAME'))
+    if not errors and needs['go-platforms']['result'] == 'success':
+        try:
+            require_native_coverage(Path('.ci-native-platforms'), os.environ['GITHUB_SHA'])
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            errors.append(f'go-platforms: {error}')
     for error in errors:
         print(f'::error::{error}')
     sys.exit(bool(errors))
