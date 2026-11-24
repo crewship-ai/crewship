@@ -1,0 +1,1 @@
+- **The first chat after a Podman rebuild could fail or leave the crew waiting for an image update.** Crewship now verifies the rebuilt image and its runtime binds, waits for sidecar readiness, and recognizes an idle Podman init process when replacing the running container.

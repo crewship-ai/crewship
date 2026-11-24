@@ -1,10 +1,13 @@
 package dockerutil
 
 import (
+	"context"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/moby/moby/client"
 )
 
 // IsLocalImageID recognizes a full Docker image configuration digest. It is a
@@ -116,4 +119,37 @@ func LocalRepoDigest(repoDigests []string, ref string) string {
 		}
 	}
 	return ""
+}
+
+// ConfigImageID normalizes the two wire encodings used for daemon-reported
+// configuration IDs. Callers must never apply it to manifest digests or tags.
+func ConfigImageID(id string) string {
+	if len(id) == 64 {
+		id = "sha256:" + id
+	}
+	if !IsLocalImageID(id) {
+		return ""
+	}
+	return id
+}
+
+type imageInspector interface {
+	ImageInspect(context.Context, string, ...client.ImageInspectOption) (client.ImageInspectResult, error)
+}
+
+// VerifiedCommitID resolves the immutable commit response itself, so a racing
+// retag cannot substitute a different image between commit and inspection.
+func VerifiedCommitID(ctx context.Context, cli imageInspector, raw string) (string, error) {
+	id := ConfigImageID(raw)
+	if id == "" {
+		return "", fmt.Errorf("committed artifact has no valid immutable image identity")
+	}
+	image, err := cli.ImageInspect(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("inspect committed image %s: %w", id, err)
+	}
+	if ConfigImageID(image.ID) != id {
+		return "", fmt.Errorf("committed image %s differs from inspected config ID %q", id, image.ID)
+	}
+	return id, nil
 }

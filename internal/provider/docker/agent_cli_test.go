@@ -7,6 +7,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,7 +211,7 @@ func TestAgentCLIRequiredMissingClientCannotReuseLiveRuntime(t *testing.T) {
 }
 
 func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
-	for _, fault := range []string{"privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "writable-sdk-alias", "writable-sdk-volume-alias", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
+	for _, fault := range []string{"podman-safe", "podman-local-archive", "podman-symlink", "podman-capabilities", "docker-expanded", "privileged", "capability", "missing-no-new-privileges", "writable-sdk", "writable-staging-volume", "writable-sdk-alias", "writable-sdk-volume-alias", "parent-alias", "image-architecture", "damaged-probe", "stale-probe-commit"} {
 		t.Run(fault, func(t *testing.T) {
 			p, daemon, hash := newSidecarRefreshFixture(t, "", "running")
 			fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
@@ -221,18 +223,57 @@ func TestAgentCLIRuntimeAdmissionRejectsUnsafeActualResponses(t *testing.T) {
 			daemon.containers[refreshOldID].labels[crewSidecarHashLabel] = hash
 			daemon.containers[refreshOldID].labels["crewship.agent-cli-sha256"] = fixture.agentCLIArtifact.SHA256
 			daemon.sdk = &agentSDKFake{t: t, artifact: fixture.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, fault: fault}
+			if strings.HasPrefix(fault, "podman-") {
+				p.detected.Runtime = "podman"
+			}
+			if fault == "podman-local-archive" {
+				p.selinuxEnabled = true
+			}
 			if fault == "stale-probe-commit" {
 				daemon.sdk.commit = strings.Repeat("c", 40)
 			}
 			team := refreshCrew()
 			ready := false
 			team.ProvisionSink = func(event devcontainer.ProvisionEvent) { ready = ready || event.Step == devcontainer.ProvStepReady }
-			if _, err := p.EnsureCrewRuntime(t.Context(), team); err == nil {
+			_, err := p.EnsureCrewRuntime(t.Context(), team)
+			if fault == "podman-safe" {
+				if err != nil || !ready {
+					t.Fatalf("safe Podman runtime: ready=%v, error=%v", ready, err)
+				}
+				return
+			}
+			if err == nil {
 				t.Fatal("runtime preflight admitted an unsafe or stale SDK response")
 			}
 			if ready {
 				t.Fatal("failed SDK preflight was advertised as a ready runtime")
 			}
 		})
+	}
+}
+
+func TestAgentCLIPodmanSuccessfulAdmissionWithoutArchive(t *testing.T) {
+	p, daemon, _ := newSidecarRefreshFixture(t, "", "running")
+	fixture := stageRuntimeArtifacts(agentCLIProviderFixture(t), quietLogger())
+	p.cfg.agentCLIArtifact = fixture.agentCLIArtifact
+	p.cfg.ExpectedAgentCLICommit = strings.Repeat("b", 40)
+	p.cfg.RequiredAgentCLICommands = []string{"version"}
+	p.detected.Runtime = "podman"
+	p.selinuxEnabled = true
+	daemon.containers[refreshOldID].labels["crewship.agent-cli-sha256"] = fixture.agentCLIArtifact.SHA256
+	daemon.sdk = &agentSDKFake{t: t, artifact: fixture.agentCLIArtifact, commit: p.cfg.ExpectedAgentCLICommit, fault: "podman-local-archive"}
+	host, err := os.Stat(fixture.agentCLIArtifact.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	// The fake daemon has no kernel init process. Stand in only for the
+	// procfs lookup; exercise admission through the final executable probe.
+	verify := func(_ context.Context, cli *client.Client, c container.InspectResponse, _ map[string]bool, target string, staged os.FileInfo) error {
+		checked = cli == p.client && c.ID == refreshOldID && target == agentCLIExecutable && os.SameFile(staged, host)
+		return nil
+	}
+	if err := p.qualifyInspectedAgentCLI(t.Context(), p.client, refreshOldID, verify); err != nil || !checked {
+		t.Fatalf("local Podman admission: mount checked=%v, error=%v", checked, err)
 	}
 }
