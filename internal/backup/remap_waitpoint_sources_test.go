@@ -220,49 +220,60 @@ func TestWaitpointInstanceRecoveryDuringConversion(t *testing.T) {
 func TestWaitpointRestoreRejectsInvalidIdentity(t *testing.T) {
 	for _, field := range []string{"token", "workspace_id"} {
 		for _, op := range []string{"additive", "fork"} {
-			t.Run(op+"/"+field, func(t *testing.T) {
-				db := openMigratedDB(t)
-				ws := seedWorkspace(t, db)
-				if _, err := db.Exec(`INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at,callback_token_hash) VALUES('wp_target',?,'existing','gate','approval','2099-01-01','target-digest')`, ws); err != nil {
-					t.Fatal(err)
-				}
-				row := func(id string) map[string]any {
-					return map[string]any{"token": id, "workspace_id": ws, "pipeline_run_id": id, "step_id": "gate", "kind": "approval", "timeout_at": "2099-01-01", "callback_token_hash": "bundle-digest"}
-				}
-				invalid := row("invalid")
-				invalid[field] = float64(42)
-				dump := &backup.DBDump{Tables: map[string][]map[string]any{"pipeline_waitpoints": {row("wp_valid"), invalid}}}
-				observer, err := db.Conn(t.Context())
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer observer.Close()
-				version := func() int {
-					var v int
-					if err := observer.QueryRowContext(t.Context(), "PRAGMA data_version").Scan(&v); err != nil {
+			for _, invalidKind := range []string{"number", "missing", "null", "empty"} {
+				t.Run(op+"/"+field+"/"+invalidKind, func(t *testing.T) {
+					db := openMigratedDB(t)
+					ws := seedWorkspace(t, db)
+					if _, err := db.Exec(`INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,timeout_at,callback_token_hash) VALUES('wp_target',?,'existing','gate','approval','2099-01-01','target-digest')`, ws); err != nil {
 						t.Fatal(err)
 					}
-					return v
-				}
-				before := version()
+					row := func(id string) map[string]any {
+						return map[string]any{"token": id, "workspace_id": ws, "pipeline_run_id": id, "step_id": "gate", "kind": "approval", "timeout_at": "2099-01-01", "callback_token_hash": "bundle-digest"}
+					}
+					invalid := row("invalid")
+					switch invalidKind {
+					case "number":
+						invalid[field] = float64(42)
+					case "missing":
+						delete(invalid, field)
+					case "null":
+						invalid[field] = nil
+					case "empty":
+						invalid[field] = ""
+					}
+					dump := &backup.DBDump{Tables: map[string][]map[string]any{"pipeline_waitpoints": {row("wp_valid"), invalid}}}
+					observer, err := db.Conn(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer observer.Close()
+					version := func() int {
+						var v int
+						if err := observer.QueryRowContext(t.Context(), "PRAGMA data_version").Scan(&v); err != nil {
+							t.Fatal(err)
+						}
+						return v
+					}
+					before := version()
 
-				switch op {
-				case "additive":
-					err = backup.RestoreDump(t.Context(), db, dump)
-				case "fork":
-					err = backup.RemapIDs(t.Context(), db, dump)
-				}
-				if err == nil {
-					t.Error("accepted invalid waitpoint identity")
-				}
-				if version() != before {
-					t.Fatal("restore committed changes to the target database")
-				}
-				var total, original int
-				if err := db.QueryRow(`SELECT count(*),count(*) FILTER(WHERE token='wp_target' AND callback_token_hash='target-digest') FROM pipeline_waitpoints`).Scan(&total, &original); err != nil || total != 1 || original != 1 {
-					t.Fatalf("target changed: rows=%d original=%d err=%v", total, original, err)
-				}
-			})
+					switch op {
+					case "additive":
+						err = backup.RestoreDump(t.Context(), db, dump)
+					case "fork":
+						err = backup.RemapIDs(t.Context(), db, dump)
+					}
+					if err == nil {
+						t.Error("accepted invalid waitpoint identity")
+					}
+					if version() != before {
+						t.Fatal("restore committed changes to the target database")
+					}
+					var total, original int
+					if err := db.QueryRow(`SELECT count(*),count(*) FILTER(WHERE token='wp_target' AND callback_token_hash='target-digest') FROM pipeline_waitpoints`).Scan(&total, &original); err != nil || total != 1 || original != 1 {
+						t.Fatalf("target changed: rows=%d original=%d err=%v", total, original, err)
+					}
+				})
+			}
 		}
 	}
 }
