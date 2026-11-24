@@ -213,8 +213,16 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	}
 	select {
 	case raw := <-observer.Frames():
-		var frame ws.ServerMessage
-		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" || frame.Channel != "page:owner-changing" {
+		var frame struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ArtifactID string   `json:"artifact_id"`
+				SessionIDs []string `json:"session_ids"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(raw, &frame) != nil || frame.Type != "session_closed" ||
+			frame.Payload.ArtifactID != "owner-changing" || len(frame.Payload.SessionIDs) != 1 ||
+			frame.Payload.SessionIDs[0] != affected.SessionID {
 			t.Fatalf("writer closure control: %s", raw)
 		}
 	case <-time.After(5 * time.Second):
