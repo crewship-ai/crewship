@@ -117,11 +117,16 @@ export function useChatCompactLayout(): boolean {
   const [compact, setCompact] = useState(false)
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
-    const mql = window.matchMedia(`(max-width: ${CHAT_TREE_BREAKPOINT - 1}px), (max-width: 1023px) and (max-height: 520px) and (pointer: coarse)`)
-    const onChange = () => setCompact(mql.matches)
-    mql.addEventListener("change", onChange)
+    const narrow = window.matchMedia(`(max-width: ${CHAT_TREE_BREAKPOINT - 1}px)`)
+    const shortTouch = window.matchMedia("(max-width: 1023px) and (max-height: 520px) and (pointer: coarse)")
+    const onChange = () => setCompact(window.innerWidth < CHAT_TREE_BREAKPOINT || shortTouch.matches)
+    narrow.addEventListener("change", onChange)
+    shortTouch.addEventListener("change", onChange)
     onChange()
-    return () => mql.removeEventListener("change", onChange)
+    return () => {
+      narrow.removeEventListener("change", onChange)
+      shortTouch.removeEventListener("change", onChange)
+    }
   }, [])
   return compact
 }

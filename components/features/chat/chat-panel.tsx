@@ -1199,7 +1199,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   }, [turns, agentName])
 
   const accessMode = useAccessMode()
-  const isMobile = useIsMobile()
+  const isPhone = useIsMobile()
+  const isMobile = isPhone || mobilePanel !== undefined
   const verifiedChatReadScope = !historyDenied && accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
   // Saved Documents have human Page identity, never an agent file/store target.
   const [documentPreview, setDocumentPreview] = useState<{ target: ViewerTarget; scope: string; activation: number } | null>(null)
@@ -1600,7 +1601,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   if (mobilePanel === "chat") {
     return withProjects(
       <div className="relative flex flex-col h-full">
-        <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
+        <div data-slot="compact-chat-scroll" className="flex min-h-0 flex-1 flex-col [@media(max-height:520px)]:overflow-y-auto" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
           <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
           {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
@@ -1629,10 +1630,13 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             </span>
           </div>
           {artifactLibrary}
-          {conversationEl}
-          <div className="max-h-[20dvh] shrink-0 overflow-y-auto empty:hidden">
-          {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-          {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          <div className="flex min-h-12 flex-1 flex-col">
+            {conversationEl}
+          </div>
+          <div className="shrink-0 empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
+            {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+            {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
+          </div>
           {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
             <div className="px-4 pb-2 shrink-0">
               <AskRail
@@ -1645,9 +1649,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
               />
             </div>
           )}
-        </div>
-        <div className="shrink-0">
-          <div className="max-h-[20dvh] overflow-y-auto empty:hidden">
+        <div className="shrink-0 bg-background [@media(max-height:520px)]:sticky [@media(max-height:520px)]:bottom-0 [@media(max-height:520px)]:z-10">
+          <div className="empty:hidden [@media(max-height:520px)]:max-h-[20dvh] [@media(max-height:520px)]:overflow-y-auto">
             {unavailableNotice}
             {prepareProjectInputs}
             {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}

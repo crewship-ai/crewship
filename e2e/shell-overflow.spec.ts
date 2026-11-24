@@ -52,6 +52,14 @@ test.describe("short chat viewport", () => {
           element.closest(".surface-pane")!.getBoundingClientRect().bottom,
         )).toBeLessThanOrEqual(1)
 
+        if (viewport.height < 500) {
+          await editor.fill("@")
+          const matches = page.getByRole("listbox", { name: "Mention suggestions" })
+          await expect.poll(() => matches.getByRole("option").count()).toBeGreaterThan(1)
+          const highlighted = matches.getByRole("option", { selected: true })
+          await expect(highlighted).toBeInViewport({ ratio: 0.5 })
+          await editor.press("Escape")
+        }
         await editor.fill("@jord")
         const suggestion = page.getByRole("option", { name: /@jordan/ })
         await expect(suggestion).toBeVisible()
@@ -96,7 +104,12 @@ test.describe("short chat viewport", () => {
     const upload = await put
     const failed = page.locator('[data-status="error"]').filter({ hasText: "sample.txt" })
     await expect(failed).toContainText("Upload failed")
-    await expect(editor.locator("xpath=ancestor::form").locator('button[type="submit"]')).toHaveAttribute("aria-disabled", "true")
+    const send = editor.locator("xpath=ancestor::form").locator('button[type="submit"]')
+    await expect(send).toHaveAttribute("aria-disabled", "true")
+    await expect.poll(() => send.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    })).toBe(true)
     await failed.getByRole("button", { name: "Retry sample.txt" }).click({ trial: true })
     await failed.getByRole("button", { name: "Remove sample.txt" }).click()
     await expect(failed).toHaveCount(0)
