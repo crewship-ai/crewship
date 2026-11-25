@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Retry backoff could report success after a pipeline was cancelled.** The executor now checks cancellation before waiting and again when the retry timer wakes.
-
 - **Workflow, activity and routine graphs use React Flow 13.** The graph styles follow the selected light or dark theme, and fit-to-view keeps the existing proportional margins.
 
 - **Docs now say what the code does for delegation limits and learned rules (#1781, #1783).** Delegation depth and fan-out are limits per instance (`delegation.max_depth`, `delegation.max_fanout`); the per-agent `delegation_timeout_s`, `max_delegation_depth` and `max_parallel_delegates` columns are unused and the guide says so. Learned rules (`learned-*.md`) are written for operator review and are not delivered to any agent, and hand-written `topics/*.md` files are not returned by memory search. The consolidate guide's path and rule format are corrected, and the Memory guide no longer says consolidation rewrites `AGENT.md` / `CREW.md`. Delivering these to agents is tracked as post-1.0 work.
