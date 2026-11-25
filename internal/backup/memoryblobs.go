@@ -352,13 +352,17 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 // call to it so the two packages share one durability primitive
 // instead of two copies of the same sequence.
 func restoreMemoryBlobFile(ctx context.Context, dst string, r io.Reader) error {
-	return writeBlobDurable(ctx, dst, r, "")
+	return writeBlobDurable(ctx, dst, decodedRecoveryReader(ctx, r), "")
 }
 
 // errBlobDigestMismatch is returned by writeBlobDurable when the bytes it
 // was handed do not hash to the digest the caller expected. Nothing is left
 // at dst in that case.
 var errBlobDigestMismatch = errors.New("blob content does not match its sha256")
+
+func decodedRecoveryReader(ctx context.Context, r io.Reader) io.Reader {
+	return &restoreReadGuard{ctx: ctx, r: r, b: readBudget(ctx), decoded: true}
+}
 
 // writeBlobDurable is restoreMemoryBlobFile's body, shared with the
 // attachment-blob restore. When wantSha is non-empty the bytes are hashed
@@ -373,7 +377,7 @@ func writeBlobDurable(ctx context.Context, dst string, r io.Reader, wantSha stri
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
 		return fmt.Errorf("rand for tempname: %w", rerr)
 	}
-	tmp := dst + ".restore.tmp." + hex.EncodeToString(randBuf[:])
+	tmp := filepath.Join(filepath.Dir(dst), ".restore.tmp."+hex.EncodeToString(randBuf[:]))
 
 	// O_EXCL so a leftover tempfile from a previous crashed restore
 	// (same dst, different random suffix — so this can only collide on
@@ -385,7 +389,7 @@ func writeBlobDurable(ctx context.Context, dst string, r io.Reader, wantSha stri
 	cleanup := func() { _ = os.Remove(tmp) }
 
 	hasher := sha256.New()
-	if _, err = io.Copy(RestoreWriter(ctx, io.MultiWriter(out, hasher)), &restoreReadGuard{ctx: ctx, r: r, b: readBudget(ctx), decoded: true}); err != nil {
+	if _, err = io.Copy(RestoreWriter(ctx, io.MultiWriter(out, hasher)), r); err != nil {
 		_ = out.Close()
 		cleanup()
 		return fmt.Errorf("write: %w", err)

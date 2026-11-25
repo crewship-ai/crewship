@@ -411,7 +411,7 @@ func restoreOneAttachmentBlob(ctx context.Context, root, sha string, wss []strin
 			}
 			src, closeSrc = f, func() { _ = f.Close() }
 		}
-		err := writeBlobDurable(ctx, dst, src, sha)
+		err := writeBlobDurable(ctx, dst, decodedRecoveryReader(ctx, src), sha)
 		if closeSrc != nil {
 			closeSrc()
 		}

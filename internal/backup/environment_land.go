@@ -12,11 +12,13 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -48,6 +50,9 @@ func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m 
 				continue
 			}
 			if !src.Has(d) {
+				if opts.Force {
+					return fmt.Errorf("backup: required environment layer %s is missing", d)
+				}
 				missing++
 				continue
 			}
@@ -56,7 +61,7 @@ func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m 
 			}
 			rc, _, err := src.Open(ctx, d)
 			if err != nil {
-				if resourceFailure(err) {
+				if opts.Force || resourceFailure(err) {
 					return err
 				}
 				missing++
@@ -65,7 +70,7 @@ func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m 
 			_, n, err := staged.Put(&restoreReadGuard{ctx: ctx, r: rc, b: readBudget(ctx), decoded: true, generated: true}, d)
 			_ = rc.Close()
 			if err != nil {
-				if resourceFailure(err) {
+				if opts.Force || resourceFailure(err) {
 					return err
 				}
 				missing++
@@ -75,12 +80,20 @@ func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m 
 			bytes += n
 		}
 	}
-	if opts.Drill {
+	if opts.Force {
+		layers := staged
+		if opts.Drill {
+			layers = src
+		}
+		if err := validateForceEnvironments(ctx, m.Contents.Environments, layers, envArchives); err != nil {
+			return err
+		}
+	} else if opts.Drill {
 		if err := checkRecoveredEnvironmentKeys(ctx, rep, src, envArchives); err != nil {
 			return err
 		}
 	}
-	dir := filepath.Join(dataDir, RecoveredEnvironmentsDir)
+	dir := filepath.Join(rep.DataDir, RecoveredEnvironmentsDir)
 	if missing > 0 {
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d environment layer file(s) are neither in the bundle nor in %s: the crews they belong to get their data back and their environment rebuilt from the crew image", missing, src.Dir))
 	}
@@ -88,6 +101,68 @@ func stageRecoveredEnvironmentLayers(ctx context.Context, rep *RecoverReport, m 
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d crew environment(s) are staged under %s (%d layer file(s), %s copied); once the server runs with Docker, land them with `crewship admin instance backups environments land` — processes start fresh, nothing that was only in memory comes back", len(m.Contents.Environments), dir, copied, humanBytes(bytes)))
 	}
 	return ctx.Err()
+}
+
+// Verify each environment record against the manifest and read its layers
+// through the same keys and store paths that the landing operation will use.
+func validateForceEnvironments(ctx context.Context, summaries []EnvironmentSummary, store *EnvironmentStore, archives []string) error {
+	remaining := make(map[string]EnvironmentSummary, len(summaries))
+	for _, summary := range summaries {
+		if _, ok := remaining[summary.ID]; ok {
+			return errors.New("backup: duplicate environment in the manifest")
+		}
+		remaining[summary.ID] = summary
+	}
+	for _, archive := range archives {
+		records, err := extractArchive(ctx, archive)
+		if err != nil {
+			return err
+		}
+		err = validateForceEnvironmentArchive(ctx, records, store, remaining)
+		if err = errors.Join(err, records.Close()); err != nil {
+			return err
+		}
+	}
+	if len(remaining) > 0 {
+		return errors.New("backup: declared environment missing from staged archives")
+	}
+	return nil
+}
+
+func validateForceEnvironmentArchive(ctx context.Context, records *ExtractedPayload, store *EnvironmentStore, remaining map[string]EnvironmentSummary) error {
+	for _, slug := range records.Environments() {
+		env := records.EnvironmentBySlug[slug]
+		want, ok := remaining[env.ID]
+		if !ok || env.Crew != want.Crew || env.Platform.String() != want.Platform || env.BlobBytes() != want.Bytes || !slices.Equal(env.Blobs(), want.Blobs) {
+			return fmt.Errorf("backup: environment %s differs from its manifest record", slug)
+		}
+		delete(remaining, env.ID)
+		layers := store
+		if want.Inline {
+			layers = records.InlineEnvironmentBlobs()
+		}
+		raw, _ := BlobSources(layers)
+		open := EnvironmentBlobOpener(env, records.EnvironmentKeys(), raw)
+		checked := map[string]bool{}
+		for _, entry := range env.Image.Entries {
+			if entry.Type != "file" || checked[entry.Digest] {
+				continue
+			}
+			rc, _, err := open(ctx, entry.Digest)
+			if err != nil {
+				return err
+			}
+			digest, n, err := hashAll(&restoreReadGuard{ctx: ctx, r: rc, b: readBudget(ctx), decoded: true})
+			if err = errors.Join(err, rc.Close()); err != nil {
+				return err
+			}
+			if "sha256:"+digest != entry.Digest || n != entry.Size {
+				return fmt.Errorf("backup: invalid environment layer for %s", slug)
+			}
+			checked[entry.Digest] = true
+		}
+	}
+	return nil
 }
 
 // checkRecoveredEnvironmentKeys proves, for a drill, that the keys the

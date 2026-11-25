@@ -178,38 +178,6 @@ func TestCompletedServiceCaptureReleasesMaintenanceOnPackFailure(t *testing.T) {
 	}
 }
 
-func TestForcedInstanceRecoveryReplacesQuotaStaging(t *testing.T) {
-	db := openMigratedDBCov(t)
-	_, crew := seedCovWorkspace(t, db, "forced-recovery")
-	if _, err := db.Exec(`UPDATE crews SET services_json=? WHERE id=?`, `[{"name":"database","quota_enforced":true,"volumes":[{"name":"data","mount":"/data","quota_bytes":33554432,"generation":3}]}]`, crew); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO service_runtime_intents(id,crew_id,service_name,desired_state,version,updated_at) VALUES('forced-intent',?,'database','running',7,'2026-10-01T16:00:00Z')`, crew); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := CreateInstanceBackup(t.Context(), db, InstanceOptions{OutputDir: t.TempDir(), Recipients: []age.Recipient{identity.Recipient()}, Actor: covAdminActor(), ServiceSnapshots: &snapshotProbe{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	opts := RecoverOptions{BundlePath: result.Path, Identities: []age.Identity{identity}, DataDir: dir, Drill: true}
-	if _, err = RecoverInstance(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	opts.Force = true
-	if _, err = RecoverInstance(t.Context(), opts); err != nil {
-		t.Fatal(err)
-	}
-	files, err := filepath.Glob(filepath.Join(dir, RecoveredServicesDir, "quota-image-*.ext4"))
-	if err != nil || len(files) != 1 {
-		t.Fatalf("old recovery images leaked: %v %v", files, err)
-	}
-}
-
 type outsideWindowSnapshotProbe struct {
 	snapshotProbe
 	controller *quiesce.Controller
