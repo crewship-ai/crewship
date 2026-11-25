@@ -3,6 +3,8 @@ package chatbridge
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -122,5 +124,148 @@ func TestDeferredSendIsPersistedOnceBeforeTheBuild(t *testing.T) {
 				t.Fatalf("acks = %d, want %d", acks, tc.wantAcks)
 			}
 		})
+	}
+}
+
+type deltaResolver struct {
+	mockResolver
+	total atomic.Int32
+}
+
+func (d *deltaResolver) IncrementMessageCount(_ context.Context, _ string, delta int) error {
+	d.total.Add(int32(delta))
+	return nil
+}
+
+// A turn saved at deferral is counted when it is saved, so the count matches
+// the transcript even if the turn never runs, and the resumed run does not
+// count it a second time (#5571).
+func TestDeferredSendIsCountedOnceAtSave(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+	}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	enq := &stubEnqueuer{resRunning: true}
+	b.SetProvisioningEnqueuer(enq)
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "files from d1", func(ws.ChatEvent) {})
+	if !errors.Is(err, ws.ErrCrewProvisioning) {
+		t.Fatalf("send was not deferred: %v", err)
+	}
+	if got := res.total.Load(); got != 1 {
+		t.Fatalf("count after a saved, never-run turn = %d, want 1", got)
+	}
+	info.CachedImage = "crewship-cache:ready"
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{
+		AdapterBinaries:      []string{"claude"},
+		AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"}),
+	}
+	pending := enq.attachMsg
+	pending.Opts.HumanResume = true
+	_ = b.HandleChatMessage(context.Background(), pending.UserID, pending.ChatID, pending.Content, func(ws.ChatEvent) {}, pending.Opts)
+	if got := res.total.Load(); got != 1 {
+		t.Fatalf("count after the resumed run = %d, want the user turn counted once", got)
+	}
+}
+
+// A failure turn written after a turn that was counted at save adds only
+// itself, so a run that ends right after the save is never counted twice.
+func TestInBandFailureTurnDoesNotRecountASavedUserTurn(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		userCounted  bool
+		wantIncrease int32
+	}{{"user turn counted at save", true, 1}, {"user turn not yet counted", false, 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			info := &ChatInfo{AgentID: "a1", WorkspaceID: "ws-1"}
+			res := &deltaResolver{mockResolver: mockResolver{info: info}}
+			b := testBridgeWithContainer(t, res, &failContainer{})
+			b.persistInBandFailureTurn(context.Background(), "sess-1", info, "", nil, "cancelled", tc.userCounted)
+			if got := res.total.Load(); got != tc.wantIncrease {
+				t.Fatalf("count increase = %d, want %d", got, tc.wantIncrease)
+			}
+		})
+	}
+}
+
+// The reason a saved message never ran is written once per message, however
+// often the failure is reported.
+func TestRecordNotRunWritesOneTurnPerMessage(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{AgentID: "a1", WorkspaceID: "ws-1"}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	for i := 0; i < 3; i++ {
+		b.RecordNotRun(context.Background(), "sess-1", "trig-1", "build failed")
+	}
+	b.RecordNotRun(context.Background(), "sess-1", "trig-2", "build failed")
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].ID != "notrun-trig-1" || msgs[1].ID != "notrun-trig-2" {
+		t.Fatalf("transcript = %+v, want one turn per message", msgs)
+	}
+	if got := res.total.Load(); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+}
+
+// A queued message that waited behind a long run is checked against the
+// sender's rights again when it starts: if the membership changed meanwhile it
+// does not run (#5571).
+func TestQueuedSendIsRefusedWhenAuthorityChangedMeanwhile(t *testing.T) {
+	t.Parallel()
+	queued := &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1}
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 2},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+		CachedImage: "crewship-cache:ready",
+	}
+	b := testBridgeWithContainer(t, &mockResolver{info: info}, &failContainer{})
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "second", func(ws.ChatEvent) {},
+		ws.ChatMessageOption{HumanResume: true, HumanAuthority: queued, UserMessagePersisted: true, OriginalTriggerMessageID: "t2"})
+	if err == nil || !strings.Contains(err.Error(), "queued human authority changed") {
+		t.Fatalf("err = %v, want the authority-changed refusal", err)
+	}
+}
+
+// When the queue refuses a message that was already saved (cap reached), the
+// reason is written to the transcript once and the turn counts once.
+func TestQueueRefusalOfASavedMessageIsRecorded(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+	}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	b.SetProvisioningEnqueuer(&stubEnqueuer{resRunning: true, attachNoJob: true})
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "files from d1", func(ws.ChatEvent) {})
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var user, notRun int
+	for _, m := range msgs {
+		switch {
+		case m.Content == "files from d1":
+			user++
+		case strings.HasPrefix(m.ID, "notrun-"):
+			notRun++
+		}
+	}
+	if user != 1 || notRun != 1 {
+		t.Fatalf("transcript has %d user and %d not-run turns, want 1 and 1", user, notRun)
+	}
+	if got := res.total.Load(); got != 2 {
+		t.Fatalf("count = %d, want 2 (saved turn once, reason once)", got)
 	}
 }

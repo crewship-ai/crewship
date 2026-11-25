@@ -266,14 +266,15 @@ func startFailedOnMissingImage(code string, err error) bool {
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
 // sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
-	orch         *orchestrator.Orchestrator
-	container    provider.ContainerProvider
-	convStore    *conversation.Store
-	logWriter    *logcollector.Writer
-	resolver     ChatResolver
-	provisioning ProvisioningEnqueuer // optional; nil means auto-provision is disabled
-	cfg          BridgeConfig
-	logger       *slog.Logger
+	notRunRecorded sync.Map // chatID/triggerID of saved messages whose not-run reason is already in the transcript
+	orch           *orchestrator.Orchestrator
+	container      provider.ContainerProvider
+	convStore      *conversation.Store
+	logWriter      *logcollector.Writer
+	resolver       ChatResolver
+	provisioning   ProvisioningEnqueuer // optional; nil means auto-provision is disabled
+	cfg            BridgeConfig
+	logger         *slog.Logger
 
 	// containerCache maps crewID → containerID so subsequent messages
 	// skip the "Starting container..." status events (container is warm).
@@ -928,6 +929,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				return fmt.Errorf("persist user message: %w", err)
 			}
 			broadcastUserMsg()
+			if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+				b.logger.Warn("increment message count (deferred send)", "chat_id", chatID, "error", err)
+			}
 			msgOpt.UserMessagePersisted = true
 		}
 
@@ -985,6 +989,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}) {
 				b.logger.Warn("could not attach deferred message to provisioning job",
 					"crew_id", info.CrewID, "chat_id", chatID)
+				const queueRefused = "Your message was saved but could not be queued behind the environment build. Send it again once the build finishes."
+				if msgOpt.UserMessagePersisted {
+					b.RecordNotRun(ctx, chatID, triggerMessageID, queueRefused)
+				}
+				streamFn(ws.ChatEvent{Type: "error", Content: queueRefused, Metadata: map[string]any{"reason": "queue_unavailable"}})
 			}
 		}
 
@@ -1066,6 +1075,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// provisioning has cleared — unless the deferral above already saved and
 	// acknowledged this exact turn before the build ran (#5559).
 	alreadySaved := msgOpt.HumanResume && msgOpt.UserMessagePersisted && msgOpt.OriginalTriggerMessageID == triggerMessageID
+	// A turn saved at deferral was already counted then (below); the run's
+	// own bookkeeping adds only what it writes itself (#5571).
+	countTurn := func(c context.Context, delta int) error {
+		if alreadySaved {
+			delta--
+		}
+		if delta <= 0 {
+			return nil
+		}
+		return b.resolver.IncrementMessageCount(c, chatID, delta)
+	}
 	var persistErr error
 	if !alreadySaved {
 		persistErr = persistUserMsg()
@@ -1556,10 +1576,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Parts:     partAcc.Parts(),
 					Timestamp: repliedAt,
 				})
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				_ = countTurn(cleanCtx, 2)
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+				_ = countTurn(cleanCtx, 1)
 			}
 			if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 				reason := "detached_still_running"
@@ -1619,12 +1639,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Parts:     partAcc.Parts(),
 					Timestamp: repliedAt,
 				})
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				_ = countTurn(cleanCtx, 2)
 				// The partial reply is persisted — it counts as "a reply
 				// landed" for the never-miss-a-reply projection too.
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+				_ = countTurn(cleanCtx, 1)
 			}
 			if terminalErr == nil && confirmedStatus == "CANCELLED" && errors.Is(runErr, orchestrator.ErrExecutionStopConfirmed) {
 				return fmt.Errorf("run agent: %w", errors.Join(ws.ErrRunCancelled, runErr))
@@ -1646,7 +1666,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
 		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
-			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg)
+			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg, alreadySaved)
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
 		// non-zero inside the container) the same way container-start
@@ -1697,7 +1717,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}); err != nil {
 			b.logger.Error("failed to persist no-output error turn", "error", err, "chat_id", chatID)
 		}
-		if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+		if err := countTurn(ctx, 2); err != nil {
 			b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 		}
 		streamFn(ws.ChatEvent{
@@ -1756,7 +1776,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	// Update message count in DB (user + assistant = 2 messages)
-	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+	if err := countTurn(ctx, 2); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 
@@ -1801,6 +1821,33 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 // Best-effort by design: a persist failure is logged, never returned. The caller
 // is already on its way to returning the run error, and swapping that for a
 // storage error would hide the real cause.
+// RecordNotRun saves, as an ordinary system error turn, why a message that was
+// saved while a crew built never ran, so a reload shows the reason. It writes
+// at most one turn per saved message (the id is derived from the trigger id),
+// however many times the failure is reported.
+func (b *Bridge) RecordNotRun(ctx context.Context, chatID, triggerMessageID, reason string) {
+	if b.convStore == nil || triggerMessageID == "" || chatID == "" {
+		return
+	}
+	if _, dup := b.notRunRecorded.LoadOrStore(chatID+"/"+triggerMessageID, struct{}{}); dup {
+		return
+	}
+	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		ID:        "notrun-" + triggerMessageID,
+		Role:      conversation.RoleSystem,
+		Content:   reason,
+		Parts:     []conversation.Part{{Type: "error", Content: reason}},
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		b.notRunRecorded.Delete(chatID + "/" + triggerMessageID)
+		b.logger.Error("failed to record not-run turn", "error", err, "chat_id", chatID)
+		return
+	}
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
+	}
+}
+
 func (b *Bridge) persistInBandFailureTurn(
 	ctx context.Context,
 	chatID string,
@@ -1808,6 +1855,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	text string,
 	parts []conversation.Part,
 	reason string,
+	userAlreadyCounted bool,
 ) {
 	role := conversation.RoleAssistant
 	content := text
@@ -1834,8 +1882,12 @@ func (b *Bridge) persistInBandFailureTurn(
 		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)
 		return
 	}
-	// user turn + failure turn
-	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+	// user turn + failure turn (the user turn may have been counted when saved)
+	delta := 2
+	if userAlreadyCounted {
+		delta = 1
+	}
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, delta); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -60,9 +61,10 @@ type ProvisionJob struct {
 	// reload-replay via the GET endpoint.
 	Steps []string
 
-	// Pending holds at most one deferred message per chat, sender and authority
-	// epoch. A repeated send by that same actor/epoch replaces its content;
-	// another human or a newly admitted epoch retains independent work.
+	// Pending holds the deferred messages in arrival order. Each saved turn
+	// (identified by its trigger message id) is kept and run on its own; only a
+	// repeated attach of the same turn replaces its entry. Other humans and
+	// newly admitted epochs retain independent work.
 	// Attached while the crew's auto-provision job is running.
 	//
 	// Drained (read, then set to nil) in the SAME h.mu critical section that
@@ -74,7 +76,7 @@ type ProvisionJob struct {
 	// already terminal and AttachPendingMessage resumes it immediately
 	// instead of adding to a map nobody will ever drain again. There is no
 	// interleaving where both the drain and a late attach see the same entry.
-	Pending map[string]chatbridge.PendingChatMessage `json:"-"`
+	Pending []chatbridge.PendingChatMessage `json:"-"`
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -562,8 +564,20 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 // runs, the build already finished.
 const resumeMessageTimeout = 10 * time.Minute
 
+// maxPendingPerChat bounds how many saved turns of one chat may wait for a
+// crew build. Past it the send is refused with a visible error instead of
+// queueing without limit behind a long build.
+const maxPendingPerChat = 20
+
+// busyResumeRetries and busyResumeDelay bound the wait for a chat's live run to
+// end before a saved queued turn is reported as not run (about 1 minute).
+const (
+	busyResumeRetries = 5
+	busyResumeDelay   = 2 * time.Second
+)
+
 func pendingMessageKey(msg chatbridge.PendingChatMessage) string {
-	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority})
+	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority, msg.Opts.OriginalTriggerMessageID})
 	return string(key)
 }
 
@@ -591,12 +605,32 @@ func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge
 	}
 	switch job.Status {
 	case "pending", "running":
-		if job.Pending == nil {
-			job.Pending = make(map[string]chatbridge.PendingChatMessage)
+		// A turn that was saved on its own keeps its own entry, so none is
+		// dropped. Only the same turn attached twice (or turns without a
+		// trigger id, from the same sender and authority) is replaced.
+		key := pendingMessageKey(msg)
+		replaced := false
+		queued := 0
+		for i := range job.Pending {
+			if job.Pending[i].ChatID == msg.ChatID {
+				queued++
+			}
 		}
-		// Coalesce only within one sender and authority epoch. Other humans
-		// or a newly admitted epoch retain independent pending work.
-		job.Pending[pendingMessageKey(msg)] = msg
+		for i := range job.Pending {
+			if pendingMessageKey(job.Pending[i]) == key {
+				job.Pending[i] = msg
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			if queued >= maxPendingPerChat {
+				// The turn is saved but will not run; the caller tells the user.
+				h.mu.Unlock()
+				return false
+			}
+			job.Pending = append(job.Pending, msg)
+		}
 		h.mu.Unlock()
 		return true
 	case "completed":
@@ -634,18 +668,122 @@ func (h *ProvisioningHandler) spawnResumeMessage(msg chatbridge.PendingChatMessa
 // messages target independent chats (a crew can have several agents/chats)
 // and none should block another or the caller (runProvisioning /
 // markJobFailed), which still has its own DB/journal/broadcast work to do.
-func (h *ProvisioningHandler) resumePending(pending map[string]chatbridge.PendingChatMessage) {
-	for _, msg := range pending {
-		h.spawnResumeMessage(msg, nil)
-	}
+func (h *ProvisioningHandler) resumePending(pending []chatbridge.PendingChatMessage) {
+	h.spawnPendingPerChat(pending, nil)
 }
 
 // failPending fires the failure path of resumeMessage for every message a
 // terminal-transition drained off a job whose build did NOT succeed.
-func (h *ProvisioningHandler) failPending(pending map[string]chatbridge.PendingChatMessage, buildErr error) {
+func (h *ProvisioningHandler) failPending(pending []chatbridge.PendingChatMessage, buildErr error) {
+	h.spawnPendingPerChat(pending, buildErr)
+}
+
+// spawnPendingPerChat runs the drained messages of one chat one after the
+// other in arrival order, because a chat accepts one live run at a time: a
+// second concurrent resume would be refused as busy and its saved turn would
+// never be answered. Different chats still run independently.
+func (h *ProvisioningHandler) spawnPendingPerChat(pending []chatbridge.PendingChatMessage, buildErr error) {
+	var order []string
+	byChat := make(map[string][]chatbridge.PendingChatMessage)
 	for _, msg := range pending {
-		h.spawnResumeMessage(msg, buildErr)
+		if _, ok := byChat[msg.ChatID]; !ok {
+			order = append(order, msg.ChatID)
+		}
+		byChat[msg.ChatID] = append(byChat[msg.ChatID], msg)
 	}
+	for _, chatID := range order {
+		queue := byChat[chatID]
+		finish := beginBackgroundWork()
+		go func() {
+			defer finish()
+			for i, msg := range queue {
+				// On shutdown do not hold the process for the whole queue. The
+				// turns are already saved; the rest are left unrun and shown
+				// as such by the transcript.
+				if i > 0 && h.bgCtx != nil && h.bgCtx.Err() != nil {
+					h.logger.Warn("server stopping: queued chat messages left unrun",
+						"chat_id", chatID, "remaining", len(queue)-i)
+					ctx, cancel := context.WithTimeout(context.Background(), notRunRecordTimeout)
+					for _, left := range queue[i:] {
+						h.recordNotRunCtx(ctx, left, notRunStoppedReason)
+					}
+					cancel()
+					return
+				}
+				h.resumeOne(msg, buildErr)
+			}
+		}()
+	}
+}
+
+// notRunRecorder is implemented by the chat bridge: it writes the reason a
+// saved message never ran into the transcript.
+type notRunRecorder interface {
+	RecordNotRun(ctx context.Context, chatID, triggerMessageID, reason string)
+}
+
+// recordNotRun saves why a queued, already-saved message did not run, so the
+// reason is visible after a reload. Messages that were not saved at deferral
+// (Ask forms, page context, documents) are skipped: they are saved on run.
+func (h *ProvisioningHandler) recordNotRun(msg chatbridge.PendingChatMessage, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notRunRecordTimeout)
+	defer cancel()
+	h.recordNotRunCtx(ctx, msg, reason)
+}
+
+// notRunRecordTimeout bounds the writes that explain unrun messages, so a
+// shutdown is never held up by a slow store.
+const notRunRecordTimeout = 5 * time.Second
+
+func (h *ProvisioningHandler) recordNotRunCtx(ctx context.Context, msg chatbridge.PendingChatMessage, reason string) {
+	if !msg.Opts.UserMessagePersisted {
+		return
+	}
+	if rec, ok := h.chatResumer.(notRunRecorder); ok {
+		rec.RecordNotRun(ctx, msg.ChatID, msg.Opts.OriginalTriggerMessageID, reason)
+	}
+}
+
+// shuttingDown reports whether the server is stopping.
+func (h *ProvisioningHandler) shuttingDown() bool {
+	return h.bgCtx != nil && h.bgCtx.Err() != nil
+}
+
+const (
+	notRunStoppedReason = "Your message was saved but did not run: the server was stopped before it could start. Send it again."
+	notRunBusyReason    = "Your message was saved but did not run: this chat was busy for too long."
+	notRunPanicReason   = "Your message was saved but did not run because of an internal error. Send it again."
+	maxBuildDetailRunes = 200
+)
+
+// safeBuildDetail is the build error as shown to people in a chat: first line
+// only, credentials masked, length bounded. Build output and registry URLs can
+// carry secrets, and this text is stored in a shared transcript.
+func safeBuildDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := strings.TrimSpace(err.Error())
+	if i := strings.IndexAny(text, "\r\n"); i >= 0 {
+		text = text[:i]
+	}
+	text = inbox.RedactSecrets(text)
+	if r := []rune(text); len(r) > maxBuildDetailRunes {
+		text = string(r[:maxBuildDetailRunes]) + "…"
+	}
+	return text
+}
+
+// resumeOne runs one queued message and contains a panic in it, so one bad
+// message cannot stop the ones queued behind it.
+func (h *ProvisioningHandler) resumeOne(msg chatbridge.PendingChatMessage, buildErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("queued chat message panicked", "chat_id", msg.ChatID, "panic", r)
+			h.recordNotRun(msg, notRunPanicReason)
+		}
+	}()
+	h.resumeMessage(msg, buildErr)
 }
 
 // Bounds for the re-deferral loop resumeMessage guards against (#2431). A
@@ -709,10 +847,16 @@ func (h *ProvisioningHandler) sleepBeforeResume(ctx context.Context, d time.Dura
 	if h.resumeSleep != nil {
 		return h.resumeSleep(ctx, d)
 	}
+	var stopped <-chan struct{}
+	if h.bgCtx != nil {
+		stopped = h.bgCtx.Done()
+	}
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
+		return false
+	case <-stopped:
 		return false
 	case <-t.C:
 		return true
@@ -753,7 +897,8 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
-		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr))) {
+		h.recordNotRun(msg, fmt.Sprintf("Your message was saved but could not run: the environment build failed (%s). %s", safeBuildDetail(buildErr), buildFailureAdvice(buildErr)))
+		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", safeBuildDetail(buildErr), buildFailureAdvice(buildErr))) {
 			return
 		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
@@ -766,7 +911,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 			Type: "error",
 			Content: fmt.Sprintf(
 				"Your message could not run: the environment build failed (%s). %s",
-				buildErr.Error(), buildFailureAdvice(buildErr),
+				safeBuildDetail(buildErr), buildFailureAdvice(buildErr),
 			),
 			Metadata: map[string]any{"reason": "provisioning_failed"},
 		})
@@ -865,6 +1010,15 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// defer-and-attach path and is handled identically to the first time.
 	msg.Opts.HumanResume = true
 	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
+	// The turn is already saved, so a busy chat must not leave it unanswered:
+	// wait for the live run to end (bounded) and run it then. Nothing is saved
+	// twice (UserMessagePersisted).
+	for try := 0; errors.Is(err, ws.ErrAgentBusy) && !errors.Is(err, chatbridge.ErrAgentBusyElsewhere) && try < busyResumeRetries; try++ {
+		if h.shuttingDown() || !h.sleepBeforeResume(ctx, busyResumeDelay<<try) {
+			break
+		}
+		err = h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
+	}
 	if err == nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
 		return
@@ -896,28 +1050,31 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// here — so silently dropping the deferred message is no longer
 		// safe: nothing else will deliver it. Tell the sender, the same way
 		// the build-failure branch above does, so they can resend once the
-		// agent is free. The plain ErrAgentBusy case below (the SAME chat
-		// already has a live run — most plausibly the user's own manual
-		// resend racing this one) keeps its zero-trace contract: that run
-		// will settle the UI, and a notice here would be a lie.
+		// agent is free. The turn is already saved, so the reason is also
+		// written to the transcript. The plain ErrAgentBusy case below (the
+		// same chat's live run) waits and retries first.
+		h.recordNotRun(msg, "Your message was saved but did not run: the agent is busy with another run. Send it again once the agent is free.")
 		emit(ws.ChatEvent{
 			Type:     "error",
 			Content:  "Your message was not delivered: the agent is busy with another run. Send it again once the agent is free.",
 			Metadata: map[string]any{"reason": "agent_busy"},
 		})
 		emit(ws.ChatEvent{Type: "done", Content: ""})
-		// Another run (most plausibly the user's own manual resend, racing
-		// this one) already owns the chat's run slot. That run is the one
-		// that will complete and settle the UI; nothing further to do here,
-		// and nothing to stream — ws.ErrAgentBusy's contract is that the
-		// handler emitted NOTHING, and staying silent is what keeps this
-		// from being a second, redundant execution of the same message.
 	case errors.Is(err, ws.ErrAgentBusy):
-		// The SAME chat already has a live run — most plausibly the user's own
-		// manual resend racing this one. That run settles the UI; a notice here
-		// would be a lie and a second delivery a duplicate. Stay silent.
-		h.logger.Info("deferred message not resumed: a run was already in progress for this chat",
+		// The chat kept a live run through every retry. The turn is saved but
+		// did not run; say so (no "done": that run owns the live turn).
+		h.logger.Warn("deferred message not resumed: the chat stayed busy",
 			"chat_id", msg.ChatID)
+		reason, code := notRunBusyReason, "agent_busy_chat"
+		if h.shuttingDown() {
+			reason, code = notRunStoppedReason, "server_stopped"
+		}
+		h.recordNotRun(msg, reason)
+		emit(ws.ChatEvent{
+			Type:     "error",
+			Content:  reason,
+			Metadata: map[string]any{"reason": code},
+		})
 	case errors.Is(err, ws.ErrCrewProvisioning):
 		// The crew needed re-provisioning again (e.g. its cached image was
 		// pruned in the moments since this job completed). HandleChatMessage
@@ -1144,7 +1301,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	defer func() {
 		if r := recover(); r != nil {
 			panicErr := fmt.Sprintf("internal error: %v", r)
-			var pending map[string]chatbridge.PendingChatMessage
+			var pending []chatbridge.PendingChatMessage
 			h.mu.Lock()
 			if j, ok := h.jobs[crewID]; ok {
 				j.Status = "failed"
