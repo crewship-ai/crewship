@@ -28,7 +28,8 @@ import (
 
 // Database check statuses recorded in the manifest.
 const (
-	// DatabaseCheckOK: integrity_check and foreign_key_check found nothing.
+	// DatabaseCheckOK: integrity_check found nothing (foreign key findings
+	// are recorded separately as warnings).
 	DatabaseCheckOK = "ok"
 	// DatabaseCheckDamaged: SQLite reported at least one problem.
 	DatabaseCheckDamaged = "damaged"
@@ -69,7 +70,13 @@ type DatabaseCheck struct {
 	Findings      []string `json:"findings,omitempty" yaml:"findings,omitempty"`
 	FindingsTotal int      `json:"findings_total,omitempty" yaml:"findings_total,omitempty"`
 	DurationMS    int64    `json:"duration_ms" yaml:"duration_ms"`
-	// Error says why a check ended in status "error".
+	// ForeignKeyFindings / ForeignKeyTotal are foreign_key_check rows (table
+	// and rowid, never values). They do NOT make the status damaged: a
+	// restore works with them and many historical instances carry some. They
+	// are warnings.
+	ForeignKeyFindings []string `json:"foreign_key_findings,omitempty" yaml:"foreign_key_findings,omitempty"`
+	ForeignKeyTotal    int      `json:"foreign_key_total,omitempty" yaml:"foreign_key_total,omitempty"`
+	// Error says why a check ended in status "error" (no file paths).
 	Error string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
@@ -90,6 +97,8 @@ func (c *DatabaseCheck) Summary() string {
 	switch {
 	case c == nil:
 		return "database not checked"
+	case c.Status == DatabaseCheckOK && c.ForeignKeyTotal > 0:
+		return fmt.Sprintf("SQLite integrity check passed; warning: %d foreign key row(s) without a parent (%s)", c.ForeignKeyTotal, strings.Join(c.ForeignKeyFindings, "; "))
 	case c.Status == DatabaseCheckOK:
 		return "SQLite integrity and foreign key checks passed"
 	case c.Status == DatabaseCheckDamaged:
@@ -110,13 +119,16 @@ func CheckDatabaseIntegrity(ctx context.Context, db *sql.DB, timeout time.Durati
 	fail := func(err error) DatabaseCheck {
 		res.Status = DatabaseCheckError
 		res.Findings, res.FindingsTotal = nil, 0
+		res.ForeignKeyFindings, res.ForeignKeyTotal = nil, 0
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			res.Error = "time limit reached"
 		case errors.Is(err, context.Canceled):
 			res.Error = "canceled"
 		default:
-			res.Error = truncateFinding(err.Error())
+			// Raw driver errors can name file paths; keep them out of the
+			// manifest.
+			res.Error = "SQLite could not run the check"
 		}
 		return res
 	}
@@ -172,7 +184,10 @@ func CheckDatabaseIntegrity(ctx context.Context, db *sql.DB, timeout time.Durati
 			_ = fk.Close()
 			return fail(err)
 		}
-		add(fmt.Sprintf("foreign key: table %s row %d has no matching row in %s", table, rowid.Int64, parent))
+		res.ForeignKeyTotal++
+		if len(res.ForeignKeyFindings) < maxDatabaseFindings {
+			res.ForeignKeyFindings = append(res.ForeignKeyFindings, truncateFinding(fmt.Sprintf("table %s row %d has no matching row in %s", table, rowid.Int64, parent)))
+		}
 	}
 	if err := fk.Err(); err != nil {
 		_ = fk.Close()
@@ -192,7 +207,7 @@ func CheckDatabaseIntegrity(ctx context.Context, db *sql.DB, timeout time.Durati
 func CheckDatabaseFileIntegrity(ctx context.Context, path string, timeout time.Duration) DatabaseCheck {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=rw&_pragma=query_only(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
-		return DatabaseCheck{Status: DatabaseCheckError, Error: truncateFinding(err.Error())}
+		return DatabaseCheck{Status: DatabaseCheckError, Error: "SQLite could not run the check"}
 	}
 	defer func() { _ = db.Close() }()
 	return CheckDatabaseIntegrity(ctx, db, timeout)

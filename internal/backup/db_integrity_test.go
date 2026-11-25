@@ -164,3 +164,114 @@ func TestPlanRetentionDamagedNewestKeepsLastIntactCheckedCopy(t *testing.T) {
 		}
 	}
 }
+
+func plantOrphan(t *testing.T, f *instanceFixture, withCheckDamage bool) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := f.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	stmts := []string{
+		"PRAGMA foreign_keys=OFF",
+		"CREATE TABLE fk_parent(id TEXT PRIMARY KEY)",
+		"CREATE TABLE fk_child(id TEXT PRIMARY KEY, parent_id TEXT REFERENCES fk_parent(id))",
+		"INSERT INTO fk_child VALUES ('c1', 'missing-parent')",
+	}
+	if withCheckDamage {
+		stmts = append(stmts,
+			"CREATE TABLE chk_fixture(value TEXT CHECK (length(value)>200))",
+			"PRAGMA ignore_check_constraints=ON",
+			"INSERT INTO chk_fixture VALUES ('x')",
+			"PRAGMA ignore_check_constraints=OFF")
+	}
+	for _, q := range stmts {
+		if _, err := conn.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+// Orphaned foreign keys alone are a warning: status stays ok, nothing is
+// listed as a gap, the contents check still passes and the drill is ok.
+func TestInstanceBackupForeignKeyOrphansAreOnlyAWarning(t *testing.T) {
+	ctx := context.Background()
+	f := newInstanceFixture(t)
+	plantOrphan(t, f, false)
+	created := f.create(t, true)
+	dc := created.Manifest.Contents.Instance.DatabaseCheck
+	if dc == nil || dc.Status != backup.DatabaseCheckOK || dc.ForeignKeyTotal != 1 || dc.FindingsTotal != 0 {
+		t.Fatalf("database_check = %+v", dc)
+	}
+	if len(created.Manifest.Contents.Incomplete) != 0 {
+		t.Fatalf("orphans became a gap: %+v", created.Manifest.Contents.Incomplete)
+	}
+	if strings.Contains(strings.Join(dc.ForeignKeyFindings, ";"), "missing-parent") {
+		t.Fatalf("finding carries a value: %v", dc.ForeignKeyFindings)
+	}
+	c, err := backup.CheckBundleContents(ctx, created.Path, []age.Identity{f.identity}, "")
+	if err != nil || !c.OK || c.ProofLevel != backup.ProofContents || !strings.Contains(c.Detail, "warning") {
+		t.Fatalf("contents = %+v err=%v", c, err)
+	}
+	d, err := backup.DrillInstance(ctx, backup.DrillOptions{BundlePath: created.Path, Identities: []age.Identity{f.identity}, TempRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Result != backup.RestoreResultOK {
+		t.Fatalf("drill = %s %v", d.Result, d.Failures())
+	}
+}
+
+// A damaged integrity_check together with orphans is damaged.
+func TestInstanceBackupCheckDamageWithOrphansIsDamaged(t *testing.T) {
+	f := newInstanceFixture(t)
+	plantOrphan(t, f, true)
+	created := f.create(t, true)
+	dc := created.Manifest.Contents.Instance.DatabaseCheck
+	if dc == nil || dc.Status != backup.DatabaseCheckDamaged || dc.FindingsTotal == 0 || dc.ForeignKeyTotal != 1 {
+		t.Fatalf("database_check = %+v", dc)
+	}
+}
+
+// The newest copy whose database is not known damaged is never dropped
+// because newer damaged copies took the floor.
+func TestPlanRetentionKeepsNewestNonDamagedCopy(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	mk := func(name string, hours int, damaged bool, proof int) backup.RetentionCandidate {
+		return backup.RetentionCandidate{Path: name, Scope: backup.ScopeInstance, CreatedAt: now.Add(-time.Duration(hours) * time.Hour),
+			ProofLevel: proof, DatabaseDamaged: damaged, Incomplete: damaged}
+	}
+	dropped := func(c []backup.RetentionCandidate) map[string]bool {
+		_, drop := backup.PlanRetention(c, backup.RetentionPolicy{KeepMin: 1}, now)
+		out := map[string]bool{}
+		for _, d := range drop {
+			out[d.Path] = true
+		}
+		return out
+	}
+	t.Run("older proof 1 survives a damaged newest", func(t *testing.T) {
+		d := dropped([]backup.RetentionCandidate{mk("bad", 1, true, 1), mk("good", 48, false, 1), mk("older", 72, false, 1)})
+		if d["bad"] || d["good"] || !d["older"] {
+			t.Fatalf("dropped = %v", d)
+		}
+	})
+	t.Run("several damaged in a row", func(t *testing.T) {
+		d := dropped([]backup.RetentionCandidate{mk("bad1", 1, true, 1), mk("bad2", 25, true, 1), mk("bad3", 49, true, 1), mk("good", 96, false, 1)})
+		if d["good"] || d["bad1"] {
+			t.Fatalf("dropped = %v", d)
+		}
+	})
+	t.Run("an unverified older copy counts as not damaged", func(t *testing.T) {
+		d := dropped([]backup.RetentionCandidate{mk("bad", 1, true, 1), mk("unverified", 48, false, 1)})
+		if d["unverified"] {
+			t.Fatalf("dropped = %v", d)
+		}
+	})
+	t.Run("no intact copy keeps the floor only", func(t *testing.T) {
+		d := dropped([]backup.RetentionCandidate{mk("bad1", 1, true, 1), mk("bad2", 25, true, 1)})
+		if d["bad1"] || !d["bad2"] {
+			t.Fatalf("dropped = %v", d)
+		}
+	})
+}
