@@ -46,19 +46,19 @@ func bundleKeyFlags(cmd *cobra.Command) ([]age.Identity, string, error) {
 
 var recoverCmd = &cobra.Command{
 	Use:   "recover",
-	Short: "Restore a whole instance from an instance backup into an empty data directory (offline)",
+	Short: "Restore a whole instance from an instance backup (offline)",
 	Long: `Restore a whole Crewship instance from an instance bundle. Runs locally, with
 no server running and none started: it writes a data directory a server can
 then boot from.
 
 What it does, in order:
-  1. verifies the bundle's checksum and decrypts it with your key;
-  2. refuses a non-empty --data-dir unless --force; with --force it still
-     refuses a target database that holds workbooks (no bundle contains
-     them) unless --discard-workbooks acknowledges their loss;
-  3. writes the database and every file store (attachments, memory and its
-     version history, page projects, chats, skills), checking each file
-     against the bundle's own index;
+  1. verifies the bundle's checksum;
+  2. checks the target directory. A non-empty directory requires --force.
+     If it contains workbooks, pass --discard-workbooks to acknowledge that
+     the recovered instance will lack them;
+  3. decrypts the bundle with your key and writes its database and file
+     stores (attachments, memory and its version history, page projects,
+     chats, skills), checking each file against the bundle's own index;
   4. applies database migrations forward to this Crewship version;
   5. drops every sign-in session, clears locks and leases, and rotates the
      session signing key;
@@ -68,6 +68,11 @@ What it does, in order:
   7. holds routines and schedules, inbound webhooks (503) and queued work, so
      the server boots with nothing firing until you resume each one with
      'crewship admin instance holds resume <key>'.
+
+With --force, stop all writers first. Recovery works in a private copy on the
+same filesystem and switches --data-dir to the recovered copy atomically.
+If validation fails, the original stays in place. After a successful switch,
+the report gives the path to the retained original directory.
 
 It prints a report (ok, partial or failed, and every gap) and stores it in the
 restored database's restore history. Crew container files are kept under
@@ -112,6 +117,9 @@ func printRecoverReport(w io.Writer, r *backup.RecoverReport) {
 		fmt.Fprintln(w, r.Summary)
 	}
 	fmt.Fprintf(w, "Data directory: %s\n", r.DataDir)
+	if r.PreviousDataDir != "" {
+		fmt.Fprintf(w, "Previous data directory (retained): %s\n", r.PreviousDataDir)
+	}
 	if r.SourceHost != "" {
 		fmt.Fprintf(w, "Backup of %s taken %s\n", r.SourceHost, r.BundleCreatedAt.Format("2006-01-02 15:04 MST"))
 	}
@@ -262,8 +270,8 @@ func init() {
 		c.Flags().String("passphrase-file", "", "Read the passphrase that opens the bundle from a file")
 	}
 	recoverCmd.Flags().String("data-dir", "", "Where to write the restored instance (required; must be empty unless --force)")
-	recoverCmd.Flags().Bool("force", false, "Allow a non-empty data directory: its database is replaced and files the bundle carries are overwritten")
-	recoverCmd.Flags().Bool("discard-workbooks", false, "With --force: acknowledge that workbooks in the replaced database are destroyed (backups never contain workbooks)")
+	recoverCmd.Flags().Bool("force", false, "Stage recovery on the same filesystem, switch directories atomically and retain the original (Linux)")
+	recoverCmd.Flags().Bool("discard-workbooks", false, "With --force, acknowledge that existing workbooks will be absent from the recovered instance")
 	backupDrillCmd.Flags().Bool("env-keys", false, "Without a recovery kit in the bundle, unlock credentials with this machine's ENCRYPTION_KEY / ENCRYPTION_KEY_V<N>")
 	backupDrillCmd.Flags().String("post", "", "Record the result on the server this CLI is logged in to; --post=<url> also checks it is that server")
 	backupDrillCmd.Flags().Lookup("post").NoOptDefVal = "-"

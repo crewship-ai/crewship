@@ -1017,6 +1017,23 @@ that credentials stay unreadable when the bundle has no kit. Its report
 (`ok`, `partial` with every gap, or `failed`) is printed and stored in the
 restored database's restore history.
 
+To recover over an existing data directory on Linux, stop the server and every
+other writer first, then pass `--force`. The parent directory must be writable
+and the filesystem must support atomic directory exchange. Allow space on that
+filesystem for a copy of the existing tree and the restored data. Recovery
+stages the changes in a private directory, preserving unrelated files and
+their permissions and ownership. It refuses trees it cannot copy safely,
+including symlinks, hard-linked files and nested mounts. If a preflight check,
+extraction or validation fails, the original directory remains in place.
+
+Once the restored copy is ready, Crewship switches it into place atomically.
+The report prints **Previous data directory (retained)** and includes
+`previous_data_dir` in JSON. That path holds the complete original, including
+its database and secrets. If the target contains workbooks, recovery also
+requires `--discard-workbooks` because the recovered instance will lack them.
+Keep the retained directory protected until you have verified the recovered
+instance and decided how long to keep the original.
+
 The restored server boots with automations **held**: routines and schedules
 do not fire, inbound webhooks answer `503`, queued work and notification
 retries do not start. Check the server, then resume each:
