@@ -241,6 +241,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 				*rep = before
 			}
 		}()
+		if err := refuseLinkedRecoveryPaths(dataDir); err != nil {
+			return rep, err
+		}
 		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir, opts.DiscardWorkbooks); err != nil {
 			return rep, err
 		}
@@ -596,7 +599,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			}
 		case name == instanceDBEntry:
 			dst := filepath.Join(dataDir, "crewship.db")
-			sha, size, err := writeExtracted(ctx, dst, tr)
+			sha, size, err := writeExtractedUnder(ctx, dataDir, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write database: %w", err)
 			}
@@ -640,7 +643,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil || dst == RecoveredStoreDir(dataDir, store) {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			sha, n, err := writeExtracted(ctx, dst, tr)
+			sha, n, err := writeExtractedUnder(ctx, dataDir, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write %s: %w", name, err)
 			}
@@ -659,7 +662,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
+			if _, _, err := writeExtractedUnder(ctx, dataDir, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.crewArchives = append(ex.crewArchives, dst)
@@ -669,7 +672,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
+			if _, _, err := writeExtractedUnder(ctx, dataDir, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.envArchives = append(ex.envArchives, dst)
@@ -724,6 +727,15 @@ func knownStore(s string) bool {
 		}
 	}
 	return false
+}
+
+// writeExtractedUnder is writeExtracted for a path below root, refusing a
+// path that goes through a link before anything is created or written.
+func writeExtractedUnder(ctx context.Context, root, dst string, r io.Reader) (string, int64, error) {
+	if err := refuseLinkedPath(root, dst); err != nil {
+		return "", 0, err
+	}
+	return writeExtracted(ctx, dst, r)
 }
 
 func writeExtracted(ctx context.Context, dst string, r io.Reader) (string, int64, error) {

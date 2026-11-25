@@ -82,7 +82,9 @@ func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalM
 			return err
 		}
 		dst := filepath.Join(RecoveredStoreDir(stageDir, StoreMemory), "versions", sha[:2], sha)
-		err = writeBlobDurable(ctx, dst, decodedRecoveryReader(ctx, source), sha)
+		if err = refuseLinkedPath(stageDir, dst); err == nil {
+			err = writeBlobDurable(ctx, dst, decodedRecoveryReader(ctx, source), sha)
+		}
 		source.Close()
 		if err != nil {
 			return err
