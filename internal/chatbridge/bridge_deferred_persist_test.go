@@ -169,3 +169,25 @@ func TestDeferredSendIsCountedOnceAtSave(t *testing.T) {
 		t.Fatalf("count after the resumed run = %d, want the user turn counted once", got)
 	}
 }
+
+// A failure turn written after a turn that was counted at save adds only
+// itself, so a run that ends right after the save is never counted twice.
+func TestInBandFailureTurnDoesNotRecountASavedUserTurn(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		userCounted  bool
+		wantIncrease int32
+	}{{"user turn counted at save", true, 1}, {"user turn not yet counted", false, 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			info := &ChatInfo{AgentID: "a1", WorkspaceID: "ws-1"}
+			res := &deltaResolver{mockResolver: mockResolver{info: info}}
+			b := testBridgeWithContainer(t, res, &failContainer{})
+			b.persistInBandFailureTurn(context.Background(), "sess-1", info, "", nil, "cancelled", tc.userCounted)
+			if got := res.total.Load(); got != tc.wantIncrease {
+				t.Fatalf("count increase = %d, want %d", got, tc.wantIncrease)
+			}
+		})
+	}
+}
