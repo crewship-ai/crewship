@@ -534,16 +534,26 @@ func TestSyncWait_BatchDisconnectAfterWaitingKeepsTheWaitingItem(t *testing.T) {
 	if first.Status != "WAITING" || first.WaitpointToken == "" {
 		t.Fatalf("first item = %+v, want WAITING", first)
 	}
-	// Items after the first either never started or were cancelled with the
-	// request; none may wait or complete, and the action ran for the first only.
-	for i, it := range out.Results[1:] {
-		if it.Status == "WAITING" || strings.EqualFold(it.Status, "COMPLETED") {
-			t.Fatalf("item %d = %+v after the client left, want it not started or cancelled", i+1, it)
+	// An item the client's departure raced with may already have started
+	// waiting; every item that waits must survive the disconnect and finish
+	// once with its approval. The others never started or were cancelled with
+	// the request; none completes on its own.
+	waiting := 0
+	for i, it := range out.Results {
+		switch {
+		case it.Status == "WAITING":
+			waiting++
+		case strings.EqualFold(it.Status, "COMPLETED"):
+			t.Fatalf("item %d = %+v completed without a decision", i, it)
 		}
 	}
-	rig.approveAndWaitCompleted(t, first.RunID, first.WaitpointToken)
+	for _, it := range out.Results {
+		if it.Status == "WAITING" {
+			rig.approveAndWaitCompleted(t, it.RunID, it.WaitpointToken)
+		}
+	}
 	time.Sleep(200 * time.Millisecond)
-	if got := rig.actions.executed(); got != 1 {
-		t.Fatalf("the approved action executed %d times, want once", got)
+	if got := rig.actions.executed(); got != waiting {
+		t.Fatalf("approved actions executed %d times, want once per waiting item (%d)", got, waiting)
 	}
 }
