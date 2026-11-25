@@ -123,9 +123,13 @@ func runArtifactBinary(t *testing.T, srv *httptest.Server, args ...string) (stri
 	if err := os.WriteFile(cfg, []byte(fmt.Sprintf("server: %s\ntoken: fake-token\nworkspace: %s\nformat: json\n", srv.URL, covWorkspaceID)), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Build (once per package run) before the clock starts: the first test to
+	// need the binary can spend longer than the whole run limit compiling it,
+	// and a context that is already expired fails the start, not the product.
+	binary := buildCrewshipBinary(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), args...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "CREWSHIP_") {
 			cmd.Env = append(cmd.Env, entry)

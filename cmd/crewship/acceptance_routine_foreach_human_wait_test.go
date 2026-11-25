@@ -120,9 +120,12 @@ var approveTokenRE = regexp.MustCompile(`waitpoints approve (\S+)`)
 // limit: a synchronous run that holds its request open hangs here.
 func runCLIWithin(t *testing.T, cfgPath string, limit time.Duration, args ...string) (string, error) {
 	t.Helper()
+	// Build before the limit starts: compiling the binary is not the run being
+	// bounded (see runArtifactBinary).
+	binary := buildCrewshipBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), args...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfgPath, "NO_COLOR=1",
 		"CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
 	out, err := cmd.CombinedOutput()
