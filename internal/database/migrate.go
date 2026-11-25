@@ -61,6 +61,27 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	return nil
 }
 
+// PendingForegroundMigrations counts the registry entries Migrate would
+// apply, including gaps below the latest applied version. Post-deployment
+// entries are only applied by the background runner.
+func PendingForegroundMigrations(ctx context.Context, db *sql.DB) (int, error) {
+	ledger, err := ReadLedger(ctx, db)
+	if err != nil && !errors.Is(err, ErrNoLedger) {
+		return 0, err
+	}
+	applied := make(map[int]bool, len(ledger))
+	for _, entry := range ledger {
+		applied[entry.Version] = true
+	}
+	var pending int
+	for _, m := range migrations {
+		if !m.postDeploy && !applied[m.version] {
+			pending++
+		}
+	}
+	return pending, nil
+}
+
 // ensureMigrationsTable creates the ledger if it is not there yet. Shared by
 // Migrate and MigrateSkipping so the two cannot disagree about its shape.
 func ensureMigrationsTable(ctx context.Context, db *sql.DB) error {

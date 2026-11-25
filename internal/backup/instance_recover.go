@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"filippo.io/age"
@@ -331,7 +332,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 			return rep, err
 		}
 		if stage != nil {
-			if err := validateRecoveredKeyFiles(rep, ex.kit, dataDir); err != nil {
+			if err := validateRecoveredKeyFiles(ctx, rep, ex.kit, dataDir); err != nil {
 				return rep, err
 			}
 		}
@@ -857,17 +858,10 @@ func (ex *extractedInstance) validateForceContents(ctx context.Context, m *Manif
 	if !maps.Equal(m.Contents.TableRowCounts, counts) {
 		return errors.New("backup: database row counts differ from the manifest")
 	}
-	envelopes := map[string]int{}
-	_, err = EachSealedValue(ctx, db, func(v SealedValue) error {
-		version, _ := encryption.ParseEnvelopeVersion(v.Envelope)
-		envelopes[version]++
-		if ex.kit != nil {
-			if _, err := encryption.DecryptWithKeys(v.Envelope, keys); err != nil {
-				return fmt.Errorf("backup: recovered key cannot open %s.%s envelope (%s): %w", v.Table, v.Column, version, err)
-			}
-		}
-		return nil
-	})
+	if ex.kit == nil {
+		keys = nil
+	}
+	envelopes, err := recoveryEnvelopeInventory(ctx, db, keys)
 	if err != nil {
 		return err
 	}
@@ -875,6 +869,28 @@ func (ex *extractedInstance) validateForceContents(ctx context.Context, m *Manif
 		return errors.New("backup: vault envelope inventory differs from the manifest")
 	}
 	return nil
+}
+
+// A nil key map counts envelopes in a keyless backup. With supplied keys,
+// prove every envelope opens, using the runtime's v1 fallback for reading
+// historical versions which lack a dedicated key.
+func recoveryEnvelopeInventory(ctx context.Context, db *sql.DB, keys map[string][]byte) (map[string]int, error) {
+	counts := map[string]int{}
+	reads := maps.Clone(keys)
+	_, err := EachSealedValue(ctx, db, func(v SealedValue) error {
+		version, _ := encryption.ParseEnvelopeVersion(v.Envelope)
+		counts[version]++
+		if reads != nil {
+			if _, ok := reads[version]; !ok {
+				reads[version] = reads["v1"]
+			}
+			if _, err := encryption.DecryptWithKeys(v.Envelope, reads); err != nil {
+				return fmt.Errorf("backup: recovered key cannot open %s.%s envelope (%s): %w", v.Table, v.Column, version, err)
+			}
+		}
+		return nil
+	})
+	return counts, err
 }
 
 func checkRecoveryIntegrity(ctx context.Context, db *sql.DB) error {
@@ -900,21 +916,28 @@ func checkRecoveryIntegrity(ctx context.Context, db *sql.DB) error {
 	return fmt.Errorf("backup: staged SQLite foreign_key_check failed: %s references missing %s (constraint %d)", child, parent, constraint)
 }
 
-// withEnv sets kvs for the duration of fn and restores the previous values.
-// Recover applies migrations with the source's keys in place: a migration
-// keyed off ENCRYPTION_KEY (the journal chain, webhook secret enveloping)
-// run under a different key writes permanently wrong data.
-func withEnv(kvs map[string]string, fn func() error) error {
+// Legacy migrations resolve vault keys from the process environment. Keep
+// concurrent recoveries out of this scope and shadow host-only key versions.
+var recoveryEnvMu sync.Mutex
+
+func withRecoveryEnv(kvs map[string]string, fn func() error) error {
+	recoveryEnvMu.Lock()
+	defer recoveryEnvMu.Unlock()
+	if kvs == nil {
+		return fn()
+	}
+	kvs = maps.Clone(kvs)
+	for _, version := range encryption.ConfiguredKeyVersions() {
+		name := encryption.KeyEnvVar(version)
+		if _, ok := kvs[name]; !ok {
+			kvs[name] = ""
+		}
+	}
 	type prev struct {
 		v  string
 		ok bool
 	}
 	saved := map[string]prev{}
-	for k, v := range kvs {
-		old, ok := os.LookupEnv(k)
-		saved[k] = prev{old, ok}
-		_ = os.Setenv(k, v)
-	}
 	defer func() {
 		for k, p := range saved {
 			if p.ok {
@@ -924,14 +947,21 @@ func withEnv(kvs map[string]string, fn func() error) error {
 			}
 		}
 	}()
+	for k, v := range kvs {
+		old, ok := os.LookupEnv(k)
+		saved[k] = prev{old, ok}
+		if err := os.Setenv(k, v); err != nil {
+			return fmt.Errorf("backup: set recovery variable %s: %w", k, err)
+		}
+	}
 	return fn()
 }
 
 func kitEnv(kit *RecoveryKit) (map[string]string, error) {
-	out := map[string]string{}
 	if kit == nil {
-		return out, nil
+		return nil, nil
 	}
+	out := map[string]string{encryption.KeyVersionEnvVar: "v1"}
 	lines, err := kit.EnvLines()
 	if err != nil {
 		return nil, err
@@ -988,22 +1018,41 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 	if err != nil {
 		return err
 	}
-	return withEnv(env, func() (retErr error) {
+	return withRecoveryEnv(env, func() (retErr error) {
 		db, err := database.Open("file:" + filepath.Join(dataDir, "crewship.db"))
 		if err != nil {
 			return fmt.Errorf("backup: open restored database: %w", err)
 		}
 		defer func() { retErr = errors.Join(retErr, db.Close()) }()
 		before := len(AppliedMigrationVersions(ctx, db.DB))
-		_, _, pending, err := database.PendingMigrations(ctx, db.DB)
+		pending, err := database.PendingForegroundMigrations(ctx, db.DB)
 		if err != nil {
 			return err
 		}
 		force := len(serviceArgs) > 0 && serviceArgs[0].force
-		if force && pending > 0 && kit == nil && os.Getenv("ENCRYPTION_KEY") != "" {
-			keys, source, _ := drillKeys(nil, true)
-			if check := drillCredentials(ctx, db.DB, keys, source); check.Status != DrillStatusOK {
-				return fmt.Errorf("backup: verify original vault keys before migrations: %s", check.Detail)
+		// Parse even unused configured keys. A database with no sealed rows
+		// provides no decryption evidence for a malformed master key.
+		var suppliedKeys map[string][]byte
+		if force {
+			for _, version := range encryption.ConfiguredKeyVersions() {
+				key, err := encryption.ResolveKey(version)
+				if err != nil {
+					return fmt.Errorf("backup: invalid supplied vault key: %w", err)
+				}
+				if suppliedKeys == nil {
+					suppliedKeys = map[string][]byte{}
+				}
+				suppliedKeys[version] = key.Key
+			}
+			if pending > 0 && (kit != nil || len(suppliedKeys) > 0) {
+				if err := encryption.VerifyCurrentKey(); err != nil {
+					return fmt.Errorf("backup: validate migration encryption key: %w", err)
+				}
+			}
+			if pending > 0 && kit == nil && suppliedKeys != nil {
+				if _, err := recoveryEnvelopeInventory(ctx, db.DB, suppliedKeys); err != nil {
+					return err
+				}
 			}
 		}
 		if pending > 0 && kit == nil && os.Getenv("ENCRYPTION_KEY") == "" {
@@ -1161,6 +1210,12 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			return err
 		}
 		rep.Holds = holds
+		if force && suppliedKeys != nil && pending > 0 {
+			// Drills and kitless recoveries have no emitted key file. Check any
+			// envelopes minted by migrations before discarding the scoped keys.
+			_, err := recoveryEnvelopeInventory(ctx, db.DB, suppliedKeys)
+			return err
+		}
 		return nil
 	})
 }
@@ -1223,30 +1278,16 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 			delete(values, k)
 		}
 	}
-	var kitLines []string
-	if kit != nil {
-		kitLines, err = kit.EnvLines()
-		if err != nil {
-			return err
-		}
-		for _, l := range kitLines {
-			if k, v, _ := strings.Cut(l, "="); k == "ENCRYPTION_KEY" {
-				values[k] = v
-			}
-		}
+	kitValues, err := kitEnv(kit)
+	if err != nil {
+		return err
+	}
+	if v := kitValues["ENCRYPTION_KEY"]; v != "" {
+		values["ENCRYPTION_KEY"] = v
 	}
 	if kit != nil && len(kit.AuditKeyring) > 0 {
-		// Sealed at rest under the recovered instance's master key, which is
-		// the kit's, not this host's environment.
-		env, err := kitEnv(kit)
-		if err != nil {
-			return err
-		}
-		if _, ok := env[encryption.KeyVersionEnvVar]; !ok {
-			env[encryption.KeyVersionEnvVar] = ""
-		}
 		var auditPath, replaced, unreadable string
-		if err := withEnv(env, func() (err error) {
+		if err := withRecoveryEnv(kitValues, func() (err error) {
 			auditPath, replaced, unreadable, err = journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now(), previousMaster)
 			return err
 		}); err != nil {
@@ -1260,7 +1301,7 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		if unreadable != "" {
 			rep.Warnings = append(rep.Warnings, "the data dir's previous audit keyring could not be read ("+unreadable+"); it was kept unchanged as "+replaced)
 		}
-		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
+		kitValues[journal.SigningKeysPathEnv] = auditPath
 	}
 	if err := writeEnvFile(secretsPath, []string{
 		"# crewship: secrets for a recovered instance, written by `crewship recover`.",
@@ -1274,18 +1315,14 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		return nil
 	}
 	keysPath := filepath.Join(dataDir, RecoveredKeysFile)
-	kv := map[string]string{NextAuthSecretEnv: newSecret}
-	for _, l := range kitLines {
-		k, v, _ := strings.Cut(l, "=")
-		kv[k] = v
-	}
+	kitValues[NextAuthSecretEnv] = newSecret
 	if err := writeEnvFile(keysPath, []string{
 		"# crewship: vault keys from the backup's recovery kit, written by `crewship recover`.",
 		"# Give these to the server before it starts — e.g. systemd EnvironmentFile=" + filepath.Join(rep.DataDir, RecoveredKeysFile) + ",",
 		"# or export them. ENCRYPTION_KEY is also in secrets.env; ENCRYPTION_KEY_V2 and later are",
 		"# read from the environment only. Whoever reads this file can read every secret in the",
 		"# instance: move the keys into your secret store and delete it.",
-	}, kv); err != nil {
+	}, kitValues); err != nil {
 		return err
 	}
 	rep.KeysFile = filepath.Join(rep.DataDir, RecoveredKeysFile)
@@ -1293,7 +1330,7 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 }
 
 // Check the files the recovered installation will actually read.
-func validateRecoveredKeyFiles(rep *RecoverReport, kit *RecoveryKit, dataDir string) error {
+func validateRecoveredKeyFiles(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string) error {
 	values, err := readEnvFile(filepath.Join(dataDir, recoveredSecretsFile))
 	if err != nil {
 		return err
@@ -1325,13 +1362,31 @@ func validateRecoveredKeyFiles(rep *RecoverReport, kit *RecoveryKit, dataDir str
 	if !maps.Equal(want, got) {
 		return errors.New("backup: staged vault key file differs from the recovered keys")
 	}
-	return nil
+	// Decode the actual published assignments. This check must still fail
+	// if a migration accidentally consumed a key from the recovering host.
+	keys := make(map[string][]byte, len(kit.Versions))
+	for _, v := range kit.Versions {
+		key, err := hex.DecodeString(got[v.Env])
+		if err != nil || len(key) != 32 {
+			return fmt.Errorf("backup: invalid staged %s", v.Env)
+		}
+		keys[v.Version] = key
+	}
+	db, err := openSnapshot(filepath.Join(dataDir, "crewship.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = recoveryEnvelopeInventory(ctx, db, keys)
+	return err
 }
 
 // previousMasterKeys resolves master-key versions from the target's previous
 // secrets.env, then this process's environment, with Decrypt's fallback from
 // a missing ENCRYPTION_KEY_V<N> to ENCRYPTION_KEY.
 func previousMasterKeys(persisted map[string]string) journal.MasterKeyFunc {
+	recoveryEnvMu.Lock()
+	defer recoveryEnvMu.Unlock()
 	// Snapshot now: the call runs later, under the kit's environment.
 	snapshot := map[string]string{}
 	for _, kv := range os.Environ() {
