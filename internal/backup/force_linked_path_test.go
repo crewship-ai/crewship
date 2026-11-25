@@ -14,6 +14,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // treeState records every entry's kind, mode, size, times and content (a
@@ -168,5 +169,39 @@ func TestForceRecoveryKeepsUnrelatedLinks(t *testing.T) {
 	}
 	if got := treeState(t, outside); strings.Join(got, "\n") != strings.Join(before, "\n") {
 		t.Errorf("directory behind a link changed: %v -> %v", before, got)
+	}
+}
+
+// After a forced recovery the published directory opens the way the server
+// opens it (the database writer, with its lease) and still holds the data.
+func TestForceRecoveredInstanceOpensAsServerDatabase(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("force publication requires Linux")
+	}
+	f := newInstanceFixture(t)
+	bundle := f.create(t, true)
+	parent := t.TempDir()
+	data := filepath.Join(parent, "data")
+	opts := backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: data}
+	for i := 0; i < 2; i++ {
+		if _, err := backup.RecoverInstance(t.Context(), opts); err != nil {
+			t.Fatalf("recovery %d: %v", i, err)
+		}
+		opts.Force = true
+		db, err := database.Open("file:"+filepath.Join(data, "crewship.db"), database.WithExclusiveWriter())
+		if err != nil {
+			t.Fatalf("server-style open after recovery %d: %v", i, err)
+		}
+		var n int
+		if err := db.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workspaces`).Scan(&n); err != nil || n != 2 {
+			db.Close()
+			t.Fatalf("workspaces = %d, %v", n, err)
+		}
+		var ok string
+		if err := db.DB.QueryRowContext(t.Context(), `PRAGMA integrity_check`).Scan(&ok); err != nil || ok != "ok" {
+			db.Close()
+			t.Fatalf("integrity = %q, %v", ok, err)
+		}
+		db.Close()
 	}
 }

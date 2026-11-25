@@ -56,7 +56,12 @@ func refuseLinkedRecoveryPaths(dataDir string) error {
 		RecoveredServicesDir, RecoveredCrewsDir, RecoveredEnvironmentsDir,
 	}
 	for _, store := range InstanceStores {
-		fixed = append(fixed, filepath.Base(RecoveredStoreDir(dataDir, store)))
+		// The full path below dataDir, so a store placed deeper is guarded too.
+		rel, err := filepath.Rel(dataDir, RecoveredStoreDir(dataDir, store))
+		if err != nil {
+			return err
+		}
+		fixed = append(fixed, rel)
 	}
 	var bad []string
 	for _, name := range fixed {
