@@ -145,6 +145,11 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 			NoStandingTrust: true,
 		})
 		if err != nil {
+			// The run may have died while the waitpoint was being written:
+			// whatever of it was stored must not stay actionable.
+			if ctx.Err() != nil {
+				e.cancelRunWaitpoints(runID)
+			}
 			return "", 0, elapsed(), fmt.Errorf("crewship step %q create approval: %w", step.ID, err)
 		}
 		token = created
@@ -169,11 +174,7 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 		// The run died mid-wait: cancel its waitpoints so the card stops
 		// being actionable, as the wait step does. Detached context — ctx
 		// is already cancelled.
-		if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
-			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _ = wc.CancelWaitpointsForRun(cctx, runID)
-			cancel()
-		}
+		e.cancelRunWaitpoints(runID)
 		return "", 0, elapsed(), ctx.Err()
 	}
 	if err != nil {
@@ -312,4 +313,14 @@ func (e *Executor) checkStillAllowedToContinue(ctx context.Context, in RunInput)
 		return fmt.Errorf("the routine is %s and cannot continue", status)
 	}
 	return nil
+}
+
+// cancelRunWaitpoints cancels the run's pending waitpoints on a detached
+// context, for a run whose own context is already gone.
+func (e *Executor) cancelRunWaitpoints(runID string) {
+	if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = wc.CancelWaitpointsForRun(cctx, runID)
+		cancel()
+	}
 }

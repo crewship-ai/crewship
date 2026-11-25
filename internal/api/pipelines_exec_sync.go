@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -32,16 +33,18 @@ func (h *PipelineHandler) runSynchronously(r *http.Request, exec *pipeline.Execu
 		stopLifecycle = context.AfterFunc(h.lifecycleCtx, cancelRun)
 	}
 
-	type humanWait struct{ runID, stepID, token string }
-	waiting := make(chan humanWait, 1)
+	gate := &syncRunGate{wake: make(chan struct{}, 1)}
 	prev := input.OnHumanWait
 	input.OnHumanWait = func(runID, stepID, token string) {
 		if prev != nil {
 			prev(runID, stepID, token)
 		}
-		select {
-		case waiting <- humanWait{runID, stepID, token}:
-		default:
+		if syncRunBeforeWaitSignal != nil {
+			syncRunBeforeWaitSignal(runCtx)
+		}
+		gate.signalWait(humanWait{runID, stepID, token})
+		if syncRunAfterWaitSignal != nil {
+			syncRunAfterWaitSignal()
 		}
 	}
 
@@ -64,10 +67,7 @@ func (h *PipelineHandler) runSynchronously(r *http.Request, exec *pipeline.Execu
 		finished <- finishedRun{result, runErr}
 	}()
 
-	select {
-	case done := <-finished:
-		return done.result, nil, done.err
-	case wait := <-waiting:
+	receiptOrOutcome := func(wait humanWait) (*pipeline.RunResult, *pipeline.RunResult, error) {
 		// A run that finished in the same instant reports its outcome.
 		select {
 		case done := <-finished:
@@ -81,11 +81,74 @@ func (h *PipelineHandler) runSynchronously(r *http.Request, exec *pipeline.Execu
 			WaitpointToken: wait.token,
 			CurrentStep:    wait.stepID,
 		}, nil
+	}
+	select {
+	case done := <-finished:
+		return done.result, nil, done.err
+	case <-gate.wake:
+		wait, _ := gate.waiting()
+		return receiptOrOutcome(wait)
 	case <-r.Context().Done():
-		// The client left before anything waited for a person: cancel the
-		// run as the request context used to.
+		// The client left. If a step already waited for a person, that
+		// came first and the run continues without the request (the
+		// receipt is still the answer). Otherwise cancel the run as the
+		// request context used to; the gate makes sure a wait that
+		// signals later cannot revive it.
+		if wait, waited := gate.clientLeft(); waited {
+			return receiptOrOutcome(wait)
+		}
 		cancelRun()
 		done := <-finished
 		return done.result, nil, done.err
 	}
+}
+
+type humanWait struct{ runID, stepID, token string }
+
+// Test seams: both nil in production.
+var (
+	syncRunBeforeWaitSignal func(runCtx context.Context)
+	syncRunAfterWaitSignal  func()
+)
+
+// syncRunGate decides, under one lock, which came first: a step that waits
+// for a person or the client leaving. First one wins. Reading a "waiting"
+// channel and the request context separately left a gap in which a run that
+// already waited was cancelled because select picked the other ready case.
+type syncRunGate struct {
+	mu    sync.Mutex
+	state int // 0 undecided, 1 waiting, 2 client left first
+	wait  humanWait
+	wake  chan struct{}
+}
+
+func (g *syncRunGate) signalWait(w humanWait) {
+	g.mu.Lock()
+	if g.state == 0 {
+		g.state, g.wait = 1, w
+	}
+	recorded := g.state == 1
+	g.mu.Unlock()
+	if recorded {
+		select {
+		case g.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (g *syncRunGate) waiting() (humanWait, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.wait, g.state == 1
+}
+
+// clientLeft records that the client left, unless a wait came first.
+func (g *syncRunGate) clientLeft() (humanWait, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.state == 0 {
+		g.state = 2
+	}
+	return g.wait, g.state == 1
 }

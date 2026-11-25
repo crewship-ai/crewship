@@ -504,19 +504,12 @@ func TestSyncWait_BatchDisconnectAfterWaitingKeepsTheWaitingItem(t *testing.T) {
 	reqCtx, disconnect := context.WithCancel(req.Context())
 	defer disconnect()
 	req = req.WithContext(reqCtx)
-	// Leave as soon as the first item waits for a person.
-	go func() {
-		deadline := time.Now().Add(15 * time.Second)
-		for time.Now().Before(deadline) {
-			var n int
-			_ = rig.db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`).Scan(&n)
-			if n > 0 {
-				disconnect()
-				return
-			}
-			time.Sleep(2 * time.Millisecond)
-		}
-	}()
+	// Leave exactly when the first item has signalled that it waits for a
+	// person: not earlier (the pending row is written before the signal) and
+	// not by polling.
+	var once sync.Once
+	syncRunAfterWaitSignal = func() { once.Do(disconnect) }
+	t.Cleanup(func() { syncRunAfterWaitSignal = nil })
 	rr := httptest.NewRecorder()
 	syncWithin(t, 20*time.Second, "batch", func() { rig.h.RunBatch(rr, req) })
 	var out struct {
@@ -555,5 +548,67 @@ func TestSyncWait_BatchDisconnectAfterWaitingKeepsTheWaitingItem(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if got := rig.actions.executed(); got != waiting {
 		t.Fatalf("approved actions executed %d times, want once per waiting item (%d)", got, waiting)
+	}
+}
+
+// Both the wait signal and the client's departure are ready at the same time:
+// the run that already waits must answer WAITING every time, not whichever
+// select case is picked.
+func TestSyncWait_SignalAndDisconnectTogetherAlwaysReceipt(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	for i := 0; i < 40; i++ {
+		req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+		req.SetPathValue("slug", "held-each")
+		reqCtx, disconnect := context.WithCancel(req.Context())
+		req = req.WithContext(reqCtx)
+		syncRunAfterWaitSignal = disconnect
+		rr := httptest.NewRecorder()
+		syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
+		syncRunAfterWaitSignal = nil
+		disconnect()
+		rc := rig.mustWaiting(t, rr)
+		rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
+	}
+}
+
+// The client leaves in the gap between the waitpoint row and the signal: that
+// is "before waiting", so the run is cancelled and nothing stays actionable.
+func TestSyncWait_DisconnectBetweenWaitpointAndSignalCancelsAndClosesTheCard(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	reqCtx, disconnect := context.WithCancel(req.Context())
+	defer disconnect()
+	req = req.WithContext(reqCtx)
+	syncRunBeforeWaitSignal = func(runCtx context.Context) {
+		disconnect()
+		select {
+		case <-runCtx.Done(): // the handler decided "client left first"
+		case <-time.After(10 * time.Second):
+		}
+	}
+	t.Cleanup(func() { syncRunBeforeWaitSignal = nil })
+	rr := httptest.NewRecorder()
+	syncWithin(t, 30*time.Second, "run", func() { rig.h.Run(rr, req) })
+	var out struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &out)
+	if strings.EqualFold(out.Status, "WAITING") || strings.EqualFold(out.Status, "COMPLETED") {
+		t.Fatalf("a run the client left before it waited answered %s", rr.Body.String())
+	}
+	var pending int
+	if err := rig.db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("%d waitpoints still pending: %v", pending, err)
+	}
+	var open int
+	_ = rig.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE kind = 'waitpoint' AND resolved_at IS NULL`).Scan(&open)
+	if open != 0 {
+		t.Fatalf("%d approval cards are still actionable", open)
+	}
+	if rig.actions.executed() != 0 {
+		t.Fatal("the action ran")
 	}
 }
