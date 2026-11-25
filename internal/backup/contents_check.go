@@ -41,6 +41,12 @@ type ContentsCheck struct {
 	// files, memory blobs, crew containers) — not a check failure, but never
 	// left out of the answer.
 	Absent []IncompleteItem `json:"absent"`
+	// DatabaseCheck is SQLite's verdict from this check, run on the
+	// extracted private copy (instance bundles). Nil when none ran.
+	DatabaseCheck *DatabaseCheck `json:"database_check,omitempty"`
+	// RecordedDatabaseCheck is what the bundle's manifest says: ok, damaged,
+	// error, or unverified for a bundle written before the check existed.
+	RecordedDatabaseCheck string `json:"recorded_database_check,omitempty"`
 }
 
 // CheckBundleContents decrypts the bundle at path with identities or
@@ -115,6 +121,7 @@ func hashAll(r io.Reader) (string, int64, error) {
 
 func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, tmpParent string, res *ContentsCheck) error {
 	inst := m.Contents.Instance
+	res.RecordedDatabaseCheck = inst.DatabaseCheckState()
 	if inst == nil {
 		res.Problems = append(res.Problems, "manifest has no instance contents")
 		return nil
@@ -174,6 +181,13 @@ func checkInstanceContents(ctx context.Context, tr *TarZstReader, m *Manifest, t
 			_ = db.Close()
 			if err != nil {
 				return err
+			}
+			// SQLite's own checks, on this private copy; the manifest's
+			// record is reported but not trusted.
+			dbc := CheckDatabaseFileIntegrity(ctx, dbPath, 0)
+			res.DatabaseCheck = &dbc
+			if !dbc.Verified() {
+				res.Problems = append(res.Problems, "the database snapshot did not pass SQLite's checks: "+dbc.Summary())
 			}
 			for _, mm := range compareRowCounts(m.Contents.TableRowCounts, counts) {
 				res.Problems = append(res.Problems, fmt.Sprintf("table %s: manifest %d rows, snapshot %d", mm.Table, mm.Recorded, mm.Actual))
