@@ -121,3 +121,52 @@ func TestForceRecoveryRefusesBundlePathsThroughLinks(t *testing.T) {
 		})
 	}
 }
+
+// Links that no bundle path goes through are kept as links, and an absolute
+// link naming the data directory still resolves after publication: the
+// published directory has the same path as the original.
+func TestForceRecoveryKeepsUnrelatedLinks(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("force publication requires Linux")
+	}
+	f := newInstanceFixture(t)
+	bundle := f.create(t, true)
+	parent := t.TempDir()
+	data := filepath.Join(parent, "data")
+	opts := backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: data}
+	if _, err := backup.RecoverInstance(t.Context(), opts); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(parent, "disk2")
+	if err := os.Mkdir(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	links := map[string]string{
+		"offsite":         outside,                          // another disk
+		"alias-of-output": filepath.Join(data, "output"),    // absolute, back into this directory
+		"relative-skills": "skills",                         // relative, inside
+		"dangling":        filepath.Join(parent, "nowhere"), // nowhere
+	}
+	for name, to := range links {
+		if err := os.Symlink(to, filepath.Join(data, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := treeState(t, outside)
+	opts.Force = true
+	if _, err := backup.RecoverInstance(t.Context(), opts); err != nil {
+		t.Fatalf("unrelated links must not block recovery: %v", err)
+	}
+	for name, to := range links {
+		got, err := os.Readlink(filepath.Join(data, name))
+		if err != nil || got != to {
+			t.Errorf("%s: link = %q, %v; want %q", name, got, err, to)
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(filepath.Join(data, "alias-of-output")); err != nil || resolved != filepath.Join(data, "output") {
+		t.Errorf("absolute link resolves to %q, %v", resolved, err)
+	}
+	if got := treeState(t, outside); strings.Join(got, "\n") != strings.Join(before, "\n") {
+		t.Errorf("directory behind a link changed: %v -> %v", before, got)
+	}
+}
