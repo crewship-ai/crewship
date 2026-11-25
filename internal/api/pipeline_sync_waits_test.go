@@ -508,8 +508,7 @@ func TestSyncWait_BatchDisconnectAfterWaitingKeepsTheWaitingItem(t *testing.T) {
 	// person: not earlier (the pending row is written before the signal) and
 	// not by polling.
 	var once sync.Once
-	syncRunAfterWaitSignal = func() { once.Do(disconnect) }
-	t.Cleanup(func() { syncRunAfterWaitSignal = nil })
+	rig.h.syncRunHooks.afterWaitRecorded = func() { once.Do(disconnect) }
 	rr := httptest.NewRecorder()
 	syncWithin(t, 20*time.Second, "batch", func() { rig.h.RunBatch(rr, req) })
 	var out struct {
@@ -562,10 +561,9 @@ func TestSyncWait_SignalAndDisconnectTogetherAlwaysReceipt(t *testing.T) {
 		req.SetPathValue("slug", "held-each")
 		reqCtx, disconnect := context.WithCancel(req.Context())
 		req = req.WithContext(reqCtx)
-		syncRunAfterWaitSignal = disconnect
+		rig.h.syncRunHooks.afterWaitRecorded = disconnect
 		rr := httptest.NewRecorder()
 		syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
-		syncRunAfterWaitSignal = nil
 		disconnect()
 		rc := rig.mustWaiting(t, rr)
 		rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
@@ -582,14 +580,13 @@ func TestSyncWait_DisconnectBetweenWaitpointAndSignalCancelsAndClosesTheCard(t *
 	reqCtx, disconnect := context.WithCancel(req.Context())
 	defer disconnect()
 	req = req.WithContext(reqCtx)
-	syncRunBeforeWaitSignal = func(runCtx context.Context) {
+	rig.h.syncRunHooks.beforeWaitSignal = func(runCtx context.Context) {
 		disconnect()
 		select {
 		case <-runCtx.Done(): // the handler decided "client left first"
 		case <-time.After(10 * time.Second):
 		}
 	}
-	t.Cleanup(func() { syncRunBeforeWaitSignal = nil })
 	rr := httptest.NewRecorder()
 	syncWithin(t, 30*time.Second, "run", func() { rig.h.Run(rr, req) })
 	var out struct {
