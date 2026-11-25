@@ -50,6 +50,7 @@ TESTS = {
         'TestImageChange_RealIdleVerifierProtectsDetachedWork',
         'TestFencedRuntimeUpgradeAfterServerRestart',
         'TestCrewDataSurvivesContainerReplacement',
+        'TestRuntimeReadyContainerizedServerBindSource',
     },
     'internal/toolchain': {'TestQualificationThroughDockerRuntime'},
     'internal/devcontainer': {'TestProvisionImmutableArtifact_RealRebuild'},

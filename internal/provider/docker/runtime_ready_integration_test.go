@@ -1,4 +1,4 @@
-//go:build conformance
+//go:build integration && linux
 
 // Readiness of a containerized server against a real daemon (#5418).
 //
@@ -10,16 +10,19 @@
 // pointed at that server-local path. It is not a run of the production Compose
 // file, the socket proxy or the server image.
 //
-// Run:
-//
-//	go test -tags conformance -run TestRuntimeReadyContainerizedServerBindSource -v ./internal/provider/docker/
+// Needs a local engine and a local alpine:3 (CI prepares it); it pulls nothing.
+// Run: go test -tags integration -run TestRuntimeReadyContainerizedServerBindSource ./internal/provider/docker/
 
 package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,18 +32,38 @@ import (
 )
 
 func TestRuntimeReadyContainerizedServerBindSource(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	p, cleanup := newConformanceProvider(ctx, t)
-	defer cleanup()
-	image := conformanceImageRef()
-	ensureConformanceImage(ctx, t, p, image)
+	cli, err := client.New(client.FromEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	if _, err := cli.Ping(ctx, client.PingOptions{}); err != nil {
+		t.Fatalf("no container engine reachable: %v", err)
+	}
+	image := os.Getenv("CREWSHIP_DATA_MOUNT_TEST_IMAGE")
+	if image == "" {
+		image = "alpine:3"
+	}
 
-	p.cfg.ReportRuntimeReadiness = true
-	p.inContainerFn = func() bool { return true }
-	staged := p.cfg // sidecar and entrypoint under the host temp dir the daemon can see
-
-	// The daemon sees the host paths: ready.
+	// Runtime files the daemon can see: a host directory.
+	visible := t.TempDir()
+	hostSidecar := filepath.Join(visible, "crewship-sidecar")
+	hostEntrypoint := filepath.Join(visible, "entrypoint.sh")
+	if err := os.WriteFile(hostSidecar, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1, 0}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hostEntrypoint, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := &Provider{
+		client:        cli,
+		detected:      DetectResult{Runtime: "docker"},
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:           Config{ReportRuntimeReadiness: true, OutputBasePath: visible, SidecarBinaryPath: hostSidecar, EntrypointPath: hostEntrypoint},
+		inContainerFn: func() bool { return true },
+	}
 	if err := p.RuntimeReady(ctx); err != nil {
 		t.Fatalf("mandatory binds visible to the daemon reported %v", err)
 	}
@@ -52,31 +75,28 @@ func TestRuntimeReadyContainerizedServerBindSource(t *testing.T) {
 	if _, err := os.Stat(root); err == nil {
 		t.Fatalf("%s exists on the host; the test needs a path only the container has", root)
 	}
-	if _, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{Name: volume}); err != nil {
+	if _, err := cli.VolumeCreate(ctx, client.VolumeCreateOptions{Name: volume}); err != nil {
 		t.Fatalf("create volume: %v", err)
 	}
-	t.Cleanup(func() {
-		bg, stop := context.WithTimeout(context.Background(), 20*time.Second)
-		defer stop()
-		_, _ = p.client.VolumeRemove(bg, volume, client.VolumeRemoveOptions{Force: true})
-	})
 	script := fmt.Sprintf(`printf '\177ELF' > %[1]s/crewship-sidecar && printf '#!/bin/sh\n' > %[1]s/entrypoint.sh && chmod 755 %[1]s/crewship-sidecar %[1]s/entrypoint.sh && test -x %[1]s/crewship-sidecar`, root)
-	helper, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config:     &container.Config{Image: image, Cmd: []string{"sh", "-ec", script}},
+	helper, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: image, User: "0:0", Cmd: []string{"sh", "-ec", script}},
 		HostConfig: &container.HostConfig{Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: volume, Target: root}}},
 	})
 	if err != nil {
+		_, _ = cli.VolumeRemove(context.WithoutCancel(ctx), volume, client.VolumeRemoveOptions{Force: true})
 		t.Fatalf("create server stand-in: %v", err)
 	}
-	defer func() {
-		bg, stop := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(func() {
+		bg, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
-		_, _ = p.client.ContainerRemove(bg, helper.ID, client.ContainerRemoveOptions{Force: true})
-	}()
-	if _, err := p.client.ContainerStart(ctx, helper.ID, client.ContainerStartOptions{}); err != nil {
+		_, _ = cli.ContainerRemove(bg, helper.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		_, _ = cli.VolumeRemove(bg, volume, client.VolumeRemoveOptions{Force: true})
+	})
+	if _, err := cli.ContainerStart(ctx, helper.ID, client.ContainerStartOptions{}); err != nil {
 		t.Fatalf("start server stand-in: %v", err)
 	}
-	wait := p.client.ContainerWait(ctx, helper.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	wait := cli.ContainerWait(ctx, helper.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	select {
 	case status, ok := <-wait.Result:
 		if !ok || status.StatusCode != 0 {
@@ -91,17 +111,13 @@ func TestRuntimeReadyContainerizedServerBindSource(t *testing.T) {
 	p.cfg.SidecarBinaryPath = root + "/crewship-sidecar"
 	p.cfg.EntrypointPath = root + "/entrypoint.sh"
 	age(p, false, bindVerifiedTTL+time.Second)
-	err = p.RuntimeReady(ctx)
-	if err == nil {
-		t.Fatal("a bind source that exists only inside the server container was reported ready")
-	}
-	if err != ErrMandatoryBindsUnreachable {
-		t.Fatalf("unexpected readiness error: %v", err)
+	if err := p.RuntimeReady(ctx); !errors.Is(err, ErrMandatoryBindsUnreachable) {
+		t.Fatalf("a bind source that exists only inside the server container reported %v", err)
 	}
 
 	// The operator fixes it (files visible to the daemon again): ready by itself.
-	p.cfg.SidecarBinaryPath = staged.SidecarBinaryPath
-	p.cfg.EntrypointPath = staged.EntrypointPath
+	p.cfg.SidecarBinaryPath = hostSidecar
+	p.cfg.EntrypointPath = hostEntrypoint
 	age(p, true, bindRejectedTTL+time.Second)
 	if err := p.RuntimeReady(ctx); err != nil {
 		t.Fatalf("readiness stayed red after the daemon could see the files: %v", err)
