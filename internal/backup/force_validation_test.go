@@ -212,8 +212,21 @@ func TestForceValidationMigrationKeyAuthority(t *testing.T) {
 	}
 	recover := func(t *testing.T, path string) (*backup.RecoverReport, error) {
 		t.Helper()
-		return backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: path, Identities: []age.Identity{identity}, DataDir: t.TempDir(), Force: true})
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "operator.txt"), []byte("existing instance"), 0640); err != nil {
+			t.Fatal(err)
+		}
+		targetBefore := forceGenerationSnapshot(t, dir)
+		sourceDir := filepath.Dir(path)
+		sourceBefore := forceGenerationSnapshot(t, sourceDir)
+		rep, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: path, Identities: []age.Identity{identity}, DataDir: dir, Force: true})
+		assertOriginalGeneration(t, sourceDir, sourceBefore)
+		if err != nil {
+			assertOriginalGeneration(t, dir, targetBefore)
+		}
+		return rep, err
 	}
+
 	noKit := create(t, false)
 	for _, tc := range []struct{ name, value, want string }{
 		{"missing key below ledger maximum", "", "pending migrations"},
@@ -298,8 +311,16 @@ func TestForceValidationMigrationKeyAuthority(t *testing.T) {
 		if _, err = db.Exec("UPDATE agents SET webhook_secret=? WHERE id='agent'", ciphertext); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = recover(t, create(t, false)); err != nil {
+		path := create(t, false)
+		if _, err = recover(t, path); err != nil {
 			t.Fatal(err)
 		}
+		t.Run("wrong original key", func(t *testing.T) {
+			t.Setenv("ENCRYPTION_KEY", instKeyV2)
+			rep, err := recover(t, path)
+			if err == nil || !strings.Contains(err.Error(), "cannot open agents.webhook_secret") || rep == nil || rep.Result != backup.RestoreResultFailed || rep.PreviousDataDir != "" {
+				t.Fatalf("wrong original key: report %+v, error %v", rep, err)
+			}
+		})
 	})
 }
