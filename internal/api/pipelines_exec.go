@@ -624,7 +624,7 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		originID = origin.ID
 	}
 	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
+	res, receipt, err := h.runSynchronously(r, exec, pipeline.RunInput{
 		PipelineID:            p.ID,
 		ChatOriginID:          originID,
 		InvocationSourceRunID: invocationSource,
@@ -649,6 +649,11 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("internal pipeline run: exec", "error", err, "slug", body.Slug)
 		replyError(w, http.StatusInternalServerError, "Failed to start routine run")
+		return
+	}
+	if receipt != nil {
+		// Waiting for a person; the run continues without this request.
+		writeJSON(w, http.StatusOK, receipt)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

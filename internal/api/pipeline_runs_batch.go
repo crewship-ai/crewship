@@ -110,13 +110,24 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		RunID  string `json:"run_id,omitempty"`
 		Status string `json:"status,omitempty"`
 		Error  string `json:"error,omitempty"`
+		// WaitpointToken and CurrentStep are set only for an item whose
+		// run is waiting for a person (status WAITING). That run continues
+		// without this request; the rest of the batch goes on.
+		WaitpointToken string `json:"waitpoint_token,omitempty"`
+		CurrentStep    string `json:"current_step,omitempty"`
 	}
 	results := make([]itemResult, 0, len(body.Items))
 	for i, item := range body.Items {
 		tags := append([]string{batchTag}, body.Tags...)
 		tags = append(tags, item.Tags...)
+		if r.Context().Err() != nil {
+			// The client left: do not start the rest of the batch. Items that
+			// already run keep running (a waiting one continues on its own).
+			results = append(results, itemResult{Index: i, Error: "not started: the client disconnected"})
+			continue
+		}
 		exec := h.newExecutor()
-		res, err := exec.Run(r.Context(), pipeline.RunInput{
+		res, receipt, err := h.runSynchronously(r, exec, pipeline.RunInput{
 			PipelineID:          p.ID,
 			WorkspaceID:         workspaceID,
 			InvokingUserID:      invokingUser,
@@ -130,6 +141,11 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			results = append(results, itemResult{Index: i, Error: err.Error()})
+			continue
+		}
+		if receipt != nil {
+			results = append(results, itemResult{Index: i, RunID: receipt.RunID, Status: receipt.Status,
+				WaitpointToken: receipt.WaitpointToken, CurrentStep: receipt.CurrentStep})
 			continue
 		}
 		out := itemResult{Index: i}

@@ -1,0 +1,1 @@
+- **A cancelled routine could continue past a retry backoff.** The executor now checks for cancellation before waiting and again when the retry timer wakes.

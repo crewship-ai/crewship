@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +145,11 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 			NoStandingTrust: true,
 		})
 		if err != nil {
+			// The run may have died while the waitpoint was being written:
+			// whatever of it was stored must not stay actionable.
+			if ctx.Err() != nil {
+				e.cancelRunWaitpoints(runID)
+			}
 			return "", 0, elapsed(), fmt.Errorf("crewship step %q create approval: %w", step.ID, err)
 		}
 		token = created
@@ -168,11 +174,7 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 		// The run died mid-wait: cancel its waitpoints so the card stops
 		// being actionable, as the wait step does. Detached context — ctx
 		// is already cancelled.
-		if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
-			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _ = wc.CancelWaitpointsForRun(cctx, runID)
-			cancel()
-		}
+		e.cancelRunWaitpoints(runID)
 		return "", 0, elapsed(), ctx.Err()
 	}
 	if err != nil {
@@ -185,6 +187,12 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 			}
 		}
 		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval denied", step.ID, step.Action)
+	}
+	// The person decided, possibly long after the run started and after its
+	// request was gone. Before the approved action runs, the person who
+	// started the run and the routine itself must still be valid (#5354).
+	if err := e.checkStillAllowedToContinue(ctx, in); err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s) after approval: %w", step.ID, step.Action, err)
 	}
 	req.ApprovalToken = token
 	out, err := e.crewship.Do(ctx, req)
@@ -280,4 +288,39 @@ func (e *Executor) signalHumanWait(ctx context.Context, in RunInput, runID, step
 		}
 	}
 	in.OnHumanWait(runID, stepID, token)
+}
+
+// checkStillAllowedToContinue re-checks a run that waited for a person: the
+// invoking user's standing, and that the routine still exists and may run
+// (not deleted, not disabled or proposed).
+func (e *Executor) checkStillAllowedToContinue(ctx context.Context, in RunInput) error {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return err
+	}
+	if in.pipeline == nil || e.store == nil || e.store.db == nil {
+		return nil
+	}
+	var status string
+	err := e.store.db.QueryRowContext(ctx, `SELECT COALESCE(status, 'active') FROM pipelines WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		in.pipeline.ID, in.WorkspaceID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("the routine was deleted while the run waited")
+	}
+	if err != nil {
+		return fmt.Errorf("routine availability check: %w", err)
+	}
+	if !routineStatusRunnable(status) {
+		return fmt.Errorf("the routine is %s and cannot continue", status)
+	}
+	return nil
+}
+
+// cancelRunWaitpoints cancels the run's pending waitpoints on a detached
+// context, for a run whose own context is already gone.
+func (e *Executor) cancelRunWaitpoints(runID string) {
+	if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = wc.CancelWaitpointsForRun(cctx, runID)
+		cancel()
+	}
 }

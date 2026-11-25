@@ -225,20 +225,24 @@ func resolveBackoff(bp *BackoffPolicy) (minDelay, maxDelay time.Duration, factor
 // is cancelled during the wait. Injectable via e.sleepFn so tests drive
 // the backoff schedule without real wall-clock delays.
 func (e *Executor) retrySleep(ctx context.Context, d time.Duration) bool {
-	if e.sleepFn != nil {
-		return e.sleepFn(ctx, d)
-	}
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return false
-	case <-t.C:
-		return true
 	}
+	if e.sleepFn != nil {
+		if !e.sleepFn(ctx, d) {
+			return false
+		}
+	} else if d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-t.C:
+		}
+	}
+	// Cancellation and timer expiry can both be ready at wakeup.
+	return ctx.Err() == nil
 }
 
 // jitterMode selects the jitter distribution applyJitter draws from.

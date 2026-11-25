@@ -330,6 +330,18 @@ a non-empty `debounce_key`, or `fire_at`) returns `202 Accepted` with
 `{ "status": "SCHEDULED", "pending_id", "fire_at", "coalesced", "priority",
 "pinned_version" }` and does not yet have a run ID.
 
+When a step starts waiting for a person (a held action or an approval inside a
+routine, including one in a routine it calls), the synchronous call does not
+hold the request open. It returns `200 OK` with `status: "WAITING"`,
+`waitpoint_token` and `current_step` for the run you started. The run continues
+without the request and finishes when a person decides. Replaying a run,
+running a schedule now, the agent `run_routine` call and each item of
+`run_batch` behave the same way: a batch item that waits appears in `results`
+with `status: "WAITING"`, `waitpoint_token` and `current_step`, and the other
+items still run. The token is a handle only; an agent cannot decide the step it
+holds with it. A client that disconnects before anything waits still cancels
+the run.
+
 Send `Prefer: respond-async` to get the run ID before the run finishes: the
 response is `202 Accepted` with `Preference-Applied: respond-async` and
 `{ "run_id", "status": "IN_PROGRESS" }` as soon as the run row exists, and
@@ -912,6 +924,11 @@ authentication; `403` without membership; `503` for an unavailable run store;
 
 **Response:** `200 OK` —
 `{ "requested": N, "replayed": N, "results": [{ "source_run_id", "new_run_id"?, "status"?, "error"? }] }`.
+
+A replay that starts waiting for a person is counted in `replayed` and its item
+has `status: "WAITING"`; it continues without the request and finishes when a
+person decides. Read each item's `status` to tell a finished replay from a
+waiting one.
 
 **Statuses:** `200 OK`; `400` for invalid selectors or JSON; `401` without
 authentication; `403` without membership/create permission; `503` for an
