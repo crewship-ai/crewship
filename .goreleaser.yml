@@ -60,9 +60,10 @@ builds:
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
       # The Word and Sheet packages this release trusts (manifest digests from
       # scripts/build-craft-components.py) and where they are published next
-      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      # to the archives (#5315). Unset in snapshots: no package is trusted. A
+      # nightly snapshot passes CRAFT_COMPONENT_URL because its tag is synthetic.
       - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
-      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}{{ envOrDefault "CRAFT_COMPONENT_URL" (printf "https://github.com/crewship-ai/crewship/releases/download/%s" .Tag) }}{{ end }}
 
   # Full daemon for macOS (#953). Separate build id so the darwin archive
   # (default-darwin below) can bundle the LINUX sidecar + entrypoint.sh —
@@ -90,9 +91,10 @@ builds:
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
       # The Word and Sheet packages this release trusts (manifest digests from
       # scripts/build-craft-components.py) and where they are published next
-      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      # to the archives (#5315). Unset in snapshots: no package is trusted. A
+      # nightly snapshot passes CRAFT_COMPONENT_URL because its tag is synthetic.
       - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
-      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}{{ envOrDefault "CRAFT_COMPONENT_URL" (printf "https://github.com/crewship-ai/crewship/releases/download/%s" .Tag) }}{{ end }}
 
   # Full daemon for Windows (#946). Separate build id so the windows
   # archive (default-windows below) can bundle the LINUX sidecar +
@@ -119,9 +121,10 @@ builds:
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
       # The Word and Sheet packages this release trusts (manifest digests from
       # scripts/build-craft-components.py) and where they are published next
-      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      # to the archives (#5315). Unset in snapshots: no package is trusted. A
+      # nightly snapshot passes CRAFT_COMPONENT_URL because its tag is synthetic.
       - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
-      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}{{ envOrDefault "CRAFT_COMPONENT_URL" (printf "https://github.com/crewship-ai/crewship/releases/download/%s" .Tag) }}{{ end }}
 
   # CLI-only build — same cmd/crewship entry point, built with the
   # `clionly` tag. Strips the embedded Next.js bundle (web/embed.go),
