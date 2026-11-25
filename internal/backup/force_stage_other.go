@@ -8,7 +8,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/writerlease"
 )
 
-type forceStage struct{ dir, previous string }
+type forceStage struct {
+	dir, previous string
+	skipped       []string
+}
 
 func beginForceStage(context.Context, string) (*forceStage, error) {
 	return nil, writerlease.ErrUnsupportedStorage
