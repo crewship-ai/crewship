@@ -94,6 +94,9 @@ func CheckBundleContents(ctx context.Context, bundlePath string, identities []ag
 		res.OK = true
 		res.ProofLevel = ProofContents
 		res.Detail = fmt.Sprintf("every section read (%d entries); %d table(s) and %d file(s) match the manifest", res.Entries, res.Tables, res.Files)
+		if res.DatabaseCheck != nil && res.RecordedDatabaseCheck == DatabaseCheckUnverified {
+			res.Detail += "; the bundle recorded no database check when it was made (unverified), SQLite's checks on it now: " + res.DatabaseCheck.Status
+		}
 		if n := len(res.Absent); n > 0 {
 			res.Detail += fmt.Sprintf("; the bundle records %d kind(s) of missing content", n)
 		}
