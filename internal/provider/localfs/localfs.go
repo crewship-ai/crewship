@@ -73,18 +73,58 @@ func (p *Provider) resolve(path string) (string, error) {
 	if baseErr != nil {
 		return "", fmt.Errorf("resolve base path: %w", baseErr)
 	}
-	// Only check symlinks if the path exists (new files won't resolve)
-	if realFull, evalErr := filepath.EvalSymlinks(full); evalErr == nil {
-		if !strings.HasPrefix(realFull, realBase+string(os.PathSeparator)) && realFull != realBase {
-			return "", fmt.Errorf("path traversal detected (symlink): %s", path)
+	// The deepest part of the path that exists is what a link can redirect:
+	// a file or directory still to be created follows its existing parent.
+	probe := full
+	for {
+		realProbe, evalErr := filepath.EvalSymlinks(probe)
+		if evalErr == nil {
+			if !strings.HasPrefix(realProbe, realBase+string(os.PathSeparator)) && realProbe != realBase {
+				return "", fmt.Errorf("path traversal detected (symlink): %s", path)
+			}
+			// Every path belongs to one crew (or one server-owned area). An
+			// agent can plant a link in its own directory, so a link must
+			// not carry the path into another crew's or area's directory,
+			// which the base-wide check above would allow.
+			if unit, uerr := filepath.EvalSymlinks(filepath.Join(p.basePath, storageUnit(rel))); uerr == nil {
+				if realProbe != unit && !strings.HasPrefix(realProbe, unit+string(os.PathSeparator)) {
+					return "", fmt.Errorf("path traversal detected (link leaves its directory): %s", path)
+				}
+			}
+			if probe == full {
+				// Re-derive the relative path from the *resolved* pair so an
+				// in-base symlink keeps resolving to its real target.
+				if resolvedRel, relErr := filepath.Rel(realBase, realProbe); relErr == nil {
+					rel = resolvedRel
+				}
+			}
+			break
 		}
-		// Re-derive the relative path from the *resolved* pair so an in-base
-		// symlink keeps resolving to its real target under the root.
-		if resolvedRel, relErr := filepath.Rel(realBase, realFull); relErr == nil {
-			rel = resolvedRel
+		parent := filepath.Dir(probe)
+		if parent == probe || !strings.HasPrefix(parent, p.basePath) {
+			break
 		}
+		probe = parent
 	}
 	return rel, nil
+}
+
+// storageUnit is the part of a base-relative path that owns everything below
+// it: the crew directory, or the crew's entry under the areas that hold one
+// directory per crew or workspace. A link may move a path inside its unit,
+// never to another.
+func storageUnit(rel string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(rel)), "/")
+	if len(parts) == 1 {
+		// A single element is a crew directory (or a file) at the top of the
+		// base, not something below one: there is no unit to confine to.
+		return "."
+	}
+	switch parts[0] {
+	case "crews", "workspaces", "attachments":
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
 }
 
 // resolveAbs is resolve for the one consumer that cannot take a relative path
@@ -114,21 +154,31 @@ func (p *Provider) resolveAbs(path string) (string, error) {
 // when it points back inside the base. Relative in-base symlinks, and
 // absolute ones on an already-existing target (resolve rewrites those to
 // their real path above), keep working.
-func (p *Provider) openRoot(path string) (*os.Root, string, error) {
+func (p *Provider) openRoot(path string, create bool) (*scopedRoot, string, error) {
 	rel, err := p.resolve(path)
 	if err != nil {
 		return nil, "", err
 	}
-	root, err := os.OpenRoot(p.basePath)
+	// One root per storage unit, never one on the whole base: a link an
+	// agent planted inside its own directory is then confined to it by the
+	// root itself, for existing and not-yet-existing targets alike.
+	unit := storageUnit(rel)
+	dir := filepath.Join(p.basePath, unit)
+	if create {
+		if err := os.MkdirAll(dir, 0775); err != nil {
+			return nil, "", fmt.Errorf("create parent dir: %w", err)
+		}
+	}
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, "", fmt.Errorf("open storage root: %w", err)
 	}
-	return root, rel, nil
+	return &scopedRoot{root: root, unit: unit}, rel, nil
 }
 
 // Read opens the file at the given path for reading.
 func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {
-	root, rel, err := p.openRoot(path)
+	root, rel, err := p.openRoot(path, false)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +202,7 @@ func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {
 //  2. If create still fails with EACCES, try unlink + create — works
 //     when the parent dir is writable for our uid/gid.
 func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
-	root, rel, err := p.openRoot(path)
+	root, rel, err := p.openRoot(path, true)
 	if err != nil {
 		return err
 	}
@@ -204,8 +254,11 @@ func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
 
 // List returns file entries in the given directory (non-recursive).
 func (p *Provider) List(_ context.Context, dir string) ([]provider.FileInfo, error) {
-	root, rel, err := p.openRoot(dir)
+	root, rel, err := p.openRoot(dir, false)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	defer root.Close()
@@ -245,8 +298,11 @@ func (p *Provider) List(_ context.Context, dir string) ([]provider.FileInfo, err
 
 // ListRecursive walks the directory tree and returns all file entries.
 func (p *Provider) ListRecursive(_ context.Context, dir string) ([]provider.FileInfo, error) {
-	root, rel, err := p.openRoot(dir)
+	root, rel, err := p.openRoot(dir, false)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	defer root.Close()
@@ -293,8 +349,11 @@ func (p *Provider) ListRecursive(_ context.Context, dir string) ([]provider.File
 // with an empty or "." path has lost track of what it is removing, and the
 // old behaviour (os.RemoveAll(basePath)) wiped every crew's output.
 func (p *Provider) Delete(_ context.Context, path string) error {
-	root, rel, err := p.openRoot(path)
+	root, rel, err := p.openRoot(path, false)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
 	defer root.Close()
@@ -306,8 +365,11 @@ func (p *Provider) Delete(_ context.Context, path string) error {
 
 // Exists reports whether a file or directory exists at the given path.
 func (p *Provider) Exists(_ context.Context, path string) (bool, error) {
-	root, rel, err := p.openRoot(path)
+	root, rel, err := p.openRoot(path, false)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
 		return false, err
 	}
 	defer root.Close()
@@ -323,7 +385,7 @@ func (p *Provider) Exists(_ context.Context, path string) (bool, error) {
 
 // EnsureDir creates the directory at path if it does not already exist.
 func (p *Provider) EnsureDir(_ context.Context, path string) error {
-	root, rel, err := p.openRoot(path)
+	root, rel, err := p.openRoot(path, true)
 	if err != nil {
 		return err
 	}
