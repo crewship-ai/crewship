@@ -1022,9 +1022,27 @@ other writer first, then pass `--force`. The parent directory must be writable
 and the filesystem must support atomic directory exchange. Allow space on that
 filesystem for a copy of the existing tree and the restored data. Recovery
 stages the changes in a private directory, preserving unrelated files and
-their permissions and ownership. It refuses trees it cannot copy safely,
-including symlinks, hard-linked files and nested mounts. If a preflight check,
-extraction or validation fails, the original directory remains in place.
+their permissions and ownership. If a preflight check, extraction or
+validation fails, the original directory remains in place.
+
+**Limits of `--force`.** The data directory must be one volume: a single
+filesystem with nothing mounted inside it (a bind mount, a separate volume or
+a network share under the data directory is refused, even on the same disk).
+What recovery does with each kind of entry:
+
+| Entry in the existing data directory | What recovery does |
+|---|---|
+| Regular file or directory | Copied with owner, permissions, ACLs, extended attributes and times. |
+| Symlink | Copied **as a link**, with the same target text, owner and times. It is never followed, so a link that points outside the directory, or nowhere, stays as it is and what it points to is not copied. |
+| Socket, for example a `crewship.sock` left by a crash | Left out of the copy and named under the report's warnings. A socket belongs to a process and is created again at start. The retained previous directory still holds it. |
+| Hard-linked file (more than one name) | Refused. A copy cannot keep the link, and keeping one name would change what the other name sees. |
+| Pipe, device or other special file | Refused. |
+| Mount point inside the directory | Refused. |
+
+Before anything is copied, recovery walks the tree once and lists **every**
+entry it would refuse, up to twenty with a count of the rest, so you can fix
+them all in one pass instead of finding them one error at a time. Nothing is
+changed while it lists.
 On other operating systems, recover into an empty directory. Forced
 replacement requires Linux.
 
