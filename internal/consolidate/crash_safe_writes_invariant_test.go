@@ -218,7 +218,6 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		"../backup/instance_create.go|out, err := os.OpenFile(sealedPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)": "instance_create.go: the sealed payload in the staging dir, streamed into the bundle and removed with the staging dir.",
 		"../backup/instance_create.go|out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":       "instance_create.go: the final bundle written as <bundle>.partial and renamed into place, removed on any failure — the same idiom as runner_create.go's outFile.",
 		"../backup/instance_recover.go|f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)":        "instance_recover.go: writeExtracted landing a file in the recovered data dir, which no server uses until recover succeeds; each file is fsynced before close and checked against the bundle's index.",
-		"../backup/instance_recover.go|f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":         "instance_recover.go: writeEnvFile — secrets.env / recovered-keys.env written to a temp, fsynced, and renamed into place.",
 
 		// ---- #2124: cmd/crewship, read one site at a time ----
 		//

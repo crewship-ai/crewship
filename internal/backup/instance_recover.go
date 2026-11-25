@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -1496,23 +1497,12 @@ func writeEnvFile(p string, header []string, values map[string]string) error {
 	for _, k := range keys {
 		b.WriteString(k + "=" + values[k] + "\n")
 	}
-	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+"-*")
+	root, err := os.OpenRoot(filepath.Dir(p))
 	if err != nil {
 		return err
 	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	_, err = f.WriteString(b.String())
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	defer root.Close()
+	return memory.WriteFileDurableRootExactMode(root, filepath.Base(p), []byte(b.String()), 0600)
 }
 
 func recordRecoverReport(ctx context.Context, rep *RecoverReport, opts RecoverOptions, dataDir string) (retErr error) {
