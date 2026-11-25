@@ -60,9 +60,10 @@ type ProvisionJob struct {
 	// reload-replay via the GET endpoint.
 	Steps []string
 
-	// Pending holds at most one deferred message per chat, sender and authority
-	// epoch. A repeated send by that same actor/epoch replaces its content;
-	// another human or a newly admitted epoch retains independent work.
+	// Pending holds the deferred messages in arrival order. Each saved turn
+	// (identified by its trigger message id) is kept and run on its own; only a
+	// repeated attach of the same turn replaces its entry. Other humans and
+	// newly admitted epochs retain independent work.
 	// Attached while the crew's auto-provision job is running.
 	//
 	// Drained (read, then set to nil) in the SAME h.mu critical section that
@@ -74,7 +75,7 @@ type ProvisionJob struct {
 	// already terminal and AttachPendingMessage resumes it immediately
 	// instead of adding to a map nobody will ever drain again. There is no
 	// interleaving where both the drain and a late attach see the same entry.
-	Pending map[string]chatbridge.PendingChatMessage `json:"-"`
+	Pending []chatbridge.PendingChatMessage `json:"-"`
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -563,7 +564,7 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 const resumeMessageTimeout = 10 * time.Minute
 
 func pendingMessageKey(msg chatbridge.PendingChatMessage) string {
-	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority})
+	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority, msg.Opts.OriginalTriggerMessageID})
 	return string(key)
 }
 
@@ -591,12 +592,21 @@ func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge
 	}
 	switch job.Status {
 	case "pending", "running":
-		if job.Pending == nil {
-			job.Pending = make(map[string]chatbridge.PendingChatMessage)
+		// A turn that was saved on its own keeps its own entry, so none is
+		// dropped. Only the same turn attached twice (or turns without a
+		// trigger id, from the same sender and authority) is replaced.
+		key := pendingMessageKey(msg)
+		replaced := false
+		for i := range job.Pending {
+			if pendingMessageKey(job.Pending[i]) == key {
+				job.Pending[i] = msg
+				replaced = true
+				break
+			}
 		}
-		// Coalesce only within one sender and authority epoch. Other humans
-		// or a newly admitted epoch retain independent pending work.
-		job.Pending[pendingMessageKey(msg)] = msg
+		if !replaced {
+			job.Pending = append(job.Pending, msg)
+		}
 		h.mu.Unlock()
 		return true
 	case "completed":
@@ -634,17 +644,38 @@ func (h *ProvisioningHandler) spawnResumeMessage(msg chatbridge.PendingChatMessa
 // messages target independent chats (a crew can have several agents/chats)
 // and none should block another or the caller (runProvisioning /
 // markJobFailed), which still has its own DB/journal/broadcast work to do.
-func (h *ProvisioningHandler) resumePending(pending map[string]chatbridge.PendingChatMessage) {
-	for _, msg := range pending {
-		h.spawnResumeMessage(msg, nil)
-	}
+func (h *ProvisioningHandler) resumePending(pending []chatbridge.PendingChatMessage) {
+	h.spawnPendingPerChat(pending, nil)
 }
 
 // failPending fires the failure path of resumeMessage for every message a
 // terminal-transition drained off a job whose build did NOT succeed.
-func (h *ProvisioningHandler) failPending(pending map[string]chatbridge.PendingChatMessage, buildErr error) {
+func (h *ProvisioningHandler) failPending(pending []chatbridge.PendingChatMessage, buildErr error) {
+	h.spawnPendingPerChat(pending, buildErr)
+}
+
+// spawnPendingPerChat runs the drained messages of one chat one after the
+// other in arrival order, because a chat accepts one live run at a time: a
+// second concurrent resume would be refused as busy and its saved turn would
+// never be answered. Different chats still run independently.
+func (h *ProvisioningHandler) spawnPendingPerChat(pending []chatbridge.PendingChatMessage, buildErr error) {
+	var order []string
+	byChat := make(map[string][]chatbridge.PendingChatMessage)
 	for _, msg := range pending {
-		h.spawnResumeMessage(msg, buildErr)
+		if _, ok := byChat[msg.ChatID]; !ok {
+			order = append(order, msg.ChatID)
+		}
+		byChat[msg.ChatID] = append(byChat[msg.ChatID], msg)
+	}
+	for _, chatID := range order {
+		queue := byChat[chatID]
+		finish := beginBackgroundWork()
+		go func() {
+			defer finish()
+			for _, msg := range queue {
+				h.resumeMessage(msg, buildErr)
+			}
+		}()
 	}
 }
 
@@ -1144,7 +1175,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	defer func() {
 		if r := recover(); r != nil {
 			panicErr := fmt.Sprintf("internal error: %v", r)
-			var pending map[string]chatbridge.PendingChatMessage
+			var pending []chatbridge.PendingChatMessage
 			h.mu.Lock()
 			if j, ok := h.jobs[crewID]; ok {
 				j.Status = "failed"
