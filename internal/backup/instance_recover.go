@@ -148,6 +148,9 @@ func (o *RecoverOptions) validate() error {
 	if o.DataDir == "" {
 		return errors.New("backup: recover needs a data directory")
 	}
+	if o.Force && o.Drill {
+		return errors.New("backup: a recovery drill cannot force replacement of the data directory")
+	}
 	if (len(o.Identities) > 0) == (o.Passphrase != "") {
 		return errors.New("backup: recover needs exactly one of an identity or a passphrase")
 	}
@@ -190,6 +193,11 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		Stores:       map[string]StoreRestore{}, Incomplete: []IncompleteItem{},
 		Warnings: []string{}, Notes: []string{}, RuntimeReset: []string{}, Holds: []quiesce.Hold{},
 	}
+	// SQLite interprets URI delimiters when opening the published database.
+	// The staging name shares its parent but omits the target's basename.
+	if opts.Force && strings.ContainsAny(rep.DatabasePath, "?#%") {
+		return rep, errors.New("backup: recovery database path contains SQLite URI delimiters")
+	}
 
 	// 1. Integrity before anything is written.
 	vr, err := Verify(ctx, opts.BundlePath)
@@ -221,10 +229,6 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		}
 		defer stage.close()
 		dataDir = stage.dir
-		// SQLite treats query delimiters in a DSN as options.
-		if strings.ContainsAny(dataDir, "?#%") {
-			return rep, errors.New("backup: recovery staging path contains SQLite URI delimiters")
-		}
 		// Until publication these counts and paths describe the scratch
 		// generation. A failed report must describe the active target.
 		before := *rep
@@ -881,7 +885,19 @@ func checkRecoveryIntegrity(ctx context.Context, db *sql.DB) error {
 	if result != "ok" {
 		return fmt.Errorf("backup: staged SQLite integrity check failed: %s", result)
 	}
-	return nil
+	// integrity_check excludes foreign keys. One orphan is enough to refuse
+	// publication, including when its child is a WITHOUT ROWID table.
+	var child, parent string
+	var rowID sql.NullInt64
+	var constraint int
+	err := db.QueryRowContext(ctx, "PRAGMA main.foreign_key_check").Scan(&child, &rowID, &parent, &constraint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("backup: staged SQLite foreign_key_check: %w", err)
+	}
+	return fmt.Errorf("backup: staged SQLite foreign_key_check failed: %s references missing %s (constraint %d)", child, parent, constraint)
 }
 
 // withEnv sets kvs for the duration of fn and restores the previous values.
