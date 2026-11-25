@@ -15,8 +15,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -78,8 +80,7 @@ type RecoverOptions struct {
 	Identities []age.Identity
 	Passphrase string
 	DataDir    string
-	// Force allows a non-empty data directory: its database is replaced and
-	// files the bundle carries are overwritten.
+	// Force prepares and validates a private copy, then publishes it atomically.
 	Force bool
 	// DiscardWorkbooks acknowledges that a forced recovery destroys every
 	// workbook in the target database; no bundle contains one. Without it a
@@ -108,6 +109,7 @@ type RecoverReport struct {
 	Summary           string                  `json:"summary"`
 	BundlePath        string                  `json:"bundle_path"`
 	DataDir           string                  `json:"data_dir"`
+	PreviousDataDir   string                  `json:"previous_data_dir,omitempty"`
 	DatabasePath      string                  `json:"database_path"`
 	SourceHost        string                  `json:"source_host"`
 	BundleCreatedAt   time.Time               `json:"bundle_created_at"`
@@ -164,8 +166,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		return nil, limitErr
 	}
 	defer release()
+	committed := false
 	defer func() {
-		if retErr == nil {
+		if retErr == nil && !committed {
 			retErr = restoreOperationError(ctx)
 		}
 	}()
@@ -210,7 +213,27 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	rep.Incomplete = append(rep.Incomplete, m.Contents.Incomplete...)
 
 	// 2. The target.
+	var stage *forceStage
 	if opts.Force {
+		stage, err = beginForceStage(ctx, dataDir)
+		if err != nil {
+			return rep, err
+		}
+		defer stage.close()
+		dataDir = stage.dir
+		// SQLite treats query delimiters in a DSN as options.
+		if strings.ContainsAny(dataDir, "?#%") {
+			return rep, errors.New("backup: recovery staging path contains SQLite URI delimiters")
+		}
+		// Until publication these counts and paths describe the scratch
+		// generation. A failed report must describe the active target.
+		before := *rep
+		rep.Stores = map[string]StoreRestore{}
+		defer func() {
+			if !committed {
+				*rep = before
+			}
+		}()
 		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir, opts.DiscardWorkbooks); err != nil {
 			return rep, err
 		}
@@ -232,13 +255,15 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 	defer recoveryRoot.Close()
 	if opts.Force {
-		if err := recoveryRoot.RemoveAll(RecoveredServicesDir); err != nil {
-			return rep, err
+		for _, name := range []string{RecoveredServicesDir, RecoveredCrewsDir, RecoveredEnvironmentsDir} {
+			if err := recoveryRoot.RemoveAll(name); err != nil {
+				return rep, err
+			}
 		}
 	}
 	var ex *extractedInstance
 	defer func() {
-		if retErr != nil && (ex == nil || ex.services == nil || !ex.services.serviceRecoveryCommitted) {
+		if stage == nil && retErr != nil && (ex == nil || ex.services == nil || !ex.services.serviceRecoveryCommitted) {
 			if err := recoveryRoot.RemoveAll(RecoveredServicesDir); err != nil {
 				logger.Error("backup: remove failed recovery service staging", "error", err)
 			}
@@ -251,16 +276,28 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 	rep.kit = ex.kit
 	for store, sr := range ex.stores {
+		sr.Path = RecoveredStoreDir(rep.DataDir, store)
 		rep.Stores[store] = sr
 	}
-	rep.CrewArchives = ex.crewArchives
+	for _, archive := range ex.crewArchives {
+		rep.CrewArchives = append(rep.CrewArchives, filepath.Join(rep.DataDir, RecoveredCrewsDir, filepath.Base(archive)))
+	}
 	rep.ServiceSnapshots = m.Contents.ServiceSnapshots
-	rep.Incomplete = append(rep.Incomplete, ex.compareIndex(m)...)
+	gaps := ex.compareIndex(m)
+	if stage != nil {
+		if len(gaps) > 0 {
+			return rep, fmt.Errorf("backup: invalid file index: %s", gaps[0].Detail)
+		}
+		if err := ex.validateForceContents(ctx, m, dataDir); err != nil {
+			return rep, err
+		}
+	}
+	rep.Incomplete = append(rep.Incomplete, gaps...)
 	if m.Contents.Instance.DatabaseSHA256 != "" && ex.dbSHA != m.Contents.Instance.DatabaseSHA256 {
 		return rep, fmt.Errorf("backup: the database in the bundle does not match its manifest digest")
 	}
 	if st, ok := m.Contents.Instance.Stores[StorePageProjects]; ok && st.Configured {
-		rep.PageProjectsPath = RecoveredStoreDir(dataDir, StorePageProjects)
+		rep.PageProjectsPath = RecoveredStoreDir(rep.DataDir, StorePageProjects)
 	}
 	if ex.kit != nil {
 		rep.RecoveryKit = true
@@ -270,14 +307,29 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 
 	// 4. The database: migrations forward, runtime reset, holds.
-	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{ex.services, m.Contents.ServiceSnapshots}); err != nil {
+	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{payload: ex.services, count: m.Contents.ServiceSnapshots, force: opts.Force}); err != nil {
 		return rep, err
 	}
 
 	// 5. Keys and secrets.
 	if !opts.Drill {
+		if stage != nil && (ex.kit == nil || len(ex.kit.AuditKeyring) == 0) {
+			if err := recoveryRoot.Remove(journal.SigningKeysFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return rep, err
+			}
+		}
+		if stage != nil && ex.kit == nil {
+			if err := recoveryRoot.Remove(RecoveredKeysFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return rep, err
+			}
+		}
 		if err := writeRecoveredSecrets(rep, ex.kit, dataDir); err != nil {
 			return rep, err
+		}
+		if stage != nil {
+			if err := validateRecoveredKeyFiles(rep, ex.kit, dataDir); err != nil {
+				return rep, err
+			}
 		}
 	}
 	envelopes := 0
@@ -291,9 +343,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		})
 	}
 	if len(ex.crewArchives) > 0 {
-		rep.Notes = append(rep.Notes, fmt.Sprintf("%d workspace(s) carry crew container files; they are kept under %s and are not in any container yet — start the crews, then land them from a workspace bundle or copy them in", len(ex.crewArchives), filepath.Join(dataDir, RecoveredCrewsDir)))
+		rep.Notes = append(rep.Notes, fmt.Sprintf("%d workspace(s) carry crew container files; they are kept under %s and are not in any container yet — start the crews, then land them from a workspace bundle or copy them in", len(ex.crewArchives), filepath.Join(rep.DataDir, RecoveredCrewsDir)))
 	}
-	if len(m.Contents.Environments) > 0 {
+	if len(m.Contents.Environments) > 0 || (opts.Force && len(ex.envArchives) > 0) {
 		if err := stageRecoveredEnvironmentLayers(ctx, rep, m, opts, dataDir, ex.envArchives); err != nil {
 			return rep, err
 		}
@@ -310,8 +362,26 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	rep.Summary = recoverSummary(rep)
 
 	// 6. Write the report into the restored database.
-	if err := recordRecoverReport(ctx, rep, opts); err != nil {
+	if stage != nil {
+		rep.PreviousDataDir = stage.previous
+	}
+	if err := recordRecoverReport(ctx, rep, opts, dataDir); err != nil {
+		if stage != nil {
+			return rep, fmt.Errorf("backup: store staged recovery report: %w", err)
+		}
 		rep.Warnings = append(rep.Warnings, "the restore report could not be stored: "+err.Error())
+	}
+	if stage != nil {
+		if err := restoreOperationError(ctx); err != nil {
+			return rep, err
+		}
+		committed, err = stage.commit(ctx)
+		if !committed {
+			return rep, fmt.Errorf("backup: recovered generation was not published: %w", err)
+		}
+		if err != nil {
+			rep.Warnings = append(rep.Warnings, "the recovered directory is active, but its publication could not be confirmed durable: "+err.Error())
+		}
 	}
 	return rep, nil
 }
@@ -366,6 +436,7 @@ func prepareDataDir(dir string, force bool) error {
 }
 
 type extractedInstance struct {
+	dbBytes      int64
 	dbSHA        string
 	stores       map[string]StoreRestore
 	hashes       map[string]map[string]IndexEntry // store → path → what landed
@@ -383,9 +454,14 @@ func openInstancePayload(path string, identities []age.Identity, passphrase stri
 	if len(contexts) > 0 {
 		ctx = contexts[0]
 	}
+	m, tr, _, closeAll, err := readInstancePayload(ctx, path, identities, passphrase, nil)
+	return m, tr, closeAll, err
+}
+
+func readInstancePayload(ctx context.Context, path string, identities []age.Identity, passphrase string, expected *Manifest) (*Manifest, *TarZstReader, func() error, func(), error) {
 	ctx, release, limitErr := ensureReadBudget(ctx)
 	if limitErr != nil {
-		return nil, nil, nil, limitErr
+		return nil, nil, nil, nil, limitErr
 	}
 	success := false
 	defer func() {
@@ -395,12 +471,22 @@ func openInstancePayload(path string, identities []age.Identity, passphrase stri
 	}()
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	m, sealed, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		_ = f.Close()
-		return m, nil, nil, err
+		return m, nil, nil, nil, err
+	}
+	var hash *HashingReader
+	if expected != nil {
+		if m.Encryption.Enabled != expected.Encryption.Enabled || m.Checksums.PayloadSHA256 != expected.Checksums.PayloadSHA256 {
+			_ = closeBundle()
+			_ = f.Close()
+			return m, nil, nil, nil, errors.New("backup: bundle changed after checksum verification")
+		}
+		hash = NewHashingReader(sealed)
+		sealed = hash
 	}
 	var plain io.Reader
 	switch {
@@ -414,20 +500,37 @@ func openInstancePayload(path string, identities []age.Identity, passphrase stri
 	if err != nil {
 		_ = closeBundle()
 		_ = f.Close()
-		return m, nil, nil, err
+		return m, nil, nil, nil, err
 	}
 	tr, err := NewTarZstReader(plain, ctx)
 	if err != nil {
 		_ = closeBundle()
 		_ = f.Close()
-		return m, nil, nil, err
+		return m, nil, nil, nil, err
+	}
+	var finish func() error
+	if hash != nil {
+		finish = func() error {
+			// tar EOF can precede the zstd checksum or age's final authenticated chunk.
+			if _, err := io.Copy(io.Discard, &restoreReadGuard{ctx: ctx, r: tr.zr, b: readBudget(ctx), decoded: true}); err != nil {
+				return err
+			}
+			if _, err := io.Copy(io.Discard, plain); err != nil {
+				return err
+			}
+			return VerifyChecksum(expected.Checksums.PayloadSHA256, hash.Sum())
+		}
 	}
 	success = true
-	return m, tr, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close(); release() }, nil
+	return m, tr, finish, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close(); release() }, nil
 }
 
 func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifest, dataDir string) (*extractedInstance, error) {
-	_, tr, closeAll, err := openInstancePayload(opts.BundlePath, opts.Identities, opts.Passphrase, ctx)
+	var expected *Manifest
+	if opts.Force {
+		expected = m
+	}
+	_, tr, finish, closeAll, err := readInstancePayload(ctx, opts.BundlePath, opts.Identities, opts.Passphrase, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +548,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			ex.hashes[s] = map[string]IndexEntry{}
 		}
 	}
+	seen := map[string]bool{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -455,6 +559,12 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 		}
 		if err != nil {
 			return nil, fmt.Errorf("backup: read payload: %w", err)
+		}
+		if opts.Force {
+			if hdr.Typeflag != '0' || filepath.ToSlash(filepath.Clean(hdr.Name)) != hdr.Name || seen[hdr.Name] {
+				return nil, fmt.Errorf("backup: invalid or duplicate instance payload entry %q", hdr.Name)
+			}
+			seen[hdr.Name] = true
 		}
 		if hdr.Typeflag != '0' && hdr.Typeflag != 0 {
 			continue // only regular files are ever written
@@ -467,18 +577,28 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			}
 		case name == instanceDBEntry:
 			dst := filepath.Join(dataDir, "crewship.db")
-			sha, _, err := writeExtracted(ctx, dst, tr)
+			sha, size, err := writeExtracted(ctx, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write database: %w", err)
 			}
-			ex.dbSHA = sha
+			ex.dbSHA, ex.dbBytes = sha, size
 		case name == instanceIndexEntry:
 			var idx InstanceIndex
-			if err := json.NewDecoder(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes)).Decode(&idx); err != nil {
+			if hdr.Size > maxBackupDBDumpBytes {
+				return nil, errors.New("backup: file index exceeds size limit")
+			}
+			dec := json.NewDecoder(RestoreBufferedReader(ctx, tr))
+			if err := dec.Decode(&idx); err != nil {
 				return nil, fmt.Errorf("backup: read file index: %w", err)
+			}
+			if opts.Force && dec.Decode(new(any)) != io.EOF {
+				return nil, errors.New("backup: trailing data in file index")
 			}
 			ex.index = &idx
 		case name == RecoveryKitPath:
+			if hdr.Size > 1<<20 {
+				return nil, errors.New("backup: recovery kit exceeds size limit")
+			}
 			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), 1<<20))
 			if err != nil {
 				return nil, err
@@ -492,6 +612,9 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			rest := strings.TrimPrefix(name, instanceFilesPrefix)
 			store, rel, ok := strings.Cut(rest, "/")
 			if !ok || !knownStore(store) {
+				if opts.Force {
+					return nil, fmt.Errorf("backup: unknown file store in %q", name)
+				}
 				continue
 			}
 			dst, err := safepath.JoinRel(RecoveredStoreDir(dataDir, store), filepath.FromSlash(rel))
@@ -531,6 +654,15 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 				return nil, err
 			}
 			ex.envArchives = append(ex.envArchives, dst)
+		default:
+			if opts.Force {
+				return nil, fmt.Errorf("backup: unknown instance payload entry %q", name)
+			}
+		}
+	}
+	if finish != nil {
+		if err := finish(); err != nil {
+			return nil, fmt.Errorf("backup: finish verifying payload: %w", err)
 		}
 	}
 	if ex.dbSHA == "" {
@@ -636,6 +768,122 @@ func (ex *extractedInstance) compareIndex(m *Manifest) []IncompleteItem {
 	return out
 }
 
+// validateForceContents compares the extracted generation with the source
+// manifest before migrations or runtime resets alter the snapshot.
+func (ex *extractedInstance) validateForceContents(ctx context.Context, m *Manifest, dataDir string) error {
+	inst := m.Contents.Instance
+	if ex.dbBytes != inst.DatabaseBytes || ex.dbSHA != inst.DatabaseSHA256 {
+		return errors.New("backup: snapshot size or digest differs from the manifest")
+	}
+	for store, entries := range ex.index.Stores {
+		if !knownStore(store) {
+			return fmt.Errorf("backup: unknown indexed store %q", store)
+		}
+		want := inst.Stores[store]
+		if len(entries) != want.Files || len(ex.hashes[store]) != want.Files || ex.stores[store].Bytes != want.Bytes {
+			return fmt.Errorf("backup: file totals for %s differ from the manifest", store)
+		}
+		indexed := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			if indexed[entry.Path] {
+				return fmt.Errorf("backup: duplicate index entry in %s", store)
+			}
+			indexed[entry.Path] = true
+		}
+	}
+	for store, want := range inst.Stores {
+		if !knownStore(store) {
+			return fmt.Errorf("backup: unknown manifest store %q", store)
+		}
+		if got := ex.stores[store]; got.Files != want.Files || got.Bytes != want.Bytes || (!want.Configured && got.Files > 0) || (want.Configured && want.IndexSHA256 != StoreIndexDigest(ex.index.Stores[store])) {
+			return fmt.Errorf("backup: store %s differs from the manifest", store)
+		}
+	}
+	for store := range ex.hashes {
+		if _, ok := inst.Stores[store]; !ok {
+			return fmt.Errorf("backup: undeclared store %s", store)
+		}
+	}
+	var crewIDs []string
+	for _, p := range ex.crewArchives {
+		extracted, err := extractArchive(ctx, p)
+		if err != nil {
+			return fmt.Errorf("backup: validate crew archive %s: %w", filepath.Base(p), err)
+		}
+		if err := extracted.Close(); err != nil {
+			return err
+		}
+		crewIDs = append(crewIDs, strings.TrimSuffix(filepath.Base(p), instanceCrewsSuffix))
+	}
+	if !slices.Equal(slices.Sorted(slices.Values(inst.CrewArchives)), slices.Sorted(slices.Values(crewIDs))) {
+		return errors.New("backup: staged crew archives differ from the manifest")
+	}
+	if inst.RecoveryKit != (ex.kit != nil) {
+		return errors.New("backup: recovery kit presence differs from the manifest")
+	}
+	keys, err := ex.kit.KeyMap()
+	if err != nil {
+		return err
+	}
+	if ex.kit != nil && (len(keys) != len(ex.kit.Versions) || (ex.kit.CurrentVersion != "" && !encryption.ValidKeyVersion(ex.kit.CurrentVersion))) {
+		return errors.New("backup: invalid key versions in the recovery kit")
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(keys)), slices.Sorted(slices.Values(inst.KitVersions))) {
+		return errors.New("backup: recovery kit key versions differ from the manifest")
+	}
+	db, err := openSnapshot(filepath.Join(dataDir, "crewship.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := checkRecoveryIntegrity(ctx, db); err != nil {
+		return err
+	}
+	versions := AppliedMigrationVersions(ctx, db)
+	if len(versions) == 0 || !slices.Equal(versions, m.SchemaMigrationVersions) {
+		return errors.New("backup: database migration ledger missing or differs from the manifest")
+	}
+	if newest := versions[len(versions)-1]; newest > database.MaxKnownMigrationVersion() {
+		return fmt.Errorf("backup: database schema v%d requires a newer Crewship binary", newest)
+	}
+	counts, err := snapshotRowCounts(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !maps.Equal(m.Contents.TableRowCounts, counts) {
+		return errors.New("backup: database row counts differ from the manifest")
+	}
+	envelopes := map[string]int{}
+	_, err = EachSealedValue(ctx, db, func(v SealedValue) error {
+		version, _ := encryption.ParseEnvelopeVersion(v.Envelope)
+		envelopes[version]++
+		if ex.kit != nil {
+			if _, err := encryption.DecryptWithKeys(v.Envelope, keys); err != nil {
+				return fmt.Errorf("backup: recovered key cannot open %s.%s envelope (%s): %w", v.Table, v.Column, version, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !maps.Equal(inst.VaultEnvelopes, envelopes) {
+		return errors.New("backup: vault envelope inventory differs from the manifest")
+	}
+	return nil
+}
+
+func checkRecoveryIntegrity(ctx context.Context, db *sql.DB) error {
+	var result string
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
+		return fmt.Errorf("backup: check staged SQLite integrity: %w", err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("backup: staged SQLite integrity check failed: %s", result)
+	}
+	return nil
+}
+
 // withEnv sets kvs for the duration of fn and restores the previous values.
 // Recover applies migrations with the source's keys in place: a migration
 // keyed off ENCRYPTION_KEY (the journal chain, webhook secret enveloping)
@@ -724,20 +972,30 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 	if err != nil {
 		return err
 	}
-	return withEnv(env, func() error {
+	return withEnv(env, func() (retErr error) {
 		db, err := database.Open("file:" + filepath.Join(dataDir, "crewship.db"))
 		if err != nil {
 			return fmt.Errorf("backup: open restored database: %w", err)
 		}
-		defer func() { _ = db.Close() }()
+		defer func() { retErr = errors.Join(retErr, db.Close()) }()
 		before := len(AppliedMigrationVersions(ctx, db.DB))
 		_, _, pending, err := database.PendingMigrations(ctx, db.DB)
 		if err != nil {
 			return err
 		}
+		force := len(serviceArgs) > 0 && serviceArgs[0].force
+		if force && pending > 0 && kit == nil && os.Getenv("ENCRYPTION_KEY") != "" {
+			keys, source, _ := drillKeys(nil, true)
+			if check := drillCredentials(ctx, db.DB, keys, source); check.Status != DrillStatusOK {
+				return fmt.Errorf("backup: verify original vault keys before migrations: %s", check.Detail)
+			}
+		}
 		if pending > 0 && kit == nil && os.Getenv("ENCRYPTION_KEY") == "" {
+			if force {
+				return fmt.Errorf("backup: %d pending migrations require the original vault key before forced recovery", pending)
+			}
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d migration(s) are pending and no vault key is available; they run when the server first starts, with the ENCRYPTION_KEY it is given — give it the original one", pending))
-		} else if pending > 0 {
+		} else if pending > 0 || force {
 			if err := database.Migrate(ctx, db.DB, logger); err != nil {
 				return fmt.Errorf("backup: migrate restored database: %w", err)
 			}
@@ -767,6 +1025,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d restored host shell hook(s) require instance administrator review; configurations are preserved and disabled. Review in Settings > Lifecycle hooks, then use crewship hooks enable <id>.", count))
 		}
 
+		if force && serviceArgs[0].count == 0 {
+			// A manifest cannot suppress a quota-service image declared by the database.
+			dump, err := instanceServiceDump(ctx, db.DB)
+			if err != nil {
+				return err
+			}
+			if err := requireSupportedDumpServiceBackups(dump, nil); err != nil {
+				return err
+			}
+		}
 		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload
 			count := serviceArgs[0].count
@@ -867,7 +1135,7 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			return err
 		}
 		// memory_versions.payload_ref is an absolute path on the source.
-		memRoot := RecoveredStoreDir(dataDir, StoreMemory)
+		memRoot := RecoveredStoreDir(rep.DataDir, StoreMemory)
 		if _, err := db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/versions/' || substr(sha256, 1, 2) || '/' || sha256 WHERE length(sha256) = 64`, memRoot); err != nil && !strings.Contains(err.Error(), "no such table") {
 			return fmt.Errorf("backup: rewrite memory blob paths: %w", err)
 		}
@@ -918,6 +1186,8 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	values := map[string]string{}
 	if existing, err := readEnvFile(secretsPath); err == nil {
 		values = existing
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	// The master keys a booted target sealed its own keyring with, before
 	// the kit's replace them: they let a replaced keyring be re-sealed.
@@ -932,7 +1202,11 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		return err
 	}
 	values["CREWSHIP_ADMIN_TOKEN_HMAC_KEY"] = hex.EncodeToString(hmacKey)
-	delete(values, "ENCRYPTION_KEY")
+	for k := range values {
+		if k == "ENCRYPTION_KEY" || strings.HasPrefix(k, "ENCRYPTION_KEY_V") || k == encryption.KeyVersionEnvVar || k == journal.SigningKeysPathEnv {
+			delete(values, k)
+		}
+	}
 	var kitLines []string
 	if kit != nil {
 		kitLines, err = kit.EnvLines()
@@ -962,7 +1236,9 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 		}); err != nil {
 			return err
 		}
+		auditPath = filepath.Join(rep.DataDir, filepath.Base(auditPath))
 		if replaced != "" {
+			replaced = filepath.Join(rep.DataDir, filepath.Base(replaced))
 			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced)
 		}
 		if unreadable != "" {
@@ -976,7 +1252,7 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	}, values); err != nil {
 		return err
 	}
-	rep.SecretsFile = secretsPath
+	rep.SecretsFile = filepath.Join(rep.DataDir, recoveredSecretsFile)
 	if kit == nil {
 		rep.Warnings = append(rep.Warnings, "the bundle carries no recovery kit: set the source's ENCRYPTION_KEY (and ENCRYPTION_KEY_V2… for later key versions) before starting the server, or credentials stay unreadable")
 		return nil
@@ -989,14 +1265,50 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	}
 	if err := writeEnvFile(keysPath, []string{
 		"# crewship: vault keys from the backup's recovery kit, written by `crewship recover`.",
-		"# Give these to the server before it starts — e.g. systemd EnvironmentFile=" + keysPath + ",",
+		"# Give these to the server before it starts — e.g. systemd EnvironmentFile=" + filepath.Join(rep.DataDir, RecoveredKeysFile) + ",",
 		"# or export them. ENCRYPTION_KEY is also in secrets.env; ENCRYPTION_KEY_V2 and later are",
 		"# read from the environment only. Whoever reads this file can read every secret in the",
 		"# instance: move the keys into your secret store and delete it.",
 	}, kv); err != nil {
 		return err
 	}
-	rep.KeysFile = keysPath
+	rep.KeysFile = filepath.Join(rep.DataDir, RecoveredKeysFile)
+	return nil
+}
+
+// Check the files the recovered installation will actually read.
+func validateRecoveredKeyFiles(rep *RecoverReport, kit *RecoveryKit, dataDir string) error {
+	values, err := readEnvFile(filepath.Join(dataDir, recoveredSecretsFile))
+	if err != nil {
+		return err
+	}
+	for name, size := range map[string]int{NextAuthSecretEnv: 64, "CREWSHIP_ADMIN_TOKEN_HMAC_KEY": 32} {
+		key, err := hex.DecodeString(values[name])
+		if err != nil || len(key) != size {
+			return fmt.Errorf("backup: invalid recovered %s", name)
+		}
+	}
+	if kit == nil {
+		return nil
+	}
+	want, err := kitEnv(kit)
+	if err != nil {
+		return err
+	}
+	if values["ENCRYPTION_KEY"] != want["ENCRYPTION_KEY"] {
+		return errors.New("backup: staged master key differs from the kit")
+	}
+	want[NextAuthSecretEnv] = values[NextAuthSecretEnv]
+	if len(kit.AuditKeyring) > 0 {
+		want[journal.SigningKeysPathEnv] = filepath.Join(rep.DataDir, journal.SigningKeysFile)
+	}
+	got, err := readEnvFile(filepath.Join(dataDir, RecoveredKeysFile))
+	if err != nil {
+		return err
+	}
+	if !maps.Equal(want, got) {
+		return errors.New("backup: staged vault key file differs from the recovered keys")
+	}
 	return nil
 }
 
@@ -1066,12 +1378,12 @@ func writeEnvFile(p string, header []string, values map[string]string) error {
 	for _, k := range keys {
 		b.WriteString(k + "=" + values[k] + "\n")
 	}
-	tmp := p + ".tmp"
-	_ = os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+"-*")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
 	_, err = f.WriteString(b.String())
 	if err == nil {
 		err = f.Sync()
@@ -1080,18 +1392,17 @@ func writeEnvFile(p string, header []string, values map[string]string) error {
 		err = cerr
 	}
 	if err != nil {
-		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, p)
 }
 
-func recordRecoverReport(ctx context.Context, rep *RecoverReport, opts RecoverOptions) error {
-	db, err := database.Open("file:" + rep.DatabasePath)
+func recordRecoverReport(ctx context.Context, rep *RecoverReport, opts RecoverOptions, dataDir string) (retErr error) {
+	db, err := database.Open("file:" + filepath.Join(dataDir, "crewship.db"))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer func() { retErr = errors.Join(retErr, db.Close()) }()
 	body, err := json.Marshal(rep)
 	if err != nil {
 		return err
@@ -1108,5 +1419,8 @@ func recordRecoverReport(ctx context.Context, rep *RecoverReport, opts RecoverOp
 		return err
 	}
 	rep.ReportID = saved.ID
+	if opts.Force {
+		return checkRecoveryIntegrity(ctx, db.DB)
+	}
 	return nil
 }
