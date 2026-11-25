@@ -725,19 +725,30 @@ var pipelineRunCmd = &cobra.Command{
 					RunID  string `json:"run_id" yaml:"run_id"`
 					Status string `json:"status" yaml:"status"`
 					Error  string `json:"error" yaml:"error"`
+					// Set for a run that waits for a person (status WAITING).
+					WaitpointToken string `json:"waitpoint_token,omitempty" yaml:"waitpoint_token,omitempty"`
+					CurrentStep    string `json:"current_step,omitempty" yaml:"current_step,omitempty"`
 				} `json:"results" yaml:"results"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
 				return fmt.Errorf("decode batch response: %w", err)
 			}
-			ok := 0
+			ok, waiting := 0, 0
 			for _, r := range br.Results {
-				if r.Error == "" {
+				switch {
+				case r.Error != "":
+				case r.Status == "WAITING":
+					waiting++
+				default:
 					ok++
 				}
 			}
 			return resolvedFormatter(cmd).AutoHuman(br, func() {
-				fmt.Printf("Batch %s: %d runs (%d ok). Retrieve with: crewship routine records %s --tag batch:%s\n", br.BatchID, br.Count, ok, args[0], br.BatchID)
+				note := ""
+				if waiting > 0 {
+					note = fmt.Sprintf(", %d waiting for a decision", waiting)
+				}
+				fmt.Printf("Batch %s: %d runs (%d ok%s). Retrieve with: crewship routine records %s --tag batch:%s\n", br.BatchID, br.Count, ok, note, args[0], br.BatchID)
 			})
 		}
 		runBody := map[string]any{"inputs": inputs}

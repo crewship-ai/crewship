@@ -176,7 +176,7 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 	}
 
 	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
+	res, receipt, err := h.runSynchronously(r, exec, pipeline.RunInput{
 		PipelineID:     p.ID,
 		WorkspaceID:    workspaceID,
 		InvokingUserID: user.ID,
@@ -212,6 +212,10 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 			return nil, http.StatusConflict, err
 		}
 		return nil, http.StatusInternalServerError, err
+	}
+	if receipt != nil {
+		// The replay is waiting for a person; it continues without this request.
+		return receipt, http.StatusOK, nil
 	}
 	return res, http.StatusOK, nil
 }

@@ -1244,7 +1244,7 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
+	res, receipt, err := h.runSynchronously(r, exec, pipeline.RunInput{
 		PipelineID:   p.ID,
 		ChatOriginID: sched.ChatOriginID,
 		// Manual force-fire retains the authenticated operator. Its create-tier
@@ -1288,6 +1288,11 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("schedule run: exec", "error", err, "schedule", scheduleID)
 		replyError(w, http.StatusInternalServerError, "Failed to start scheduled run")
+		return
+	}
+	if receipt != nil {
+		// Waiting for a person; the run continues without this request.
+		writeJSON(w, http.StatusOK, receipt)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
