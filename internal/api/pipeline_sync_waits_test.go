@@ -429,3 +429,32 @@ func TestSyncWait_ContinuingRunRechecksTheInvokingPerson(t *testing.T) {
 		t.Fatalf("run status %q, action executed %d times: a person who left the workspace still drove the action", status, rig.actions.executed())
 	}
 }
+
+// A routine deleted while its run waits does not run the approved action.
+func TestSyncWait_ContinuingRunStopsWhenTheRoutineIsDeleted(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+	if _, err := rig.db.Exec(`UPDATE pipelines SET deleted_at = ? WHERE id = 'pln_held'`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.wp.CompleteApproval(t.Context(), rig.ws, rc.WaitpointToken, true, rig.user, ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	var status string
+	for time.Now().Before(deadline) {
+		_ = rig.db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, rc.RunID).Scan(&status)
+		if s := strings.ToLower(status); s == "failed" || s == "cancelled" || s == "completed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.EqualFold(status, "completed") || rig.actions.executed() != 0 {
+		t.Fatalf("run status %q, action executed %d times after the routine was deleted", status, rig.actions.executed())
+	}
+}

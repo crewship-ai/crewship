@@ -186,6 +186,12 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 		}
 		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval denied", step.ID, step.Action)
 	}
+	// The person decided, possibly long after the run started and after its
+	// request was gone. Before the approved action runs, the person who
+	// started the run and the routine itself must still be valid (#5354).
+	if err := e.checkStillAllowedToContinue(ctx, in); err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s) after approval: %w", step.ID, step.Action, err)
+	}
 	req.ApprovalToken = token
 	out, err := e.crewship.Do(ctx, req)
 	if err != nil {
@@ -280,4 +286,25 @@ func (e *Executor) signalHumanWait(ctx context.Context, in RunInput, runID, step
 		}
 	}
 	in.OnHumanWait(runID, stepID, token)
+}
+
+// checkStillAllowedToContinue re-checks a run that waited for a person: the
+// invoking user's standing, and that the routine has not been deleted.
+func (e *Executor) checkStillAllowedToContinue(ctx context.Context, in RunInput) error {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return err
+	}
+	if in.pipeline == nil || e.store == nil || e.store.db == nil {
+		return nil
+	}
+	var live bool
+	err := e.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
+		in.pipeline.ID, in.WorkspaceID).Scan(&live)
+	if err != nil {
+		return fmt.Errorf("routine availability check: %w", err)
+	}
+	if !live {
+		return errors.New("the routine was deleted while the run waited")
+	}
+	return nil
 }
