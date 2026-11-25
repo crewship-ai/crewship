@@ -54,6 +54,7 @@ import (
 	"regexp"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -206,6 +207,59 @@ func vmShareRemedy(runtime, path string) string {
 // the create always fails, and only the SHAPE of the failure is read.
 const preflightSentinelImage = "crewship-bind-preflight:does-not-exist"
 
+// bindProbeOutcome is what one create against the sentinel image proved.
+type bindProbeOutcome int
+
+const (
+	// bindProbeInconclusive: the daemon answered with something this probe
+	// has no opinion about (unreachable, forbidden, timeout, nothing to bind).
+	bindProbeInconclusive bindProbeOutcome = iota
+	// bindProbeReachable: the mount configuration validated.
+	bindProbeReachable
+	// bindProbeRejected: the daemon refused a mandatory bind source.
+	bindProbeRejected
+)
+
+// probeMandatoryBinds asks the daemon whether it can see the sidecar and
+// entrypoint bind sources. The create always fails on the sentinel image
+// (every engine validates the mounts before it resolves the image), so only
+// the SHAPE of the failure is read and nothing has to be cleaned up.
+func (p *Provider) probeMandatoryBinds(ctx context.Context) (bindProbeOutcome, error) {
+	mounts, err := p.buildMounts("preflight", "", "", "", "")
+	if err != nil {
+		return bindProbeInconclusive, nil // no sidecar/entrypoint configured; validateSidecarPaths already said so
+	}
+	// Keep only the read-only sidecar/entrypoint binds: the crew data dirs are
+	// per-crew and do not exist yet at boot.
+	var binds []mount.Mount
+	for _, m := range mounts {
+		if m.Type == mount.TypeBind {
+			binds = append(binds, m)
+		}
+	}
+	if len(binds) == 0 {
+		return bindProbeInconclusive, nil
+	}
+	created, createErr := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
+		Config:     &container.Config{Image: preflightSentinelImage},
+		HostConfig: &container.HostConfig{Mounts: binds},
+	})
+	if createErr == nil {
+		// The sentinel resolved: the mounts validated and a container exists.
+		_, _ = p.client.ContainerRemove(context.WithoutCancel(ctx), created.ID, client.ContainerRemoveOptions{Force: true})
+		return bindProbeReachable, nil
+	}
+	if unreachableBindSourcePath(createErr) != "" {
+		return bindProbeRejected, p.explainBindFailure(createErr)
+	}
+	// An image-not-found error (the expected one) says the mounts validated;
+	// anything else is a daemon problem this probe has no opinion about.
+	if cerrdefs.IsNotFound(createErr) && strings.Contains(createErr.Error(), preflightSentinelImage) {
+		return bindProbeReachable, nil
+	}
+	return bindProbeInconclusive, createErr
+}
+
 // preflightMandatoryBinds checks at boot that the daemon can see the sidecar
 // and entrypoint bind sources, instead of leaving it to blow up on a user's
 // first prompt (#1706).
@@ -218,36 +272,7 @@ const preflightSentinelImage = "crewship-bind-preflight:does-not-exist"
 // in the codebase the least visible one. The same explanation is attached to
 // the create error too, where it reaches the user's provisioning failure.
 func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
-	mounts, err := p.buildMounts("preflight", "", "", "", "")
-	if err != nil {
-		return // no sidecar/entrypoint configured; validateSidecarPaths already said so
-	}
-	// Keep only the read-only sidecar/entrypoint binds: the crew data dirs are
-	// per-crew and do not exist yet at boot.
-	var binds []mount.Mount
-	for _, m := range mounts {
-		if m.Type == mount.TypeBind {
-			binds = append(binds, m)
-		}
-	}
-	if len(binds) == 0 {
-		return
-	}
-	_, createErr := dockerutil.CreateContainer(ctx, p.client, client.ContainerCreateOptions{
-		Config:     &container.Config{Image: preflightSentinelImage},
-		HostConfig: &container.HostConfig{Mounts: binds},
-	})
-	// The only outcome that means anything is a bind-source rejection. An
-	// image-not-found error (the expected one) says the mounts validated;
-	// anything else is a daemon problem this probe has no opinion about.
-	if unreachableBindSourcePath(createErr) == "" {
-		return
-	}
-	p.logger.Error("no crew can start on this container runtime: a mandatory bind source is unreachable from the daemon (#1706)",
-		"runtime", p.detected.Runtime,
-		"socket", p.detected.Socket,
-		"error", p.explainBindFailure(createErr).Error(),
-	)
+	p.verifyMandatoryBinds(ctx)
 }
 
 func (p *Provider) relabelCrewBinds() bool {
