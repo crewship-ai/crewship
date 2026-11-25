@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -659,7 +660,19 @@ func (h *AgentHandler) cleanupChatAttachments(crewID, slug sql.NullString, chatI
 		return
 	}
 	dir := filepath.Join(h.storagePath, crewID.String, slug.String, "attachments", chatID)
-	if err := os.RemoveAll(dir); err != nil {
+	// The agent can write everything below the crew directory (its /output
+	// mount) and can replace a directory in it with a link. Remove through a
+	// root on the crew directory so no link can carry the removal elsewhere;
+	// a link as the last element is removed as a link.
+	root, err := os.OpenRoot(filepath.Join(h.storagePath, crewID.String))
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			h.logger.Warn("chat attachment cleanup failed", "dir", dir, "error", err)
+		}
+		return
+	}
+	defer root.Close()
+	if err := root.RemoveAll(filepath.Join(slug.String, "attachments", chatID)); err != nil {
 		// RemoveAll returns nil when the dir never existed, so this is a
 		// genuine unlink failure (perms, I/O) — worth a breadcrumb, not a
 		// failed request.
