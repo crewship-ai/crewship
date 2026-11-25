@@ -389,3 +389,80 @@ func TestForceStageAbortsPartialCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestForceStageRequiresTrustedParentChain(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		ancestor, parent os.FileMode
+		allow            bool
+	}{
+		{"group writable parent", 0700, 0770, false},
+		{"world writable parent", 0700, 0702, false},
+		{"sticky writable parent", 0700, 0777 | os.ModeSticky, false},
+		{"writable ancestor", 0770, 0700, false},
+		{"sticky ancestor with private child", 0777 | os.ModeSticky, 0700, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ancestor := t.TempDir()
+			parent := filepath.Join(ancestor, "private")
+			if err := os.Mkdir(parent, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(ancestor, tc.ancestor); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(parent, tc.parent); err != nil {
+				t.Fatal(err)
+			}
+			s, err := beginForceStage(t.Context(), filepath.Join(parent, "data"))
+			if s != nil {
+				defer s.close()
+			}
+			if tc.allow {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("accepted untrusted directory")
+			}
+			entries, err := os.ReadDir(parent)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("staging wrote in rejected parent: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestForceStageCleanupUsesOriginalDirectory(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := beginForceStage(t.Context(), filepath.Join(parent, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(root, "moved")
+	if err = os.Rename(parent, moved); err != nil {
+		s.close()
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(s.dir, 0700); err != nil {
+		s.close()
+		t.Fatal(err)
+	}
+	marker := filepath.Join(s.dir, "keep")
+	writeForceFixture(t, marker, "replacement")
+	if done, err := s.commit(t.Context()); done || !errors.Is(err, writerlease.ErrLost) {
+		s.close()
+		t.Fatalf("publication after parent replacement: %v %v", done, err)
+	}
+	s.close()
+	assertForceFixture(t, marker, "replacement")
+	if _, err = os.Stat(filepath.Join(moved, filepath.Base(s.container))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("original scratch cleanup: %v", err)
+	}
+}

@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/writerlease"
 	"golang.org/x/sys/unix"
@@ -17,6 +19,7 @@ import (
 // private directory protects both incomplete plaintext and the retained copy.
 type forceStage struct {
 	dir, previous, target, container string
+	scratch                          *os.Root
 	parent, holder                   *os.File
 	old, next                        *os.File
 	anchors                          []*os.File
@@ -40,12 +43,8 @@ func prepareForceStage(ctx context.Context, target string, clone func(context.Co
 	if target == parent {
 		return nil, fmt.Errorf("cannot replace filesystem root")
 	}
-	real, err := filepath.EvalSymlinks(parent)
-	if err != nil {
+	if err := trustForceParent(parent); err != nil {
 		return nil, err
-	}
-	if real != parent {
-		return nil, fmt.Errorf("recovery parent contains a symlink: %s", parent)
 	}
 	s := &forceStage{target: target}
 	defer func() {
@@ -111,7 +110,11 @@ func prepareForceStage(ctx context.Context, target string, clone func(context.Co
 	if err != nil {
 		return nil, err
 	}
-	s.holder, err = os.Open(s.container)
+	s.scratch, err = os.OpenRoot(s.container)
+	if err != nil {
+		return nil, err
+	}
+	s.holder, err = s.scratch.Open(".")
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +129,43 @@ func prepareForceStage(ctx context.Context, target string, clone func(context.Co
 		return nil, fmt.Errorf("stage recovery generation: %w", err)
 	}
 	return s, nil
+}
+
+// Recovery helpers open paths below the private staging directory. Validate
+// from / down so each name is protected before looking up the next component.
+// A sticky ancestor (such as /tmp) protects the next trusted owner's entry.
+// The immediate parent also controls the target name, which may be absent.
+func trustForceParent(parent string) error {
+	path := "/"
+	for component := range strings.SplitSeq(parent, "/") {
+		path = filepath.Join(path, component)
+		var st unix.Stat_t
+		if err := unix.Lstat(path, &st); err != nil {
+			return err
+		}
+		if st.Mode&unix.S_IFMT != unix.S_IFDIR || (st.Uid != 0 && st.Uid != uint32(os.Geteuid())) {
+			return fmt.Errorf("untrusted recovery directory: %s", path)
+		}
+		if st.Mode&0022 != 0 && (path == parent || st.Mode&unix.S_ISVTX == 0) {
+			return fmt.Errorf("recovery directory is writable by group or others: %s", path)
+		}
+	}
+	return nil
+}
+
+func verifyForceName(path string, f *os.File) error {
+	locked, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	named, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(locked, named) {
+		return writerlease.ErrLost
+	}
+	return nil
 }
 
 func forceMount(path string) (uint64, error) {
@@ -153,12 +193,24 @@ func (s *forceStage) publish(ctx context.Context, rename func(int, string, int, 
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	parent := filepath.Dir(s.target)
+	if err := trustForceParent(parent); err != nil {
+		return false, err
+	}
+	if err := verifyForceName(parent, s.parent); err != nil {
+		return false, err
+	}
+	if err := verifyForceName(s.container, s.holder); err != nil {
+		return false, err
+	}
 	var err error
 	if s.next == nil {
 		s.next, err = writerlease.GenerationLock(s.dir, true)
 		if err != nil {
 			return false, err
 		}
+	} else if err = verifyForceName(s.dir, s.next); err != nil {
+		return false, err
 	}
 	original := ""
 	if s.old != nil {
@@ -180,16 +232,8 @@ func (s *forceStage) publish(ctx context.Context, rename func(int, string, int, 
 	}
 	flag := uint(unix.RENAME_NOREPLACE)
 	if s.old != nil {
-		named, e := os.Lstat(s.target)
-		if e != nil {
-			return false, e
-		}
-		locked, e := s.old.Stat()
-		if e != nil {
-			return false, e
-		}
-		if !os.SameFile(locked, named) {
-			return false, writerlease.ErrLost
+		if err = verifyForceName(s.target, s.old); err != nil {
+			return false, err
 		}
 		flag = unix.RENAME_EXCHANGE
 	}
@@ -204,22 +248,50 @@ func (s *forceStage) publish(ctx context.Context, rename func(int, string, int, 
 	return true, errors.Join(s.parent.Sync(), s.holder.Sync())
 }
 
+// Remove the empty wrapper through its original parent even if that parent
+// moved. If the parent is now shared, or the wrapper name was reused, leave
+// the directory entry alone.
+func (s *forceStage) removeScratchWrapper() {
+	if s.holder == nil {
+		return // An open failure left no handle with which to identify the wrapper.
+	}
+	parentFD := int(s.parent.Fd())
+	var parent, named, held unix.Stat_t
+	if unix.Fstat(parentFD, &parent) != nil || parent.Mode&0022 != 0 || (parent.Uid != 0 && parent.Uid != uint32(os.Geteuid())) {
+		return
+	}
+	name := filepath.Base(s.container)
+	if unix.Fstatat(parentFD, name, &named, unix.AT_SYMLINK_NOFOLLOW) != nil || unix.Fstat(int(s.holder.Fd()), &held) != nil {
+		return
+	}
+	if named.Dev != held.Dev || named.Ino != held.Ino {
+		return
+	}
+	_ = unix.Unlinkat(parentFD, name, unix.AT_REMOVEDIR)
+}
+
 func (s *forceStage) close() {
 	if s.container != "" && (!s.published || s.previous == "") {
-		if err := os.RemoveAll(s.container); errors.Is(err, os.ErrPermission) {
-			// A copied directory can intentionally be read-only. Only scratch
-			// belonging to a failed transaction reaches this cleanup path.
-			_ = filepath.WalkDir(s.container, func(path string, d os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if d.IsDir() {
-					return os.Chmod(path, 0700)
-				}
-				return nil
-			})
-			_ = os.RemoveAll(s.container)
+		// Recursively clean only through the original private directory handle.
+		// Its former pathname may now identify a different installation.
+		if s.scratch != nil {
+			if err := s.scratch.RemoveAll("generation"); errors.Is(err, os.ErrPermission) {
+				_ = fs.WalkDir(s.scratch.FS(), "generation", func(path string, d fs.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+					if d.IsDir() {
+						return s.scratch.Chmod(path, 0700)
+					}
+					return nil
+				})
+				_ = s.scratch.RemoveAll("generation")
+			}
 		}
+		s.removeScratchWrapper()
+	}
+	if s.scratch != nil {
+		_ = s.scratch.Close()
 	}
 	for _, f := range append(s.anchors, s.next, s.old, s.holder, s.parent) {
 		if f != nil {
