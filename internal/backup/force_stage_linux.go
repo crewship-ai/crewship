@@ -25,10 +25,23 @@ type forceStage struct {
 	anchors                          []*os.File
 	mount                            uint64
 	published                        bool
+	// skipped lists sockets left out of the copy (relative paths).
+	skipped []string
 }
 
 func beginForceStage(ctx context.Context, target string) (*forceStage, error) {
-	return prepareForceStage(ctx, target, cloneForceTree)
+	var fc *forceCopy
+	s, err := prepareForceStage(ctx, target, func(ctx context.Context, src, dst string, mount uint64) error {
+		if err := scanForceTree(ctx, src, mount); err != nil {
+			return err
+		}
+		fc = &forceCopy{root: src}
+		return cloneForceNode(ctx, src, dst, mount, fc)
+	})
+	if s != nil && fc != nil {
+		s.skipped = fc.skipped
+	}
+	return s, err
 }
 
 func prepareForceStage(ctx context.Context, target string, clone func(context.Context, string, string, uint64) error) (_ *forceStage, err error) {

@@ -374,6 +374,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	// 6. Write the report into the restored database.
 	if stage != nil {
 		rep.PreviousDataDir = stage.previous
+		if n := len(stage.skipped); n > 0 {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d socket(s) of the previous data directory were not copied (%s); a socket belongs to a running process and is created again at start. The retained previous data directory still holds them.", n, strings.Join(stage.skipped, ", ")))
+		}
 	}
 	logger.DebugContext(ctx, "writing recovery report")
 	if err := recordRecoverReport(ctx, rep, opts, dataDir); err != nil {

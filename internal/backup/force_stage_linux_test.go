@@ -35,7 +35,7 @@ func assertForceFixture(t *testing.T, path, value string) {
 }
 
 func TestForceStageFilesystemBoundaries(t *testing.T) {
-	for _, kind := range []string{"symlink", "hardlink", "fifo", "target symlink"} {
+	for _, kind := range []string{"hardlink", "fifo", "target symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			parent := t.TempDir()
 			target := filepath.Join(parent, "data")
@@ -47,8 +47,6 @@ func TestForceStageFilesystemBoundaries(t *testing.T) {
 			inside := filepath.Join(target, "alias")
 			var err error
 			switch kind {
-			case "symlink":
-				err = os.Symlink(external, inside)
 			case "hardlink":
 				err = os.Link(external, inside)
 			case "fifo":

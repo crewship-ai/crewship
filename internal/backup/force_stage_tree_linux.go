@@ -15,7 +15,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Never follow a link or enter even a same-device bind mount. A hard-linked
+// Never follow a link or enter even a same-device bind mount. A symlink
+// returns a nil file: callers copy or keep the link itself. A hard-linked
 // file cannot be cloned independently without changing its alias semantics.
 func openForceNode(path string, mount uint64) (*os.File, unix.Stat_t, error) {
 	var stat unix.Stat_t
@@ -30,6 +31,9 @@ func openForceNode(path string, mount uint64) (*os.File, unix.Stat_t, error) {
 		return nil, stat, err
 	}
 	switch stat.Mode & unix.S_IFMT {
+	case unix.S_IFLNK:
+		// A link is copied as a link and never opened: there is no handle.
+		return nil, stat, nil
 	case unix.S_IFDIR:
 	case unix.S_IFREG:
 		if stat.Nlink != 1 {
@@ -51,13 +55,36 @@ func openForceNode(path string, mount uint64) (*os.File, unix.Stat_t, error) {
 	return f, opened, nil
 }
 
+// forceCopy collects what a clone leaves out. root is the source's top.
+type forceCopy struct {
+	root    string
+	skipped []string
+}
+
 func cloneForceTree(ctx context.Context, src, dst string, mount uint64) error {
+	return cloneForceNode(ctx, src, dst, mount, &forceCopy{root: src})
+}
+
+func cloneForceNode(ctx context.Context, src, dst string, mount uint64, fc *forceCopy) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if fc.root != src {
+		// A socket belongs to a process, not to the data: after a crash the
+		// stale one only blocks the next start. Leave it out and say so.
+		var st unix.Stat_t
+		if err := unix.Lstat(src, &st); err == nil && st.Mode&unix.S_IFMT == unix.S_IFSOCK {
+			rel, _ := filepath.Rel(fc.root, src)
+			fc.skipped = append(fc.skipped, rel)
+			return nil
+		}
 	}
 	in, st, err := openForceNode(src, mount)
 	if err != nil {
 		return err
+	}
+	if in == nil {
+		return cloneForceLink(src, dst, &st)
 	}
 	defer in.Close()
 	if st.Mode&unix.S_IFMT == unix.S_IFDIR {
@@ -65,7 +92,7 @@ func cloneForceTree(ctx context.Context, src, dst string, mount uint64) error {
 			return err
 		}
 		if err = visitForceChildren(ctx, in, func(name string) error {
-			return cloneForceTree(ctx, filepath.Join(src, name), filepath.Join(dst, name), mount)
+			return cloneForceNode(ctx, filepath.Join(src, name), filepath.Join(dst, name), mount, fc)
 		}); err != nil {
 			return err
 		}
@@ -88,6 +115,96 @@ func cloneForceTree(ctx context.Context, src, dst string, mount uint64) error {
 		return err
 	}
 	return in.Sync()
+}
+
+// cloneForceLink copies a symlink as a link: the same target text, owner,
+// attributes and times. It never reads through the link, so a link that
+// points outside the installation, or nowhere, is kept as it is.
+func cloneForceLink(src, dst string, st *unix.Stat_t) error {
+	target, err := os.Readlink(src)
+	if err != nil {
+		return err
+	}
+	if err = os.Symlink(target, dst); err != nil {
+		return err
+	}
+	if err = unix.Fchownat(unix.AT_FDCWD, dst, int(st.Uid), int(st.Gid), unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return err
+	}
+	if err = copyForceAttrs(src, dst); err != nil {
+		return err
+	}
+	return unix.UtimesNanoAt(unix.AT_FDCWD, dst, []unix.Timespec{st.Atim, st.Mtim}, unix.AT_SYMLINK_NOFOLLOW)
+}
+
+const maxForceObstacles = 20
+
+// scanForceTree lists every entry that stops a recovery copy BEFORE anything
+// is copied: hard-linked files, special files other than sockets, and mount
+// crossings. Links and sockets are not obstacles. It reads only (Lstat), so
+// the operator sees the whole list at once, not one error per attempt.
+func scanForceTree(ctx context.Context, root string, mount uint64) error {
+	var found []string
+	total := 0
+	note := func(path, why string) {
+		total++
+		if len(found) < maxForceObstacles {
+			rel, _ := filepath.Rel(root, path)
+			found = append(found, rel+" ("+why+")")
+		}
+	}
+	var walk func(path string) error
+	walk = func(path string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		id, err := forceMount(path)
+		if err != nil {
+			return err
+		}
+		if id != mount {
+			note(path, "another mount")
+			return nil
+		}
+		var st unix.Stat_t
+		if err := unix.Lstat(path, &st); err != nil {
+			return err
+		}
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFLNK, unix.S_IFSOCK:
+			return nil
+		case unix.S_IFREG:
+			if st.Nlink != 1 {
+				note(path, "hard-linked file")
+			}
+			return nil
+		case unix.S_IFDIR:
+		default:
+			note(path, "special file")
+			return nil
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := walk(filepath.Join(path, e.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(root); err != nil {
+		return err
+	}
+	if total == 0 {
+		return nil
+	}
+	more := ""
+	if total > len(found) {
+		more = fmt.Sprintf("; and %d more", total-len(found))
+	}
+	return fmt.Errorf("recovery cannot copy the current data directory: %d entr(y/ies) block it: %s%s", total, strings.Join(found, "; "), more)
 }
 
 func visitForceChildren(ctx context.Context, dir *os.File, visit func(string) error) error {
@@ -123,7 +240,9 @@ func syncForceTree(ctx context.Context, path, original string, mount uint64, uid
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	if f != nil {
+		defer f.Close()
+	}
 	if original != "" {
 		var old unix.Stat_t
 		switch e := unix.Lstat(original, &old); {
@@ -133,6 +252,13 @@ func syncForceTree(ctx context.Context, path, original string, mount uint64, uid
 		default:
 			return e
 		}
+	}
+	if f == nil {
+		// A symlink: change the link's own owner, never its target's.
+		if st.Uid != uid || st.Gid != gid {
+			return unix.Fchownat(unix.AT_FDCWD, path, int(uid), int(gid), unix.AT_SYMLINK_NOFOLLOW)
+		}
+		return nil
 	}
 	if st.Uid != uid || st.Gid != gid {
 		if err = f.Chown(int(uid), int(gid)); err != nil {
