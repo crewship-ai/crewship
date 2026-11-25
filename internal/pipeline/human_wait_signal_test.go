@@ -219,6 +219,10 @@ func TestOnHumanWait_NestedExpiryEndsTheParentRun(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("no signal")
 	}
+	// The store's own sweeper runs every 30 s; let the 1 s approval expire and
+	// sweep it now.
+	time.Sleep(1500 * time.Millisecond)
+	wp.sweepOnce()
 	select {
 	case res := <-finished:
 		if res == nil || res.Status != "FAILED" {
