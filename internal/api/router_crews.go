@@ -706,6 +706,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
 	provisioning.SetLegacyImageEviction(r.legacyImageEviction)
 	provisioning.SetInstallationID(r.installationID)
+	if r.containerCleanup != nil {
+		r.containerCleanup.CollectionPolicy = provisioning.ownedImageCollectionPolicy
+	}
 	if runtime, ok := r.keeperContainer.(provider.ImageReferenceAcquirerSetter); ok {
 		runtime.SetImageReferenceAcquirer(provisioning)
 	}

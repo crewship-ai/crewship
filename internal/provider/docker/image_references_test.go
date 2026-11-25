@@ -64,6 +64,7 @@ func (f *referenceFake) ContainerCreate(_ context.Context, o client.ContainerCre
 	var c client.ContainerInspectResult
 	c.Container.ID = id
 	c.Container.Name = "/" + o.Name
+	c.Container.HostConfig = o.HostConfig
 	c.Container.Config = o.Config
 	c.Container.Image = o.Config.Image
 	c.Container.State = &container.State{Status: "created"}
@@ -257,7 +258,12 @@ func TestImageReferencesReconcileDeferScope(t *testing.T) {
 					t.Fatalf("failed recheck: reads=%d err=%v", reads, err)
 				}
 				return
-			case "missing image", "running container", "selected running container":
+			case "missing image":
+				if err != nil || !slices.Equal(f.removed, []string{firstContainer, secondContainer}) {
+					t.Fatalf("removed=%v err=%v", f.removed, err)
+				}
+				return
+			case "running container", "selected running container":
 				if !errors.As(err, &partial) || partial.Deferred != 1 {
 					t.Fatalf("expected one deferred reference: %v", err)
 				}
@@ -445,5 +451,226 @@ func TestPodmanReferenceInitialProbeFailureLeavesNoContainer(t *testing.T) {
 	daemon.probes = 0
 	if _, err := p.Preserve(t.Context(), refs); err != nil || len(f.creates) != 1 || f.creates[0].Config.Labels[imageReferenceTagsLabel] != tag {
 		t.Fatalf("retry: creates=%d err=%v", len(f.creates), err)
+	}
+}
+
+// A missing image record can outlive its cache tag and leave a created
+// reference behind. The reference may be released after validating the pin.
+func TestUnselectedReferenceWithMissingImageEventuallyReleased(t *testing.T) {
+	f, id := referenceFixture(t)
+	refs := NewImageReferences(f, referenceBorrower)
+	if _, err := refs.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.images, id)
+	empty := func(context.Context) ([]resourcelifecycle.ImageReference, error) { return nil, nil }
+	gate := &resourcelifecycle.ImageUse{}
+	var err error
+	for range 2 {
+		err = refs.Reconcile(t.Context(), gate, empty)
+	}
+	if err != nil || len(f.containers) != 0 {
+		t.Fatalf("after two complete inventories: retained=%d err=%v", len(f.containers), err)
+	}
+}
+
+type referenceInspectError struct {
+	*referenceFake
+	failRef string
+}
+
+func (f referenceInspectError) ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	if ref == f.failRef {
+		return client.ImageInspectResult{}, errors.New("engine unavailable")
+	}
+	return f.referenceFake.ImageInspect(ctx, ref, opts...)
+}
+
+func TestMissingImageReferenceRequiresCompleteEvidence(t *testing.T) {
+	for _, mode := range []string{"selected id", "selected alias", "unresolved alias", "selected after inventory", "lease on unknown alias", "provider error", "foreign owner", "different image label", "running", "data volume", "host bind", "writable container", "application command", "wrong name", "db error"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			p := NewImageReferences(f, referenceBorrower)
+			if _, err := p.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			cid := strings.Repeat("c", 64)
+			c := f.containers[cid]
+			alias := "crewship-cache:" + referenceOwner + "-111111111111"
+			gate := &resourcelifecycle.ImageUse{}
+			var wanted []resourcelifecycle.ImageReference
+			delete(f.images, id)
+			switch mode {
+			case "selected id":
+				wanted = []resourcelifecycle.ImageReference{{Ref: id}}
+			case "selected alias":
+				c.Container.Config.Labels[imageReferenceTagsLabel] = alias
+				wanted = []resourcelifecycle.ImageReference{{Ref: "docker.io/library/" + alias}}
+			case "unresolved alias":
+				wanted = []resourcelifecycle.ImageReference{{Ref: "registry.example/private:old"}}
+			case "lease on unknown alias":
+				release, err := gate.UseImages(t.Context(), "unrecorded:alias")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "provider error":
+				p.client = referenceInspectError{f, id}
+			case "foreign owner":
+				c.Container.Config.Labels[imageReferenceOwnerLabel] = referenceOwner
+			case "different image label":
+				c.Container.Config.Labels[imageReferenceIDLabel] = "sha256:" + strings.Repeat("5", 64)
+			case "running":
+				c.Container.State.Running = true
+			case "data volume":
+				c.Container.Mounts = []container.MountPoint{{Type: "volume", Name: "customer-data"}}
+			case "host bind":
+				c.Container.HostConfig.Binds = []string{"/srv/customer:/data"}
+			case "writable container":
+				c.Container.HostConfig.ReadonlyRootfs = false
+			case "application command":
+				c.Container.Config.Cmd = []string{"start-application"}
+			case "wrong name":
+				c.Container.Name = "/crewship-image-ref-other"
+			}
+			f.containers[cid] = c
+			reads := 0
+			err := p.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
+				reads++
+				if mode == "db error" && reads == 2 {
+					return nil, errors.New("read failed")
+				}
+				if mode == "selected after inventory" && reads == 2 {
+					return []resourcelifecycle.ImageReference{{Ref: id}}, nil
+				}
+				return wanted, nil
+			})
+			if len(f.containers) != 1 || len(f.removed) != 0 {
+				t.Fatalf("removed=%v err=%v", f.removed, err)
+			}
+		})
+	}
+}
+
+func TestImageReferenceRegistryDigestProtectsDistinctConfigID(t *testing.T) {
+	for _, mode := range []string{"selection", "acquisition", "missing image", "legacy missing image"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			img := f.images[id]
+			ref := "registry.example/team/work@sha256:" + strings.Repeat("9", 64)
+			img.RepoDigests = []string{ref}
+			f.images[id] = img
+			pins := NewImageReferences(f, referenceBorrower)
+			if _, err := pins.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			required := []resourcelifecycle.ImageReference{{Ref: ref}}
+			gate := &resourcelifecycle.ImageUse{}
+			switch mode {
+			case "acquisition":
+				required = nil
+				release, err := gate.UseImages(t.Context(), ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "missing image", "legacy missing image":
+				delete(f.images, id)
+				if mode == "legacy missing image" {
+					for _, c := range f.containers {
+						delete(c.Container.Config.Labels, imageReferenceDigestsLabel)
+					}
+				}
+			}
+			err := pins.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) { return required, nil })
+			if len(f.containers) != 1 || len(f.removed) != 0 {
+				t.Fatalf("lost registry selection: removed=%v err=%v", f.removed, err)
+			}
+			if mode == "legacy missing image" {
+				var partial *ReferenceSweepError
+				if !errors.As(err, &partial) || partial.Deferred != 1 {
+					t.Fatalf("want unresolved legacy selection: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// The dormant feature has lost its catalog entry. A cache miss for an
+// optional external base is a different observation from a failed inspect.
+func TestMissingFeaturePinWithColdConfiguredBase(t *testing.T) {
+	const base = "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm"
+	modes := []string{"base not pulled", "base selects missing feature", "base selects another image", "engine failure", "unknown origin", "required reference", "active build input", "managed feature", "managed cache", "operator snapshot", "private base", "similar MCR repository", "similar MCR registry", "uncataloged tag", "service only", "absent digest", "recorded alias", "no feature provenance", "unparseable tag"}
+	for _, base := range devcontainer.BuiltinBaseImages() {
+		modes = append(modes, base.Image)
+	}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			pins := NewImageReferences(f, referenceBorrower)
+			if _, err := pins.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			containerID := strings.Repeat("c", 64)
+			labels := f.containers[containerID].Container.Config.Labels
+			// Docker retains the source image labels that weren't overridden
+			// when the reference container was created.
+			labels[devcontainer.ImageInstanceLabel] = referenceOwner
+			labels[devcontainer.ImageKindLabel] = devcontainer.ImageKindFeature
+			labels[devcontainer.ImageAcquisitionKeyLabel] = strings.Repeat("a", 64)
+			img := f.images[id]
+			delete(f.images, id)
+			ref := resourcelifecycle.ImageReference{Ref: base, ConfiguredBaseOnly: true}
+			catalogBase := strings.HasPrefix(mode, "mcr.microsoft.com/")
+			if catalogBase {
+				ref.Ref = mode
+			}
+			switch mode {
+			case "base selects missing feature":
+				f.images[base] = img
+			case "base selects another image":
+				img.ID = "sha256:" + strings.Repeat("3", 64)
+				f.images[base] = img
+			case "engine failure":
+				pins.client = referenceInspectError{f, base}
+			case "active build input":
+				ref.BuildInput = true
+			case "unknown origin", "service only":
+				ref.ConfiguredBaseOnly = false
+			case "required reference":
+				ref.Required = true
+			case "managed feature":
+				ref.Ref = "docker.io/library/crewship-feat:other"
+			case "uncataloged tag":
+				ref.Ref = "mcr.microsoft.com/devcontainers/javascript-node:custom"
+			case "managed cache":
+				ref.Ref = "crewship-cache:other"
+			case "operator snapshot":
+				ref.Ref = "docker.io/crewship-env/ops:snapshot"
+			case "private base":
+				ref.Ref = "registry.example/private/base:dev"
+			case "similar MCR repository":
+				ref.Ref = "mcr.microsoft.com/devcontainers/javascript-node-local:22-bookworm"
+			case "similar MCR registry":
+				ref.Ref = "mcr.microsoft.com.example/devcontainers/javascript-node:22-bookworm"
+			case "absent digest":
+				ref.Ref = "registry.example/feature@sha256:" + strings.Repeat("3", 64)
+			case "recorded alias":
+				labels[imageReferenceTagsLabel] = base
+			case "no feature provenance":
+				delete(labels, devcontainer.ImageAcquisitionKeyLabel)
+			case "unparseable tag":
+				ref.Ref = "example.test/app:bad tag"
+			}
+			err := pins.Reconcile(t.Context(), &resourcelifecycle.ImageUse{}, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
+				return []resourcelifecycle.ImageReference{ref}, nil
+			})
+			wantRelease := catalogBase || mode == "base not pulled" || mode == "base selects another image"
+			if (len(f.removed) == 1) != wantRelease || wantRelease && err != nil {
+				t.Fatalf("removed=%v err=%v", f.removed, err)
+			}
+		})
 	}
 }

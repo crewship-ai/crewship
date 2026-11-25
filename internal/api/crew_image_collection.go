@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"strconv"
@@ -63,6 +64,23 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	h.mu.RLock()
+	instanceID := h.instanceID
+	h.mu.RUnlock()
+	if devcontainer.ImageNamespace(instanceID) != "" {
+		h.collectOwnedImages(scanCtx, h.ownedImageCollectionPolicy)
+	}
+	// Always report historical backlog; explicit legacy deletion remains opt-in.
+	h.sweepLegacyCacheImages(scanCtx)
+
+}
+
+// ownedImageCollectionPolicy reads operator configuration. A policy backed by
+// instance settings also supplies the start of the current enabled period.
+func (h *ProvisioningHandler) ownedImageCollectionPolicy(ctx context.Context) (bool, time.Time) {
+	if ctx.Err() != nil {
+		return false, time.Time{}
+	}
+	h.mu.RLock()
 	enabled := h.legacyImageEviction
 	h.mu.RUnlock()
 	if value, configured := os.LookupEnv(imageGCEnv); configured {
@@ -72,18 +90,25 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 			h.logger.Warn("image collection disabled: invalid boolean setting", "setting", imageGCEnv)
 		}
 	}
-	h.mu.RLock()
-	instanceID := h.instanceID
-	h.mu.RUnlock()
-	if devcontainer.ImageNamespace(instanceID) != "" && enabled {
-		h.collectOwnedImages(scanCtx)
-	}
-	// Always report historical backlog; explicit legacy deletion remains opt-in.
-	h.sweepLegacyCacheImages(scanCtx)
-
+	return enabled, time.Time{}
 }
 
-func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
+func (h *ProvisioningHandler) gcNow() time.Time {
+	if h.gcClock != nil {
+		return h.gcClock()
+	}
+	return time.Now()
+}
+
+func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context, policy func(context.Context) (bool, time.Time)) {
+	enabled, notBefore := policy(ctx)
+	if !enabled || ctx.Err() != nil {
+		return
+	}
+	validPolicy := func(checkCtx context.Context) bool {
+		active, since := policy(checkCtx)
+		return checkCtx.Err() == nil && active && since.Equal(notBefore)
+	}
 	h.mu.RLock()
 	owner := h.instanceID
 	h.mu.RUnlock()
@@ -92,8 +117,11 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		h.logger.Warn("image collection: unused-image state unavailable; retaining images", "error", err)
 		return
 	}
-	now := time.Now()
-	if lastPass, known := unusedSince[lastPassMarker]; !known || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
+	now := h.gcNow()
+	if now.Before(notBefore) {
+		return
+	}
+	if lastPass, known := unusedSince[lastPassMarker]; !known || lastPass.Before(notBefore) || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
 		// Nobody was watching: an image may have been used and released
 		// unseen. Start every window over rather than act on what was true
 		// before the gap.
@@ -142,9 +170,9 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 			h.logger.Warn("image collection deferred: incomplete image identity")
 			return
 		}
-		byRef[img.ID] = img.ID
-		for _, tag := range img.RepoTags {
-			byRef[tag] = img.ID
+		if !recordImageAliases(byRef, img) {
+			h.logger.Warn("image collection deferred: conflicting cache aliases")
+			return
 		}
 	}
 	protected, err := h.protectedImageIDs(ctx, byRef, true)
@@ -152,7 +180,7 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		h.logger.Warn("image collection: references unavailable; retaining images", "error", err)
 		return
 	}
-	cutoff := time.Now().Add(-ownedImageMinAge).Unix()
+	cutoff := now.Add(-ownedImageMinAge).Unix()
 	present := map[string]bool{}
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
@@ -176,8 +204,8 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		}
 		if ownedImageUnusedWindow > 0 {
 			first, tracked := unusedSince[img.ID]
-			if !tracked {
-				if _, err := h.db.ExecContext(ctx, `INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?) ON CONFLICT(instance_id,image_id) DO NOTHING`,
+			if !tracked || first.Before(notBefore) {
+				if _, err := h.db.ExecContext(ctx, `INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?) ON CONFLICT(instance_id,image_id) DO UPDATE SET first_unused_at=excluded.first_unused_at`,
 					owner, img.ID, tsformat.Format(now)); err != nil {
 					h.logger.Warn("image collection: unused-image state write failed", "error", err)
 					return
@@ -188,7 +216,7 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 				continue
 			}
 		}
-		if err := h.removeCollectedImage(ctx, img, true); err != nil {
+		if err := h.removeCollectedImage(ctx, img, validPolicy); err != nil {
 			return
 		}
 	}
@@ -256,6 +284,23 @@ func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner,
 	return nil
 }
 
+// Conflicting aliases in one inventory cannot establish which ID a selection
+// protects. Defer the pass, including when the conflict appears at final read.
+func recordImageAliases(byRef map[string]string, img image.Summary) bool {
+	byRef[img.ID] = img.ID
+	for _, tag := range slices.Concat(img.RepoTags, img.RepoDigests) {
+		if tag == "<none>:<none>" || tag == "" {
+			continue
+		}
+		key := devcontainer.CanonicalCacheRef(tag)
+		if id, exists := byRef[key]; exists && id != img.ID {
+			return false
+		}
+		byRef[key] = img.ID
+	}
+	return true
+}
+
 func ownedImage(img image.Summary, instanceID string) bool {
 	if img.Labels[devcontainer.ImageInstanceLabel] != instanceID {
 		return false
@@ -276,7 +321,7 @@ func ownedImage(img image.Summary, instanceID string) bool {
 		if tag == "<none>:<none>" {
 			continue
 		}
-		if !strings.HasPrefix(tag, prefix+instanceID+"-") {
+		if !strings.HasPrefix(devcontainer.CanonicalCacheRef(tag), prefix+instanceID+"-") {
 			return false
 		}
 		tagged = true
@@ -290,27 +335,27 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string, report bool) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews`)
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,''),COALESCE(services_json,'') FROM crews`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	protected := map[string]bool{}
 	for rows.Next() {
-		var current, last, previous, base, config, deletedAt string
-		if err := rows.Scan(&current, &last, &previous, &base, &config, &deletedAt); err != nil {
+		var current, last, previous, base, config, deletedAt, services string
+		if err := rows.Scan(&current, &last, &previous, &base, &config, &deletedAt, &services); err != nil {
 			return nil, err
 		}
 		// A soft-deleted crew keeps its selections for a while: it can be
 		// revived. A deletion time that cannot be read protects, never frees.
 		if deletedAt != "" {
 			at, err := time.Parse(time.RFC3339Nano, deletedAt) // tsformat:allow: parse only; deleted_at is read and compared as time.Time in Go
-			if err == nil && time.Since(at) > deletedCrewImageRetention {
+			if err == nil && h.gcNow().Sub(at) > deletedCrewImageRetention {
 				continue
 			}
 		}
 		// Protect configured bases even before a live crew has a container.
-		if id := byRef[base]; id != "" {
+		if id := byRef[devcontainer.CanonicalCacheRef(base)]; id != "" {
 			protected[id] = true
 		}
 		if config != "" {
@@ -319,7 +364,16 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 				if report {
 					h.logger.Warn("image collection: invalid crew configuration; explicit selections remain protected")
 				}
-			} else if id := byRef[cfg.Image]; id != "" {
+			} else if id := byRef[devcontainer.CanonicalCacheRef(cfg.Image)]; id != "" {
+				protected[id] = true
+			}
+		}
+		serviceRefs, err := resourcelifecycle.ConfiguredImageReferences("", "", services)
+		if err != nil {
+			return nil, err
+		}
+		for _, service := range serviceRefs {
+			if id := byRef[devcontainer.CanonicalCacheRef(service.Ref)]; id != "" {
 				protected[id] = true
 			}
 		}
@@ -327,7 +381,7 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 			if ref == "" {
 				continue
 			}
-			id := byRef[ref]
+			id := byRef[devcontainer.CanonicalCacheRef(ref)]
 			if id == "" {
 				if report {
 					h.logger.Warn("image collection: selected reference absent from complete inventory; skipping reference", "image_ref", ref)
@@ -343,7 +397,8 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 
 // Inventory is outside the lifecycle gate. Final checks/removal have a small
 // deadline and exclude only this artifact's build aliases (and rare restores).
-func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidate image.Summary, owned bool) error {
+func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidate image.Summary, validPolicy func(context.Context) bool) error {
+	owned := validPolicy != nil
 	gate := resourcelifecycle.Images(h.db)
 	release, ok := gate.TryCollect()
 	if !ok {
@@ -351,7 +406,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		return nil
 	}
 	defer release()
-	refs := append([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags...)
+	refs := slices.Concat([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags, candidate.RepoDigests)
 	releaseImage, ok := gate.TryCollectImages(refs...)
 	if !ok {
 		h.logger.Info("image collection: candidate build active; retaining artifact", "image_id", candidate.ID)
@@ -376,9 +431,9 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 			h.logger.Warn("image collection deferred: final inventory incomplete")
 			return nil
 		}
-		byRef[img.ID] = img.ID
-		for _, tag := range img.RepoTags {
-			byRef[tag] = img.ID
+		if !recordImageAliases(byRef, *img) {
+			h.logger.Warn("image collection deferred: conflicting final cache aliases")
+			return nil
 		}
 		if img.ID == candidate.ID {
 			current = img
@@ -391,7 +446,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		}
 		return nil
 	}
-	if !slices.Equal(candidate.RepoTags, current.RepoTags) {
+	if !slices.Equal(candidate.RepoTags, current.RepoTags) || !slices.Equal(candidate.RepoDigests, current.RepoDigests) {
 		h.logger.Info("image collection: aliases changed; retry next pass", "image_id", candidate.ID)
 		return nil
 	}
@@ -415,6 +470,10 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 			return h.forgetOwnedImageUnused(ctx, owner, candidate.ID)
 		}
 		return nil
+	}
+	if owned && !validPolicy(finalCtx) {
+		h.logger.Info("image collection deferred: policy unavailable or changed")
+		return errors.New("image collection policy changed during pass")
 	}
 	if _, err := h.gcClient.ImageRemove(finalCtx, candidate.ID, client.ImageRemoveOptions{Force: false, PruneChildren: false}); err != nil {
 		h.logger.Info("image collection: artifact retained", "image_id", candidate.ID, "error", err)

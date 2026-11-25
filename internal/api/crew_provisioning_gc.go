@@ -69,7 +69,7 @@ func (h *ProvisioningHandler) reconcileImageReferences(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(writer.Context(), 30*time.Second)
 	defer cancel()
 	err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
-		return resourcelifecycle.SelectedImageReferences(ctx, h.db)
+		return resourcelifecycle.SelectedImageReferencesAt(ctx, h.db, h.gcNow())
 	})
 	h.mu.Lock()
 	if err == nil {
@@ -160,7 +160,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 		return
 	}
 	containers := listResult.Items
-	cutoff := time.Now().Add(-tempContainerMaxAge).Unix()
+	cutoff := h.gcNow().Add(-tempContainerMaxAge).Unix()
 	removed := 0
 	for i, c := range containers {
 		if i >= orphanGCSweepCap {
@@ -240,7 +240,7 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 			return
 		}
 		if selected {
-			referenced[tag] = struct{}{}
+			referenced[devcontainer.CanonicalCacheRef(tag)] = struct{}{}
 		} else if dockerutil.IsLocalImageID(tag) {
 			knownArtifacts[tag] = struct{}{}
 		}
@@ -277,13 +277,20 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 		}
 		_, inUse := referenced[img.ID]
 		_, managed := knownArtifacts[img.ID]
+		foreignAlias := false
 		for _, tag := range img.RepoTags {
+			if tag == "<none>:<none>" {
+				continue
+			}
+			tag = devcontainer.CanonicalCacheRef(tag)
+			cacheAlias := strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix) || strings.HasPrefix(tag, cacheImagePrefix)
+			foreignAlias = foreignAlias || !cacheAlias
 			if _, ok := referenced[tag]; ok {
 				inUse = true
 			}
-			managed = managed || strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix) || strings.HasPrefix(tag, cacheImagePrefix)
+			managed = managed || cacheAlias
 		}
-		if inUse || !managed {
+		if inUse || !managed || foreignAlias {
 			continue
 		}
 		if img.Created > safeCutoff {
@@ -303,7 +310,7 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 		return
 	}
 	for _, imageID := range orphans {
-		h.removeCollectedImage(ctx, candidates[imageID], false)
+		h.removeCollectedImage(ctx, candidates[imageID], nil)
 	}
 
 }

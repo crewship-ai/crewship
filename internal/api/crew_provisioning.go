@@ -18,7 +18,8 @@ import (
 )
 
 type ProvisioningHandler struct {
-	lastCompleteReferenceSweep time.Time // protected by mu
+	gcClock                    func() time.Time // nil uses the system clock
+	lastCompleteReferenceSweep time.Time        // protected by mu
 	gcWake                     chan struct{}
 	legacyImageEviction        bool                    // deprecated opt-in alias; protected by mu
 	instanceID                 string                  // image ownership; read/written under mu

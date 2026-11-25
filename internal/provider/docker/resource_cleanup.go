@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
@@ -61,6 +63,101 @@ func (r *cleanupRuntime) Inspect(ctx context.Context, id string) (resourcelifecy
 	}
 	return out, nil
 }
+
+// OrphanRetentionReason qualifies a rowless crew independently of the
+// positive-tombstone teardown. In particular, stopped application containers
+// and a restored database's only attachment to persistent data stay intact.
+func (r *cleanupRuntime) OrphanRetentionReason(ctx context.Context, expected resourcelifecycle.Container) (string, error) {
+	result, err := r.client.ContainerInspect(ctx, expected.ID, client.ContainerInspectOptions{Size: true})
+	if err != nil {
+		return "", err
+	}
+	c := result.Container
+	reason := rowlessContainerRetention(c, expected)
+	if reason != "" {
+		return reason, nil
+	}
+	// Even an empty container might be the last reference to an image that
+	// the engine no longer lists (e.g. an old containerd export).
+	img, err := r.client.ImageInspect(ctx, c.Image)
+	if cerrdefs.IsNotFound(err) {
+		return "missing-image", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if img.ID == "" || dockerutil.ConfigImageID(img.ID) != dockerutil.ConfigImageID(c.Image) {
+		return "unverified-image", nil
+	}
+	// Metadata blocks count towards SizeRw on the containerd snapshotter.
+	// Conversely, a zero-byte file is still a change. Ask for the actual diff.
+	diff, err := r.client.ContainerDiff(ctx, c.ID, client.ContainerDiffOptions{})
+	if err != nil {
+		return "", err
+	}
+	if len(diff.Changes) != 0 {
+		return "writable-layer", nil
+	}
+	if diff.Changes == nil {
+		// Docker and Podman encode a successful zero-entry diff as JSON null.
+		// Empty HTTP bodies and truncated JSON surface as SDK decode errors.
+		if c.SizeRw == nil || *c.SizeRw < 0 {
+			return "unverified-writable-layer", nil
+		}
+		version, err := r.client.ServerVersion(ctx, client.ServerVersionOptions{})
+		if err != nil {
+			return "", err
+		}
+		for _, component := range version.Components {
+			if component.Name == "Engine" || component.Name == "Podman Engine" {
+				return "", nil
+			}
+		}
+		return "unverified-writable-layer", nil
+	}
+	return "", nil
+}
+
+func rowlessContainerRetention(c container.InspectResponse, expected resourcelifecycle.Container) string {
+	if len(c.ID) != 64 || dockerutil.ConfigImageID(c.ID) == "" || c.ID != expected.ID || c.Config == nil || c.HostConfig == nil || c.State == nil || c.NetworkSettings == nil || dockerutil.ConfigImageID(c.Image) == "" {
+		return "incomplete-inspection"
+	}
+	labels := c.Config.Labels
+	if strings.TrimSpace(expected.InstanceID) == "" || strings.TrimSpace(expected.CrewID) == "" || (expected.Kind != "crew" && expected.Kind != "sidecar") || labels[resourcelifecycle.InstanceLabel] != expected.InstanceID || labels[crewCrewIDLabel] != expected.CrewID || labels[crewKindLabel] != expected.Kind {
+		return "ownership-changed"
+	}
+	st, h := c.State, c.HostConfig
+	if st.Status != "created" || st.Running || st.Paused || st.Restarting || st.Dead || st.Pid != 0 || c.RestartCount != 0 || !h.RestartPolicy.IsNone() {
+		return "runtime-used"
+	}
+	if !h.ReadonlyRootfs {
+		return "writable-layer"
+	}
+	if h.PublishAllPorts || len(h.PortBindings) > 0 || len(c.NetworkSettings.Ports) > 0 {
+		return "published-port"
+	}
+	if !h.NetworkMode.IsNone() || len(h.Links) > 0 {
+		return "network-attached"
+	}
+	for name := range c.NetworkSettings.Networks {
+		if name != "none" {
+			return "network-attached"
+		}
+	}
+	if len(c.Mounts) > 0 || len(h.Binds) > 0 || len(h.Mounts) > 0 || len(h.VolumesFrom) > 0 || len(c.Config.Volumes) > 0 {
+		return "data-attachment"
+	}
+	if expected.Kind == "sidecar" || labels[sidecarSvcLabel] != "" {
+		return "application"
+	}
+	for key := range labels {
+		if strings.HasPrefix(key, "com.docker.compose.") || strings.HasPrefix(key, "io.podman.compose.") || strings.HasPrefix(key, "io.kubernetes.") {
+			return "application"
+		}
+	}
+	return ""
+}
+
 func (r *cleanupRuntime) Stop(ctx context.Context, id string) error {
 	timeout := 10
 	_, err := r.client.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})

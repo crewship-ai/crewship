@@ -1,0 +1,393 @@
+//go:build image_lifecycle_integration && linux
+
+package api
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"log/slog"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/containerd/errdefs"
+	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+)
+
+// Run on a disposable local engine preloaded only with gc-fixture:base,
+// containing /bin/busybox. The runner disposes of the entire engine.
+func TestIsolatedImageLifecycle(t *testing.T) {
+	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
+	if host == "" {
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
+	}
+	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
+		t.Fatal("explicit isolated socket must match DOCKER_HOST")
+	}
+	ctx := t.Context()
+	cli, err := client.New(client.FromEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	command := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "docker", append([]string{"--host", host}, args...)...)
+		out, err := cmd.Output()
+		if err != nil {
+			var failure *exec.ExitError
+			if errors.As(err, &failure) {
+				t.Fatalf("%v: %s: %v", args, failure.Stderr, err)
+			}
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if command("ps", "-aq") != "" || command("volume", "ls", "-q") != "" || len(strings.Fields(command("image", "ls", "-aq"))) != 1 {
+		t.Fatal("fixture requires a fresh engine")
+	}
+	base := command("image", "inspect", "--format", "{{.Id}}", "gc-fixture:base")
+	scratch := command("create", "--network", "none", base)
+	image := func(key, owner string) string {
+		t.Helper()
+		tag := "crewship-cache:" + owner + "-" + strings.Repeat(key, 12)
+		command("commit", "--change", "LABEL "+devcontainer.ImageInstanceLabel+"="+owner, "--change", "LABEL "+devcontainer.ImageKindLabel+"=crew", "--change", "LABEL "+devcontainer.ImageAcquisitionKeyLabel+"="+strings.Repeat(key, 64), scratch, tag)
+		return command("image", "inspect", "--format", "{{.Id}}", tag)
+	}
+	old := image("1", collectionOwner)
+	graceOnly := image("6", collectionOwner)
+	current := image("2", collectionOwner)
+	previous := image("3", collectionOwner)
+	stoppedImage := image("4", collectionOwner)
+	foreign := image("5", strings.Repeat("b", 64))
+	command("rm", scratch)
+	makeCrew := func(name, crew, img string) string {
+		return command("create", "--name", name, "--network", "none", "--label", resourcelifecycle.InstanceLabel+"="+collectionOwner, "--label", "crewship.kind=crew", "--label", "crewship.crew-id="+crew, img)
+	}
+	target := makeCrew("deleted-crew", "deleted", old)
+	live := makeCrew("surviving-crew", "live", current)
+	unknown := makeCrew("crew-without-row", "unknown", base)
+	stopped := command("create", "--network", "none", stoppedImage)
+	volume := command("volume", "create", "customer")
+	app := command("run", "-d", "--network", "none", "--label", "com.docker.compose.project=customer", "-v", volume+":/customer", base, "/bin/busybox", "sleep", "600")
+	command("exec", app, "/bin/busybox", "sh", "-c", "printf 'customer bytes' >/customer/marker")
+	temp := command("create", "--name", devcontainer.TempContainerNamePrefix+"scratch", "--label", "crewship.temp=provision", "--network", "none", base)
+
+	var archive bytes.Buffer
+	tw := tar.NewWriter(&archive)
+	if err := tw.WriteHeader(&tar.Header{Name: "marker", Size: 3, Mode: 0600}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("abc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(t.TempDir(), "backup.tar")
+	if err := os.WriteFile(backup, archive.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	seedCrewRow(t, db, "deleted", ws, "Deleted", "deleted")
+	seedCrewRow(t, db, "live", ws, "Live", "live")
+	seedChatForDelete(t, &AgentHandler{db: db}, ws, "chat-agent", "chat", user)
+	mustExec(t, db, "UPDATE crews SET cached_image=?,previous_image=? WHERE id='deleted'", old, graceOnly)
+	mustExec(t, db, "UPDATE crews SET cached_image=?,previous_image=? WHERE id='live'", current, previous)
+	h := &ProvisioningHandler{db: db, logger: slog.Default(), instanceID: collectionOwner, gcClient: cli, imageReferences: dockerprovider.NewImageReferences(cli, collectionOwner)}
+	clock := time.Now().UTC()
+	h.gcClock = func() time.Time { return clock }
+	t.Setenv(imageGCEnv, "true")
+	h.reconcileImageReferences(ctx)
+	// Restore a database-only snapshot on the same daemon. Each installation
+	// has its own gate and derives the daemon-visible pins from its own DB.
+	copyPath := filepath.Join(t.TempDir(), "restored.db")
+	mustExec(t, db, "VACUUM INTO ?", copyPath)
+	borrowDB, err := sql.Open("sqlite", copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = borrowDB.Close() })
+	mustExec(t, borrowDB, "UPDATE crews SET previous_image=NULL WHERE id='deleted'")
+	borrower := &ProvisioningHandler{db: borrowDB, logger: slog.Default(), instanceID: strings.Repeat("b", 64), imageReferences: dockerprovider.NewImageReferences(cli, strings.Repeat("b", 64))}
+	borrower.reconcileImageReferences(ctx)
+	counts := func(stage string) {
+		t.Logf("%s images=%d containers=%d volumes=%d", stage, len(strings.Fields(command("image", "ls", "-aq"))), len(strings.Fields(command("ps", "-aq"))), len(strings.Fields(command("volume", "ls", "-q"))))
+	}
+	counts("before DELETE")
+	controller := &resourcelifecycle.Controller{DB: db, InstanceID: collectionOwner, Connect: dockerprovider.NewCleanupRuntime, CollectionPolicy: h.ownedImageCollectionPolicy}
+	handler := NewCrewHandler(db, newTestLogger())
+	handler.containerCleanup = controller
+	reply := httptest.NewRecorder()
+	handler.Delete(reply, crewDeleteReq(user, ws, "deleted"))
+	if reply.Code != 200 {
+		t.Fatalf("DELETE: %d %s", reply.Code, reply.Body.String())
+	}
+	controller.Tick(ctx)
+	containerPresent := func(id string, want bool) {
+		t.Helper()
+		_, err := cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+		if (err != nil && !errdefs.IsNotFound(err)) || (err == nil) != want {
+			t.Errorf("container %s want present=%t: %v", id, want, err)
+		}
+	}
+	imagePresent := func(id string, want bool) {
+		t.Helper()
+		_, err := cli.ImageInspect(ctx, id)
+		if (err != nil && !errdefs.IsNotFound(err)) || (err == nil) != want {
+			t.Errorf("image %s want present=%t: %v", id, want, err)
+		}
+	}
+	containerPresent(target, false)
+	start := clock
+	pass := func() {
+		h.reconcileImageReferences(ctx)
+		h.sweepOrphanTempContainers(ctx)
+		h.sweepOrphanCacheImages(ctx)
+	}
+	clock = start.Add(30 * time.Minute)
+	pass()
+	containerPresent(temp, true)
+	clock = start.Add(90 * time.Minute)
+	pass()
+	containerPresent(temp, false)
+	clock = start.Add(7*24*time.Hour - time.Minute)
+	pass()
+	imagePresent(old, true)
+	imagePresent(graceOnly, true)
+	clock = start.Add(7*24*time.Hour + time.Minute)
+	pass()
+	for range 47 {
+		clock = clock.Add(orphanGCInterval)
+		h.sweepOrphanCacheImages(ctx)
+	}
+	imagePresent(graceOnly, true)
+	clock = clock.Add(orphanGCInterval)
+	pass()
+	imagePresent(graceOnly, false)
+	imagePresent(old, true)
+	// Two successive selections retire both the current and rollback reference.
+	for _, next := range []string{previous, current} {
+		mustExec(t, borrowDB, "UPDATE crews SET cached_image=? WHERE id='deleted'", next)
+	}
+	borrower.reconcileImageReferences(ctx)
+	pass()
+	for i := 0; i < 47; i++ {
+		clock = clock.Add(orphanGCInterval)
+		h.sweepOrphanCacheImages(ctx)
+	}
+	imagePresent(old, true)
+	clock = clock.Add(orphanGCInterval)
+	pass()
+	imagePresent(old, false)
+	for _, id := range []string{base, current, previous, foreign, stoppedImage} {
+		imagePresent(id, true)
+	}
+	for _, id := range []string{app, stopped, live, unknown} {
+		containerPresent(id, true)
+	}
+	if command("exec", app, "/bin/busybox", "cat", "/customer/marker") != "customer bytes" {
+		t.Error("volume contents changed")
+	}
+	content, err := os.ReadFile(backup)
+	if err != nil || !bytes.Equal(content, archive.Bytes()) {
+		t.Fatal("archive changed", err)
+	}
+	var message string
+	if err := db.QueryRow("SELECT content FROM conversation_messages WHERE id='chat-m1' AND role='user'").Scan(&message); err != nil || message != "hi" {
+		t.Fatal("chat changed", err)
+	}
+	counts("after retention and unused window")
+}
+
+// Exercise ordinary replacement of a feature tag while an installation
+// retains the prior ID. Report ImageInspect independently of reconciliation:
+// retagging alone need not discard the record on every engine.
+func TestIsolatedFeatureTagReplacement(t *testing.T) {
+	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
+	if host == "" {
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
+	}
+	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
+		t.Fatal("isolated socket mismatch")
+	}
+	ctx := t.Context()
+	cli, err := client.New(client.FromEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	cmd := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "docker", append([]string{"--host", host}, args...)...).Output()
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	owner := strings.Repeat("c", 64)
+	key := strings.Repeat("a", 64)
+	labels := map[string]string{devcontainer.ImageInstanceLabel: owner, devcontainer.ImageKindLabel: devcontainer.ImageKindFeature, devcontainer.ImageAcquisitionKeyLabel: key}
+	tag := devcontainer.ImageAcquisitionRef(labels)
+	dir := t.TempDir()
+	builder := devcontainer.NewDockerBuildKitBuilderFor(slog.Default(), cli)
+	export := func(gen string) string {
+		t.Helper()
+		var recipe strings.Builder
+		recipe.WriteString("FROM scratch\nCOPY generation /generation\n")
+		for _, key := range []string{devcontainer.ImageInstanceLabel, devcontainer.ImageKindLabel, devcontainer.ImageAcquisitionKeyLabel} {
+			recipe.WriteString("LABEL " + key + "=" + labels[key] + "\n")
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(recipe.String()), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "generation"), []byte(gen), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Podman's Docker compatibility service has no BuildKit session
+		// endpoint. Exercise its native exporter on the same API socket.
+		if os.Getenv("CREWSHIP_TEST_PODMAN_BUILDER") == "1" {
+			out, err := exec.CommandContext(ctx, "podman", "--remote", "--url", host, "build", "--network=none", "--pull=never", "-t", tag, dir).CombinedOutput()
+			if err != nil {
+				t.Fatalf("podman build: %v: %s", err, out)
+			}
+		} else if err := builder.Build(ctx, dir, tag, func(line string) { t.Log(line) }); err != nil {
+			t.Fatal(err)
+		}
+		return cmd("image", "inspect", "--format", "{{.Id}}", tag)
+	}
+	// Each export moves the same feature tag. Keep the previous two config IDs
+	// in separate created references to exercise a backlog in one pass.
+	pins := dockerprovider.NewImageReferences(cli, owner)
+	var oldIDs []string
+	for _, generation := range []string{"first", "second"} {
+		id := export(generation)
+		if _, err := pins.Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+			t.Fatal(err)
+		}
+		oldIDs = append(oldIDs, id)
+	}
+	newID := export("third")
+	if oldIDs[0] == oldIDs[1] || slices.Contains(oldIDs, newID) {
+		t.Fatal("fixture did not move tag")
+	}
+	missing := 0
+	for _, id := range oldIDs {
+		if _, err := cli.ImageInspect(ctx, id); errdefs.IsNotFound(err) {
+			missing++
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Logf("reexported feature: %d/%d prior config IDs absent from the catalog", missing, len(oldIDs))
+	source := cmd("create", "--network", "none", "gc-fixture:base")
+	selectedTag := "crewship-cache:" + owner + "-333333333333"
+	cmd("commit", "--change", "LABEL "+devcontainer.ImageInstanceLabel+"="+owner, "--change", "LABEL "+devcontainer.ImageKindLabel+"=crew", source, selectedTag)
+	cmd("rm", source)
+	selected := cmd("image", "inspect", "--format", "{{.Id}}", selectedTag)
+	const base = "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm"
+	if _, err := cli.ImageInspect(ctx, base); !errdefs.IsNotFound(err) {
+		t.Fatalf("expected confirmed absent registry base, got %v", err)
+	}
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	for _, crew := range []string{"first", "second", "third"} {
+		seedCrewRow(t, db, crew, ws, crew, crew)
+		mustExec(t, db, "UPDATE crews SET runtime_image=?,cached_image=? WHERE id=?", base, selected, crew)
+	}
+	desired := func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		return resourcelifecycle.SelectedImageReferences(ctx, db)
+	}
+	if err := pins.Reconcile(ctx, resourcelifecycle.Images(db), desired); err != nil {
+		t.Fatal(err)
+	}
+	left := strings.Fields(cmd("ps", "-aq", "--filter", "label=crewship.image.reference.instance-id="+owner))
+	if len(left) != 1 {
+		t.Fatalf("expected only the selected crew reference, got %d", len(left))
+	}
+	if id := cmd("inspect", "--format", "{{.Image}}", left[0]); strings.TrimPrefix(id, "sha256:") != strings.TrimPrefix(selected, "sha256:") {
+		t.Fatalf("remaining pin points at %s, expected %s", id, selected)
+	}
+
+}
+
+// A restored database can lack a still-valuable crew. Observe an empty,
+// never-started runtime alongside another that holds the only workspace file.
+func TestIsolatedMissingCrewContainer(t *testing.T) {
+	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
+	if host == "" {
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
+	}
+	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
+		t.Fatal("isolated socket mismatch")
+	}
+	ctx := t.Context()
+	cmd := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "docker", append([]string{"--host", host}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	const owner = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	volume := cmd("volume", "create", "restored-workspace")
+	cmd("run", "--rm", "--network", "none", "-v", volume+":/workspace", "gc-fixture:base", "/bin/busybox", "sh", "-c", "printf only-copy >/workspace/file")
+	create := func(options ...string) string {
+		args := []string{"create", "--network", "none", "--read-only", "--restart=no", "--label", resourcelifecycle.InstanceLabel + "=" + owner, "--label", "crewship.kind=crew", "--label", "crewship.crew-id=missing"}
+		return cmd(append(append(args, options...), "gc-fixture:base")...)
+	}
+	empty := create()
+	attached := create("-v", volume+":/workspace")
+	db := setupTestDB(t)
+	now := time.Now()
+	provisioning := &ProvisioningHandler{db: db, logger: slog.Default()}
+	controller := &resourcelifecycle.Controller{DB: db, CollectionPolicy: provisioning.ownedImageCollectionPolicy, InstanceID: owner, Connect: dockerprovider.NewCleanupRuntime, Now: func() time.Time { return now }}
+	present := func(id string) bool {
+		return cmd("ps", "-aq", "--no-trunc", "--filter", "id="+id) == id
+	}
+	advance := func(steps int) {
+		for range steps {
+			now = now.Add(orphanGCInterval)
+			controller.Tick(ctx)
+		}
+	}
+	t.Setenv(imageGCEnv, "false")
+	controller.Tick(ctx)
+	advance(49)
+	if !present(empty) || !present(attached) {
+		t.Fatal("opt-out did not preserve both containers")
+	}
+	t.Setenv(imageGCEnv, "true")
+	controller.Tick(ctx)
+	advance(47)
+	if !present(empty) || !present(attached) {
+		t.Fatal("removed before the observed-unused deadline")
+	}
+	advance(2)
+	if present(empty) {
+		t.Error("unattached empty container still present")
+	}
+	if !present(attached) {
+		t.Fatal("removed the restored workspace container")
+	}
+	got := cmd("run", "--rm", "--network", "none", "-v", volume+":/workspace:ro", "gc-fixture:base", "/bin/busybox", "cat", "/workspace/file")
+	if got != "only-copy" {
+		t.Fatalf("changed restored workspace content: %q", got)
+	}
+}

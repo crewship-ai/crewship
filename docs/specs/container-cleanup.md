@@ -3,8 +3,9 @@
 Crew and workspace deletion leave crew tombstones. A periodic controller removes
 runtime and managed service containers with a positively deleted crew owner and
 an exact `crewship.instance-id` matching this installation. It scans stopped as
-well as running containers. Missing owners, legacy containers without instance
-labels, and foreign installation labels are never automatic cleanup candidates.
+well as running containers. Legacy containers without instance labels and containers labelled for a foreign
+installation are retained. Crews absent from the database have a separate opt-in
+observation period described below.
 Container names and slugs do not establish ownership. A separate pass reaps
 unused, installation-labelled noexec bind-volume metadata as described below.
 
@@ -67,6 +68,21 @@ consistency: a late create is removed by a later scan while its owner tombstone
 exists. Revive/restore racing the last check can lose that container's process
 and writable layer. Strong incarnation/restore coordination and persistent data
 removal are outside this contract.
+
+### Containers whose crew is absent
+
+With `CREWSHIP_IMAGE_GC=true`, the controller also observes local crew
+containers whose owner has no database row. A tombstone continues to use the
+deletion path above. The missing-owner pass requires 24 hours of observations.
+A server restart, restore, failed inventory or observation gap over two hours
+starts the window again. The controller rechecks the crew ID and installation
+under exclusion with database writes, restore and provisioning before removing
+the exact container ID without force or volume removal.
+
+The controller retains containers with customer data, application attachments,
+published ports or uncertain runtime evidence. A running container remains
+running. The server log records why an inspected candidate was retained.
+Disabling the opt-in discards the observation window.
 
 ## Unused noexec bind-volume records
 
@@ -167,6 +183,18 @@ and reports an error; an invalid crew configuration can defer pin reclamation
 until repaired. Removal is never forced and never removes volumes. Failed
 publication/restore can leave safe reference containers which a later scan
 reclaims if nothing selects or acquires them.
+
+Docker Hub's fully qualified `docker.io/library/crewship-cache:` and
+`docker.io/library/crewship-feat:` tags share protection and acquisition
+reservations with their short spellings. A foreign alias on an owned image
+protects the entire image.
+
+After an image export moves a tag, a Docker containerd store can return
+`NotFound` for the old image while its dormant reference container still
+exists. Release then needs complete selection evidence, exclusive admission
+across image acquisition keys and repeated engine inspection confirming the
+same unmounted reference identity. An engine outage or unresolved selection
+defers release.
 
 A resolved runtime ID is leased through actual container creation. Direct
 service-controller starts use the same provider acquisition port; declared

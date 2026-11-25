@@ -1132,6 +1132,7 @@ func (h *ProvisioningHandler) RuntimeProvisionSink(runCtx context.Context, crewI
 // It updates the in-memory job state and persists the result to the DB.
 
 func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) {
+	defer resourcelifecycle.Images(h.db).Provisioning()()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	// Release the rate-limit slot regardless of success/failure.

@@ -516,7 +516,7 @@ Owned image collection is experimental and off by default on Docker. See [the li
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` | `0` (off) | Remove this installation's stopped runtime containers of live crews after this many days stopped. Unknown stop times, volumes, host data and service containers stay. |
-| `CREWSHIP_IMAGE_GC` | off | Set to `true` or `1` to opt into owned image collection on a dedicated or coordinated Docker daemon. Keeps current selections, one previous immutable selection per crew and every container source image; removes unused own crew/feature images older than 24 hours. Legacy unlabelled images and shared BuildKit cache are excluded. |
+| `CREWSHIP_IMAGE_GC` | off | Set to `true` or `1` to opt into owned image collection on a Docker daemon dedicated to one Crewship installation. Keeps current selections, one previous immutable selection per crew and every container source image; removes unused own crew/feature images older than 24 hours. Legacy unlabelled images and shared BuildKit cache are excluded. |
 | `CREWSHIP_CACHE_EVICTION` | deprecated | Deprecated explicit opt-in alias for owned collection, with a warning; no independent image sweeper. An explicit `CREWSHIP_IMAGE_GC` value takes precedence. |
 
 ## Devcontainer Cache GC
@@ -532,7 +532,7 @@ acquisition/publication/restore and retains artifacts on incomplete evidence.
 | `CREWSHIP_CACHE_GC_AUTODELETE` | unset (legacy log-only) | Explicitly delete unlabelled historical cache/feature images and known untagged revision artifacts beyond the old five-minute age floor. Labelled images belong to the owned collector instead. |
 
 Leave the legacy switch unset on shared Docker daemons: another installation's
-legacy selections are invisible. Owned collection checks local ownership, but copied/restored selections can still borrow another installation's artifact. Keep automatic deletion off on uncoordinated shared daemons.
+legacy selections are invisible. Owned collection checks local ownership, but copied/restored selections can still borrow another installation's artifact. Keep automatic deletion off on shared daemons.
 It does not clean global BuildKit cache or remove volumes, backups or base images.
 Apple Containers image collection remains unsupported.
 

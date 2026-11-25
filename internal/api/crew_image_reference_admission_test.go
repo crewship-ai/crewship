@@ -131,3 +131,37 @@ func TestSelectedEnvironmentDoesNotRequireItsMissingUnusedBase(t *testing.T) {
 		t.Fatal("runnable selected environment was replaced")
 	}
 }
+
+func TestColdCatalogBaseCannotOverrideServiceSelection(t *testing.T) {
+	const base = "mcr.microsoft.com/devcontainers/python:3.12-bookworm"
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	first := seedCrewRow(t, db, "base-only", ws, "Base", "base")
+	second := seedCrewRow(t, db, "sidecar", ws, "Sidecar", "sidecar")
+	assertBaseOnly := func(want bool) {
+		t.Helper()
+		refs, err := resourcelifecycle.SelectedImageReferences(t.Context(), db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ref := range refs {
+			if ref.Ref == base {
+				if ref.ConfiguredBaseOnly != want {
+					t.Fatalf("base-only provenance = %v, want %v", ref.ConfiguredBaseOnly, want)
+				}
+				return
+			}
+		}
+		t.Fatalf("missing %q", base)
+	}
+	service := `[{"name":"app","image":"` + base + `"}]`
+	mustExec(t, db, "UPDATE crews SET services_json=? WHERE id=?", service, second)
+	assertBaseOnly(false)
+	mustExec(t, db, "UPDATE crews SET runtime_image=? WHERE id=?", base, first)
+	assertBaseOnly(false)
+	mustExec(t, db, "UPDATE crews SET services_json=NULL WHERE id=?", second)
+	assertBaseOnly(true)
+	mustExec(t, db, "UPDATE crews SET previous_image=? WHERE id=?", base, second)
+	assertBaseOnly(false)
+}

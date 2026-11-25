@@ -24,6 +24,7 @@ import (
 
 const imageReferenceOwnerLabel = "crewship.image.reference.instance-id"
 const imageReferenceTagsLabel = "crewship.image.reference.config-tags"
+const imageReferenceDigestsLabel = "crewship.image.reference.repo-digests"
 const imageReferenceIDLabel = "crewship.image.reference.image-id"
 const imageReferenceNamePrefix = "crewship-image-ref-"
 
@@ -63,7 +64,7 @@ func (p *ImageReferences) Preserve(ctx context.Context, refs []resourcelifecycle
 		// A public/foreign repository alias already excludes its image from
 		// managed GC. Ordinary configuration saves must not require Docker.
 		if !ref.Required && !dockerutil.IsLocalImageID(ref.Ref) &&
-			!strings.HasPrefix(ref.Ref, "crewship-cache:") && !strings.HasPrefix(ref.Ref, devcontainer.FeatureImageTagPrefix) {
+			!strings.HasPrefix(devcontainer.CanonicalCacheRef(ref.Ref), "crewship-cache:") && !strings.HasPrefix(devcontainer.CanonicalCacheRef(ref.Ref), devcontainer.FeatureImageTagPrefix) {
 			continue
 		}
 		stepCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -112,7 +113,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	name := imageReferenceName(p.owner, img.ID)
 	existing, err := p.client.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
 	if err == nil {
-		return img.ID, p.validate(ctx, existing, img, isPodman)
+		return img.ID, p.validate(ctx, existing, img.ID, img.RepoTags, isPodman)
 	}
 	if !cerrdefs.IsNotFound(err) {
 		return "", fmt.Errorf("inspect environment reference: %w", err)
@@ -129,6 +130,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	}
 	referenceLabels := map[string]string{
 		imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
+		imageReferenceDigestsLabel:      strings.Join(img.RepoDigests, "\n"),
 		resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
 		devcontainer.TempContainerLabelKey: "",
 	}
@@ -161,18 +163,18 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 		if inspectErr != nil {
 			return "", fmt.Errorf("retain exact environment %s: %w", img.ID, err)
 		}
-		return img.ID, p.validate(ctx, existing, img, isPodman)
+		return img.ID, p.validate(ctx, existing, img.ID, img.RepoTags, isPodman)
 	}
 	existing, err = p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("confirm environment reference: %w", err)
 	}
-	return img.ID, p.validate(ctx, existing, img, isPodman)
+	return img.ID, p.validate(ctx, existing, img.ID, img.RepoTags, isPodman)
 }
 
-func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, img client.ImageInspectResult, isPodman func() (bool, error)) error {
+func (p *ImageReferences) validate(ctx context.Context, result client.ContainerInspectResult, imageID string, imageTags []string, isPodman func() (bool, error)) error {
 	c := result.Container
-	id := dockerutil.ConfigImageID(img.ID)
+	id := dockerutil.ConfigImageID(imageID)
 	raw, idErr := hex.DecodeString(c.ID)
 	if idErr != nil || len(raw) != 32 || c.ID != strings.ToLower(c.ID) || c.Config == nil || c.State == nil || c.State.Running || c.State.Status != "created" ||
 		id == "" || dockerutil.ConfigImageID(c.Image) != id ||
@@ -193,7 +195,7 @@ func (p *ImageReferences) validate(ctx context.Context, result client.ContainerI
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("confirm configured environment image for %q: %w", c.ID, err)
 		}
-		if display == "" || !podman || !(slices.Contains(img.RepoTags, display) || slices.Contains(recorded, display)) {
+		if display == "" || !podman || !(matchesReference(imageTags, display) || matchesReference(recorded, display)) {
 			return fmt.Errorf("environment reference configured image mismatch for %q", c.ID)
 		}
 	}
@@ -299,6 +301,14 @@ type referenceInventoryError struct{ error }
 
 func (e *referenceInventoryError) Unwrap() error { return e.error }
 
+func matchesReference(refs []string, ref string) bool {
+	if ref == "" {
+		return false
+	}
+	ref = devcontainer.CanonicalCacheRef(ref)
+	return slices.ContainsFunc(refs, func(candidate string) bool { return devcontainer.CanonicalCacheRef(candidate) == ref })
+}
+
 func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifecycle.ImageUse, containerID string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) error {
 	release, ok := gate.TryCollect()
 	if !ok {
@@ -316,20 +326,24 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 		return err
 	}
 	id := dockerutil.ConfigImageID(c.Container.Image)
-	if id == "" {
-		return fmt.Errorf("image reference has invalid config ID")
+	if id == "" || c.Container.ID != containerID {
+		return fmt.Errorf("image reference has invalid container or config ID")
 	}
 	img, err := p.client.ImageInspect(ctx, id)
+	if cerrdefs.IsNotFound(err) {
+		return p.releaseMissing(ctx, gate, c, id, desired)
+	}
 	if err != nil {
 		return err
 	}
-	if err := p.validate(ctx, c, img, func() (bool, error) { return dockerutil.DetectPodman(ctx, p.client) }); err != nil {
+	if err := p.validate(ctx, c, img.ID, img.RepoTags, func() (bool, error) { return dockerutil.DetectPodman(ctx, p.client) }); err != nil {
 		return err
 	}
 	if img.Config == nil {
 		return fmt.Errorf("image reference has incomplete image configuration")
 	}
 	aliases := append([]string{id, devcontainer.ImageAcquisitionRef(img.Config.Labels)}, img.RepoTags...)
+	aliases = append(aliases, img.RepoDigests...)
 	releaseImage, idle := gate.TryCollectImages(aliases...)
 	if !idle {
 		return nil
@@ -340,16 +354,113 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 		return &referenceInventoryError{err}
 	}
 	for _, ref := range refs {
-		for _, alias := range aliases {
-			if ref.Ref != "" && ref.Ref == alias {
-				return nil
-			}
+		if matchesReference(aliases, ref.Ref) {
+			return nil
 		}
 	}
 	if _, err := p.client.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false}); err != nil {
 		return err
 	}
 	return nil
+}
+
+// A containerd re-export can remove the old image's catalog entry while its
+// created reference still exists. Only release that exact dormant pin after a
+// second inspection, checking the full selection under an all-image lease.
+func (p *ImageReferences) releaseMissing(ctx context.Context, gate *resourcelifecycle.ImageUse, listed client.ContainerInspectResult, id string, desired func(context.Context) ([]resourcelifecycle.ImageReference, error)) error {
+	release, idle := gate.TryCollectAllImages()
+	if !idle {
+		return nil
+	}
+	defer release()
+	refs, err := desired(ctx)
+	if err != nil {
+		return &referenceInventoryError{err}
+	}
+	c, err := p.client.ContainerInspect(ctx, listed.Container.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return err
+	}
+	if err := p.validateMissingPin(ctx, c, listed.Container.ID, id); err != nil {
+		return err
+	}
+	pin := c.Container
+	aliases := append(strings.Split(pin.Config.Labels[imageReferenceTagsLabel], "\n"), id, pin.Config.Image, devcontainer.ImageAcquisitionRef(pin.Config.Labels))
+	aliases = append(aliases, strings.Split(pin.Config.Labels[imageReferenceDigestsLabel], "\n")...)
+	for _, ref := range refs {
+		if ref.Ref == "" {
+			continue
+		}
+		if matchesReference(aliases, ref.Ref) {
+			return nil
+		}
+		if desc := pin.ImageManifestDescriptor; desc != nil && (ref.Ref == string(desc.Digest) || strings.HasSuffix(ref.Ref, "@"+string(desc.Digest))) {
+			return nil
+		}
+		if dockerutil.IsLocalImageID(ref.Ref) {
+			continue
+		}
+		// A tag could have named the missing artifact, even if old releases
+		// didn't record it. Only a confirmed resolution to another config ID
+		// establishes that this selection doesn't need the pin.
+		resolved, err := p.client.ImageInspect(ctx, ref.Ref)
+		if cerrdefs.IsNotFound(err) && absentConfiguredBase(ref, pin.Config.Labels) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cannot resolve selection while reconciling missing image: %w", err)
+		}
+		selected := dockerutil.ConfigImageID(resolved.ID)
+		if selected == "" || selected == id {
+			return nil
+		}
+	}
+	_, err = p.client.ImageInspect(ctx, id)
+	if err == nil {
+		return nil
+	}
+	if !cerrdefs.IsNotFound(err) {
+		return err
+	}
+	final, err := p.client.ContainerInspect(ctx, pin.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return err
+	}
+	if err := p.validateMissingPin(ctx, final, pin.ID, id); err != nil {
+		return err
+	}
+	_, err = p.client.ContainerRemove(ctx, pin.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false})
+	return err
+}
+
+// A base that has never been pulled is normal. Its mutable tag cannot
+// currently resolve to this missing feature. Exact selections, recorded pin
+// aliases, and all uncertain inspections remain protected.
+func absentConfiguredBase(ref resourcelifecycle.ImageReference, labels map[string]string) bool {
+	if !ref.ConfiguredBaseOnly || ref.Required || ref.BuildInput || labels[devcontainer.ImageKindLabel] != devcontainer.ImageKindFeature || devcontainer.ImageAcquisitionRef(labels) == "" {
+		return false
+	}
+	// A registry miss for an operator snapshot or custom tag remains ambiguous.
+	return devcontainer.IsBuiltinBaseImage(ref.Ref)
+}
+
+func (p *ImageReferences) validateMissingPin(ctx context.Context, c client.ContainerInspectResult, containerID, id string) error {
+	pin := c.Container
+	if pin.ID != containerID || pin.HostConfig == nil || !pin.HostConfig.ReadonlyRootfs || pin.HostConfig.NetworkMode != "none" ||
+		pin.Config == nil || !slices.Equal(pin.Config.Entrypoint, []string{"/bin/false"}) ||
+		!slices.Equal(pin.Config.Cmd, []string{"crewship-image-reference"}) || pin.Config.User != "1001:1001" ||
+		len(pin.HostConfig.Mounts) > 0 || len(pin.HostConfig.Binds) > 0 || len(pin.HostConfig.PortBindings) > 0 || len(pin.HostConfig.VolumesFrom) > 0 ||
+		pin.State == nil || pin.State.Pid != 0 || pin.State.Paused || pin.State.Restarting || pin.State.Dead || len(pin.ExecIDs) > 0 {
+		return fmt.Errorf("missing-image reference %q does not match the dormant pin configuration", pin.ID)
+	}
+	for _, m := range pin.Mounts {
+		if m.Type != "tmpfs" {
+			return fmt.Errorf("missing-image reference %q has non-transient storage", pin.ID)
+		}
+	}
+	// Validate using only facts present in the container record. In particular,
+	// Podman's display name must have been recorded when the pin was created.
+	return p.validate(ctx, c, id, nil, func() (bool, error) { return dockerutil.DetectPodman(ctx, p.client) })
 }
 
 // SetImageReferenceAcquirer is called once while the server wires routes,

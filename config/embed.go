@@ -17,3 +17,9 @@ import _ "embed"
 //
 //go:embed models.json
 var ModelsJSON []byte
+
+// BaseImagesJSON contains the bundled public base images offered by the CLI
+// and the web configuration picker.
+//
+//go:embed base-images.json
+var BaseImagesJSON []byte

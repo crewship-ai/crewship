@@ -256,3 +256,38 @@ func TestImages_OneGatePerDatabaseHandle(t *testing.T) {
 	}
 	other()
 }
+
+func TestMissingImageLeaseExcludesEveryAlias(t *testing.T) {
+	g := &ImageUse{}
+	drop, ok := g.TryCollectAllImages()
+	if !ok {
+		t.Fatal("missing-image reservation refused")
+	}
+	if release, ok := g.TryCollectImages("uncatalogued:alias"); ok {
+		release()
+		t.Fatal("overlapping deletion admitted")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	finished := make(chan error, 1)
+	go func() {
+		release, err := g.UseImages(ctx, "unknown:alias")
+		if err == nil {
+			release()
+		}
+		finished <- err
+	}()
+	cancel()
+	if err := <-finished; err == nil {
+		t.Fatal("acquired through missing-image reservation")
+	}
+	drop()
+	lease, err := g.UseImages(t.Context(), "new:alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease()
+	if release, ok := g.TryCollectAllImages(); ok {
+		release()
+		t.Fatal("missing-image deletion admitted during acquisition")
+	}
+}
