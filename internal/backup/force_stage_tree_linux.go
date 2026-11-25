@@ -119,7 +119,9 @@ func visitForceChildren(ctx context.Context, dir *os.File, visit func(string) er
 
 // Recovery may run as root for an installation owned by a service UID. Files
 // replaced by extraction retain the original owner; newly added descendants
-// inherit ownership from the containing staged directory.
+// inherit ownership from the containing staged directory. Keep the access
+// mode and ACL mask set by database.Open on the staged root (0700); the
+// retained generation still has the operator's original directory permissions.
 func syncForceTree(ctx context.Context, path, original string, mount uint64, uid, gid uint32) error {
 	if err := ctx.Err(); err != nil {
 		return err

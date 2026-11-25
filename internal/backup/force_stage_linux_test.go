@@ -3,7 +3,9 @@
 package backup
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/writerlease"
 	"golang.org/x/sys/unix"
 )
@@ -205,6 +208,61 @@ func TestForceStageRetainedMetadata(t *testing.T) {
 		attrs, err := forceAttrs(path)
 		if err != nil || string(attrs["user.test"]) != "metadata" {
 			t.Fatal("lost extended attributes", err)
+		}
+	}
+}
+
+func TestForceStageKeepsDatabaseRootPrivate(t *testing.T) {
+	target := t.TempDir()
+	if err := os.Chmod(target, 0750); err != nil {
+		t.Fatal(err)
+	}
+	// POSIX access ACL v2: owner rwx, named UID 65534 r-x, group ---,
+	// mask r-x, other ---. Linux reflects the effective mask in mode bits.
+	const attr = "system.posix_acl_access"
+	acl, err := hex.DecodeString("02000000" + "01000700ffffffff" + "02000500feff0000" + "04000000ffffffff" + "10000500ffffffff" + "20000000ffffffff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aclErr := unix.Setxattr(target, attr, acl, 0)
+	if aclErr != nil && !errors.Is(aclErr, unix.ENOTSUP) {
+		t.Fatal(aclErr)
+	}
+	key := filepath.Join(target, "secrets.env")
+	if err = os.WriteFile(key, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := beginForceStage(t.Context(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	db, err := database.Open("file:" + filepath.Join(s.dir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.commit(t.Context()); !done || err != nil {
+		t.Fatal(done, err)
+	}
+	for path, want := range map[string]os.FileMode{target: 0700, s.previous: 0750, key: 0600} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("mode of %s = %o, want %o", path, got, want)
+		}
+	}
+	if aclErr == nil {
+		attrs, err := forceAttrs(s.previous)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(attrs[attr], acl) {
+			t.Fatalf("retained root ACL = %x, want %x", attrs[attr], acl)
 		}
 	}
 }
