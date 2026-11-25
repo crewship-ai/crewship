@@ -86,6 +86,19 @@ func withMooringAgentActualProductionSaved(t *testing.T, check func(*collaborati
 	if err != nil {
 		t.Fatalf("production bootstrap: %v", err)
 	}
+	// A failed run of this fixture often ends with only "invalid Mooring session
+	// transport", which is where the host closed the session, not why (#4776).
+	t.Cleanup(func() {
+		if !t.Failed() || d == nil || d.cell == nil || d.cell.runtime == nil {
+			return
+		}
+		if d.pump != nil {
+			if failure := d.pump.firstFailure.Load(); failure != nil {
+				t.Logf("first host failure stage=%s", *failure)
+			}
+		}
+		t.Logf("session runtime error=%v stage=%s", d.cell.runtime.Err(), d.cell.runtime.FailureStage())
+	})
 	if policy.beforeTask != nil {
 		policy.beforeTask(x, m, d)
 	}
