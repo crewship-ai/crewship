@@ -225,6 +225,14 @@ xattr -d com.apple.quarantine ./crewship
 
 ## Docker Compose
 
+<Warning>
+  With this Compose file the Docker daemon cannot see the server's runtime
+  files, so agents do not start; see
+  [#5418](https://github.com/crewship-ai/crewship/issues/5418) and
+  [#5420](https://github.com/crewship-ai/crewship/issues/5420). Use the signed
+  installer to run agents.
+</Warning>
+
 The repo ships a production-grade compose file at
 `docker/docker-compose.prod.yml`. It builds an image from the
 checked-out source, brokers all Docker API access through a
