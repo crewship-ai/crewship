@@ -376,7 +376,7 @@ a message naming the volume, its free space and the floor, for example
 ### Orphan deletion policy
 
 Owned crew and feature image collection is experimental and **off by default**.
-Set `CREWSHIP_IMAGE_GC=true` only on a dedicated or coordinated Docker daemon. Current selections, the previous immutable
+Set `CREWSHIP_IMAGE_GC=true` only on a Docker daemon dedicated to one Crewship installation. Current selections, the previous immutable
 selection of each live crew and all container source images are protected.
 An owned image older than 24 hours may be removed, including an untagged
 abandoned build, once it has stayed unused and unprotected for 24 hours as
