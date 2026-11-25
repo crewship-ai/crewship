@@ -149,9 +149,9 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 			h.logger.Warn("image collection deferred: incomplete image identity")
 			return
 		}
-		byRef[img.ID] = img.ID
-		for _, tag := range img.RepoTags {
-			byRef[tag] = img.ID
+		if !recordImageAliases(byRef, img) {
+			h.logger.Warn("image collection deferred: conflicting cache aliases")
+			return
 		}
 	}
 	protected, err := h.protectedImageIDs(ctx, byRef, true)
@@ -263,6 +263,23 @@ func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner,
 	return nil
 }
 
+// Conflicting aliases in one inventory cannot establish which ID a selection
+// protects. Defer the pass, including when the conflict appears at final read.
+func recordImageAliases(byRef map[string]string, img image.Summary) bool {
+	byRef[img.ID] = img.ID
+	for _, tag := range img.RepoTags {
+		if tag == "<none>:<none>" || tag == "" {
+			continue
+		}
+		key := devcontainer.CanonicalCacheRef(tag)
+		if id, exists := byRef[key]; exists && id != img.ID {
+			return false
+		}
+		byRef[key] = img.ID
+	}
+	return true
+}
+
 func ownedImage(img image.Summary, instanceID string) bool {
 	if img.Labels[devcontainer.ImageInstanceLabel] != instanceID {
 		return false
@@ -283,7 +300,7 @@ func ownedImage(img image.Summary, instanceID string) bool {
 		if tag == "<none>:<none>" {
 			continue
 		}
-		if !strings.HasPrefix(tag, prefix+instanceID+"-") {
+		if !strings.HasPrefix(devcontainer.CanonicalCacheRef(tag), prefix+instanceID+"-") {
 			return false
 		}
 		tagged = true
@@ -297,15 +314,15 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string, report bool) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews`)
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,''),COALESCE(services_json,'') FROM crews`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	protected := map[string]bool{}
 	for rows.Next() {
-		var current, last, previous, base, config, deletedAt string
-		if err := rows.Scan(&current, &last, &previous, &base, &config, &deletedAt); err != nil {
+		var current, last, previous, base, config, deletedAt, services string
+		if err := rows.Scan(&current, &last, &previous, &base, &config, &deletedAt, &services); err != nil {
 			return nil, err
 		}
 		// A soft-deleted crew keeps its selections for a while: it can be
@@ -317,7 +334,7 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 			}
 		}
 		// Protect configured bases even before a live crew has a container.
-		if id := byRef[base]; id != "" {
+		if id := byRef[devcontainer.CanonicalCacheRef(base)]; id != "" {
 			protected[id] = true
 		}
 		if config != "" {
@@ -326,7 +343,16 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 				if report {
 					h.logger.Warn("image collection: invalid crew configuration; explicit selections remain protected")
 				}
-			} else if id := byRef[cfg.Image]; id != "" {
+			} else if id := byRef[devcontainer.CanonicalCacheRef(cfg.Image)]; id != "" {
+				protected[id] = true
+			}
+		}
+		serviceRefs, err := resourcelifecycle.ConfiguredImageReferences("", "", services)
+		if err != nil {
+			return nil, err
+		}
+		for _, service := range serviceRefs {
+			if id := byRef[devcontainer.CanonicalCacheRef(service.Ref)]; id != "" {
 				protected[id] = true
 			}
 		}
@@ -334,7 +360,7 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 			if ref == "" {
 				continue
 			}
-			id := byRef[ref]
+			id := byRef[devcontainer.CanonicalCacheRef(ref)]
 			if id == "" {
 				if report {
 					h.logger.Warn("image collection: selected reference absent from complete inventory; skipping reference", "image_ref", ref)
@@ -383,9 +409,9 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 			h.logger.Warn("image collection deferred: final inventory incomplete")
 			return nil
 		}
-		byRef[img.ID] = img.ID
-		for _, tag := range img.RepoTags {
-			byRef[tag] = img.ID
+		if !recordImageAliases(byRef, *img) {
+			h.logger.Warn("image collection deferred: conflicting final cache aliases")
+			return nil
 		}
 		if img.ID == candidate.ID {
 			current = img

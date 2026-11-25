@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // ImageUse coordinates local build/publication, restore and collection. It is
@@ -17,6 +19,7 @@ type ImageUse struct {
 	refsMu      sync.Mutex
 	active      map[string]int
 	deleting    map[string]chan struct{}
+	allImages   chan struct{}
 }
 
 var imageUses sync.Map // *sql.DB -> *ImageUse; one entry per opened database
@@ -37,12 +40,13 @@ func (g *ImageUse) TryCollect() (func(), bool) {
 // UseImages protects only this build's base and output cache aliases. Other
 // crews keep acquiring images while an unrelated image is being removed.
 func (g *ImageUse) UseImages(ctx context.Context, refs ...string) (func(), error) {
+	refs = canonicalLeaseKeys(refs)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		g.refsMu.Lock()
-		var wait <-chan struct{}
+		wait := g.allImages
 		for _, ref := range refs {
 			if ch := g.deleting[ref]; ch != nil {
 				wait = ch
@@ -85,9 +89,39 @@ func (g *ImageUse) UseImages(ctx context.Context, refs ...string) (func(), error
 	}
 }
 
-func (g *ImageUse) TryCollectImages(refs ...string) (func(), bool) {
+// Equivalent Docker Hub spellings must reserve the same acquisition key.
+func canonicalLeaseKeys(refs []string) []string {
+	keys := make([]string, len(refs))
+	for i, key := range refs {
+		keys[i] = devcontainer.CanonicalCacheRef(key)
+	}
+	return keys
+}
+
+// TryCollectAllImages reserves every image key during a missing-image check.
+// Without an image inventory record we cannot enumerate its former aliases.
+func (g *ImageUse) TryCollectAllImages() (func(), bool) {
 	g.refsMu.Lock()
 	defer g.refsMu.Unlock()
+	if g.allImages != nil || len(g.active) != 0 || len(g.deleting) != 0 {
+		return nil, false
+	}
+	g.allImages = make(chan struct{})
+	return sync.OnceFunc(func() {
+		g.refsMu.Lock()
+		defer g.refsMu.Unlock()
+		close(g.allImages)
+		g.allImages = nil
+	}), true
+}
+
+func (g *ImageUse) TryCollectImages(refs ...string) (func(), bool) {
+	refs = canonicalLeaseKeys(refs)
+	g.refsMu.Lock()
+	defer g.refsMu.Unlock()
+	if g.allImages != nil {
+		return nil, false
+	}
 	for _, ref := range refs {
 		if g.active[ref] > 0 || g.deleting[ref] != nil {
 			return nil, false

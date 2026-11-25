@@ -24,7 +24,7 @@ import (
 func cacheArtifactReferences(refs map[string][]string, img image.Summary) []string {
 	crews := append([]string{}, refs[img.ID]...)
 	for _, tag := range img.RepoTags {
-		crews = append(crews, refs[tag]...)
+		crews = append(crews, refs[devcontainer.CanonicalCacheRef(tag)]...)
 	}
 	slices.Sort(crews)
 	return slices.Compact(crews)
@@ -84,7 +84,8 @@ func (h *ProvisioningHandler) referencedCacheImages(ctx context.Context) (map[st
 		if err := rows.Scan(&tag, &slug); err != nil {
 			return nil, err
 		}
-		refs[tag] = append(refs[tag], slug)
+		key := devcontainer.CanonicalCacheRef(tag)
+		refs[key] = append(refs[key], slug)
 	}
 	return refs, rows.Err()
 }
@@ -130,7 +131,8 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 			replyInternalError(w, h.logger, "scan referenced cache image", err)
 			return
 		}
-		refs[tag] = append(refs[tag], slug)
+		key := devcontainer.CanonicalCacheRef(tag)
+		refs[key] = append(refs[key], slug)
 	}
 
 	imgs, err := h.listLocalImagesCached(r.Context())
@@ -141,6 +143,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 	out := make([]CacheImageInfo, 0, len(imgs))
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {
+			tag = devcontainer.CanonicalCacheRef(tag)
 			if !strings.HasPrefix(tag, cacheImagePrefix) {
 				continue
 			}
@@ -255,10 +258,11 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	var candidateID string
 	var candidateRefs []string
 	for _, img := range inventory.Items {
-		if slices.Contains(img.RepoTags, tag) {
+		if slices.ContainsFunc(img.RepoTags, func(alias string) bool { return devcontainer.CanonicalCacheRef(alias) == tag }) {
 			candidateID = img.ID
 			seen := map[string]bool{tag: true, "": true}
 			for _, ref := range append([]string{img.ID, devcontainer.ImageAcquisitionRef(img.Labels)}, img.RepoTags...) {
+				ref = devcontainer.CanonicalCacheRef(ref)
 				if !seen[ref] {
 					candidateRefs = append(candidateRefs, ref)
 					seen[ref] = true
@@ -309,7 +313,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 
 			found := false
 			for _, img := range images.Items {
-				if !slices.Contains(img.RepoTags, tag) {
+				if !slices.ContainsFunc(img.RepoTags, func(alias string) bool { return devcontainer.CanonicalCacheRef(alias) == tag }) {
 					continue
 				}
 				found = true

@@ -240,7 +240,7 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 			return
 		}
 		if selected {
-			referenced[tag] = struct{}{}
+			referenced[devcontainer.CanonicalCacheRef(tag)] = struct{}{}
 		} else if dockerutil.IsLocalImageID(tag) {
 			knownArtifacts[tag] = struct{}{}
 		}
@@ -277,13 +277,20 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 		}
 		_, inUse := referenced[img.ID]
 		_, managed := knownArtifacts[img.ID]
+		foreignAlias := false
 		for _, tag := range img.RepoTags {
+			if tag == "<none>:<none>" {
+				continue
+			}
+			tag = devcontainer.CanonicalCacheRef(tag)
+			cacheAlias := strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix) || strings.HasPrefix(tag, cacheImagePrefix)
+			foreignAlias = foreignAlias || !cacheAlias
 			if _, ok := referenced[tag]; ok {
 				inUse = true
 			}
-			managed = managed || strings.HasPrefix(tag, devcontainer.FeatureImageTagPrefix) || strings.HasPrefix(tag, cacheImagePrefix)
+			managed = managed || cacheAlias
 		}
-		if inUse || !managed {
+		if inUse || !managed || foreignAlias {
 			continue
 		}
 		if img.Created > safeCutoff {

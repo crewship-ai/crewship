@@ -53,6 +53,17 @@ func ImageNamespace(instanceID string) string {
 	return id
 }
 
+// CanonicalCacheRef maps Docker Hub's fully qualified spelling of Crewship's
+// two local cache repositories to the spelling used at build time. Other
+// namespaces, registries, image IDs and ordinary image references stay exact.
+func CanonicalCacheRef(ref string) string {
+	short := strings.TrimPrefix(ref, "docker.io/library/")
+	if strings.HasPrefix(short, cacheImageRepoPrefix) || strings.HasPrefix(short, FeatureImageTagPrefix) {
+		return short
+	}
+	return ref
+}
+
 // namespacedTag joins a repository prefix ("crewship-cache:"), the
 // installation namespace and a hash. Without identity it is the legacy name.
 func namespacedTag(prefix, instanceID, hash string) string {

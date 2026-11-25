@@ -64,6 +64,7 @@ func (f *referenceFake) ContainerCreate(_ context.Context, o client.ContainerCre
 	var c client.ContainerInspectResult
 	c.Container.ID = id
 	c.Container.Name = "/" + o.Name
+	c.Container.HostConfig = o.HostConfig
 	c.Container.Config = o.Config
 	c.Container.Image = o.Config.Image
 	c.Container.State = &container.State{Status: "created"}
@@ -257,7 +258,12 @@ func TestImageReferencesReconcileDeferScope(t *testing.T) {
 					t.Fatalf("failed recheck: reads=%d err=%v", reads, err)
 				}
 				return
-			case "missing image", "running container", "selected running container":
+			case "missing image":
+				if err != nil || !slices.Equal(f.removed, []string{firstContainer, secondContainer}) {
+					t.Fatalf("removed=%v err=%v", f.removed, err)
+				}
+				return
+			case "running container", "selected running container":
 				if !errors.As(err, &partial) || partial.Deferred != 1 {
 					t.Fatalf("expected one deferred reference: %v", err)
 				}
@@ -449,8 +455,7 @@ func TestPodmanReferenceInitialProbeFailureLeavesNoContainer(t *testing.T) {
 }
 
 // A missing image record can outlive its cache tag and leave a created
-// reference behind. Pin the requested outcome separately from the existing
-// partial-sweep regression, which covers the current conservative behavior.
+// reference behind. The reference may be released after validating the pin.
 func TestUnselectedReferenceWithMissingImageEventuallyReleased(t *testing.T) {
 	f, id := referenceFixture(t)
 	refs := NewImageReferences(f, referenceBorrower)
@@ -466,5 +471,83 @@ func TestUnselectedReferenceWithMissingImageEventuallyReleased(t *testing.T) {
 	}
 	if err != nil || len(f.containers) != 0 {
 		t.Fatalf("after two complete inventories: retained=%d err=%v", len(f.containers), err)
+	}
+}
+
+type referenceInspectError struct {
+	*referenceFake
+	failRef string
+}
+
+func (f referenceInspectError) ImageInspect(ctx context.Context, ref string, opts ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	if ref == f.failRef {
+		return client.ImageInspectResult{}, errors.New("engine unavailable")
+	}
+	return f.referenceFake.ImageInspect(ctx, ref, opts...)
+}
+
+func TestMissingImageReferenceRequiresCompleteEvidence(t *testing.T) {
+	for _, mode := range []string{"selected id", "selected alias", "unresolved alias", "selected after inventory", "lease on unknown alias", "provider error", "foreign owner", "different image label", "running", "data volume", "host bind", "writable container", "application command", "wrong name", "db error"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			p := NewImageReferences(f, referenceBorrower)
+			if _, err := p.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			cid := strings.Repeat("c", 64)
+			c := f.containers[cid]
+			alias := "crewship-cache:" + referenceOwner + "-111111111111"
+			gate := &resourcelifecycle.ImageUse{}
+			var wanted []resourcelifecycle.ImageReference
+			delete(f.images, id)
+			switch mode {
+			case "selected id":
+				wanted = []resourcelifecycle.ImageReference{{Ref: id}}
+			case "selected alias":
+				c.Container.Config.Labels[imageReferenceTagsLabel] = alias
+				wanted = []resourcelifecycle.ImageReference{{Ref: "docker.io/library/" + alias}}
+			case "unresolved alias":
+				wanted = []resourcelifecycle.ImageReference{{Ref: "registry.example/private:old"}}
+			case "lease on unknown alias":
+				release, err := gate.UseImages(t.Context(), "unrecorded:alias")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "provider error":
+				p.client = referenceInspectError{f, id}
+			case "foreign owner":
+				c.Container.Config.Labels[imageReferenceOwnerLabel] = referenceOwner
+			case "different image label":
+				c.Container.Config.Labels[imageReferenceIDLabel] = "sha256:" + strings.Repeat("5", 64)
+			case "running":
+				c.Container.State.Running = true
+			case "data volume":
+				c.Container.Mounts = []container.MountPoint{{Type: "volume", Name: "customer-data"}}
+			case "host bind":
+				c.Container.HostConfig.Binds = []string{"/srv/customer:/data"}
+			case "writable container":
+				c.Container.HostConfig.ReadonlyRootfs = false
+			case "application command":
+				c.Container.Config.Cmd = []string{"start-application"}
+			case "wrong name":
+				c.Container.Name = "/crewship-image-ref-other"
+			}
+			f.containers[cid] = c
+			reads := 0
+			err := p.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
+				reads++
+				if mode == "db error" && reads == 2 {
+					return nil, errors.New("read failed")
+				}
+				if mode == "selected after inventory" && reads == 2 {
+					return []resourcelifecycle.ImageReference{{Ref: id}}, nil
+				}
+				return wanted, nil
+			})
+			if len(f.containers) != 1 || len(f.removed) != 0 {
+				t.Fatalf("removed=%v err=%v", f.removed, err)
+			}
+		})
 	}
 }
