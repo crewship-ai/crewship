@@ -15,7 +15,7 @@ import (
 
 // The extracted entries contain the digest and length of the bytes actually
 // written. A matching file inherited from the target is not bundle evidence.
-func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalMemory string, stores map[string]map[string]IndexEntry) error {
+func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalMemory string, stores map[string]map[string]IndexEntry, verified map[string]int64) error {
 	rows, err := db.QueryContext(ctx, `SELECT workspace_id,tier,path,sha256,bytes,payload_ref=path,
 		typeof(sha256)='text' AND typeof(bytes)='integer' FROM memory_versions`)
 	if err != nil {
@@ -26,7 +26,6 @@ func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalM
 	// A missing table at this point is a broken migrated schema.
 	personas := map[string]string{}
 	crewOwners := map[string]string{}
-	verified := map[string]int64{}
 	for rows.Next() {
 		var workspace, tier, sourcePath, sha string
 		var size int64
@@ -89,6 +88,13 @@ func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalM
 			return err
 		}
 	}
+	// All rows now name evidenced content-addressed objects. Use the final
+	// published root for references persisted in SQLite.
+	_, err = db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/' || substr(sha256,1,2) || '/' || sha256`, filepath.Join(finalMemory, "versions"))
+	return err
+}
+
+func verifyForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalMemory string, verified map[string]int64) error {
 	// Check the final staged files too, once per distinct object. The index
 	// proves bundle provenance; the disk read proves what the published
 	// reference will actually serve.
@@ -104,31 +110,33 @@ func rebaseForceMemoryVersions(ctx context.Context, db *sql.DB, stageDir, finalM
 			}
 		}
 	}
-	// All rows now name evidenced content-addressed objects. Use the final
-	// published root for references persisted in SQLite.
-	_, err = db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/' || substr(sha256,1,2) || '/' || sha256`, filepath.Join(finalMemory, "versions"))
-	if err != nil {
-		return err
-	}
-	// SQLite triggers run during the rewrite. Check the references that
-	// actually survived it against the verified object set.
-	refs, err := db.QueryContext(ctx, `SELECT DISTINCT sha256,bytes,payload_ref FROM memory_versions`)
+	refs, err := db.QueryContext(ctx, `SELECT DISTINCT sha256, bytes, payload_ref,
+		typeof(sha256)='text' AND typeof(bytes)='integer' AND typeof(payload_ref)='text' FROM memory_versions`)
 	if err != nil {
 		return err
 	}
 	defer refs.Close()
+	referenced := 0
 	for refs.Next() {
 		var sha, ref string
 		var size int64
-		if err := refs.Scan(&sha, &size, &ref); err != nil {
+		var typed bool
+		if err := refs.Scan(&sha, &size, &ref, &typed); err != nil {
 			return err
 		}
 		n, ok := verified[sha]
-		if !ok || n != size || ref != filepath.Join(finalMemory, "versions", sha[:2], sha) {
+		if !typed || !ok || n != size || ref != filepath.Join(finalMemory, "versions", sha[:2], sha) {
 			return errors.New("unverified memory version reference after rewrite")
 		}
+		referenced++
 	}
-	return refs.Err()
+	if err := refs.Err(); err != nil {
+		return err
+	}
+	if referenced != len(verified) {
+		return errors.New("verified memory version reference missing after report insertion")
+	}
+	return nil
 }
 
 func verifyStagedMemoryObject(ctx context.Context, root *os.Root, sha string, size int64) error {

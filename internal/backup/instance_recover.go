@@ -315,7 +315,11 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 
 	// 4. The database: migrations forward, runtime reset, holds.
-	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{payload: ex.services, count: m.Contents.ServiceSnapshots, force: opts.Force, restoredStores: ex.hashes}); err != nil {
+	var final *forceRecoveryValidation
+	if stage != nil {
+		final = &forceRecoveryValidation{memoryObjects: make(map[string]int64)}
+	}
+	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{payload: ex.services, count: m.Contents.ServiceSnapshots, validation: final, restoredStores: ex.hashes}); err != nil {
 		return rep, err
 	}
 
@@ -336,11 +340,6 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 			return rep, err
 		}
 		logger.DebugContext(ctx, "recovery secrets written")
-		if stage != nil {
-			if err := validateRecoveredKeyFiles(ctx, rep, ex.kit, dataDir); err != nil {
-				return rep, err
-			}
-		}
 	}
 	envelopes := 0
 	for _, n := range rep.VaultEnvelopes {
@@ -383,6 +382,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		rep.Warnings = append(rep.Warnings, "the restore report could not be stored: "+err.Error())
 	}
 	if stage != nil {
+		if err := final.verify(ctx, rep, ex.kit, dataDir); err != nil {
+			return rep, err
+		}
 		logger.DebugContext(ctx, "publishing recovered directory")
 		if err := restoreOperationError(ctx); err != nil {
 			return rep, err
@@ -1037,7 +1039,7 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		if err != nil {
 			return err
 		}
-		force := len(serviceArgs) > 0 && serviceArgs[0].force
+		force := len(serviceArgs) > 0 && serviceArgs[0].validation != nil
 		// Parse even unused configured keys. A database with no sealed rows
 		// provides no decryption evidence for a malformed master key.
 		var suppliedKeys map[string][]byte
@@ -1210,7 +1212,7 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		// memory_versions.payload_ref is an absolute path on the source.
 		memRoot := RecoveredStoreDir(rep.DataDir, StoreMemory)
 		if force {
-			if err := rebaseForceMemoryVersions(ctx, db.DB, dataDir, memRoot, serviceArgs[0].restoredStores); err != nil {
+			if err := rebaseForceMemoryVersions(ctx, db.DB, dataDir, memRoot, serviceArgs[0].restoredStores, serviceArgs[0].validation.memoryObjects); err != nil {
 				return fmt.Errorf("backup: verify memory versions: %w", err)
 			}
 		} else if _, err := db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/versions/' || substr(sha256, 1, 2) || '/' || sha256 WHERE length(sha256) = 64`, memRoot); err != nil && !strings.Contains(err.Error(), "no such table") {
@@ -1222,11 +1224,10 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			return err
 		}
 		rep.Holds = holds
-		if force && suppliedKeys != nil && pending > 0 {
-			// Drills and kitless recoveries have no emitted key file. Check any
-			// envelopes minted by migrations before discarding the scoped keys.
-			_, err := recoveryEnvelopeInventory(ctx, db.DB, suppliedKeys)
-			return err
+		if force && kit == nil && pending > 0 {
+			// Preserve exactly the key set checked before migration, even after
+			// withRecoveryEnv restores the caller's environment.
+			serviceArgs[0].validation.migrationKeys = suppliedKeys
 		}
 		return nil
 	})
@@ -1342,26 +1343,26 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 }
 
 // Check the files the recovered installation will actually read.
-func validateRecoveredKeyFiles(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string) error {
+func validateRecoveredKeyFiles(rep *RecoverReport, kit *RecoveryKit, dataDir string) (map[string][]byte, error) {
 	values, err := readEnvFile(filepath.Join(dataDir, recoveredSecretsFile))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for name, size := range map[string]int{NextAuthSecretEnv: 64, "CREWSHIP_ADMIN_TOKEN_HMAC_KEY": 32} {
 		key, err := hex.DecodeString(values[name])
 		if err != nil || len(key) != size {
-			return fmt.Errorf("backup: invalid recovered %s", name)
+			return nil, fmt.Errorf("backup: invalid recovered %s", name)
 		}
 	}
 	if kit == nil {
-		return nil
+		return nil, nil
 	}
 	want, err := kitEnv(kit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if values["ENCRYPTION_KEY"] != want["ENCRYPTION_KEY"] {
-		return errors.New("backup: staged master key differs from the kit")
+		return nil, errors.New("backup: staged master key differs from the kit")
 	}
 	want[NextAuthSecretEnv] = values[NextAuthSecretEnv]
 	if len(kit.AuditKeyring) > 0 {
@@ -1369,10 +1370,10 @@ func validateRecoveredKeyFiles(ctx context.Context, rep *RecoverReport, kit *Rec
 	}
 	got, err := readEnvFile(filepath.Join(dataDir, RecoveredKeysFile))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !maps.Equal(want, got) {
-		return errors.New("backup: staged vault key file differs from the recovered keys")
+		return nil, errors.New("backup: staged vault key file differs from the recovered keys")
 	}
 	// Decode the actual published assignments. This check must still fail
 	// if a migration accidentally consumed a key from the recovering host.
@@ -1380,16 +1381,42 @@ func validateRecoveredKeyFiles(ctx context.Context, rep *RecoverReport, kit *Rec
 	for _, v := range kit.Versions {
 		key, err := hex.DecodeString(got[v.Env])
 		if err != nil || len(key) != 32 {
-			return fmt.Errorf("backup: invalid staged %s", v.Env)
+			return nil, fmt.Errorf("backup: invalid staged %s", v.Env)
 		}
 		keys[v.Version] = key
+	}
+	return keys, nil
+}
+
+type forceRecoveryValidation struct {
+	memoryObjects map[string]int64
+	migrationKeys map[string][]byte
+}
+
+// Run after the report writer closes. Its INSERT and any triggers have now
+// completed, and nothing else writes the staged database before publication.
+func (v *forceRecoveryValidation) verify(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string) (retErr error) {
+	keys, err := validateRecoveredKeyFiles(rep, kit, dataDir)
+	if err != nil {
+		return err
+	}
+	if kit == nil {
+		keys = v.migrationKeys
 	}
 	db, err := openSnapshot(filepath.Join(dataDir, "crewship.db"))
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	_, err = recoveryEnvelopeInventory(ctx, db, keys)
+	defer func() { retErr = errors.Join(retErr, db.Close()) }()
+	if err := checkRecoveryIntegrity(ctx, db); err != nil {
+		return err
+	}
+	if err := verifyForceMemoryVersions(ctx, db, dataDir, RecoveredStoreDir(rep.DataDir, StoreMemory), v.memoryObjects); err != nil {
+		return fmt.Errorf("backup: verify final memory versions: %w", err)
+	}
+	if keys != nil {
+		_, err = recoveryEnvelopeInventory(ctx, db, keys)
+	}
 	return err
 }
 
@@ -1502,8 +1529,5 @@ func recordRecoverReport(ctx context.Context, rep *RecoverReport, opts RecoverOp
 		return err
 	}
 	rep.ReportID = saved.ID
-	if opts.Force {
-		return checkRecoveryIntegrity(ctx, db.DB)
-	}
 	return nil
 }

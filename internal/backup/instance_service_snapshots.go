@@ -132,7 +132,7 @@ func instanceServiceDump(ctx context.Context, db *sql.DB) (*DBDump, error) {
 
 type instanceServiceRecovery struct {
 	restoredStores map[string]map[string]IndexEntry
-	force          bool
+	validation     *forceRecoveryValidation
 	payload        *ExtractedPayload
 	count          int
 }
