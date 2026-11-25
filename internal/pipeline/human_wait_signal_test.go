@@ -69,3 +69,66 @@ func TestOnHumanWait_NestedHeldActionAndApproval(t *testing.T) {
 		})
 	}
 }
+
+// #5354: a held action inside a CALLED routine signals the caller too, and the
+// signal names the run the caller started (the parent), not the child's own
+// run, so a synchronous run can return a receipt for the right run.
+func TestOnHumanWait_NestedRoutineReportsTheParentRun(t *testing.T) {
+	db := openResumeTestDB(t)
+	seedHeldActionMembers(t, db)
+	t.Cleanup(func() { db.Close() })
+	store := NewStore(db)
+	wp := NewSQLWaitpointStore(db)
+	t.Cleanup(wp.Close)
+	saveResumePipeline(t, store, "child-hold", `{"dsl_version":"1.0","name":"child-hold","steps":[
+ {"id":"each","type":"foreach","foreach":{"items":"[\"a\"]","as":"host","parallelism":1,"steps":[
+  {"id":"create","type":"crewship","action":"issue.create","args":{"title":"Status {{ inputs.host }}"}}
+ ]}}
+]}`)
+	parent := saveResumePipeline(t, store, "parent-call", `{"dsl_version":"1.0","name":"parent-call","steps":[
+ {"id":"call","type":"call_pipeline","pipeline_slug":"child-hold"}
+]}`)
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
+		WithRunStore(NewRunStore(db)).WithWaitpointStore(wp).WithCrewshipActions(&heldCrewshipActions{db: db})
+
+	type signal struct{ runID, stepID, token string }
+	signals := make(chan signal, 4)
+	started := make(chan string, 1)
+	finished := make(chan *RunResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() {
+		res, err := exec.Run(ctx, RunInput{PipelineID: parent.ID, WorkspaceID: "ws_test", Mode: ModeRun,
+			OnStarted:   func(id string) { started <- id },
+			OnHumanWait: func(runID, stepID, token string) { signals <- signal{runID, stepID, token} }})
+		if err != nil {
+			t.Errorf("run: %v", err)
+		}
+		finished <- res
+	}()
+	parentRun := <-started
+	var got signal
+	select {
+	case got = <-signals:
+	case res := <-finished:
+		t.Fatalf("run ended without signalling a human wait: %+v", res)
+	case <-ctx.Done():
+		t.Fatal("a held action in a called routine never signalled the caller")
+	}
+	if got.runID != parentRun {
+		t.Fatalf("signal names run %s, want the run the caller started (%s)", got.runID, parentRun)
+	}
+	var pending string
+	if err := db.QueryRow(`SELECT token FROM pipeline_waitpoints WHERE status = 'pending'`).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if got.token != pending {
+		t.Fatalf("signal token %q, want %q", got.token, pending)
+	}
+	if err := wp.CompleteApproval(ctx, "ws_test", pending, true, "u_admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-finished; res == nil || res.Status != "COMPLETED" {
+		t.Fatalf("run after approval: %+v", res)
+	}
+}
