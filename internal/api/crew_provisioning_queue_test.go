@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -158,4 +159,80 @@ func TestProvisioningQueueCapsTurnsPerChat(t *testing.T) {
 		Opts: ws.ChatMessageOption{OriginalTriggerMessageID: "id-over"}}) {
 		t.Fatal("the turn over the cap was accepted")
 	}
+}
+
+type recordingResumer struct {
+	*fakeChatResumer
+	mu       sync.Mutex
+	recorded []string
+}
+
+func (r *recordingResumer) RecordNotRun(_ context.Context, chatID, trigger, reason string) {
+	r.mu.Lock()
+	r.recorded = append(r.recorded, trigger)
+	r.mu.Unlock()
+}
+
+func (r *recordingResumer) got() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.recorded...)
+}
+
+// A failed build leaves a reason in the transcript for every saved message.
+func TestProvisioningBuildFailureRecordsNotRun(t *testing.T) {
+	h, wsID, crewID, _ := resumeTestRig(t, skipCfg)
+	r := &recordingResumer{fakeChatResumer: newFakeChatResumer()}
+	h.chatResumer = r
+	job := &ProvisionJob{CrewID: crewID, Status: "running"}
+	h.jobs[crewID] = job
+	queueTurns(t, h, crewID, "a", "b")
+	h.markJobFailed(job, wsID, errors.New("boom"))
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.got()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.got(); len(got) != 2 {
+		t.Fatalf("recorded %v, want both saved messages", got)
+	}
+}
+
+// At shutdown the queued rest is recorded, not waited for or dropped silently.
+func TestProvisioningShutdownRecordsTheUnrunRest(t *testing.T) {
+	h, wsID, crewID, _ := resumeTestRig(t, skipCfg)
+	b := &blockingResumer{started: make(chan string, 4), release: make(chan struct{})}
+	r := &recordingResumerOverBlocking{blockingResumer: b}
+	h.chatResumer = r
+	job := covJob(crewID)
+	h.jobs[crewID] = job
+	queueTurns(t, h, crewID, "first", "second")
+	h.runProvisioning(crewID, wsID, skipCfg, "", "", job)
+	<-b.started
+	h.Stop()
+	b.release <- struct{}{}
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.got()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.got(); len(got) != 1 || got[0] != "id-second" {
+		t.Fatalf("recorded %v, want only the second message", got)
+	}
+}
+
+type recordingResumerOverBlocking struct {
+	*blockingResumer
+	mu       sync.Mutex
+	recorded []string
+}
+
+func (r *recordingResumerOverBlocking) RecordNotRun(_ context.Context, _, trigger, _ string) {
+	r.mu.Lock()
+	r.recorded = append(r.recorded, trigger)
+	r.mu.Unlock()
+}
+
+func (r *recordingResumerOverBlocking) got() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.recorded...)
 }

@@ -266,14 +266,15 @@ func startFailedOnMissingImage(code string, err error) bool {
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
 // sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
-	orch         *orchestrator.Orchestrator
-	container    provider.ContainerProvider
-	convStore    *conversation.Store
-	logWriter    *logcollector.Writer
-	resolver     ChatResolver
-	provisioning ProvisioningEnqueuer // optional; nil means auto-provision is disabled
-	cfg          BridgeConfig
-	logger       *slog.Logger
+	notRunRecorded sync.Map // chatID/triggerID of saved messages whose not-run reason is already in the transcript
+	orch           *orchestrator.Orchestrator
+	container      provider.ContainerProvider
+	convStore      *conversation.Store
+	logWriter      *logcollector.Writer
+	resolver       ChatResolver
+	provisioning   ProvisioningEnqueuer // optional; nil means auto-provision is disabled
+	cfg            BridgeConfig
+	logger         *slog.Logger
 
 	// containerCache maps crewID → containerID so subsequent messages
 	// skip the "Starting container..." status events (container is warm).
@@ -1816,6 +1817,33 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 // Best-effort by design: a persist failure is logged, never returned. The caller
 // is already on its way to returning the run error, and swapping that for a
 // storage error would hide the real cause.
+// RecordNotRun saves, as an ordinary system error turn, why a message that was
+// saved while a crew built never ran, so a reload shows the reason. It writes
+// at most one turn per saved message (the id is derived from the trigger id),
+// however many times the failure is reported.
+func (b *Bridge) RecordNotRun(ctx context.Context, chatID, triggerMessageID, reason string) {
+	if b.convStore == nil || triggerMessageID == "" || chatID == "" {
+		return
+	}
+	if _, dup := b.notRunRecorded.LoadOrStore(chatID+"/"+triggerMessageID, struct{}{}); dup {
+		return
+	}
+	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		ID:        "notrun-" + triggerMessageID,
+		Role:      conversation.RoleSystem,
+		Content:   reason,
+		Parts:     []conversation.Part{{Type: "error", Content: reason}},
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		b.notRunRecorded.Delete(chatID + "/" + triggerMessageID)
+		b.logger.Error("failed to record not-run turn", "error", err, "chat_id", chatID)
+		return
+	}
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
+	}
+}
+
 func (b *Bridge) persistInBandFailureTurn(
 	ctx context.Context,
 	chatID string,

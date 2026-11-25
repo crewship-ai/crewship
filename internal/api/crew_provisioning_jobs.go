@@ -702,11 +702,32 @@ func (h *ProvisioningHandler) spawnPendingPerChat(pending []chatbridge.PendingCh
 				if i > 0 && h.bgCtx != nil && h.bgCtx.Err() != nil {
 					h.logger.Warn("server stopping: queued chat messages left unrun",
 						"chat_id", chatID, "remaining", len(queue)-i)
+					for _, left := range queue[i:] {
+						h.recordNotRun(left, "Your message was saved but did not run: the server was stopped before it could start. Send it again.")
+					}
 					return
 				}
 				h.resumeOne(msg, buildErr)
 			}
 		}()
+	}
+}
+
+// notRunRecorder is implemented by the chat bridge: it writes the reason a
+// saved message never ran into the transcript.
+type notRunRecorder interface {
+	RecordNotRun(ctx context.Context, chatID, triggerMessageID, reason string)
+}
+
+// recordNotRun saves why a queued, already-saved message did not run, so the
+// reason is visible after a reload. Messages that were not saved at deferral
+// (Ask forms, page context, documents) are skipped: they are saved on run.
+func (h *ProvisioningHandler) recordNotRun(msg chatbridge.PendingChatMessage, reason string) {
+	if !msg.Opts.UserMessagePersisted {
+		return
+	}
+	if rec, ok := h.chatResumer.(notRunRecorder); ok {
+		rec.RecordNotRun(context.Background(), msg.ChatID, msg.Opts.OriginalTriggerMessageID, reason)
 	}
 }
 
@@ -826,6 +847,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
+		h.recordNotRun(msg, fmt.Sprintf("Your message was saved but could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr)))
 		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr))) {
 			return
 		}
@@ -999,6 +1021,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// did not run; say so (no "done": that run owns the live turn).
 		h.logger.Warn("deferred message not resumed: the chat stayed busy",
 			"chat_id", msg.ChatID)
+		h.recordNotRun(msg, "Your message was saved but did not run: this chat was busy for too long.")
 		emit(ws.ChatEvent{
 			Type:     "error",
 			Content:  "Your message was saved but did not run: this chat was busy for too long.",

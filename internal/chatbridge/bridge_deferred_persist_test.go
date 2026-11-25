@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -189,5 +190,48 @@ func TestInBandFailureTurnDoesNotRecountASavedUserTurn(t *testing.T) {
 				t.Fatalf("count increase = %d, want %d", got, tc.wantIncrease)
 			}
 		})
+	}
+}
+
+// The reason a saved message never ran is written once per message, however
+// often the failure is reported.
+func TestRecordNotRunWritesOneTurnPerMessage(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{AgentID: "a1", WorkspaceID: "ws-1"}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	for i := 0; i < 3; i++ {
+		b.RecordNotRun(context.Background(), "sess-1", "trig-1", "build failed")
+	}
+	b.RecordNotRun(context.Background(), "sess-1", "trig-2", "build failed")
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].ID != "notrun-trig-1" || msgs[1].ID != "notrun-trig-2" {
+		t.Fatalf("transcript = %+v, want one turn per message", msgs)
+	}
+	if got := res.total.Load(); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+}
+
+// A queued message that waited behind a long run is checked against the
+// sender's rights again when it starts: if the membership changed meanwhile it
+// does not run (#5571).
+func TestQueuedSendIsRefusedWhenAuthorityChangedMeanwhile(t *testing.T) {
+	t.Parallel()
+	queued := &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1}
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 2},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+		CachedImage: "crewship-cache:ready",
+	}
+	b := testBridgeWithContainer(t, &mockResolver{info: info}, &failContainer{})
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "second", func(ws.ChatEvent) {},
+		ws.ChatMessageOption{HumanResume: true, HumanAuthority: queued, UserMessagePersisted: true, OriginalTriggerMessageID: "t2"})
+	if err == nil || !strings.Contains(err.Error(), "queued human authority changed") {
+		t.Fatalf("err = %v, want the authority-changed refusal", err)
 	}
 }
