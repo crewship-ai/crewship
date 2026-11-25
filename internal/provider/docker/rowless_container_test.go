@@ -35,8 +35,6 @@ func TestRowlessContainerPreservesInUseAndApplicationData(t *testing.T) {
 		"previous work":  func(c *container.InspectResponse) { c.RestartCount++ },
 		"ports":          func(c *container.InspectResponse) { c.HostConfig.PublishAllPorts = true },
 		"attached":       func(c *container.InspectResponse) { c.HostConfig.NetworkMode = "container:other" },
-		"unknown size":   func(c *container.InspectResponse) { c.SizeRw = nil },
-		"customer bytes": func(c *container.InspectResponse) { *c.SizeRw = 4 },
 		"writable layer": func(c *container.InspectResponse) { c.HostConfig.ReadonlyRootfs = false },
 		"bind":           func(c *container.InspectResponse) { c.HostConfig.Binds = []string{"/customer:/work"} },
 		"volume": func(c *container.InspectResponse) {
@@ -90,6 +88,58 @@ func TestRowlessContainerImageInspectionFailureScope(t *testing.T) {
 			t.Cleanup(func() { _ = cli.Close() })
 			rt := cleanupRuntime{client: cli}
 			reason, err := rt.OrphanRetentionReason(t.Context(), expected)
+			if reason != tc.reason || (err != nil) != tc.wantError {
+				t.Fatalf("reason=%q err=%v", reason, err)
+			}
+		})
+	}
+}
+
+func TestRowlessContainerWritableLayerEvidence(t *testing.T) {
+	size := int64(4096)
+	for _, tc := range []struct {
+		name         string
+		size         *int64
+		code         int
+		body, reason string
+		wantError    bool
+	}{
+		{"snapshot metadata", &size, 200, "[]", "", false},
+		{"size unavailable", nil, 200, "[]", "", false},
+		{"engine encodes empty slice", &size, 200, "null", "", false},
+		{"no size and null", nil, 200, "null", "unverified-writable-layer", false},
+		{"empty HTTP response", &size, 200, "", "", true},
+		{"changed file", &size, 200, `[{"Kind":1,"Path":"/customer"}]`, "writable-layer", false},
+		{"truncated diff", &size, 200, "[", "", true},
+		{"unavailable diff", &size, 503, `{"message":"unavailable"}`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expected, c := rowlessFixture()
+			c.SizeRw = tc.size
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/version"):
+					_, _ = w.Write([]byte(`{"Components":[{"Name":"Engine"}]}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+c.ID+"/json"):
+					_ = json.NewEncoder(w).Encode(c)
+				case strings.HasSuffix(r.URL.Path, "/containers/"+c.ID+"/changes"):
+					w.WriteHeader(tc.code)
+					_, _ = w.Write([]byte(tc.body))
+				case strings.HasSuffix(r.URL.Path, "/images/"+c.Image+"/json"):
+					_ = json.NewEncoder(w).Encode(map[string]string{"Id": c.Image})
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			cli, err := client.New(client.WithHost("tcp://"+strings.TrimPrefix(srv.URL, "http://")), client.WithAPIVersion("1.47"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cli.Close() })
+			reason, err := (&cleanupRuntime{client: cli}).OrphanRetentionReason(t.Context(), expected)
 			if reason != tc.reason || (err != nil) != tc.wantError {
 				t.Fatalf("reason=%q err=%v", reason, err)
 			}

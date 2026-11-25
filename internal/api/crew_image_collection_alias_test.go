@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -86,5 +89,63 @@ func TestQualifiedCacheDigestSelection(t *testing.T) {
 	h.sweepOrphanCacheImages(t.Context())
 	if len(fake.removedImages) != 0 {
 		t.Fatalf("collected selection by manifest digest: %v", fake.removedImages)
+	}
+}
+
+func TestImageCollectionPolicyAdmission(t *testing.T) {
+	for _, mode := range []string{"disabled", "new enabled period", "cancelled", "policy unavailable", "before second removal", "restarted after off-on"} {
+		t.Run(mode, func(t *testing.T) {
+			a := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+			b := collectionImage("b", collectionOwner, devcontainer.ImageKindCrew)
+			f := &fakeGCClient{images: []image.Summary{a, b}}
+			h := newGCTestHandler(t, f)
+			h.instanceID = collectionOwner
+			now := time.Now().UTC()
+			h.gcClock = func() time.Time { return now }
+			setUnusedSince(t, h, lastPassMarker, now)
+			for _, id := range []string{a.ID, b.ID} {
+				setUnusedSince(t, h, id, now.Add(-48*time.Hour))
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			reads := 0
+			h.collectOwnedImages(ctx, func(context.Context) (bool, time.Time) {
+				reads++
+				since := now.Add(-72 * time.Hour)
+				switch mode {
+				case "disabled":
+					return false, since
+				case "new enabled period":
+					if reads > 1 {
+						return true, now
+					}
+				case "cancelled":
+					if reads > 1 {
+						cancel()
+					}
+				case "policy unavailable":
+					if reads > 1 {
+						return false, time.Time{}
+					}
+				case "before second removal":
+					if reads == 3 {
+						return false, since
+					}
+				case "restarted after off-on":
+					return true, now.Add(-time.Minute)
+				}
+				return true, since
+			})
+			if mode == "before second removal" {
+				if reads != 3 || !slices.Equal(f.removedImages, []string{a.ID}) {
+					t.Fatalf("reads=%d removed=%v", reads, f.removedImages)
+				}
+			} else if len(f.removedImages) != 0 {
+				t.Fatalf("removed=%v", f.removedImages)
+			}
+			if mode == "restarted after off-on" && !unusedSinceRows(t, h)[a.ID].Equal(now) {
+				t.Fatal("old observation survived activation")
+			}
+		})
 	}
 }

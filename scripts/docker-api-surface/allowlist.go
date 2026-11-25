@@ -98,6 +98,11 @@ var allowList = []Endpoint{
 		Why: "creates every agent, sidecar and provisioning container",
 	},
 	{
+		Method: "ContainerDiff", HTTP: "GET /containers/{id}/changes", ProxyVars: []string{"CONTAINERS"},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "confirms an empty layer before optional cleanup of an unused, rowless crew container when size accounting is inconclusive",
+	},
+	{
 		Method: "ContainerInspect", HTTP: "GET /containers/{id}/json", ProxyVars: []string{"CONTAINERS"},
 		Tier: TierCore, Packages: []string{"internal/api", "internal/backup", "internal/devcontainer", "internal/provider/docker", "scripts/ci/installer-qualification"},
 		Why: "state, mounts and network reads for running crews; effective configuration audit for disposable lock builders",

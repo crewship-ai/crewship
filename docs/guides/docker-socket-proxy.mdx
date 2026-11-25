@@ -99,6 +99,7 @@ or a listed endpoint nobody calls.
 | `ContainerStart` | `POST /containers/{id}/start` | Starts them |
 | `ContainerStop` | `POST /containers/{id}/stop` | Stops crews and sidecars before removal |
 | `ContainerRemove` | `DELETE /containers/{id}` | Tears down crews, temp containers, stranded runtime |
+| `ContainerDiff` | `GET /containers/{id}/changes` | Checks for writable-layer changes before optional orphan cleanup when size accounting is inconclusive |
 | `ContainerInspect` | `GET /containers/{id}/json` | State, mounts and network reads; disposable lock-builder audit |
 | `ContainerList` | `GET /containers/json` | Reconciles the crew inventory against what is running |
 | `ContainerStats` | `GET /containers/{id}/stats` | Memory and CPU readings behind the admission gate |

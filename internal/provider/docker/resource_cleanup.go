@@ -89,6 +89,32 @@ func (r *cleanupRuntime) OrphanRetentionReason(ctx context.Context, expected res
 	if img.ID == "" || dockerutil.ConfigImageID(img.ID) != dockerutil.ConfigImageID(c.Image) {
 		return "unverified-image", nil
 	}
+	// Metadata blocks count towards SizeRw on the containerd snapshotter.
+	// Conversely, a zero-byte file is still a change. Ask for the actual diff.
+	diff, err := r.client.ContainerDiff(ctx, c.ID, client.ContainerDiffOptions{})
+	if err != nil {
+		return "", err
+	}
+	if len(diff.Changes) != 0 {
+		return "writable-layer", nil
+	}
+	if diff.Changes == nil {
+		// Docker and Podman encode a successful zero-entry diff as JSON null.
+		// Empty HTTP bodies and truncated JSON surface as SDK decode errors.
+		if c.SizeRw == nil || *c.SizeRw < 0 {
+			return "unverified-writable-layer", nil
+		}
+		version, err := r.client.ServerVersion(ctx, client.ServerVersionOptions{})
+		if err != nil {
+			return "", err
+		}
+		for _, component := range version.Components {
+			if component.Name == "Engine" || component.Name == "Podman Engine" {
+				return "", nil
+			}
+		}
+		return "unverified-writable-layer", nil
+	}
 	return "", nil
 }
 
@@ -104,7 +130,7 @@ func rowlessContainerRetention(c container.InspectResponse, expected resourcelif
 	if st.Status != "created" || st.Running || st.Paused || st.Restarting || st.Dead || st.Pid != 0 || c.RestartCount != 0 || !h.RestartPolicy.IsNone() {
 		return "runtime-used"
 	}
-	if !h.ReadonlyRootfs || c.SizeRw == nil || *c.SizeRw != 0 {
+	if !h.ReadonlyRootfs {
 		return "writable-layer"
 	}
 	if h.PublishAllPorts || len(h.PortBindings) > 0 || len(c.NetworkSettings.Ports) > 0 {

@@ -104,8 +104,11 @@ type Controller struct {
 	// BootAt marks persisted observations stale until this process scans.
 	BootAt time.Time
 	// Now is the observation clock. A nil clock uses time.Now.
-	Now     func() time.Time
-	orphans orphanObservations
+	Now func() time.Time
+	// CollectionPolicy reads the image collector's opt-in and the start of its
+	// current policy generation. Nil disables collection of crews without rows.
+	CollectionPolicy func(context.Context) (enabled bool, notBefore time.Time)
+	orphans          orphanObservations
 	// yieldHook replaces quiesce.Yield in the network pass. Tests only: it
 	// lets a test interrupt the pass while the tick's context is still live.
 	yieldHook func(context.Context) error

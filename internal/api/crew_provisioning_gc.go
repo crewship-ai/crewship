@@ -310,7 +310,7 @@ func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 		return
 	}
 	for _, imageID := range orphans {
-		h.removeCollectedImage(ctx, candidates[imageID], false)
+		h.removeCollectedImage(ctx, candidates[imageID], nil)
 	}
 
 }

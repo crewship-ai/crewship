@@ -128,7 +128,7 @@ func TestIsolatedImageLifecycle(t *testing.T) {
 		t.Logf("%s images=%d containers=%d volumes=%d", stage, len(strings.Fields(command("image", "ls", "-aq"))), len(strings.Fields(command("ps", "-aq"))), len(strings.Fields(command("volume", "ls", "-q"))))
 	}
 	counts("before DELETE")
-	controller := &resourcelifecycle.Controller{DB: db, InstanceID: collectionOwner, Connect: dockerprovider.NewCleanupRuntime}
+	controller := &resourcelifecycle.Controller{DB: db, InstanceID: collectionOwner, Connect: dockerprovider.NewCleanupRuntime, CollectionPolicy: h.ownedImageCollectionPolicy}
 	handler := NewCrewHandler(db, newTestLogger())
 	handler.containerCleanup = controller
 	reply := httptest.NewRecorder()
@@ -322,7 +322,8 @@ func TestIsolatedMissingCrewContainer(t *testing.T) {
 	attached := create("-v", volume+":/workspace")
 	db := setupTestDB(t)
 	now := time.Now()
-	controller := &resourcelifecycle.Controller{DB: db, InstanceID: owner, Connect: dockerprovider.NewCleanupRuntime, Now: func() time.Time { return now }}
+	provisioning := &ProvisioningHandler{db: db, logger: slog.Default()}
+	controller := &resourcelifecycle.Controller{DB: db, CollectionPolicy: provisioning.ownedImageCollectionPolicy, InstanceID: owner, Connect: dockerprovider.NewCleanupRuntime, Now: func() time.Time { return now }}
 	present := func(id string) bool {
 		return cmd("ps", "-aq", "--no-trunc", "--filter", "id="+id) == id
 	}

@@ -3,10 +3,8 @@ package resourcelifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
-	"os"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -16,9 +14,10 @@ const orphanContainerInterval = 30 * time.Minute
 // A removal is possible only after complete, consecutive observations by this
 // live process. Restored databases and restarted servers begin with no credit.
 type orphanObservations struct {
-	generation uint64
-	at         time.Time
-	first      map[string]time.Time
+	generation  uint64
+	policySince time.Time
+	at          time.Time
+	first       map[string]time.Time
 }
 
 type orphanRuntime interface {
@@ -28,7 +27,12 @@ type orphanRuntime interface {
 }
 
 func (c *Controller) observeMissingOwners(ctx context.Context, rt Runtime, containers []Container, previous orphanObservations, budget int) {
-	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CREWSHIP_IMAGE_GC")))
+	if ctx.Err() != nil || c.CollectionPolicy == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	enabled, policySince := c.CollectionPolicy(ctx)
 	inspector, ok := rt.(orphanRuntime)
 	if !enabled || !ok {
 		return
@@ -37,16 +41,17 @@ func (c *Controller) observeMissingOwners(ctx context.Context, rt Runtime, conta
 	if c.Now != nil {
 		now = c.Now()
 	}
+	if ctx.Err() != nil || now.Before(policySince) {
+		return
+	}
 	generation := Images(c.DB).restoreGeneration.Load()
 	gap := now.Sub(previous.at)
-	if previous.generation != generation || gap < 0 || gap > 4*orphanContainerInterval {
+	if previous.generation != generation || !previous.policySince.Equal(policySince) || gap < 0 || gap > 4*orphanContainerInterval {
 		previous = orphanObservations{}
 	} else if gap < orphanContainerInterval {
 		c.orphans = previous
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	rows, err := c.DB.QueryContext(ctx, "SELECT id FROM crews")
 	if err != nil {
 		return
@@ -94,14 +99,14 @@ func (c *Controller) observeMissingOwners(ctx context.Context, rt Runtime, conta
 		}
 		candidates = append(candidates, candidate{x, first})
 	}
-	next := orphanObservations{generation: generation, at: now, first: map[string]time.Time{}}
+	next := orphanObservations{generation: generation, policySince: policySince, at: now, first: map[string]time.Time{}}
 	for _, candidate := range candidates {
 		x := candidate.container
 		if now.Sub(candidate.since) < orphanContainerWindow || budget <= 0 {
 			next.first[x.ID] = candidate.since
 			continue
 		}
-		removed, err := c.removeMissingOwner(ctx, rt, inspector, x, generation)
+		removed, err := c.removeMissingOwner(ctx, rt, inspector, x, generation, policySince)
 		if err != nil {
 			slog.Warn("orphan container removal deferred", "container_id", x.ID)
 			return
@@ -115,7 +120,7 @@ func (c *Controller) observeMissingOwners(ctx context.Context, rt Runtime, conta
 	c.orphans = next
 }
 
-func (c *Controller) removeMissingOwner(ctx context.Context, rt Runtime, inspector orphanRuntime, x Container, generation uint64) (bool, error) {
+func (c *Controller) removeMissingOwner(ctx context.Context, rt Runtime, inspector orphanRuntime, x Container, generation uint64, policySince time.Time) (bool, error) {
 	g := Images(c.DB)
 	release, ok := g.TryCollect()
 	if !ok {
@@ -161,8 +166,36 @@ func (c *Controller) removeMissingOwner(ctx context.Context, rt Runtime, inspect
 	if err != nil || reason != "" {
 		return false, err
 	}
+	// Read policy under the same SQLite writer admission as owner existence.
+	// A committed OFF or OFF → ON since the pass began invalidates all credit.
+	policyCtx := context.WithValue(ctx, collectionPolicyTxKey{}, collectionPolicyTx{c.DB, tx})
+	enabled, latest := c.CollectionPolicy(policyCtx)
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if !enabled || !latest.Equal(policySince) {
+		return false, errors.New("collection policy changed during orphan observation")
+	}
 	if err = rt.Remove(ctx, x.ID); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+type collectionPolicyTxKey struct{}
+type collectionPolicyTx struct {
+	db *sql.DB
+	tx *sql.Tx
+}
+
+// CollectionPolicyReader lets a database-backed opt-in use the active writer
+// transaction during final admission. Opening a second connection could
+// deadlock a single-connection database or observe the wrong snapshot.
+func CollectionPolicyReader(ctx context.Context, db *sql.DB) interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+} {
+	if active, ok := ctx.Value(collectionPolicyTxKey{}).(collectionPolicyTx); ok && active.db == db {
+		return active.tx
+	}
+	return db
 }
