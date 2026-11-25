@@ -26,7 +26,7 @@ import (
 type PipelineHandler struct {
 	// syncRunHooks are test seams of runSynchronously; zero in production.
 	syncRunHooks syncRunHooks
-	diffs *diffComputeBudget
+	diffs        *diffComputeBudget
 	// runTokenSecret authenticates optional fresh invocation provenance.
 	runTokenSecret string
 	// queuedKeys serialises same-key manual starts around capacity queuing.
