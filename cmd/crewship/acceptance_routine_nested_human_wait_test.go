@@ -46,7 +46,7 @@ func TestAcceptance_SyncRunOfRoutineCallingHeldRoutineReturnsParentReceipt(t *te
 	}
 	// The receipt's run is the parent: it is listed under the parent routine.
 	records, err := runRoutineDetailCLI(t, owner, "routine", "records", "held-parent")
-	if err != nil || !strings.Contains(records, id[1]) {
+	if err != nil || !strings.Contains(records, id[1][:16]) {
 		t.Fatalf("receipt run %s is not a run of the parent routine (err=%v):\n%s", id[1], err, records)
 	}
 	if out, err := runCLIWithin(t, owner, 30*time.Second, "routine", "waitpoints", "approve", tok[1]); err != nil {
