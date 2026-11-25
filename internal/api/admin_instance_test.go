@@ -118,6 +118,10 @@ func TestInstanceRoutes_RefuseAWorkspaceAdmin(t *testing.T) {
 		{"PUT", "/api/v1/admin/instance/admins/wsadmin", ""},
 		{"GET", "/api/v1/admin/instance/audit", ""},
 		{"GET", "/api/v1/admin/instance/audit/verify", ""},
+		{"GET", craftApplicationsPath, ""},
+		{"PATCH", craftApplicationsPath + "/wordcraft", `{"desired":"disabled"}`},
+		{"POST", craftApplicationsPath + "/wordcraft/diagnostics", ""},
+		{"POST", craftApplicationsPath + "/wordcraft/install", ""},
 	} {
 		if rr := f.do(f.wsAdmin, c.method, c.path, c.body); rr.Code != http.StatusForbidden {
 			t.Errorf("workspace ADMIN %s %s = %d, want 403", c.method, c.path, rr.Code)

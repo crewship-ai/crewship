@@ -191,6 +191,83 @@ test.describe("Admin console", () => {
   }
 })
 
+const applicationsPath = "/api/v1/admin/instance/artifacts/applications"
+const sheetMessage = "The document engine could not start. See the server log."
+const agentsMessage = "Turned off. Existing documents stay readable; nobody can create or edit them."
+
+async function mockArtifactsConsole(page: Page, instanceAdmin: boolean) {
+  const requests: string[] = []
+  await seed(page, { ...PINNED, "crewship.workspaceId:fixture-admin": "fixture-ws" })
+  await page.route("**/api/**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === "/api/auth/session") {
+      return route.fulfill({ json: {
+        user: { id: "fixture-admin", email: "admin@example.test", is_instance_admin: instanceAdmin },
+        expires: "2099-01-01T00:00:00Z",
+      } })
+    }
+    if (path === "/api/v1/workspaces") {
+      return route.fulfill({ json: [{ id: "fixture-ws", name: "Fixture", slug: "fixture", currentUserRole: "ADMIN" }] })
+    }
+    if (path === applicationsPath || path.startsWith(applicationsPath + "/")) {
+      requests.push(`${request.method()} ${path}`)
+      if (!instanceAdmin) return route.fulfill({ status: 403, json: { error: "Instance admin required" } })
+      if (request.method() === "GET" && path === applicationsPath) {
+        return route.fulfill({ json: {
+          editor: "ok",
+          applications: [
+            { id: "wordcraft", label: "Word", desired: "enabled", source: "admin", locked: false, state: "ready",
+              documents: 2, component: { available: true, development: false } },
+            { id: "gridcraft", label: "Sheet", desired: "enabled", source: "server_config", locked: true, state: "unavailable",
+              reason: "engine_start_failed", message: sheetMessage, documents: 0,
+              component: { available: false, development: false, reason: "engine_start_failed" } },
+          ],
+          agents: { id: "agents", label: "Agents in Word and Sheet", desired: "disabled", source: "default",
+            locked: false, state: "disabled", reason: "app_disabled", message: agentsMessage },
+        } })
+      }
+    }
+    return route.fulfill({ status: 404, json: { error: "No fixture for this endpoint" } })
+  })
+  return requests
+}
+
+test.describe("Admin Artifacts", () => {
+  test("instance admin opens applications, sees backend reasons and cancels turning off Word", async ({ page }) => {
+    const requests = await mockArtifactsConsole(page, true)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/admin")
+    await page.getByRole("navigation", { name: "Admin sections" }).getByRole("button", { name: "Artifacts", exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/?\?tab=artifacts$/)
+    const panel = page.getByRole("region", { name: "Admin Artifacts" })
+    for (const name of ["Word", "Sheet", "Agents in Word and Sheet"]) {
+      await expect(panel.getByRole("heading", { name, exact: true })).toBeVisible()
+    }
+    await expect(panel.getByText(sheetMessage, { exact: true })).toBeVisible()
+    await expect(panel.getByText(agentsMessage, { exact: true })).toBeVisible()
+    await expect(panel.getByText(/Managed by server configuration/)).toBeVisible()
+    await expect(panel.getByRole("button", { name: "Turn off Sheet" })).toBeDisabled()
+    await panel.getByRole("button", { name: "Turn off Word", exact: true }).click()
+    const dialog = page.getByRole("alertdialog", { name: "Turn off Word?" })
+    await expect(dialog.getByText("Existing documents will remain readable.")).toBeVisible()
+    await dialog.getByLabel(/Allow open editors to finish saving for/).selectOption("300")
+    await dialog.getByRole("button", { name: "Cancel" }).click()
+    await expect(dialog).toBeHidden()
+    await expect(panel.getByRole("button", { name: "Turn off Word", exact: true })).toBeEnabled()
+    expect(new Set(requests)).toEqual(new Set([`GET ${applicationsPath}`]))
+  })
+
+  test("workspace admin cannot open the Artifacts deep link or trigger its API", async ({ page }) => {
+    const requests = await mockArtifactsConsole(page, false)
+    await page.goto("/admin?tab=artifacts")
+    await expect(page.getByRole("heading", { name: "You can’t open the Admin console" })).toBeVisible()
+    await expect(page.getByRole("navigation", { name: "Admin sections" })).toHaveCount(0)
+    await expect(page.getByRole("region", { name: "Admin Artifacts" })).toHaveCount(0)
+    expect(requests).toEqual([])
+  })
+})
+
 test.describe("Admin for someone who is not an instance administrator", () => {
   test("M01 non-admin sees no-access, not a redirect", async ({ page }) => {
     await sessionAs(page, false)
