@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,7 +290,8 @@ func (e *Executor) signalHumanWait(ctx context.Context, in RunInput, runID, step
 }
 
 // checkStillAllowedToContinue re-checks a run that waited for a person: the
-// invoking user's standing, and that the routine has not been deleted.
+// invoking user's standing, and that the routine still exists and may run
+// (not deleted, not disabled or proposed).
 func (e *Executor) checkStillAllowedToContinue(ctx context.Context, in RunInput) error {
 	if err := e.checkInvokingUser(ctx, in); err != nil {
 		return err
@@ -297,14 +299,17 @@ func (e *Executor) checkStillAllowedToContinue(ctx context.Context, in RunInput)
 	if in.pipeline == nil || e.store == nil || e.store.db == nil {
 		return nil
 	}
-	var live bool
-	err := e.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
-		in.pipeline.ID, in.WorkspaceID).Scan(&live)
+	var status string
+	err := e.store.db.QueryRowContext(ctx, `SELECT COALESCE(status, 'active') FROM pipelines WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		in.pipeline.ID, in.WorkspaceID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("the routine was deleted while the run waited")
+	}
 	if err != nil {
 		return fmt.Errorf("routine availability check: %w", err)
 	}
-	if !live {
-		return errors.New("the routine was deleted while the run waited")
+	if !routineStatusRunnable(status) {
+		return fmt.Errorf("the routine is %s and cannot continue", status)
 	}
 	return nil
 }
