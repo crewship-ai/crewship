@@ -324,3 +324,121 @@ func TestForceValidationMigrationKeyAuthority(t *testing.T) {
 		})
 	})
 }
+
+// Repack the fixture with a kit from before audit keyrings were included.
+// This exercises mint-key validation without relying on keyring sealing to
+// incidentally diagnose a selector whose key was never backed up.
+func legacyMintBundle(t *testing.T, source string, identity *age.X25519Identity, selector string) string {
+	t.Helper()
+	f, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	m, sealed, err := backup.ReadBundle(f, t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := backup.DecryptStream(sealed, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := backup.NewTarZstReader(plain, t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	var payload bytes.Buffer
+	writer, err := backup.NewTarZstWriter(&payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		h, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.Name != backup.RecoveryKitPath {
+			if err := writer.WriteStream(h.Name, h.Mode, h.ModTime, h.Size, reader); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		var kit backup.RecoveryKit
+		if err := json.NewDecoder(reader).Decode(&kit); err != nil {
+			t.Fatal(err)
+		}
+		kit.AuditKeyring = nil
+		kit.CurrentVersion = selector
+		body, err := json.Marshal(kit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.WriteFile(h.Name, h.Mode, h.ModTime, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(filepath.Join(t.TempDir(), "legacy-kit.tar.zst"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.WriteBundle(out, m, &payload, backup.WriteBundleOptions{Recipients: []age.Recipient{identity.Recipient()}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Name()
+}
+
+func TestForceValidationMintKeyAtCurrentSchema(t *testing.T) {
+	f := newInstanceFixture(t)
+	bundle := f.create(t, true)
+	t.Setenv("ENCRYPTION_KEY_V7", instKeyV2)
+	for _, tc := range []struct {
+		name, selector string
+		refuse         bool
+	}{
+		{"missing selected key", "v7", true},
+		{"legacy default mint key", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := legacyMintBundle(t, bundle.Path, f.identity, tc.selector)
+			target := t.TempDir()
+			if err := os.WriteFile(filepath.Join(target, "operator.txt"), []byte("original instance"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			before := forceGenerationSnapshot(t, target)
+			source := forceGenerationSnapshot(t, filepath.Dir(path))
+			report, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: path, Identities: []age.Identity{f.identity}, DataDir: target, Force: true})
+			assertOriginalGeneration(t, filepath.Dir(path), source)
+			if tc.refuse {
+				if err == nil || !strings.Contains(err.Error(), "ENCRYPTION_KEY_V7") || report == nil || report.Result != backup.RestoreResultFailed || report.PreviousDataDir != "" {
+					t.Fatalf("missing mint key: report %+v, error %v", report, err)
+				}
+				assertOriginalGeneration(t, target, before)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.MigrationsApplied != 0 {
+				t.Fatalf("fixture applied %d migrations", report.MigrationsApplied)
+			}
+			keys, err := backup.ReadEnvFile(report.KeysFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if keys[encryption.KeyVersionEnvVar] != "v1" || keys["ENCRYPTION_KEY"] != instKeyV1 {
+				t.Fatal("legacy kit did not select the recovered v1 mint key")
+			}
+			assertOriginalGeneration(t, report.PreviousDataDir, before)
+		})
+	}
+}
