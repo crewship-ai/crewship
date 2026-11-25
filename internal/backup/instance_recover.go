@@ -230,6 +230,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		}
 		defer stage.close()
 		dataDir = stage.dir
+		logger.DebugContext(ctx, "recovery target cloned")
 		// Until publication these counts and paths describe the scratch
 		// generation. A failed report must describe the active target.
 		before := *rep
@@ -279,6 +280,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	if err != nil {
 		return rep, err
 	}
+	logger.DebugContext(ctx, "recovery payload extracted")
 	rep.kit = ex.kit
 	for store, sr := range ex.stores {
 		sr.Path = RecoveredStoreDir(rep.DataDir, store)
@@ -296,6 +298,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		if err := ex.validateForceContents(ctx, m, dataDir); err != nil {
 			return rep, err
 		}
+		logger.DebugContext(ctx, "recovery snapshot validated")
 	}
 	rep.Incomplete = append(rep.Incomplete, gaps...)
 	if m.Contents.Instance.DatabaseSHA256 != "" && ex.dbSHA != m.Contents.Instance.DatabaseSHA256 {
@@ -317,6 +320,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 
 	// 5. Keys and secrets.
+	logger.DebugContext(ctx, "recovery database prepared")
 	if !opts.Drill {
 		if stage != nil && (ex.kit == nil || len(ex.kit.AuditKeyring) == 0) {
 			if err := recoveryRoot.Remove(journal.SigningKeysFile); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -331,6 +335,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		if err := writeRecoveredSecrets(rep, ex.kit, dataDir); err != nil {
 			return rep, err
 		}
+		logger.DebugContext(ctx, "recovery secrets written")
 		if stage != nil {
 			if err := validateRecoveredKeyFiles(ctx, rep, ex.kit, dataDir); err != nil {
 				return rep, err
@@ -370,6 +375,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	if stage != nil {
 		rep.PreviousDataDir = stage.previous
 	}
+	logger.DebugContext(ctx, "writing recovery report")
 	if err := recordRecoverReport(ctx, rep, opts, dataDir); err != nil {
 		if stage != nil {
 			return rep, fmt.Errorf("backup: store staged recovery report: %w", err)
@@ -377,6 +383,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		rep.Warnings = append(rep.Warnings, "the restore report could not be stored: "+err.Error())
 	}
 	if stage != nil {
+		logger.DebugContext(ctx, "publishing recovered directory")
 		if err := restoreOperationError(ctx); err != nil {
 			return rep, err
 		}
@@ -384,6 +391,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		if !committed {
 			return rep, fmt.Errorf("backup: recovered generation was not published: %w", err)
 		}
+		logger.DebugContext(ctx, "recovered directory published")
 		if err != nil {
 			rep.Warnings = append(rep.Warnings, "the recovered directory is active, but its publication could not be confirmed durable: "+err.Error())
 		}

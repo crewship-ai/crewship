@@ -9,6 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/quota"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -200,12 +201,21 @@ func TestForcedInstanceRecoveryReplacesQuotaStaging(t *testing.T) {
 	if _, err = RecoverInstance(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
+	pattern := filepath.Join(dir, RecoveredServicesDir, "quota-image-*.ext4")
+	files, err := filepath.Glob(pattern)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("initial recovery did not stage one quota image: %v %v", files, err)
+	}
+	stale := filepath.Join(dir, RecoveredServicesDir, "quota-image-stale.ext4")
+	if err := os.Rename(files[0], stale); err != nil {
+		t.Fatal(err)
+	}
 	opts.Force = true
 	if _, err = RecoverInstance(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
-	files, err := filepath.Glob(filepath.Join(dir, RecoveredServicesDir, "quota-image-*.ext4"))
-	if err != nil || len(files) != 1 {
+	files, err = filepath.Glob(pattern)
+	if err != nil || len(files) != 1 || files[0] == stale {
 		t.Fatalf("old recovery images leaked: %v %v", files, err)
 	}
 }
