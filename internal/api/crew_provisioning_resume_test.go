@@ -398,13 +398,16 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 						t.Fatalf("calls = %d, want %d", fake.callCount(), busyResumeRetries+1)
 					}
 				}
-				select {
-				case raw := <-obs.Frames():
-					if !strings.Contains(string(raw), "agent_busy_chat") {
-						t.Fatalf("frame = %s, want the not-run error", raw)
+				for found := false; !found; {
+					select {
+					case raw := <-obs.Frames():
+						found = strings.Contains(string(raw), "agent_busy_chat")
+						if strings.Contains(string(raw), `"type":"done"`) {
+							t.Fatalf("unexpected done frame: %s", raw)
+						}
+					case <-time.After(3 * time.Second):
+						t.Fatal("no not-run error after the chat stayed busy")
 					}
-				case <-time.After(3 * time.Second):
-					t.Fatal("no not-run error after the chat stayed busy")
 				}
 			},
 		},
