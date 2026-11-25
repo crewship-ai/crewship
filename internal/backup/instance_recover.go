@@ -1066,9 +1066,12 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				}
 				suppliedKeys[version] = key.Key
 			}
-			if pending > 0 && (kit != nil || len(suppliedKeys) > 0) {
+			// A kit supplies the mint configuration for first boot even when the
+			// ledger is current. Historical envelope reads can fall back to v1,
+			// but startup requires the selected mint version's own key.
+			if kit != nil || (pending > 0 && len(suppliedKeys) > 0) {
 				if err := encryption.VerifyCurrentKey(); err != nil {
-					return fmt.Errorf("backup: validate migration encryption key: %w", err)
+					return fmt.Errorf("backup: invalid recovery mint key: %w", err)
 				}
 			}
 			if pending > 0 && kit == nil && suppliedKeys != nil {
@@ -1384,6 +1387,7 @@ func validateRecoveredKeyFiles(rep *RecoverReport, kit *RecoveryKit, dataDir str
 	if err != nil {
 		return nil, err
 	}
+	// Includes the selector and keys already checked by VerifyCurrentKey.
 	if !maps.Equal(want, got) {
 		return nil, errors.New("backup: staged vault key file differs from the recovered keys")
 	}
