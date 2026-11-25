@@ -73,11 +73,20 @@ const STATUS = {
 const isLocked = (application: Application) => application.locked || application.source === "server_config"
 const isInstalling = (application: Application) => application.reason === "component_installing"
 
+class ApplicationRequestError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
+const accessDenied = (error: unknown) =>
+  error instanceof ApplicationRequestError && (error.status === 401 || error.status === 403)
+
 async function request<T>(path: string, init?: ApiFetchInit): Promise<T> {
   const response = await apiFetch(path, init)
   if (!response.ok) {
     const body = await response.json().catch(() => null)
-    throw new Error(body?.error || body?.detail || `HTTP ${response.status}`)
+    throw new ApplicationRequestError(response.status, body?.error || body?.detail || `HTTP ${response.status}`)
   }
   return response.json()
 }
@@ -106,8 +115,10 @@ export function ArtifactsTab() {
   const query = useQuery({
     queryKey: QUERY_KEY,
     retry: false,
+    gcTime: 0,
     queryFn: ({ signal }) => request<ApplicationSettings>(APPLICATIONS_PATH, { signal }),
-    refetchInterval: ({ state: { data } }) => {
+    refetchInterval: ({ state: { data, error } }) => {
+      if (accessDenied(error)) return false
       if (data?.applications.some(isInstalling)) return 2000
       if (data?.applications.some((app) => app.state === "draining")) return 15000
       return false
@@ -130,7 +141,7 @@ export function ArtifactsTab() {
     onError: (error) => toast.error(error.message),
   })
 
-  if (!query.data) {
+  if (!query.data || accessDenied(query.error)) {
     if (query.isError) {
       return <PageError title="Couldn’t load artifact applications" detail={query.error.message} onRetry={() => void query.refetch()} />
     }

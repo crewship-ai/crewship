@@ -28,8 +28,7 @@ const response = (body: unknown, status = 200) => ({
   ok: status >= 200 && status < 300, status, json: async () => body,
 }) as Response
 
-function view() {
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } })
+function view(client = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } })) {
   return render(<QueryClientProvider client={client}><ArtifactsTab /></QueryClientProvider>)
 }
 
@@ -108,6 +107,18 @@ describe("Admin artifact applications", () => {
     view()
     expect(await screen.findByText("Couldn’t load artifact applications")).toBeInTheDocument()
     expect(screen.getByText("Instance administrator required")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Turn off Word" })).not.toBeInTheDocument()
+  })
+
+  it("removes cached controls if the server revokes access", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    mocks.apiFetch
+      .mockResolvedValueOnce(response(settings()))
+      .mockResolvedValue(response({ error: "Instance administrator required" }, 403))
+    view(client)
+    expect(await screen.findByRole("button", { name: "Turn off Word" })).toBeInTheDocument()
+    void client.invalidateQueries({ queryKey: ["instance-admin", "artifact-applications"] })
+    expect(await screen.findByText("Instance administrator required")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Turn off Word" })).not.toBeInTheDocument()
   })
 })
