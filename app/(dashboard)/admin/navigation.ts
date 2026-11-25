@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge, type LucideIcon } from "lucide-react"
+import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge, PackageOpen, type LucideIcon } from "lucide-react"
 import type { TabKey } from "./types"
 
 /** The pages of Admin › Backups (/admin/backups?section=). */
@@ -60,6 +60,7 @@ export const sections: NavSection[] = [
   {
     label: "Data",
     items: [
+      { key: "artifacts", label: "Artifacts", icon: PackageOpen, about: "Manage Word, Sheet, and agent access to their documents" },
       { key: "backups-page", label: "Backups", icon: Database, href: "/admin/backups" },
       { key: "retention", label: "Data retention", icon: History, about: "How long each kind of data is kept" },
     ],

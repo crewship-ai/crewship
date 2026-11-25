@@ -29,6 +29,7 @@ import type { RuntimeEntry } from "./tabs/runtime-tab"
 import { AdminNavTile } from "./tabs/admin-kit"
 import { RetentionPage } from "@/components/features/admin/backups/data-retention"
 import { NotificationsTab } from "./tabs/notifications-tab"
+import { ArtifactsTab } from "./tabs/artifacts-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 import { cn } from "@/lib/utils"
@@ -299,6 +300,10 @@ function AdminConsole() {
 
     if (tab === "ratelimits") {
       return <RateLimitsTab workspaceId={workspaceId} />
+    }
+
+    if (tab === "artifacts") {
+      return <ArtifactsTab />
     }
 
     if (tab === "retention") {
