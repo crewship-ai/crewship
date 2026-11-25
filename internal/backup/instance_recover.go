@@ -315,7 +315,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 	}
 
 	// 4. The database: migrations forward, runtime reset, holds.
-	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{payload: ex.services, count: m.Contents.ServiceSnapshots, force: opts.Force}); err != nil {
+	if err := finishRecoveredDatabase(ctx, rep, ex.kit, dataDir, logger, instanceServiceRecovery{payload: ex.services, count: m.Contents.ServiceSnapshots, force: opts.Force, restoredStores: ex.hashes}); err != nil {
 		return rep, err
 	}
 
@@ -1209,7 +1209,11 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 		}
 		// memory_versions.payload_ref is an absolute path on the source.
 		memRoot := RecoveredStoreDir(rep.DataDir, StoreMemory)
-		if _, err := db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/versions/' || substr(sha256, 1, 2) || '/' || sha256 WHERE length(sha256) = 64`, memRoot); err != nil && !strings.Contains(err.Error(), "no such table") {
+		if force {
+			if err := rebaseForceMemoryVersions(ctx, db.DB, dataDir, memRoot, serviceArgs[0].restoredStores); err != nil {
+				return fmt.Errorf("backup: verify memory versions: %w", err)
+			}
+		} else if _, err := db.ExecContext(ctx, `UPDATE memory_versions SET payload_ref = ? || '/versions/' || substr(sha256, 1, 2) || '/' || sha256 WHERE length(sha256) = 64`, memRoot); err != nil && !strings.Contains(err.Error(), "no such table") {
 			return fmt.Errorf("backup: rewrite memory blob paths: %w", err)
 		}
 

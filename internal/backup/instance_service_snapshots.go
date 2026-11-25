@@ -131,9 +131,10 @@ func instanceServiceDump(ctx context.Context, db *sql.DB) (*DBDump, error) {
 }
 
 type instanceServiceRecovery struct {
-	force   bool
-	payload *ExtractedPayload
-	count   int
+	restoredStores map[string]map[string]IndexEntry
+	force          bool
+	payload        *ExtractedPayload
+	count          int
 }
 
 // Staging is deliberately separate from starting a service on the new host.
