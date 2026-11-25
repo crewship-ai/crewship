@@ -103,6 +103,9 @@ type Controller struct {
 	lastScanFailed atomic.Bool
 	// BootAt marks persisted observations stale until this process scans.
 	BootAt time.Time
+	// Now is the observation clock. A nil clock uses time.Now.
+	Now     func() time.Time
+	orphans orphanObservations
 	// yieldHook replaces quiesce.Yield in the network pass. Tests only: it
 	// lets a test interrupt the pass while the tick's context is still live.
 	yieldHook func(context.Context) error
@@ -258,6 +261,11 @@ func (c *Controller) Tick(ctx context.Context) {
 	if c == nil || c.DB == nil || c.InstanceID == "" || c.Connect == nil {
 		return
 	}
+	// A failed/incomplete tick discards its entire orphan observation. A fresh
+	// controller after a restart/DB restore can never inherit an old deadline.
+	previousOrphans := c.orphans
+	c.orphans = orphanObservations{}
+
 	// Docker removal and its mount evidence are one background writer. A
 	// backup closes admission and drains any stop/remove already in flight
 	// before copying the database and container files. A new tick stays due
@@ -504,6 +512,12 @@ func (c *Controller) Tick(ctx context.Context) {
 		return
 	}
 	c.lastScanFailed.Store(false)
+	for _, state := range states {
+		if state.Error != "" {
+			return
+		}
+	}
+	c.observeMissingOwners(ctx, rt, remaining, previousOrphans, cap-attempts)
 }
 
 type networksOutcome int

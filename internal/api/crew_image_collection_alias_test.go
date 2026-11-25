@@ -72,3 +72,19 @@ func TestQualifiedCacheImageSelectionAndLease(t *testing.T) {
 		}
 	}
 }
+
+func TestQualifiedCacheDigestSelection(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
+	img := collectionImage("1", collectionOwner, devcontainer.ImageKindCrew)
+	img.RepoDigests = []string{"docker.io/library/crewship-cache@sha256:" + strings.Repeat("2", 64)}
+	h, _, crew := covProvRig(t, &covCommitClient{}, "")
+	h.instanceID = collectionOwner
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h.gcClient = fake
+	mustExec(t, h.db, "UPDATE crews SET runtime_image=? WHERE id=?", strings.TrimPrefix(img.RepoDigests[0], "docker.io/library/"), crew)
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("collected selection by manifest digest: %v", fake.removedImages)
+	}
+}

@@ -267,7 +267,7 @@ func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner,
 // protects. Defer the pass, including when the conflict appears at final read.
 func recordImageAliases(byRef map[string]string, img image.Summary) bool {
 	byRef[img.ID] = img.ID
-	for _, tag := range img.RepoTags {
+	for _, tag := range slices.Concat(img.RepoTags, img.RepoDigests) {
 		if tag == "<none>:<none>" || tag == "" {
 			continue
 		}
@@ -384,7 +384,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		return nil
 	}
 	defer release()
-	refs := append([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags...)
+	refs := slices.Concat([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags, candidate.RepoDigests)
 	releaseImage, ok := gate.TryCollectImages(refs...)
 	if !ok {
 		h.logger.Info("image collection: candidate build active; retaining artifact", "image_id", candidate.ID)
@@ -424,7 +424,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		}
 		return nil
 	}
-	if !slices.Equal(candidate.RepoTags, current.RepoTags) {
+	if !slices.Equal(candidate.RepoTags, current.RepoTags) || !slices.Equal(candidate.RepoDigests, current.RepoDigests) {
 		h.logger.Info("image collection: aliases changed; retry next pass", "image_id", candidate.ID)
 		return nil
 	}

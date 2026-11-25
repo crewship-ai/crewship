@@ -551,3 +551,49 @@ func TestMissingImageReferenceRequiresCompleteEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestImageReferenceRegistryDigestProtectsDistinctConfigID(t *testing.T) {
+	for _, mode := range []string{"selection", "acquisition", "missing image", "legacy missing image"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			img := f.images[id]
+			ref := "registry.example/team/work@sha256:" + strings.Repeat("9", 64)
+			img.RepoDigests = []string{ref}
+			f.images[id] = img
+			pins := NewImageReferences(f, referenceBorrower)
+			if _, err := pins.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			required := []resourcelifecycle.ImageReference{{Ref: ref}}
+			gate := &resourcelifecycle.ImageUse{}
+			switch mode {
+			case "acquisition":
+				required = nil
+				release, err := gate.UseImages(t.Context(), ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "missing image", "legacy missing image":
+				delete(f.images, id)
+				if mode == "legacy missing image" {
+					for _, c := range f.containers {
+						delete(c.Container.Config.Labels, imageReferenceDigestsLabel)
+					}
+				}
+			}
+			err := pins.Reconcile(t.Context(), gate, func(context.Context) ([]resourcelifecycle.ImageReference, error) { return required, nil })
+			if len(f.containers) != 1 || len(f.removed) != 0 {
+				t.Fatalf("lost registry selection: removed=%v err=%v", f.removed, err)
+			}
+			if mode == "legacy missing image" {
+				var partial *ReferenceSweepError
+				if !errors.As(err, &partial) || partial.Deferred != 1 {
+					t.Fatalf("want unresolved legacy selection: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

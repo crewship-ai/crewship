@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
@@ -13,13 +14,15 @@ import (
 // Collection never waits on a build: it retries on its next ordinary tick.
 // All users of one live database share this gate, including backup replay.
 type ImageUse struct {
-	protectorMu sync.RWMutex
-	protector   ImageReferenceProtector
-	mu          sync.RWMutex
-	refsMu      sync.Mutex
-	active      map[string]int
-	deleting    map[string]chan struct{}
-	allImages   chan struct{}
+	restoreGeneration atomic.Uint64
+	provisioning      sync.RWMutex
+	protectorMu       sync.RWMutex
+	protector         ImageReferenceProtector
+	mu                sync.RWMutex
+	refsMu            sync.Mutex
+	active            map[string]int
+	deleting          map[string]chan struct{}
+	allImages         chan struct{}
 }
 
 var imageUses sync.Map // *sql.DB -> *ImageUse; one entry per opened database
@@ -27,6 +30,21 @@ var imageUses sync.Map // *sql.DB -> *ImageUse; one entry per opened database
 func Images(db *sql.DB) *ImageUse {
 	g, _ := imageUses.LoadOrStore(db, &ImageUse{})
 	return g.(*ImageUse)
+}
+
+// Provisioning keeps rowless container collection out of the full job,
+// including its preflight before any base or build alias has been acquired.
+func (g *ImageUse) Provisioning() func() {
+	g.provisioning.RLock()
+	return g.provisioning.RUnlock
+}
+
+// Restore fences collectors and restarts orphan observation after the restore,
+// including an interrupted or rolled-back attempt.
+func (g *ImageUse) Restore() func() {
+	release := g.Use()
+	g.restoreGeneration.Add(1)
+	return func() { g.restoreGeneration.Add(1); release() }
 }
 
 func (g *ImageUse) Use() func() { g.mu.RLock(); return g.mu.RUnlock }

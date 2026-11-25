@@ -1213,7 +1213,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		return RestoreStats{}, err
 	}
 	imageUse := resourcelifecycle.Images(db)
-	releaseImages := imageUse.Use()
+	releaseImages := imageUse.Restore()
 	defer releaseImages()
 	// Restore preserves exact captured selections. Image ownership is not
 	// authority to replace an environment with newly resolved dependencies.

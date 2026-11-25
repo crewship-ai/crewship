@@ -23,7 +23,7 @@ import (
 // image may have several aliases; all describe the same underlying artifact.
 func cacheArtifactReferences(refs map[string][]string, img image.Summary) []string {
 	crews := append([]string{}, refs[img.ID]...)
-	for _, tag := range img.RepoTags {
+	for _, tag := range slices.Concat(img.RepoTags, img.RepoDigests) {
 		crews = append(crews, refs[devcontainer.CanonicalCacheRef(tag)]...)
 	}
 	slices.Sort(crews)
@@ -255,23 +255,28 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "resolve image deletion target", inventoryErr)
 		return
 	}
-	var candidateID string
-	var candidateRefs []string
-	for _, img := range inventory.Items {
-		if slices.ContainsFunc(img.RepoTags, func(alias string) bool { return devcontainer.CanonicalCacheRef(alias) == tag }) {
-			candidateID = img.ID
-			seen := map[string]bool{tag: true, "": true}
-			for _, ref := range append([]string{img.ID, devcontainer.ImageAcquisitionRef(img.Labels)}, img.RepoTags...) {
-				ref = devcontainer.CanonicalCacheRef(ref)
-				if !seen[ref] {
-					candidateRefs = append(candidateRefs, ref)
-					seen[ref] = true
-				}
-			}
-			break
+	var candidate *image.Summary
+	for i := range inventory.Items {
+		img := &inventory.Items[i]
+		if !slices.ContainsFunc(img.RepoTags, func(alias string) bool { return devcontainer.CanonicalCacheRef(alias) == tag }) {
+			continue
 		}
+		if candidate != nil {
+			replyError(w, http.StatusConflict, "cache tag has ambiguous image identity")
+			return
+		}
+		candidate = img
 	}
-	if candidateID != "" {
+	if candidate != nil {
+		seen := map[string]bool{tag: true, "": true}
+		var candidateRefs []string
+		for _, ref := range slices.Concat([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags, candidate.RepoDigests) {
+			key := devcontainer.CanonicalCacheRef(ref)
+			if !seen[key] {
+				candidateRefs = append(candidateRefs, key)
+				seen[key] = true
+			}
+		}
 		releaseID, available := resourcelifecycle.Images(h.db).TryCollectImages(candidateRefs...)
 		if !available {
 			replyError(w, http.StatusConflict, "this image is in use by a build; retry deletion later")
@@ -285,8 +290,8 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	// A forced delete removes the named tag, as it always has. Forcing by
 	// image ID would drop every other alias of the artifact too, including
 	// a crewship-env/* tag a restore published.
-	if !force && dockerutil.IsLocalImageID(candidateID) {
-		removeRef = candidateID
+	if !force && candidate != nil && dockerutil.IsLocalImageID(candidate.ID) {
+		removeRef = candidate.ID
 	}
 
 	if !force {
@@ -308,30 +313,17 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		for ref := range refs {
 			hasPinned = hasPinned || dockerutil.IsLocalImageID(ref)
 		}
-		if hasPinned {
-			images := inventory
-
-			found := false
-			for _, img := range images.Items {
-				if !slices.ContainsFunc(img.RepoTags, func(alias string) bool { return devcontainer.CanonicalCacheRef(alias) == tag }) {
-					continue
-				}
-				found = true
-				if !dockerutil.IsLocalImageID(img.ID) {
-					replyError(w, http.StatusConflict, "cached image identity could not be established")
-					return
-				}
-				if crews := cacheArtifactReferences(refs, img); len(crews) > 0 {
-					writeJSON(w, http.StatusConflict, map[string]any{
-						"error":         "image is referenced by live crews; pass ?force=true to delete anyway",
-						"referenced_by": crews,
-					})
-					return
-				}
-				removeRef = img.ID // do not follow a tag moved after this check
+		if candidate == nil && hasPinned {
+			replyError(w, http.StatusNotFound, "cached image not found")
+			return
+		}
+		if candidate != nil {
+			if hasPinned && !dockerutil.IsLocalImageID(candidate.ID) {
+				replyError(w, http.StatusConflict, "cached image identity could not be established")
+				return
 			}
-			if !found {
-				replyError(w, http.StatusNotFound, "cached image not found")
+			if crews := cacheArtifactReferences(refs, *candidate); len(crews) > 0 {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "image is referenced by live crews; pass ?force=true to delete anyway", "referenced_by": crews})
 				return
 			}
 		}

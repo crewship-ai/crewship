@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -413,4 +414,21 @@ type failingRemoveGCClient struct{ fakeGCClient }
 
 func (f *failingRemoveGCClient) ImageRemove(_ context.Context, _ string, _ dockerclient.ImageRemoveOptions) (dockerclient.ImageRemoveResult, error) {
 	return dockerclient.ImageRemoveResult{}, errors.New("daemon refused")
+}
+
+func TestCacheDeleteAmbiguousQualifiedTag(t *testing.T) {
+	a := collectionImage("1", collectionOwner, devcontainer.ImageKindCrew)
+	b := collectionImage("2", collectionOwner, devcontainer.ImageKindCrew)
+	b.RepoTags = []string{"docker.io/library/" + a.RepoTags[0]}
+	fake := &fakeGCClient{images: []image.Summary{a, b}}
+	h := newCacheTestHandler(t, fake)
+	user := seedTestUser(t, h.db)
+	ws := seedTestWorkspace(t, h.db, user)
+	req := httptest.NewRequest("DELETE", "/api/v1/cache/"+a.RepoTags[0], nil)
+	req.SetPathValue("tag", a.RepoTags[0])
+	rec := httptest.NewRecorder()
+	h.CacheDelete(rec, withWorkspaceUser(req, user, ws, "OWNER"))
+	if rec.Code != http.StatusConflict || len(fake.removedImages) != 0 {
+		t.Fatalf("ambiguous selection: %d removed=%v", rec.Code, fake.removedImages)
+	}
 }

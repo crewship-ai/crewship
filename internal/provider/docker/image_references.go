@@ -24,6 +24,7 @@ import (
 
 const imageReferenceOwnerLabel = "crewship.image.reference.instance-id"
 const imageReferenceTagsLabel = "crewship.image.reference.config-tags"
+const imageReferenceDigestsLabel = "crewship.image.reference.repo-digests"
 const imageReferenceIDLabel = "crewship.image.reference.image-id"
 const imageReferenceNamePrefix = "crewship-image-ref-"
 
@@ -129,6 +130,7 @@ func (p *ImageReferences) preserve(ctx context.Context, ref resourcelifecycle.Im
 	}
 	referenceLabels := map[string]string{
 		imageReferenceOwnerLabel: p.owner, imageReferenceIDLabel: img.ID,
+		imageReferenceDigestsLabel:      strings.Join(img.RepoDigests, "\n"),
 		resourcelifecycle.InstanceLabel: "", "crewship.kind": "", "crewship.crew-id": "",
 		devcontainer.TempContainerLabelKey: "",
 	}
@@ -341,6 +343,7 @@ func (p *ImageReferences) releaseUnused(ctx context.Context, gate *resourcelifec
 		return fmt.Errorf("image reference has incomplete image configuration")
 	}
 	aliases := append([]string{id, devcontainer.ImageAcquisitionRef(img.Config.Labels)}, img.RepoTags...)
+	aliases = append(aliases, img.RepoDigests...)
 	releaseImage, idle := gate.TryCollectImages(aliases...)
 	if !idle {
 		return nil
@@ -383,6 +386,7 @@ func (p *ImageReferences) releaseMissing(ctx context.Context, gate *resourcelife
 	}
 	pin := c.Container
 	aliases := append(strings.Split(pin.Config.Labels[imageReferenceTagsLabel], "\n"), id, pin.Config.Image, devcontainer.ImageAcquisitionRef(pin.Config.Labels))
+	aliases = append(aliases, strings.Split(pin.Config.Labels[imageReferenceDigestsLabel], "\n")...)
 	for _, ref := range refs {
 		if ref.Ref == "" {
 			continue

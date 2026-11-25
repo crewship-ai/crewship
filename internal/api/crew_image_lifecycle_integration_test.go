@@ -291,3 +291,68 @@ func TestIsolatedFeatureTagReplacement(t *testing.T) {
 		t.Fatalf("unselected fixture reference remains: %s", left)
 	}
 }
+
+// A restored database can lack a still-valuable crew. Observe an empty,
+// never-started runtime alongside another that holds the only workspace file.
+func TestIsolatedMissingCrewContainer(t *testing.T) {
+	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
+	if host == "" {
+		t.Skip("requires a dedicated engine")
+	}
+	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
+		t.Fatal("isolated socket mismatch")
+	}
+	ctx := t.Context()
+	cmd := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "docker", append([]string{"--host", host}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	const owner = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	volume := cmd("volume", "create", "restored-workspace")
+	cmd("run", "--rm", "--network", "none", "-v", volume+":/workspace", "gc-fixture:base", "/bin/busybox", "sh", "-c", "printf only-copy >/workspace/file")
+	create := func(options ...string) string {
+		args := []string{"create", "--network", "none", "--read-only", "--restart=no", "--label", resourcelifecycle.InstanceLabel + "=" + owner, "--label", "crewship.kind=crew", "--label", "crewship.crew-id=missing"}
+		return cmd(append(append(args, options...), "gc-fixture:base")...)
+	}
+	empty := create()
+	attached := create("-v", volume+":/workspace")
+	db := setupTestDB(t)
+	now := time.Now()
+	controller := &resourcelifecycle.Controller{DB: db, InstanceID: owner, Connect: dockerprovider.NewCleanupRuntime, Now: func() time.Time { return now }}
+	present := func(id string) bool {
+		return cmd("ps", "-aq", "--no-trunc", "--filter", "id="+id) == id
+	}
+	advance := func(steps int) {
+		for range steps {
+			now = now.Add(orphanGCInterval)
+			controller.Tick(ctx)
+		}
+	}
+	t.Setenv(imageGCEnv, "false")
+	controller.Tick(ctx)
+	advance(49)
+	if !present(empty) || !present(attached) {
+		t.Fatal("opt-out did not preserve both containers")
+	}
+	t.Setenv(imageGCEnv, "true")
+	controller.Tick(ctx)
+	advance(47)
+	if !present(empty) || !present(attached) {
+		t.Fatal("removed before the observed-unused deadline")
+	}
+	advance(2)
+	if present(empty) {
+		t.Error("unattached empty container still present")
+	}
+	if !present(attached) {
+		t.Fatal("removed the restored workspace container")
+	}
+	got := cmd("run", "--rm", "--network", "none", "-v", volume+":/workspace:ro", "gc-fixture:base", "/bin/busybox", "cat", "/workspace/file")
+	if got != "only-copy" {
+		t.Fatalf("changed restored workspace content: %q", got)
+	}
+}

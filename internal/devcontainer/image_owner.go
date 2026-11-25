@@ -58,7 +58,8 @@ func ImageNamespace(instanceID string) string {
 // namespaces, registries, image IDs and ordinary image references stay exact.
 func CanonicalCacheRef(ref string) string {
 	short := strings.TrimPrefix(ref, "docker.io/library/")
-	if strings.HasPrefix(short, cacheImageRepoPrefix) || strings.HasPrefix(short, FeatureImageTagPrefix) {
+	if strings.HasPrefix(short, cacheImageRepoPrefix) || strings.HasPrefix(short, FeatureImageTagPrefix) ||
+		strings.HasPrefix(short, "crewship-cache@sha256:") || strings.HasPrefix(short, "crewship-feat@sha256:") {
 		return short
 	}
 	return ref
