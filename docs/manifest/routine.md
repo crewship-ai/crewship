@@ -706,14 +706,16 @@ crewship routine bulk-replay --fingerprint <fp>   # replay the whole group after
 
 ## Waitpoint callback tokens (external completion)
 
-A `wait` step parks the run on a high-entropy **token**. Beyond the
-inbox approve/reject flow, an **external system** can complete the wait
-via a public callback URL — no workspace JWT, the token is the auth
-(same model as webhook dispatch). Surface the URL from the pending
-waitpoint:
+A `wait` step parks the run on a waitpoint whose **token** (`wp_…`) is a public
+id — the inbox, `routine waitpoints list` and the approve/reject commands use
+it, and it completes nothing on its own. Beyond the inbox approve/reject flow,
+an **external system** can complete the wait via a public callback URL — no
+workspace JWT, a separate secret in the URL is the auth (same model as webhook
+dispatch). A MANAGER mints the URL; it is shown once and stored only as a
+digest (minting again replaces it):
 
 ```
-crewship routine waitpoints <token>     # prints "Callback URL: …"
+crewship routine waitpoints callback-url <token>   # prints the URL once
 ```
 
 The external task then completes (or denies) the wait:
@@ -723,8 +725,9 @@ curl -X POST <callback_url> -d '{"approved":true,"payload":{"result":"ok"}}'
 ```
 
 `approved` defaults to `true` (bare POST = "task done, continue").
-`payload` is stored on the waitpoint for the resumed step. Endpoint:
-`POST /api/v1/waitpoint-tokens/{token}`.
+`payload` is stored on the waitpoint for the resumed step. Endpoints:
+`POST /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/callback-token`
+(mint) and `POST /api/v1/waitpoint-tokens/{secret}` (complete).
 
 ## Batch trigger
 

@@ -124,12 +124,16 @@ func TestCovCT3_Validate_AdminToken_HappyPath(t *testing.T) {
 		userID, hashAdmin(token, key))
 
 	res, err := ValidateCLITokenFull(context.Background(), db, token,
-		ValidateAuditContext{RemoteAddr: "127.0.0.1", UserAgent: "covct3", Path: "/y"})
+		ValidateAuditContext{RemoteAddr: "127.0.0.1", UserAgent: "covct3", Path: "/api/v1/workspaces/ws/pipelines/waitpoints/legacy-approval/approve"})
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	if res.UserID != userID {
 		t.Errorf("user = %q, want %q", res.UserID, userID)
+	}
+	var path string
+	if err := db.QueryRow("SELECT path FROM cli_token_uses WHERE token_id='covct3-t3'").Scan(&path); err != nil || strings.Contains(path, "legacy-approval") || !strings.HasSuffix(path, "/approve") {
+		t.Errorf("waitpoint audit path not redacted: %q (%v)", path, err)
 	}
 	var uses int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM cli_token_uses WHERE token_id = 'covct3-t3'`).Scan(&uses); err != nil || uses != 1 {
@@ -207,5 +211,14 @@ func TestCovCT3_IsValidCLIToken_NoAuditSideEffects(t *testing.T) {
 	}
 	if uses != 0 {
 		t.Errorf("cli_token_uses rows = %d after 5 IsValidCLIToken calls, want 0 (no audit side effects)", uses)
+	}
+}
+
+func TestWaitpointInboxAuditPath(t *testing.T) {
+	const path = "/api/v1/inbox/ibx_ws_waitpoint_legacysecret"
+	for _, suffix := range []string{"", "/act"} {
+		if got := cliUseAuditPath(path + suffix); got != "/api/v1/inbox/{id}"+suffix {
+			t.Fatalf("unexpected Inbox audit path")
+		}
 	}
 }

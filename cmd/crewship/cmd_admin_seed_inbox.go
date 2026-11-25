@@ -196,7 +196,8 @@ func seedInboxRows(now time.Time) []seedRow {
 // ids, where inbox.Insert dedupes silently while the success line still
 // reported them as written.
 //
-// Base 36 keeps it short. The `run_seed_` and `seed_` prefixes are load-bearing
+// Base 36 keeps it short. The `run_seed_`, `seed_` and (waitpoints) `wp_seed_`
+// prefixes are load-bearing
 // and must not move: --clear finds what this wrote by LIKE on exactly those.
 func seedSuffix(now time.Time) string {
 	return strconv.FormatInt(now.UnixNano(), 36)
@@ -222,25 +223,39 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	suffix := seedSuffix(time.Now())
 
 	if clear {
-		res, err := db.ExecContext(ctx,
-			`DELETE FROM inbox_items WHERE workspace_id = ? AND source_id LIKE 'seed_%'`, workspaceID)
+		// Migration replaces the legacy seed token. Its synthetic run keeps the
+		// reserved run_seed_ prefix and the same workspace.
+		const seededRunIDs = `SELECT id FROM pipeline_runs WHERE workspace_id = ? AND id GLOB 'run_seed_*'`
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM inbox_items WHERE workspace_id = ? AND (source_id GLOB 'seed_*' OR source_id GLOB 'wp_seed_*'
+			OR (kind = 'waitpoint' AND source_id IN (SELECT token FROM pipeline_waitpoints
+				WHERE workspace_id = ? AND pipeline_run_id IN (`+seededRunIDs+`))))`, workspaceID, workspaceID, workspaceID)
 		if err != nil {
 			return fmt.Errorf("clear seeded inbox rows: %w", err)
 		}
 		n, _ := res.RowsAffected()
-		res2, err := db.ExecContext(ctx,
+		res2, err := tx.ExecContext(ctx,
 			`DELETE FROM approvals_queue WHERE workspace_id = ? AND reason LIKE '[seed]%'`, workspaceID)
 		if err != nil {
 			return fmt.Errorf("clear seeded approvals: %w", err)
 		}
 		n2, _ := res2.RowsAffected()
-		if _, err := db.ExecContext(ctx,
-			`DELETE FROM pipeline_waitpoints WHERE workspace_id = ? AND token LIKE 'seed_%'`, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM pipeline_waitpoints WHERE workspace_id = ? AND (token GLOB 'seed_*' OR token GLOB 'wp_seed_*'
+			OR pipeline_run_id IN (`+seededRunIDs+`))`, workspaceID, workspaceID); err != nil {
 			return fmt.Errorf("clear seeded waitpoint tokens: %w", err)
 		}
-		if _, err := db.ExecContext(ctx,
-			`DELETE FROM pipeline_runs WHERE workspace_id = ? AND id LIKE 'run_seed_%'`, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM pipeline_runs WHERE workspace_id = ? AND id GLOB 'run_seed_*'`, workspaceID); err != nil {
 			return fmt.Errorf("clear the seeded run: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 		cli.PrintSuccess(fmt.Sprintf("Removed %d seeded inbox item(s) and %d seeded approval(s).", n, n2))
 		return nil
@@ -297,6 +312,13 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	written := 0
 	for i, row := range seedInboxRows(now) {
 		sourceID := fmt.Sprintf("seed_%s_%d", suffix, i)
+		if row.kind == inbox.KindWaitpoint {
+			// A waitpoint's source id is its public id, which the waitpoint
+			// store recognises by the "wp_" prefix (#1910); anything else it
+			// treats as a legacy secret and migrates to a fresh id at boot,
+			// which --clear would then no longer find.
+			sourceID = "wp_" + sourceID
+		}
 		payload := row.payload
 		if payload == nil {
 			payload = map[string]any{}

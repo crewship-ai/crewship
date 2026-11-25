@@ -1361,14 +1361,13 @@ LIMIT 200`, workspaceID)
 		InvokingCrewID string          `json:"invoking_crew_id,omitempty"`
 		TimeoutAt      string          `json:"timeout_at"`
 		CreatedAt      string          `json:"created_at"`
-		// CallbackURL is the PUBLIC completion endpoint for this
-		// waitpoint — an external system holding it can complete the
-		// waitpoint without a workspace JWT (the token is the auth).
-		// Hand it to a third-party task/approval service to drive a
-		// human-in-the-loop or external-completion wait.
-		CallbackURL string `json:"callback_url,omitempty"`
+		// CallbackAvailable says whether a MANAGER can mint a public
+		// callback URL for this waitpoint (POST …/waitpoints/{token}/
+		// callback-token). The URL itself is never listed (#1910): it is
+		// a bearer capability, shown once when minted, stored only as a
+		// digest. Token above is the public waitpoint id, not a secret.
+		CallbackAvailable bool `json:"callback_available"`
 	}
-	base := InstanceURLFromRequest(r, "")
 	out := make([]wpRow, 0, 50)
 	for rows.Next() {
 		var row wpRow
@@ -1380,11 +1379,10 @@ LIMIT 200`, workspaceID)
 		}
 		if form != "" {
 			row.DecisionForm = json.RawMessage(form)
-		} else if !pipeline.IsCrewshipApprovalStepKey(row.StepID) {
-			// A held routine action is decided by an OWNER or ADMIN only;
-			// its token's holder cannot complete it, so no callback is offered.
-			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
 		}
+		// A typed decision or a held routine action (OWNER/ADMIN only)
+		// cannot be completed by the callback, so none is offered.
+		row.CallbackAvailable = pipeline.CallbackOffered(row.StepID, form)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {

@@ -742,6 +742,19 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				return fmt.Errorf("backup: migrate restored database: %w", err)
 			}
 		}
+		// An instance snapshot may already carry the current schema ledger.
+		// Qualify its rows while the recovered directory is still offline.
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := convertRestoreWaitpoints(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
 
 		// A physical snapshot carries source-instance execution approvals too.

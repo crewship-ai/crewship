@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -10,8 +11,11 @@ import (
 
 // CompleteWaitpointToken is the PUBLIC waitpoint completion endpoint
 // (trigger.dev `wait.forToken` parity). An external system holding a
-// waitpoint token completes the wait via an HTTP callback — no workspace
-// JWT required: the high-entropy token in the path is the auth surface,
+// waitpoint callback secret completes the wait via an HTTP callback — no
+// workspace JWT required: the high-entropy secret in the path is the auth
+// surface. The secret is minted on demand by a MANAGER
+// (MintWaitpointCallbackToken, shown once) and stored only as a digest; it is
+// NOT the waitpoint's id, which every member can see (#1910). The model is
 // the same model as the public webhook dispatch endpoint. This lets a
 // human-in-the-loop / external-task wait be resolved by a third party
 // (approval service, CI job, vendor webhook) instead of only the inbox.
@@ -36,8 +40,8 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store not wired")
 		return
 	}
-	token := r.PathValue("token")
-	if token == "" {
+	secret := r.PathValue("token")
+	if secret == "" {
 		replyError(w, http.StatusBadRequest, "token required")
 		return
 	}
@@ -63,41 +67,19 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 		payload = string(body.Payload)
 	}
 
-	wp, ok := h.waitpoints.(waitpointDecideDoor)
+	store, ok := h.waitpoints.(interface {
+		DecideCallback(context.Context, string, bool, string) (string, string, error)
+	})
 	if !ok {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
 	}
-	// This endpoint has no workspace JWT — the high-entropy token in the
-	// path is the sole auth surface (see doc comment above), so there's no
-	// caller-asserted workspace to check the token against. We still thread
-	// a workspaceID through CompleteApproval so its UPDATE stays scoped
-	// like the authed ApproveWaitpoint path (#1415): look up the token's
-	// OWN workspace first and pass that back. This can't reject a
-	// legitimate holder of the token (the value always matches itself) —
-	// it just keeps both call sites sharing one workspace-scoped query
-	// instead of the callback path using a laxer one.
-	type workspaceLookup interface {
-		WorkspaceIDForToken(ctx context.Context, token string) (string, error)
-	}
-	workspaceID := ""
-	if wl, ok := h.waitpoints.(workspaceLookup); ok {
-		if wsID, wErr := wl.WorkspaceIDForToken(r.Context(), token); wErr == nil {
-			workspaceID = wsID
+	id, workspaceID, err := store.DecideCallback(r.Context(), secret, approved, payload)
+	if err != nil {
+		if id != "" {
+			err = explainDecideError(r.Context(), store, workspaceID, id, err)
 		}
-	}
-	// The decider is the EXTERNAL token holder, attributed to the
-	// "external-callback" sentinel: no human user, the token is the
-	// authority. Audit queries can distinguish callback completions from
-	// inbox approvals by this sentinel. This is not an agent door (B14,
-	// #2388): an agent is never handed a waitpoint token — the token
-	// travels to the inbox, the pending-waitpoints listing and the CLI, all
-	// of them person-facing — so the only way one reaches this route is a
-	// person choosing to give it away.
-	if err := wp.Decide(r.Context(), workspaceID, token, approved,
-		pipeline.WaitpointDecider{Kind: pipeline.DeciderExternal, ID: "external-callback"}, payload); err != nil {
-		err = explainDecideError(r.Context(), wp, workspaceID, token, err)
-		replyWaitpointDecideError(w, h.logger, "waitpoint callback complete", token, err)
+		replyWaitpointDecideError(w, h.logger, "waitpoint callback complete", id, err)
 		return
 	}
 
@@ -106,12 +88,69 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 		RunIDForToken(ctx context.Context, token string) (string, error)
 	}
 	if lk, ok := h.waitpoints.(runLookup); ok {
-		if runID, lerr := lk.RunIDForToken(r.Context(), token); lerr == nil && runID != "" {
+		if runID, lerr := lk.RunIDForToken(r.Context(), id); lerr == nil && runID != "" {
 			h.newExecutor().ResumeAfterApproval(runID, h.logger)
 		} else if lerr != nil {
-			h.logger.Warn("waitpoint callback resume: run lookup failed", "error", lerr, "token", tokenFingerprint(token))
+			h.logger.Warn("waitpoint callback resume: run lookup failed", "error", lerr, "waitpoint", id)
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": approved})
+}
+
+// waitpointCallbackMinter mints a waitpoint's callback secret.
+type waitpointCallbackMinter interface {
+	MintCallbackToken(ctx context.Context, workspaceID, id, actorID string) (secret string, rotated bool, err error)
+}
+
+// MintWaitpointCallbackToken mints the public callback URL for one pending
+// waitpoint and returns it ONCE. POST
+// /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/callback-token
+//
+// The secret in the URL is stored only as a digest (#1910), so it cannot be
+// listed or read back later; a lost URL is replaced by minting again, which
+// also revokes the previous one (`rotated: true`). Minting is a
+// capability grant that can release a gated run without authentication, so
+// it takes the approve route's own tier (MANAGER+) and is audited.
+func (h *PipelineHandler) MintWaitpointCallbackToken(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "update") {
+		return
+	}
+	minter, ok := h.waitpoints.(waitpointCallbackMinter)
+	if h.waitpoints == nil || !ok {
+		replyError(w, http.StatusServiceUnavailable, "waitpoint store not wired")
+		return
+	}
+	id := r.PathValue("token")
+	if id == "" {
+		replyError(w, http.StatusBadRequest, "token required")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	actor := UserFromContext(r.Context())
+	if actor == nil || actor.ID == "" {
+		replyError(w, http.StatusForbidden, "authenticated manager required")
+		return
+	}
+	secret, rotated, err := minter.MintCallbackToken(r.Context(), workspaceID, id, actor.ID)
+	switch {
+	case errors.Is(err, pipeline.ErrWaitpointNotFound):
+		replyError(w, http.StatusNotFound, "waitpoint not found")
+		return
+	case errors.Is(err, pipeline.ErrCallbackNotOffered):
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	case errors.Is(err, pipeline.ErrAlreadyDecided):
+		replyError(w, http.StatusConflict, pipeline.ErrAlreadyDecided.Error())
+		return
+	case err != nil:
+		h.logger.Error("waitpoint callback token mint", "error", err, "waitpoint", pipeline.PublicWaitpointID(workspaceID, id))
+		replyError(w, http.StatusInternalServerError, "Failed to mint callback token")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"token":        pipeline.PublicWaitpointID(workspaceID, id),
+		"callback_url": InstanceURLFromRequest(r, "") + "/api/v1/waitpoint-tokens/" + secret,
+		"rotated":      rotated,
+	})
 }

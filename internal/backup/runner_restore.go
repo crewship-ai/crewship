@@ -466,6 +466,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Refuse unqualified scope transformation or history collision before any
 	// destination admission, replacement, service import or database write.
 	if !opts.FilesOnly {
+		if err := validateWaitpointIdentities(extracted.DBDump); err != nil {
+			return nil, err
+		}
 		if opts.AsWorkspace != "" || opts.AsCrew != "" {
 			if err := rejectMooringCollaborationRemap(extracted.DBDump); err != nil {
 				return nil, err

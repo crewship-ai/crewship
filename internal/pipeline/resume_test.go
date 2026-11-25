@@ -289,7 +289,7 @@ func TestResume_WaitStep_SurvivesRestartAndAcceptsApproval(t *testing.T) {
 	timeoutAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, prompt, status, timeout_at)
-VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok?', 'pending', ?)`, timeoutAt); err != nil {
+VALUES ('wp_000000000000000000000000c0ffee01', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok?', 'pending', ?)`, timeoutAt); err != nil {
 		t.Fatalf("seed waitpoint: %v", err)
 	}
 
@@ -322,7 +322,7 @@ VALUES ('tok_resume_wait', 'ws_test', 'run_resume_wait', 'gate', 'approval', 'ok
 	go func() {
 		// Give the resumed goroutine a moment to re-park.
 		time.Sleep(100 * time.Millisecond)
-		err := wpStore.CompleteApproval(context.Background(), "ws_test", "tok_resume_wait", true, "user_test", "")
+		err := wpStore.CompleteApproval(context.Background(), "ws_test", "wp_000000000000000000000000c0ffee01", true, "user_test", "")
 		if err == nil {
 			exec.ResumeAfterApproval("run_resume_wait", slog.Default())
 		}

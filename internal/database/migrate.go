@@ -2108,6 +2108,9 @@ END;
 	{version: 20261025233100, name: "crew_resource_grants", fn: migrationCrewResourceGrants},
 	{version: 20261026111927, name: "crew_manage_grants", fn: migrationCrewManageGrants},
 	{version: 20261110185446, name: "page_propose_grants", fn: migrationPageProposeGrants},
+	{version: 20261124213500, name: "convert_waitpoint_identities", fn: func(ctx context.Context, tx *sql.Tx, _ *slog.Logger) error {
+		return ConvertWaitpointIdentities(ctx, tx)
+	}},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

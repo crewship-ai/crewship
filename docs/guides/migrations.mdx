@@ -401,12 +401,7 @@ exits non-zero, rather than printing a URL with nothing after the last slash.
 </Warning>
 
 `pipeline_waitpoints.token` is the same kind of secret and is **not** covered
-here. It is that table's primary key, it is the handle carried by
-`inbox_items.source_id` and by a WAITING run's `waitpoint_token`, and
-`GET …/pipelines/waitpoints` reads it back out of the column to rebuild the
-public `POST /api/v1/waitpoint-tokens/{token}` callback URL on demand. It is a
-*retrievable* shared secret by contract rather than a show-once credential, so
-hashing it means redesigning that contract first.
+here: it was a *retrievable* shared secret by contract. See 20261119180903 below, which changed the contract and then hashed it.
 
 ## 20260811081130 — Drop a redundant trust-grant index
 
@@ -798,6 +793,57 @@ artifact_projects` stays off. Running the statement again changes nothing.
 
 To turn Projects off after the upgrade, see
 [Turning Projects off](/configuration/artifacts#turning-projects-off).
+
+## 20261119180903 — Waitpoint ids become public, callback secrets hashed
+
+`pipeline_waitpoints.token` used to be both the waitpoint's identity (primary
+key, `inbox_items.source_id`, a WAITING run's `waitpoint_token`, the approve
+route's path segment) **and** the bearer credential for the unauthenticated
+`POST /api/v1/waitpoint-tokens/{token}` callback (#1910). As the identity it was
+on every member surface — and any member could read a working callback URL from
+`GET …/pipelines/waitpoints` — while the database held it in the clear.
+
+`20261119180903_waitpoint_callback_token_hash` adds `callback_token_hash` and a
+partial `UNIQUE` index. From then on `token` holds a public id (`wp_` + 32 hex),
+and the callback secret (`wpt_` + 64 hex) is minted on demand by a MANAGER
+(`POST …/waitpoints/{token}/callback-token`, `crewship routine waitpoints
+callback-url`), shown once, and stored only as `sh1:` + SHA-256 — the same
+unkeyed scheme as 20260810171000 above.
+
+Startup migration `20261124213500` converts all legacy waitpoints in one transaction after the normal pre-migration snapshot and schema-version check. The server accepts work after commit. A failed conversion rolls back and fails startup. Restarting after the cause is fixed retries the migration. Each legacy identity is replaced by a deterministic, workspace-scoped public ID in the following references:
+`inbox_items.source_id` **and** `inbox_items.id`
+(the inbox writer derives the id as `ibx_<workspace>_waitpoint_<source_id>`);
+`inbox_item_reads.inbox_item_id`; `notification_deliveries.source_id` and
+`dedup_key`; and `audit_logs.entity_id`. Historical ADMIN CLI request paths in `cli_token_uses.path` can retain the
+old identifier. These historical audit records remain intact. New CLI usage records omit the waitpoint identifier from these paths. The old value no longer
+authorizes a callback. Full-instance backups are point-in-time copies with the same sensitivity as the database. Recovery qualifies the restored rows before service. An additive restore converts existing destination rows and incoming identities inside the restore transaction.
+
+**Old secrets are not carried forward.** Before this change any workspace
+member could read a waitpoint's callback URL from the pending list, so a
+pre-upgrade token cannot be presumed private. Converted waitpoints get no
+callback digest: the public callback refuses them until a MANAGER mints a new
+URL.
+
+<Warning>
+**Upgrade action: re-mint callback URLs for waitpoints pending at upgrade
+time.** An external system (CI job, approval service, vendor webhook) that was
+handed a callback URL before the upgrade gets `409` from it afterwards. Run
+`crewship routine waitpoints list`, then `crewship routine waitpoints
+callback-url <token>` for each gate an external system completes, and give it
+the new URL. Approving through the Inbox, the routine page or `crewship routine
+waitpoints approve <token>` (with the new token from `list`) works without any
+action.
+
+**Other client-visible changes.** The pending list no longer contains
+`callback_url`; it has `callback_available` instead, and the URL comes only
+from the mint call. The public callback no longer accepts the listed `token`.
+A token value captured before the upgrade no longer names the waitpoint on the
+authenticated routes either; read the new one from `list`.
+</Warning>
+
+A forked restore (`--as-workspace` / `--as-crew`) gives each copied waitpoint a
+new `wp_` id and **no** callback digest: a fork does not inherit the source's
+live capabilities.
 
 ## How to read this in operation
 

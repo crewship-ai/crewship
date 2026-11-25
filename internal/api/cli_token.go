@@ -780,7 +780,7 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 			useID, tokenID, nowStr,
 			nullIfBlank(audit.RemoteAddr),
 			nullIfBlank(audit.UserAgent),
-			nullIfBlank(audit.Path),
+			nullIfBlank(cliUseAuditPath(audit.Path)),
 		); auditErr != nil {
 			return ValidateCLITokenResult{}, fmt.Errorf("audit insert: %w", auditErr)
 		}
@@ -837,4 +837,25 @@ func nullIfBlank(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// Waitpoint routes historically carried a bearer token where the public ID
+// appears today. Record the operation without persisting the path credential.
+func cliUseAuditPath(path string) string {
+	for _, route := range []string{"/pipelines/waitpoints/", "/inbox/"} {
+		prefix, tail, ok := strings.Cut(path, route)
+		if !ok {
+			continue
+		}
+		id, op, hasOp := strings.Cut(tail, "/")
+		if route == "/inbox/" && !strings.HasPrefix(id, "ibx_") {
+			continue
+		}
+		clean := prefix + route + "{id}"
+		if hasOp {
+			clean += "/" + op
+		}
+		return clean
+	}
+	return path
 }

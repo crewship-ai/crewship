@@ -45,13 +45,29 @@ func TestChatDecisionWaitpointIdentityNeverGrantsCallbackAuthority(t *testing.T)
 	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("bearer accepted as E2 ID %v", err)
 	}
-	// Existing callback holders keep the exact legacy behavior.
+	// The waitpoint id is not a callback capability either (#1910) …
 	req = httptest.NewRequest("POST", "/", nil)
 	req.SetPathValue("token", d.token)
 	rr = httptest.NewRecorder()
 	d.r.PipelinesHandler.CompleteWaitpointToken(rr, req)
+	if rr.Code != 409 || d.read(t).Decision.Status != "pending" {
+		t.Fatalf("waitpoint id grants callback authority %d %s", rr.Code, rr.Body.String())
+	}
+	// … only a minted secret is, and it never reaches the card.
+	store := d.r.PipelinesHandler.waitpoints.(*pipeline.SQLWaitpointStore)
+	secret, _, err := store.MintCallbackToken(t.Context(), d.f.workspace, d.token, d.f.user)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if encoded, _ := json.Marshal(d.read(t)); secret == d.id || strings.Contains(string(encoded), secret) {
+		t.Fatal("the callback secret reached the chat card")
+	}
+	req = httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("token", secret)
+	rr = httptest.NewRecorder()
+	d.r.PipelinesHandler.CompleteWaitpointToken(rr, req)
 	if rr.Code != 200 {
-		t.Fatalf("legacy callback broken %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("minted callback broken %d %s", rr.Code, rr.Body.String())
 	}
 }
 

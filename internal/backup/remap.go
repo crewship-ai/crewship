@@ -379,6 +379,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	if dump == nil {
 		return nil
 	}
+	if err := validateWaitpointIdentities(dump); err != nil {
+		return err
+	}
 	if err := rejectMooringCollaborationRemap(dump); err != nil {
 		return err
 	}

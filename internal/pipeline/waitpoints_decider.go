@@ -192,6 +192,7 @@ func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, toke
 	_ = s.db.QueryRowContext(ctx,
 		`SELECT status, pipeline_run_id, step_id FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?`,
 		token, workspaceID).Scan(&status, &runID, &stepID)
+	token = PublicWaitpointID(workspaceID, token)
 	if workspaceID == "" {
 		// The public callback resolves the token's own workspace before it
 		// reaches the door; a refusal with no workspace cannot satisfy the

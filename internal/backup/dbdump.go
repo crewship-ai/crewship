@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // BackupTables is the ordered list of tables exported in workspace /
@@ -796,7 +798,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 	if dump.scope, err = reconcileWorkspaceScopeTx(ctx, tx, workspaceID, dump, filters); err != nil {
 		dump.scope = &ScopeReconciliation{SkipReason: err.Error()}
 	}
-	return dump, nil
+	return normalizeWaitpointIdentities(dump, false), nil
 }
 
 // tableRowCounts reduces a DBDump to how many rows each table carries —
@@ -952,7 +954,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		_ = rows.Close()
 		dump.Tables[f.table] = out
 	}
-	return dump, nil
+	return normalizeWaitpointIdentities(dump, false), nil
 }
 
 // normalizeScan converts raw sql.Scan values into JSON-friendly Go
@@ -1207,6 +1209,9 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	if err := validateWaitpointIdentities(dump); err != nil {
+		return RestoreStats{}, err
+	}
 	imageUse := resourcelifecycle.Images(db)
 	releaseImages := imageUse.Use()
 	defer releaseImages()
@@ -1298,6 +1303,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// re-keyed table degenerates the statement into a NOT NULL violation
 	// that OR IGNORE then swallows. Counted here, reported to the operator
 	// by the caller. See dropped_columns.go.
+	if current, err := convertRestoreWaitpoints(ctx, tx); err != nil {
+		return stats, err
+	} else if current {
+		dump = normalizeLegacyWaitpointRestore(dump)
+	}
 	var dropped droppedColumnTally
 	restoredMissions := map[string]bool{}
 	hasIssueWork, err := tableExistsTx(ctx, tx, "issue_work")
@@ -1487,6 +1497,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					continue
 				}
 				val := row[k]
+				// Bundle data cannot authorize callbacks on the destination.
+				if table == "pipeline_waitpoints" && k == "callback_token_hash" {
+					val = nil
+				}
 				if documentBinaryColumn(table, k) {
 					// Early native-proposal bundles encoded this BLOB as TEXT.
 					// Preserve readable legacy candidates without weakening the
@@ -1830,4 +1844,20 @@ func UnmarshalDump(data []byte) (*DBDump, error) {
 		return nil, fmt.Errorf("backup: unmarshal dump: %w", err)
 	}
 	return &d, nil
+}
+
+// convertRestoreWaitpoints prepares existing identities on the restore transaction.
+// Older recovery targets acquire the digest column in the startup migration.
+func convertRestoreWaitpoints(ctx context.Context, tx *sql.Tx) (bool, error) {
+	cols, err := tableColumns(ctx, tx, "pipeline_waitpoints")
+	if err != nil {
+		return false, fmt.Errorf("backup: probe waitpoint schema: %w", err)
+	}
+	if !cols["callback_token_hash"] {
+		return false, nil
+	}
+	if err := database.ConvertWaitpointIdentities(ctx, tx); err != nil {
+		return false, fmt.Errorf("backup: convert recovered waitpoints: %w", err)
+	}
+	return true, nil
 }

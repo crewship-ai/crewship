@@ -11,14 +11,15 @@ import (
 // durable run, approval and Inbox state in the same transaction as takeover or
 // Stop. Live routines receive cancellation through the execution monitor.
 func cancelParkedIssueRoutinesTx(ctx context.Context, tx *sql.Tx, missionID, now string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT w.token FROM pipeline_waitpoints w JOIN pipeline_runs r ON r.id=w.pipeline_run_id JOIN issue_executions x ON x.routine_run_id=r.id WHERE x.mission_id=? AND r.status='waiting' AND w.status='pending'`, missionID)
+	rows, err := tx.QueryContext(ctx, `SELECT w.token,w.workspace_id FROM pipeline_waitpoints w JOIN pipeline_runs r ON r.id=w.pipeline_run_id JOIN issue_executions x ON x.routine_run_id=r.id WHERE x.mission_id=? AND r.status='waiting' AND w.status='pending'`, missionID)
 	if err != nil {
 		return err
 	}
-	var tokens []string
+	type gate struct{ token, workspace string }
+	var tokens []gate
 	for rows.Next() {
-		var token string
-		if err = rows.Scan(&token); err != nil {
+		var token gate
+		if err = rows.Scan(&token.token, &token.workspace); err != nil {
 			rows.Close()
 			return err
 		}
@@ -29,11 +30,12 @@ func cancelParkedIssueRoutinesTx(ctx context.Context, tx *sql.Tx, missionID, now
 	if err != nil {
 		return err
 	}
-	for _, token := range tokens {
+	for _, item := range tokens {
+		token := item.token
 		if _, err = tx.ExecContext(ctx, `UPDATE pipeline_waitpoints SET status='cancelled',decided_at=? WHERE token=? AND status='pending'`, now, token); err != nil {
 			return err
 		}
-		if _, err = inbox.ResolveBySourceTx(ctx, tx, "waitpoint", token, "cancelled", ""); err != nil {
+		if _, err = inbox.ResolveWorkspaceSourceTx(ctx, tx, item.workspace, "waitpoint", token, "cancelled", ""); err != nil {
 			return err
 		}
 	}

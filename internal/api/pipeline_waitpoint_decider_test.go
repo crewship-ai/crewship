@@ -143,11 +143,15 @@ func TestApproveWaitpoint_PersonDecides_AfterPeerWasRefused(t *testing.T) {
 }
 
 func TestCompleteWaitpointToken_ExternalHolderDecides(t *testing.T) {
-	h, _, wsID := newPipelineHandlerForCRUDTest(t)
-	_, tok := seedPendingWaitpoint(t, h, wsID)
+	h, user, wsID := newPipelineHandlerForCRUDTest(t)
+	store, tok := seedPendingWaitpoint(t, h, wsID)
+	secret, _, err := store.MintCallbackToken(t.Context(), wsID, tok, user)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
 
 	req := httptest.NewRequest("POST", "/x", strings.NewReader(`{"approved":true}`))
-	req.SetPathValue("token", tok)
+	req.SetPathValue("token", secret)
 	rr := httptest.NewRecorder()
 	h.CompleteWaitpointToken(rr, req)
 

@@ -3,7 +3,27 @@ package backup
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strings"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
+
+// Validate decoded values before SQLite affinity or fork remapping can change
+// their types. The error identifies the field without logging a legacy bearer.
+func validateWaitpointIdentities(dump *DBDump) error {
+	if dump == nil {
+		return nil
+	}
+	for i, row := range dump.Tables["pipeline_waitpoints"] {
+		for _, key := range []string{"token", "workspace_id"} {
+			if value, ok := row[key].(string); !ok || value == "" {
+				return fmt.Errorf("backup: pipeline_waitpoints row %d requires nonempty text in %s", i+1, key)
+			}
+		}
+	}
+	return nil
+}
 
 // Forks need independent source identities, including the token primary key
 // which the generic id-column remapper cannot see. Same-ID restores never call
@@ -17,11 +37,17 @@ func remapWaitpointSources(dump *DBDump, ids map[string]map[string]string) error
 		if !ok || old == "" {
 			continue
 		}
-		token, err := mintHexToken(32)
+		token, err := mintHexToken(16)
 		if err != nil {
 			return fmt.Errorf("backup: remint waitpoint identity: %w", err)
 		}
-		row["token"] = "tok_" + token
+		// A public waitpoint id (#1910), not a capability. The fork does not
+		// inherit the source's callback capability either (#2274's rule for
+		// every capability table): the digest is dropped, so no URL that
+		// completes the source's gate completes the copy, and the unique
+		// digest index cannot collide when the fork lands beside its source.
+		row["token"] = pipeline.WaitpointIDPrefix + token
+		row["callback_token_hash"] = nil
 		tokens[old] = row["token"].(string)
 		for column, table := range map[string]string{"pipeline_run_id": "pipeline_runs", "invoking_crew_id": "crews"} {
 			if old, ok := row[column].(string); ok {
@@ -75,4 +101,70 @@ func remapWaitpointSources(dump *DBDump, ids map[string]map[string]string) error
 		row["payload_json"] = string(encoded)
 	}
 	return nil
+}
+
+// normalizeLegacyWaitpointRestore preserves identity across a boot migration
+// and repeated same-ID restores. Make copies so a failed restore leaves the
+// caller's decoded bundle intact and can be retried.
+func normalizeLegacyWaitpointRestore(dump *DBDump) *DBDump {
+	return normalizeWaitpointIdentities(dump, true)
+}
+
+func normalizeWaitpointIdentities(dump *DBDump, restore bool) *DBDump {
+	normalized := *dump
+	normalized.Tables = maps.Clone(dump.Tables)
+	for _, table := range []string{"pipeline_waitpoints", "inbox_items", "inbox_item_reads"} {
+		if rows, ok := dump.Tables[table]; ok {
+			normalized.Tables[table] = append([]map[string]any(nil), rows...)
+		}
+	}
+	type sourceKey struct{ workspace, token string }
+	migrated := map[sourceKey]string{}
+	for i, row := range normalized.Tables["pipeline_waitpoints"] {
+		old, _ := row["token"].(string)
+		ws, _ := row["workspace_id"].(string)
+		if old == "" || ws == "" {
+			continue
+		}
+		updated := maps.Clone(row)
+		if !strings.HasPrefix(old, pipeline.WaitpointIDPrefix) {
+			id := pipeline.LegacyWaitpointPublicID(ws, old)
+			updated["token"] = id
+			migrated[sourceKey{ws, old}] = id
+		}
+		// Restoring an older snapshot must not reactivate a rotated callback.
+		// Additive restore leaves the digest of an existing current row alone.
+		if restore || old != updated["token"] {
+			updated["callback_token_hash"] = nil
+		}
+		normalized.Tables["pipeline_waitpoints"][i] = updated
+	}
+	inboxIDs := map[string]string{}
+	for i, row := range normalized.Tables["inbox_items"] {
+		if row["kind"] != "waitpoint" {
+			continue
+		}
+		old, _ := row["source_id"].(string)
+		ws, _ := row["workspace_id"].(string)
+		id := migrated[sourceKey{ws, old}]
+		if id == "" || id == old {
+			continue
+		}
+		updated := maps.Clone(row)
+		updated["source_id"] = id
+		if oldID, ok := row["id"].(string); ok {
+			newID := strings.ReplaceAll(oldID, old, id)
+			updated["id"] = newID
+			inboxIDs[oldID] = newID
+		}
+		normalized.Tables["inbox_items"][i] = updated
+	}
+	for i, row := range normalized.Tables["inbox_item_reads"] {
+		if oldID, ok := row["inbox_item_id"].(string); ok && inboxIDs[oldID] != "" {
+			updated := maps.Clone(row)
+			updated["inbox_item_id"] = inboxIDs[oldID]
+			normalized.Tables["inbox_item_reads"][i] = updated
+		}
+	}
+	return &normalized
 }
