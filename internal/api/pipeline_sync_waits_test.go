@@ -336,3 +336,56 @@ func TestSyncWait_DisconnectBeforeAnyWaitStillCancels(t *testing.T) {
 		})
 	}
 }
+
+// The waitpoint token in a WAITING receipt is only a handle. An agent (an
+// internal, crew-bound token) must not be able to approve or deny the step it
+// holds, neither through the approve door nor through the public callback
+// with that same token; only a person can.
+func TestSyncWait_ReceiptTokenCannotBeUsedByAnAgent(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+
+	pending := func() string {
+		var st string
+		_ = rig.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token = ?`, rc.WaitpointToken).Scan(&st)
+		return st
+	}
+	for _, approved := range []bool{true, false} {
+		body := `{"approved":false}`
+		if approved {
+			body = `{"approved":true}`
+		}
+		// The agent's request: no user session, a crew-bound internal token.
+		ar := httptest.NewRequest("POST", "/approve", strings.NewReader(body))
+		ctx := context.WithValue(ar.Context(), ctxInternalTokenCrew, "held-crew")
+		ctx = context.WithValue(ctx, ctxWorkspaceID, rig.ws)
+		ctx = context.WithValue(ctx, ctxRole, "OWNER")
+		ar = ar.WithContext(ctx)
+		ar.SetPathValue("token", rc.WaitpointToken)
+		arr := httptest.NewRecorder()
+		rig.h.ApproveWaitpoint(arr, ar)
+		if arr.Code != http.StatusForbidden {
+			t.Fatalf("agent decision (approved=%v) = %d %s, want 403", approved, arr.Code, arr.Body.String())
+		}
+		if got := pending(); got != "pending" {
+			t.Fatalf("waitpoint is %q after an agent's attempt, want it untouched (pending)", got)
+		}
+	}
+	// The public callback needs its own secret, not the handle.
+	cr := httptest.NewRequest("POST", "/api/v1/waitpoint-tokens/x", strings.NewReader(`{"approved":true}`))
+	cr.SetPathValue("token", rc.WaitpointToken)
+	crr := httptest.NewRecorder()
+	rig.h.CompleteWaitpointToken(crr, cr)
+	if crr.Code == http.StatusOK {
+		t.Fatalf("the receipt's handle completed the wait through the public callback: %s", crr.Body.String())
+	}
+	if got := pending(); got != "pending" {
+		t.Fatalf("waitpoint is %q after the callback attempt, want pending", got)
+	}
+	rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
+}
