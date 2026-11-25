@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -165,12 +166,20 @@ type recordingResumer struct {
 	*fakeChatResumer
 	mu       sync.Mutex
 	recorded []string
+	reasons  []string
 }
 
 func (r *recordingResumer) RecordNotRun(_ context.Context, chatID, trigger, reason string) {
 	r.mu.Lock()
 	r.recorded = append(r.recorded, trigger)
+	r.reasons = append(r.reasons, reason)
 	r.mu.Unlock()
+}
+
+func (r *recordingResumer) reasonList() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.reasons...)
 }
 
 func (r *recordingResumer) got() []string {
@@ -235,4 +244,87 @@ func (r *recordingResumerOverBlocking) got() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.recorded...)
+}
+
+func waitRecorded(t *testing.T, r *recordingResumer, n int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.got()) < n && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(r.got()) < n {
+		t.Fatalf("recorded %v, want %d reasons", r.got(), n)
+	}
+}
+
+func resumeOneSaved(t *testing.T, r *recordingResumer, h *ProvisioningHandler, buildErr error) {
+	t.Helper()
+	h.resumeOne(chatbridge.PendingChatMessage{UserID: "user-1", ChatID: "chat-1", Content: "hi",
+		Opts: ws.ChatMessageOption{OriginalTriggerMessageID: "t1", UserMessagePersisted: true}}, buildErr)
+}
+
+// The build error stored in the shared transcript carries no credentials, no
+// build output beyond the first line, and a bounded length.
+func TestNotRunBuildReasonIsSanitized(t *testing.T) {
+	h, _, _, _ := resumeTestRig(t, skipCfg)
+	r := &recordingResumer{fakeChatResumer: newFakeChatResumer()}
+	h.chatResumer = r
+	secretErr := errors.New("pull https://deploy:s3cretpw@registry.example/img failed token=abc123def " + strings.Repeat("x", 500) + "\nlayer output password=hunter2")
+	resumeOneSaved(t, r, h, secretErr)
+	waitRecorded(t, r, 1)
+	reason := r.reasonList()[0]
+	for _, leak := range []string{"s3cretpw", "abc123def", "hunter2", "layer output"} {
+		if strings.Contains(reason, leak) {
+			t.Fatalf("reason leaks %q: %s", leak, reason)
+		}
+	}
+	if len([]rune(reason)) > 500 {
+		t.Fatalf("reason is %d runes, want it bounded", len([]rune(reason)))
+	}
+}
+
+func TestNotRunRecordedWhenAgentBusyElsewhere(t *testing.T) {
+	h, _, _, _ := resumeTestRig(t, skipCfg)
+	f := newFakeChatResumer()
+	f.err = chatbridge.ErrAgentBusyElsewhere
+	r := &recordingResumer{fakeChatResumer: f}
+	h.chatResumer = r
+	resumeOneSaved(t, r, h, nil)
+	waitRecorded(t, r, 1)
+	if !strings.Contains(r.reasonList()[0], "busy with another run") {
+		t.Fatalf("reason = %q", r.reasonList()[0])
+	}
+}
+
+type panicResumer struct{ *recordingResumer }
+
+func (panicResumer) HandleChatMessage(context.Context, string, string, string, func(ws.ChatEvent), ...ws.ChatMessageOption) error {
+	panic("boom")
+}
+
+func TestNotRunRecordedWhenResumePanics(t *testing.T) {
+	h, _, _, _ := resumeTestRig(t, skipCfg)
+	r := &recordingResumer{fakeChatResumer: newFakeChatResumer()}
+	h.chatResumer = panicResumer{r}
+	resumeOneSaved(t, r, h, nil)
+	waitRecorded(t, r, 1)
+	if !strings.Contains(r.reasonList()[0], "internal error") {
+		t.Fatalf("reason = %q", r.reasonList()[0])
+	}
+}
+
+// A shutdown during the wait for a busy chat is reported as a stop, not as
+// "busy for too long".
+func TestNotRunBusyWaitInterruptedByShutdownSaysStopped(t *testing.T) {
+	h, _, _, _ := resumeTestRig(t, skipCfg)
+	f := newFakeChatResumer()
+	f.err = ws.ErrAgentBusy
+	r := &recordingResumer{fakeChatResumer: f}
+	h.chatResumer = r
+	h.resumeSleep = func(context.Context, time.Duration) bool { h.Stop(); return false }
+	resumeOneSaved(t, r, h, nil)
+	waitRecorded(t, r, 1)
+	if !strings.Contains(r.reasonList()[0], "server was stopped") {
+		t.Fatalf("reason = %q, want the stopped reason", r.reasonList()[0])
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
@@ -702,9 +703,11 @@ func (h *ProvisioningHandler) spawnPendingPerChat(pending []chatbridge.PendingCh
 				if i > 0 && h.bgCtx != nil && h.bgCtx.Err() != nil {
 					h.logger.Warn("server stopping: queued chat messages left unrun",
 						"chat_id", chatID, "remaining", len(queue)-i)
+					ctx, cancel := context.WithTimeout(context.Background(), notRunRecordTimeout)
 					for _, left := range queue[i:] {
-						h.recordNotRun(left, "Your message was saved but did not run: the server was stopped before it could start. Send it again.")
+						h.recordNotRunCtx(ctx, left, notRunStoppedReason)
 					}
+					cancel()
 					return
 				}
 				h.resumeOne(msg, buildErr)
@@ -723,12 +726,52 @@ type notRunRecorder interface {
 // reason is visible after a reload. Messages that were not saved at deferral
 // (Ask forms, page context, documents) are skipped: they are saved on run.
 func (h *ProvisioningHandler) recordNotRun(msg chatbridge.PendingChatMessage, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notRunRecordTimeout)
+	defer cancel()
+	h.recordNotRunCtx(ctx, msg, reason)
+}
+
+// notRunRecordTimeout bounds the writes that explain unrun messages, so a
+// shutdown is never held up by a slow store.
+const notRunRecordTimeout = 5 * time.Second
+
+func (h *ProvisioningHandler) recordNotRunCtx(ctx context.Context, msg chatbridge.PendingChatMessage, reason string) {
 	if !msg.Opts.UserMessagePersisted {
 		return
 	}
 	if rec, ok := h.chatResumer.(notRunRecorder); ok {
-		rec.RecordNotRun(context.Background(), msg.ChatID, msg.Opts.OriginalTriggerMessageID, reason)
+		rec.RecordNotRun(ctx, msg.ChatID, msg.Opts.OriginalTriggerMessageID, reason)
 	}
+}
+
+// shuttingDown reports whether the server is stopping.
+func (h *ProvisioningHandler) shuttingDown() bool {
+	return h.bgCtx != nil && h.bgCtx.Err() != nil
+}
+
+const (
+	notRunStoppedReason = "Your message was saved but did not run: the server was stopped before it could start. Send it again."
+	notRunBusyReason    = "Your message was saved but did not run: this chat was busy for too long."
+	notRunPanicReason   = "Your message was saved but did not run because of an internal error. Send it again."
+	maxBuildDetailRunes = 200
+)
+
+// safeBuildDetail is the build error as shown to people in a chat: first line
+// only, credentials masked, length bounded. Build output and registry URLs can
+// carry secrets, and this text is stored in a shared transcript.
+func safeBuildDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := strings.TrimSpace(err.Error())
+	if i := strings.IndexAny(text, "\r\n"); i >= 0 {
+		text = text[:i]
+	}
+	text = inbox.RedactSecrets(text)
+	if r := []rune(text); len(r) > maxBuildDetailRunes {
+		text = string(r[:maxBuildDetailRunes]) + "…"
+	}
+	return text
 }
 
 // resumeOne runs one queued message and contains a panic in it, so one bad
@@ -737,6 +780,7 @@ func (h *ProvisioningHandler) resumeOne(msg chatbridge.PendingChatMessage, build
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("queued chat message panicked", "chat_id", msg.ChatID, "panic", r)
+			h.recordNotRun(msg, notRunPanicReason)
 		}
 	}()
 	h.resumeMessage(msg, buildErr)
@@ -803,10 +847,16 @@ func (h *ProvisioningHandler) sleepBeforeResume(ctx context.Context, d time.Dura
 	if h.resumeSleep != nil {
 		return h.resumeSleep(ctx, d)
 	}
+	var stopped <-chan struct{}
+	if h.bgCtx != nil {
+		stopped = h.bgCtx.Done()
+	}
 	t := time.NewTimer(d)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
+		return false
+	case <-stopped:
 		return false
 	case <-t.C:
 		return true
@@ -847,8 +897,8 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
-		h.recordNotRun(msg, fmt.Sprintf("Your message was saved but could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr)))
-		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr))) {
+		h.recordNotRun(msg, fmt.Sprintf("Your message was saved but could not run: the environment build failed (%s). %s", safeBuildDetail(buildErr), buildFailureAdvice(buildErr)))
+		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", safeBuildDetail(buildErr), buildFailureAdvice(buildErr))) {
 			return
 		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
@@ -861,7 +911,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 			Type: "error",
 			Content: fmt.Sprintf(
 				"Your message could not run: the environment build failed (%s). %s",
-				buildErr.Error(), buildFailureAdvice(buildErr),
+				safeBuildDetail(buildErr), buildFailureAdvice(buildErr),
 			),
 			Metadata: map[string]any{"reason": "provisioning_failed"},
 		})
@@ -964,7 +1014,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// wait for the live run to end (bounded) and run it then. Nothing is saved
 	// twice (UserMessagePersisted).
 	for try := 0; errors.Is(err, ws.ErrAgentBusy) && !errors.Is(err, chatbridge.ErrAgentBusyElsewhere) && try < busyResumeRetries; try++ {
-		if !h.sleepBeforeResume(ctx, busyResumeDelay<<try) {
+		if h.shuttingDown() || !h.sleepBeforeResume(ctx, busyResumeDelay<<try) {
 			break
 		}
 		err = h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
@@ -1000,32 +1050,30 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// here — so silently dropping the deferred message is no longer
 		// safe: nothing else will deliver it. Tell the sender, the same way
 		// the build-failure branch above does, so they can resend once the
-		// agent is free. The plain ErrAgentBusy case below (the SAME chat
-		// already has a live run — most plausibly the user's own manual
-		// resend racing this one) keeps its zero-trace contract: that run
-		// will settle the UI, and a notice here would be a lie.
+		// agent is free. The turn is already saved, so the reason is also
+		// written to the transcript. The plain ErrAgentBusy case below (the
+		// same chat's live run) waits and retries first.
+		h.recordNotRun(msg, "Your message was saved but did not run: the agent is busy with another run. Send it again once the agent is free.")
 		emit(ws.ChatEvent{
 			Type:     "error",
 			Content:  "Your message was not delivered: the agent is busy with another run. Send it again once the agent is free.",
 			Metadata: map[string]any{"reason": "agent_busy"},
 		})
 		emit(ws.ChatEvent{Type: "done", Content: ""})
-		// Another run (most plausibly the user's own manual resend, racing
-		// this one) already owns the chat's run slot. That run is the one
-		// that will complete and settle the UI; nothing further to do here,
-		// and nothing to stream — ws.ErrAgentBusy's contract is that the
-		// handler emitted NOTHING, and staying silent is what keeps this
-		// from being a second, redundant execution of the same message.
 	case errors.Is(err, ws.ErrAgentBusy):
 		// The chat kept a live run through every retry. The turn is saved but
 		// did not run; say so (no "done": that run owns the live turn).
 		h.logger.Warn("deferred message not resumed: the chat stayed busy",
 			"chat_id", msg.ChatID)
-		h.recordNotRun(msg, "Your message was saved but did not run: this chat was busy for too long.")
+		reason, code := notRunBusyReason, "agent_busy_chat"
+		if h.shuttingDown() {
+			reason, code = notRunStoppedReason, "server_stopped"
+		}
+		h.recordNotRun(msg, reason)
 		emit(ws.ChatEvent{
 			Type:     "error",
-			Content:  "Your message was saved but did not run: this chat was busy for too long.",
-			Metadata: map[string]any{"reason": "agent_busy_chat"},
+			Content:  reason,
+			Metadata: map[string]any{"reason": code},
 		})
 	case errors.Is(err, ws.ErrCrewProvisioning):
 		// The crew needed re-provisioning again (e.g. its cached image was

@@ -235,3 +235,37 @@ func TestQueuedSendIsRefusedWhenAuthorityChangedMeanwhile(t *testing.T) {
 		t.Fatalf("err = %v, want the authority-changed refusal", err)
 	}
 }
+
+// When the queue refuses a message that was already saved (cap reached), the
+// reason is written to the transcript once and the turn counts once.
+func TestQueueRefusalOfASavedMessageIsRecorded(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+	}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	b.SetProvisioningEnqueuer(&stubEnqueuer{resRunning: true, attachNoJob: true})
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "files from d1", func(ws.ChatEvent) {})
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var user, notRun int
+	for _, m := range msgs {
+		switch {
+		case m.Content == "files from d1":
+			user++
+		case strings.HasPrefix(m.ID, "notrun-"):
+			notRun++
+		}
+	}
+	if user != 1 || notRun != 1 {
+		t.Fatalf("transcript has %d user and %d not-run turns, want 1 and 1", user, notRun)
+	}
+	if got := res.total.Load(); got != 2 {
+		t.Fatalf("count = %d, want 2 (saved turn once, reason once)", got)
+	}
+}
