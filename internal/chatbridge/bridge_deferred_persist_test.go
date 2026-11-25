@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -122,5 +123,49 @@ func TestDeferredSendIsPersistedOnceBeforeTheBuild(t *testing.T) {
 				t.Fatalf("acks = %d, want %d", acks, tc.wantAcks)
 			}
 		})
+	}
+}
+
+type deltaResolver struct {
+	mockResolver
+	total atomic.Int32
+}
+
+func (d *deltaResolver) IncrementMessageCount(_ context.Context, _ string, delta int) error {
+	d.total.Add(int32(delta))
+	return nil
+}
+
+// A turn saved at deferral is counted when it is saved, so the count matches
+// the transcript even if the turn never runs, and the resumed run does not
+// count it a second time (#5571).
+func TestDeferredSendIsCountedOnceAtSave(t *testing.T) {
+	t.Parallel()
+	info := &ChatInfo{
+		HumanAuthority: &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "m", MemberRevision: 1},
+		AgentID:        "a1", AgentSlug: "alice", CrewID: "crew-1", CrewSlug: "engineering",
+		WorkspaceID: "ws-1", CLIAdapter: "CLAUDE_CODE", ToolProfile: "CODING", TimeoutSecs: 30, Visibility: "private",
+	}
+	res := &deltaResolver{mockResolver: mockResolver{info: info}}
+	b := testBridgeWithContainer(t, res, &failContainer{})
+	enq := &stubEnqueuer{resRunning: true}
+	b.SetProvisioningEnqueuer(enq)
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "files from d1", func(ws.ChatEvent) {})
+	if !errors.Is(err, ws.ErrCrewProvisioning) {
+		t.Fatalf("send was not deferred: %v", err)
+	}
+	if got := res.total.Load(); got != 1 {
+		t.Fatalf("count after a saved, never-run turn = %d, want 1", got)
+	}
+	info.CachedImage = "crewship-cache:ready"
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{
+		AdapterBinaries:      []string{"claude"},
+		AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"}),
+	}
+	pending := enq.attachMsg
+	pending.Opts.HumanResume = true
+	_ = b.HandleChatMessage(context.Background(), pending.UserID, pending.ChatID, pending.Content, func(ws.ChatEvent) {}, pending.Opts)
+	if got := res.total.Load(); got != 1 {
+		t.Fatalf("count after the resumed run = %d, want the user turn counted once", got)
 	}
 }

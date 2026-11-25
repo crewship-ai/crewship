@@ -928,6 +928,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				return fmt.Errorf("persist user message: %w", err)
 			}
 			broadcastUserMsg()
+			if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+				b.logger.Warn("increment message count (deferred send)", "chat_id", chatID, "error", err)
+			}
 			msgOpt.UserMessagePersisted = true
 		}
 
@@ -1067,6 +1070,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// provisioning has cleared — unless the deferral above already saved and
 	// acknowledged this exact turn before the build ran (#5559).
 	alreadySaved := msgOpt.HumanResume && msgOpt.UserMessagePersisted && msgOpt.OriginalTriggerMessageID == triggerMessageID
+	// A turn saved at deferral was already counted then (below); the run's
+	// own bookkeeping adds only what it writes itself (#5571).
+	countTurn := func(c context.Context, delta int) error {
+		if alreadySaved {
+			delta--
+		}
+		if delta <= 0 {
+			return nil
+		}
+		return b.resolver.IncrementMessageCount(c, chatID, delta)
+	}
 	var persistErr error
 	if !alreadySaved {
 		persistErr = persistUserMsg()
@@ -1557,10 +1571,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Parts:     partAcc.Parts(),
 					Timestamp: repliedAt,
 				})
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				_ = countTurn(cleanCtx, 2)
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+				_ = countTurn(cleanCtx, 1)
 			}
 			if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 				reason := "detached_still_running"
@@ -1620,12 +1634,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Parts:     partAcc.Parts(),
 					Timestamp: repliedAt,
 				})
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				_ = countTurn(cleanCtx, 2)
 				// The partial reply is persisted — it counts as "a reply
 				// landed" for the never-miss-a-reply projection too.
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
-				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+				_ = countTurn(cleanCtx, 1)
 			}
 			if terminalErr == nil && confirmedStatus == "CANCELLED" && errors.Is(runErr, orchestrator.ErrExecutionStopConfirmed) {
 				return fmt.Errorf("run agent: %w", errors.Join(ws.ErrRunCancelled, runErr))
@@ -1647,7 +1661,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
 		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
-			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg)
+			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg, alreadySaved)
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
 		// non-zero inside the container) the same way container-start
@@ -1698,7 +1712,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}); err != nil {
 			b.logger.Error("failed to persist no-output error turn", "error", err, "chat_id", chatID)
 		}
-		if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+		if err := countTurn(ctx, 2); err != nil {
 			b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 		}
 		streamFn(ws.ChatEvent{
@@ -1757,7 +1771,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	// Update message count in DB (user + assistant = 2 messages)
-	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+	if err := countTurn(ctx, 2); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 
@@ -1809,6 +1823,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	text string,
 	parts []conversation.Part,
 	reason string,
+	userAlreadyCounted bool,
 ) {
 	role := conversation.RoleAssistant
 	content := text
@@ -1835,8 +1850,12 @@ func (b *Bridge) persistInBandFailureTurn(
 		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)
 		return
 	}
-	// user turn + failure turn
-	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+	// user turn + failure turn (the user turn may have been counted when saved)
+	delta := 2
+	if userAlreadyCounted {
+		delta = 1
+	}
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, delta); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 }
