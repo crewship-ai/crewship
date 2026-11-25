@@ -373,12 +373,13 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 			// winning run is the one that finishes and settles the UI. Any
 			// frame emitted here would be a second, contradictory verdict on
 			// the same turn.
-			name: "concurrent manual run wins the slot: the resume stays silent, not a duplicate",
+			name: "chat stays busy: bounded retries, then a visible not-run error (no done frame)",
 			run: func(t *testing.T) {
 				h, wsID, crewID, hub := resumeTestRig(t, skipCfg)
 				fake := newFakeChatResumer()
 				fake.err = ws.ErrAgentBusy
 				h.chatResumer = fake
+				h.resumeSleep = func(context.Context, time.Duration) bool { return true }
 
 				obs := hub.AddObserver("session:chat-1", "user-1", 8)
 				defer hub.RemoveObserver("session:chat-1", obs)
@@ -389,14 +390,22 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 
 				h.runProvisioning(crewID, wsID, skipCfg, "", "", job)
 
-				select {
-				case <-fake.called:
-				case <-time.After(3 * time.Second):
-					t.Fatal("timed out waiting for the resume attempt")
+				deadline := time.After(3 * time.Second)
+				for fake.callCount() < busyResumeRetries+1 {
+					select {
+					case <-fake.called:
+					case <-deadline:
+						t.Fatalf("calls = %d, want %d", fake.callCount(), busyResumeRetries+1)
+					}
 				}
-
-				// Refusal must not open/reset a shared session run.
-				expectNoMoreFrames(t, obs)
+				select {
+				case raw := <-obs.Frames():
+					if !strings.Contains(string(raw), "agent_busy_chat") {
+						t.Fatalf("frame = %s, want the not-run error", raw)
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatal("no not-run error after the chat stayed busy")
+				}
 			},
 		},
 		{

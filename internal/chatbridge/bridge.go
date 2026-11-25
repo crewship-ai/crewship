@@ -985,6 +985,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}) {
 				b.logger.Warn("could not attach deferred message to provisioning job",
 					"crew_id", info.CrewID, "chat_id", chatID)
+				streamFn(ws.ChatEvent{Type: "error", Content: "Your message was saved but could not be queued behind the environment build. Send it again once the build finishes.", Metadata: map[string]any{"reason": "queue_unavailable"}})
 			}
 		}
 

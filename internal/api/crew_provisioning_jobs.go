@@ -563,6 +563,18 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 // runs, the build already finished.
 const resumeMessageTimeout = 10 * time.Minute
 
+// maxPendingPerChat bounds how many saved turns of one chat may wait for a
+// crew build. Past it the send is refused with a visible error instead of
+// queueing without limit behind a long build.
+const maxPendingPerChat = 20
+
+// busyResumeRetries and busyResumeDelay bound the wait for a chat's live run to
+// end before a saved queued turn is reported as not run (about 1 minute).
+const (
+	busyResumeRetries = 5
+	busyResumeDelay   = 2 * time.Second
+)
+
 func pendingMessageKey(msg chatbridge.PendingChatMessage) string {
 	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority, msg.Opts.OriginalTriggerMessageID})
 	return string(key)
@@ -597,6 +609,12 @@ func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge
 		// trigger id, from the same sender and authority) is replaced.
 		key := pendingMessageKey(msg)
 		replaced := false
+		queued := 0
+		for i := range job.Pending {
+			if job.Pending[i].ChatID == msg.ChatID {
+				queued++
+			}
+		}
 		for i := range job.Pending {
 			if pendingMessageKey(job.Pending[i]) == key {
 				job.Pending[i] = msg
@@ -605,6 +623,11 @@ func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge
 			}
 		}
 		if !replaced {
+			if queued >= maxPendingPerChat {
+				// The turn is saved but will not run; the caller tells the user.
+				h.mu.Unlock()
+				return false
+			}
 			job.Pending = append(job.Pending, msg)
 		}
 		h.mu.Unlock()
@@ -672,11 +695,30 @@ func (h *ProvisioningHandler) spawnPendingPerChat(pending []chatbridge.PendingCh
 		finish := beginBackgroundWork()
 		go func() {
 			defer finish()
-			for _, msg := range queue {
-				h.resumeMessage(msg, buildErr)
+			for i, msg := range queue {
+				// On shutdown do not hold the process for the whole queue. The
+				// turns are already saved; the rest are left unrun and shown
+				// as such by the transcript.
+				if i > 0 && h.bgCtx != nil && h.bgCtx.Err() != nil {
+					h.logger.Warn("server stopping: queued chat messages left unrun",
+						"chat_id", chatID, "remaining", len(queue)-i)
+					return
+				}
+				h.resumeOne(msg, buildErr)
 			}
 		}()
 	}
+}
+
+// resumeOne runs one queued message and contains a panic in it, so one bad
+// message cannot stop the ones queued behind it.
+func (h *ProvisioningHandler) resumeOne(msg chatbridge.PendingChatMessage, buildErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("queued chat message panicked", "chat_id", msg.ChatID, "panic", r)
+		}
+	}()
+	h.resumeMessage(msg, buildErr)
 }
 
 // Bounds for the re-deferral loop resumeMessage guards against (#2431). A
@@ -896,6 +938,15 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// defer-and-attach path and is handled identically to the first time.
 	msg.Opts.HumanResume = true
 	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
+	// The turn is already saved, so a busy chat must not leave it unanswered:
+	// wait for the live run to end (bounded) and run it then. Nothing is saved
+	// twice (UserMessagePersisted).
+	for try := 0; errors.Is(err, ws.ErrAgentBusy) && !errors.Is(err, chatbridge.ErrAgentBusyElsewhere) && try < busyResumeRetries; try++ {
+		if !h.sleepBeforeResume(ctx, busyResumeDelay<<try) {
+			break
+		}
+		err = h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, emit, msg.Opts)
+	}
 	if err == nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
 		return
@@ -944,11 +995,15 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// handler emitted NOTHING, and staying silent is what keeps this
 		// from being a second, redundant execution of the same message.
 	case errors.Is(err, ws.ErrAgentBusy):
-		// The SAME chat already has a live run — most plausibly the user's own
-		// manual resend racing this one. That run settles the UI; a notice here
-		// would be a lie and a second delivery a duplicate. Stay silent.
-		h.logger.Info("deferred message not resumed: a run was already in progress for this chat",
+		// The chat kept a live run through every retry. The turn is saved but
+		// did not run; say so (no "done": that run owns the live turn).
+		h.logger.Warn("deferred message not resumed: the chat stayed busy",
 			"chat_id", msg.ChatID)
+		emit(ws.ChatEvent{
+			Type:     "error",
+			Content:  "Your message was saved but did not run: this chat was busy for too long.",
+			Metadata: map[string]any{"reason": "agent_busy_chat"},
+		})
 	case errors.Is(err, ws.ErrCrewProvisioning):
 		// The crew needed re-provisioning again (e.g. its cached image was
 		// pruned in the moments since this job completed). HandleChatMessage
