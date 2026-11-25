@@ -133,21 +133,6 @@ func nextChatEvent(t *testing.T, o *ws.Observer) ws.ChatEvent {
 	}
 }
 
-// expectNoMoreFrames fails the test if another frame arrives on o within a
-// short window. Used to pin "silent" contracts (e.g. ws.ErrAgentBusy) where
-// emitting anything at all would mean a duplicate/leaked frame.
-func expectNoMoreFrames(t *testing.T, o *ws.Observer) {
-	t.Helper()
-	select {
-	case raw, ok := <-o.Frames():
-		if ok {
-			t.Fatalf("expected no further frames, got: %s", raw)
-		}
-	case <-time.After(200 * time.Millisecond):
-		// no frame arrived — expected.
-	}
-}
-
 func TestResumeDeferredChatMessage(t *testing.T) {
 	// No features/postCreate/containerEnv/mise: the provisioner's skip path
 	// completes without touching Docker (see TestRunProvisioning_
