@@ -18,10 +18,11 @@ var (
 )
 
 type Lease struct {
-	mu       sync.Mutex
-	file     *os.File
-	path     string
-	identity os.FileInfo
+	mu         sync.Mutex
+	file       *os.File
+	path       string
+	identity   os.FileInfo
+	generation *os.File
 }
 
 // Acquire does not wait and never unlinks the database or a shared lock anchor.
@@ -34,11 +35,20 @@ func Acquire(path string) (*Lease, error) {
 	if err = supportedStorage(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
+	generation, err := lockGeneration(path)
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		if !keep && generation != nil {
+			generation.Close()
+		}
+	}()
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open writer lease: %w", err)
 	}
-	keep := false
 	defer func() {
 		if !keep {
 			_ = file.Close()
@@ -57,7 +67,7 @@ func Acquire(path string) (*Lease, error) {
 	if err = lock(file); err != nil {
 		return nil, err
 	}
-	lease := &Lease{file: file, path: path, identity: identity}
+	lease := &Lease{file: file, path: path, identity: identity, generation: generation}
 	if err = lease.Verify(); err != nil {
 		return nil, err
 	}
@@ -101,6 +111,10 @@ func (l *Lease) Close() error {
 		return nil
 	}
 	err := l.file.Close()
+	if l.generation != nil {
+		err = errors.Join(err, l.generation.Close())
+		l.generation = nil
+	}
 	l.file = nil
 	return err
 }
