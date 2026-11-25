@@ -163,18 +163,34 @@ func (p *Provider) openRoot(path string, create bool) (*scopedRoot, string, erro
 	// agent planted inside its own directory is then confined to it by the
 	// root itself, for existing and not-yet-existing targets alike.
 	unit := storageUnit(rel)
-	dir := filepath.Join(p.basePath, unit)
+	base, err := os.OpenRoot(p.basePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("open storage root: %w", err)
+	}
+	if unit == "." {
+		return &scopedRoot{root: base, unit: unit}, rel, nil
+	}
+	defer base.Close()
+	if beforeUnitCreate != nil {
+		beforeUnitCreate()
+	}
+	// The unit is created and opened through the base's root, so no link on
+	// the way can carry either step out of the storage tree.
 	if create {
-		if err := os.MkdirAll(dir, 0775); err != nil {
+		if err := base.MkdirAll(unit, 0775); err != nil {
 			return nil, "", fmt.Errorf("create parent dir: %w", err)
 		}
 	}
-	root, err := os.OpenRoot(dir)
+	root, err := base.OpenRoot(unit)
 	if err != nil {
 		return nil, "", fmt.Errorf("open storage root: %w", err)
 	}
 	return &scopedRoot{root: root, unit: unit}, rel, nil
 }
+
+// beforeUnitCreate is a test seam: it runs after the path check and before
+// the unit is created or opened.
+var beforeUnitCreate func()
 
 // Read opens the file at the given path for reading.
 func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {

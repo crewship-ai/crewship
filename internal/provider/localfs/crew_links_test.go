@@ -208,3 +208,30 @@ func TestAdministratorLinkedBaseWorks(t *testing.T) {
 		exercise(t, p, "crewA")
 	})
 }
+
+// Creating a crew's directory must not depend on a check made earlier: swap
+// the area directory for a link out of the storage tree between the path
+// check and the creation, and nothing may be created outside.
+func TestCreatingAUnitSurvivesALinkSwappedInBeforeIt(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	p, err := New(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "crews"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beforeUnitCreate = func() {
+		_ = os.Remove(filepath.Join(base, "crews"))
+		_ = os.Symlink(outside, filepath.Join(base, "crews"))
+	}
+	defer func() { beforeUnitCreate = nil }()
+	err = p.Write(context.Background(), "crews/c1/shared/f.txt", strings.NewReader("x"))
+	if err == nil {
+		t.Error("a write into a unit behind a swapped link reported success")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("%d entr(y/ies) created outside the storage tree", len(entries))
+	}
+}
