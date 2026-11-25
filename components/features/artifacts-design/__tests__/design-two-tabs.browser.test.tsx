@@ -70,8 +70,13 @@ type Tabs = { design: { editable: boolean } | null; edit(id: string): void; text
 async function kill(page: Page) {
  const session = await page.context().newCDPSession(page)
  const crashed = page.waitForEvent("crash")
- void session.send("Page.crash").catch(() => {})
- await crashed
+ const sent = session.send("Page.crash").then(() => "resolved", (error: unknown) => `rejected: ${String(error)}`)
+ try {
+  await crashed
+ } catch (error) {
+  // Without this a timeout does not say whether the CDP command reached the renderer (#5679).
+  throw new Error(`no crash event: Page.crash ${await Promise.race([sent, "has no answer yet"])}; page closed=${page.isClosed()}; ${String(error)}`)
+ }
 }
 type Row = { key: string[]; text: string }
 const storedRows = (page: Page) => page.evaluate(() => new Promise<Row[]>((resolve, reject) => { const r = indexedDB.open("crewship-artifact-drafts", 1); r.onerror = () => reject(r.error); r.onsuccess = () => { const db = r.result, tx = db.transaction("drafts", "readonly"), all = tx.objectStore("drafts").getAll(); tx.oncomplete = () => { db.close(); resolve(all.result) } } }))

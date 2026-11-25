@@ -174,6 +174,12 @@ func sessionOriginsFixture(t *testing.T, mode string, optin bool) originFixture 
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
+	// A transport error here only says the session closed; the stage says where
+	// the host closed it (flaky under load, see #4776).
+	fatal := func(e error) {
+		t.Helper()
+		t.Fatalf("%v (session runtime failure stage %q)", e, runtime.FailureStage())
+	}
 	adapter, e := NewSessionCausalAdapter(runtime, key, sessionTestVersions)
 	if e != nil {
 		t.Fatal(e)
@@ -209,11 +215,11 @@ func sessionOriginsFixture(t *testing.T, mode string, optin bool) originFixture 
 	go func() { _, e := runtime.Open(t.Context(), open); opened <- e }()
 	control, e := runtime.NextControl(t.Context())
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	raw, e := control.Frame()
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	var acquire protocol.OwnerAcquire
 	if json.Unmarshal(raw, &acquire) != nil {
@@ -221,27 +227,27 @@ func sessionOriginsFixture(t *testing.T, mode string, optin bool) originFixture 
 	}
 	owner, e := owners.Acquire(t.Context(), key, runtime.RuntimeRef())
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	checkpoint := []byte("synthetic origins fixture, not an application engine")
 	if e = store.Initialize(t.Context(), owner, checkpoint); e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	grant := protocol.OwnerGrant{Type: "owner_grant", RequestID: acquire.RequestID, Scope: acquire.Scope, SessionID: open.SessionID, RuntimeRef: acquire.RuntimeRef, Fence: protocol.Fence{Generation: protocol.Counter(strconv.FormatInt(owner.Generation, 10)), Token: owner.Token}, LeaseDurationMs: "5000", Revision: "0", RenewalNonce: acquire.RenewalNonce, PermissionVersion: "1"}
 	raw, _ = json.Marshal(grant)
 	if e = runtime.ReplyControl(t.Context(), control, raw); e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	snapshot, e := store.ReadFullCheckpoint(t.Context(), owner)
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	restore := protocol.SessionRestore{Type: "session_restore", RequestID: "restore", ControlProfile: PrivateSessionProfile, Scope: open.Scope, SessionID: open.SessionID, RuntimeRef: open.RuntimeRef, Fence: grant.Fence, Versions: open.Versions, Targets: []protocol.TargetVersion{}, Checkpoint: snapshot.Checkpoint}
 	if _, e = runtime.Restore(t.Context(), restore); e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	if e = <-opened; e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	activation, e := runtime.Activate(t.Context(), store, owner, restore)
 	if mode == "missing-echo" {
@@ -251,11 +257,11 @@ func sessionOriginsFixture(t *testing.T, mode string, optin bool) originFixture 
 		return originFixture{store: store, owner: owner, runtime: runtime, clock: clock}
 	}
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	basis, e := activation.InitialFullBasis()
 	if e != nil {
-		t.Fatal(e)
+		fatal(e)
 	}
 	return originFixture{store: store, activation: activation, owner: owner, basis: basis, clock: clock, runtime: runtime}
 }

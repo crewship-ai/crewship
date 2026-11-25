@@ -65,6 +65,11 @@ func (h approvalSweepSignal) Handle(_ context.Context, r slog.Record) error {
 }
 func TestApprovalRetentionSweeperRunsImmediatelyAndStopsAfterPeriodicFailure(t *testing.T) {
 	db := openTestDB(t)
+	// :memory: SQLite is per connection. The sweeper runs on its own goroutine
+	// while this test queries the same *sql.DB, so the pool can open a second
+	// connection that never saw the schema ("no such table: approvals_queue").
+	// Pin one connection so both sides share the one in-memory database.
+	db.SetMaxOpenConns(1)
 	seedApprovalRows(t, db, []seedRow{{id: "old", workspaceID: "ws_test", status: "approved", decidedAgeDays: 120}})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

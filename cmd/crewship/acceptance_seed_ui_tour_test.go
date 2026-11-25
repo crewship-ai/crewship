@@ -92,10 +92,13 @@ func startUITourAcceptanceServer(t *testing.T) (serverURL, cfgPath string, db *s
 
 func runUITourSeedCLI(t *testing.T, serverURL, cfgPath string, extra ...string) (string, error) {
 	t.Helper()
+	// Build before the limit starts: compiling the binary is not the run being
+	// bounded (see runArtifactBinary).
+	binary := buildCrewshipBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	args := append([]string{"seed", "--server", serverURL, "--ui-tour"}, extra...)
-	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), args...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = t.TempDir() // not a git checkout: no .env.local
 	// No provider credentials anywhere in the environment: the tour must not
 	// need them.
