@@ -61,10 +61,6 @@ type forceCopy struct {
 	skipped []string
 }
 
-func cloneForceTree(ctx context.Context, src, dst string, mount uint64) error {
-	return cloneForceNode(ctx, src, dst, mount, &forceCopy{root: src})
-}
-
 func cloneForceNode(ctx context.Context, src, dst string, mount uint64, fc *forceCopy) error {
 	if err := ctx.Err(); err != nil {
 		return err

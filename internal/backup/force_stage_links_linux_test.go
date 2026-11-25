@@ -76,7 +76,7 @@ func TestForceStageSkipsSocketsAndNamesThem(t *testing.T) {
 	writeForceFixture(t, filepath.Join(target, "crewship.db"), "db")
 	ln, err := net.Listen("unix", filepath.Join(target, "run", "crewship.sock"))
 	if err != nil {
-		t.Skipf("cannot create a socket here: %v", err)
+		t.Fatalf("cannot create a socket: %v", err)
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close() // leaves the socket file behind, like a crash

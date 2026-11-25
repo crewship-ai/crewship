@@ -592,6 +592,11 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			continue // only regular files are ever written
 		}
 		name := hdr.Name
+		// An entry name is a relative path inside the bundle: never absolute,
+		// never leaving it. Every destination below is built from it.
+		if !filepath.IsLocal(filepath.FromSlash(name)) {
+			return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
+		}
 		switch {
 		case strings.HasPrefix(name, serviceSnapshotsPrefix):
 			if err := services.extractServiceSnapshot(ctx, tr, hdr, name, &serviceBytes); err != nil {

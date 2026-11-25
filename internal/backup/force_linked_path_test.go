@@ -1,3 +1,5 @@
+//go:build linux
+
 package backup_test
 
 import (
@@ -6,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -57,9 +58,6 @@ func treeState(t *testing.T, root string) []string {
 // A link inside the existing data directory must never let forced recovery
 // write outside its private stage, whatever the link points at.
 func TestForceRecoveryRefusesBundlePathsThroughLinks(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("force publication requires Linux")
-	}
 	cases := []struct {
 		name string
 		// plant replaces the directory at link with a symlink and returns
@@ -127,9 +125,6 @@ func TestForceRecoveryRefusesBundlePathsThroughLinks(t *testing.T) {
 // link naming the data directory still resolves after publication: the
 // published directory has the same path as the original.
 func TestForceRecoveryKeepsUnrelatedLinks(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("force publication requires Linux")
-	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	parent := t.TempDir()
@@ -175,9 +170,6 @@ func TestForceRecoveryKeepsUnrelatedLinks(t *testing.T) {
 // After a forced recovery the published directory opens the way the server
 // opens it (the database writer, with its lease) and still holds the data.
 func TestForceRecoveredInstanceOpensAsServerDatabase(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("force publication requires Linux")
-	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	parent := t.TempDir()

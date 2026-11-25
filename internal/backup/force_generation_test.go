@@ -1,14 +1,14 @@
+//go:build linux
+
 package backup_test
 
 import (
-	"archive/tar"
 	"bytes"
 	"crypto/sha256"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"filippo.io/age"
@@ -17,9 +17,6 @@ import (
 )
 
 func TestForceGenerationWrongIdentity(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("force publication requires Linux")
-	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	target := filepath.Join(t.TempDir(), "data")
@@ -49,60 +46,6 @@ func TestForceGenerationWrongIdentity(t *testing.T) {
 		info, err := os.Stat(filepath.Join(target, p))
 		if err != nil || !os.SameFile(originals[p], info) {
 			t.Errorf("original %s changed after rejected recovery: %v", p, err)
-		}
-	}
-}
-
-type forceEntry struct {
-	info     os.FileInfo
-	uid, gid int
-	hash     [sha256.Size]byte
-}
-
-func forceGenerationSnapshot(t *testing.T, root string) map[string]forceEntry {
-	t.Helper()
-	tree := make(map[string]forceEntry)
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		entry := forceEntry{info: info, uid: header.Uid, gid: header.Gid}
-		if info.Mode().IsRegular() {
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			entry.hash = sha256.Sum256(body)
-		}
-		tree[rel] = entry
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tree
-}
-
-func assertOriginalGeneration(t *testing.T, dir string, before map[string]forceEntry) {
-	t.Helper()
-	after := forceGenerationSnapshot(t, dir)
-	if len(after) != len(before) {
-		t.Errorf("original entry count = %d, want %d", len(after), len(before))
-	}
-	for rel, old := range before {
-		got, ok := after[rel]
-		if !ok || !os.SameFile(old.info, got.info) || old.hash != got.hash ||
-			old.info.Mode() != got.info.Mode() || old.uid != got.uid || old.gid != got.gid ||
-			!old.info.ModTime().Equal(got.info.ModTime()) {
-			t.Errorf("original entry changed: %s", rel)
 		}
 	}
 }
@@ -140,9 +83,6 @@ func wrongSnapshotSizeBundle(t *testing.T, path string) string {
 }
 
 func TestForceGenerationCorruptionAndSwitch(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("force publication requires Linux")
-	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	parent := t.TempDir()
