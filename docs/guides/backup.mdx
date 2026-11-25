@@ -1025,6 +1025,8 @@ stages the changes in a private directory, preserving unrelated files and
 their permissions and ownership. It refuses trees it cannot copy safely,
 including symlinks, hard-linked files and nested mounts. If a preflight check,
 extraction or validation fails, the original directory remains in place.
+On other operating systems, recover into an empty directory. Forced
+replacement requires Linux.
 
 Once the restored copy is ready, Crewship switches it into place atomically.
 The report prints **Previous data directory (retained)** and includes
@@ -1033,6 +1035,12 @@ its database and secrets. If the target contains workbooks, recovery also
 requires `--discard-workbooks` because the recovered instance will lack them.
 Keep the retained directory protected until you have verified the recovered
 instance and decided how long to keep the original.
+
+Linux recovery tests kill the recovery process at the major stages and on
+both sides of the directory exchange. They also exercise an out-of-space
+write during staging and simulate an out-of-space failure at publication.
+These checks cover process interruption and those specific storage errors.
+Host power loss and recovery on a physically full filesystem remain untested.
 
 To roll back, stop Crewship and every writer and keep them stopped during
 both directory moves. Record the active path and the retained path from the

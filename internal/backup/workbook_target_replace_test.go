@@ -3,6 +3,7 @@ package backup_test
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -71,6 +72,9 @@ func TestReplaceRestoreRefusesTargetWorkbooks(t *testing.T) {
 // contains a workbook, so it refuses exactly like a replace restore unless the
 // operator acknowledges the loss with DiscardWorkbooks (--discard-workbooks).
 func TestForceRecoverRefusesTargetWorkbooks(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("force publication requires Linux")
+	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	dir := filepath.Join(t.TempDir(), "installation")

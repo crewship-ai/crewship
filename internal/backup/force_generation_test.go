@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 )
 
 func TestForceGenerationWrongIdentity(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("force publication requires Linux")
+	}
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
 	target := filepath.Join(t.TempDir(), "data")
@@ -38,8 +42,8 @@ func TestForceGenerationWrongIdentity(t *testing.T) {
 	}
 	opts.Force = true
 	opts.Identities = []age.Identity{other}
-	if _, err = backup.RecoverInstance(t.Context(), opts); err == nil {
-		t.Fatal("accepted the wrong recovery identity")
+	if _, err = backup.RecoverInstance(t.Context(), opts); !errors.Is(err, backup.ErrDecryption) {
+		t.Fatalf("expected decryption refusal, got %v", err)
 	}
 	for _, p := range paths {
 		info, err := os.Stat(filepath.Join(target, p))
