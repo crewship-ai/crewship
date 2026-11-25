@@ -846,7 +846,7 @@ func (ex *extractedInstance) validateForceContents(ctx context.Context, m *Manif
 	if !slices.Equal(slices.Sorted(maps.Keys(keys)), slices.Sorted(slices.Values(inst.KitVersions))) {
 		return errors.New("backup: recovery kit key versions differ from the manifest")
 	}
-	db, err := openSnapshot(filepath.Join(dataDir, "crewship.db"))
+	db, err := openStagedIntegrityDB(filepath.Join(dataDir, "crewship.db"))
 	if err != nil {
 		return err
 	}
@@ -901,6 +901,14 @@ func recoveryEnvelopeInventory(ctx context.Context, db *sql.DB, keys map[string]
 		return nil
 	})
 	return counts, err
+}
+
+// This handle is only for the private staged database. SQLite omits CHECK
+// expressions when parsing a schema on a read-only B-tree. Open the existing
+// file in rw mode so integrity_check sees those expressions, and enable
+// query_only on every connection before running any verification SQL.
+func openStagedIntegrityDB(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+path+"?mode=rw&_pragma=query_only(1)&_pragma=busy_timeout(5000)")
 }
 
 func checkRecoveryIntegrity(ctx context.Context, db *sql.DB) error {
@@ -1403,7 +1411,7 @@ func (v *forceRecoveryValidation) verify(ctx context.Context, rep *RecoverReport
 	if kit == nil {
 		keys = v.migrationKeys
 	}
-	db, err := openSnapshot(filepath.Join(dataDir, "crewship.db"))
+	db, err := openStagedIntegrityDB(filepath.Join(dataDir, "crewship.db"))
 	if err != nil {
 		return err
 	}
