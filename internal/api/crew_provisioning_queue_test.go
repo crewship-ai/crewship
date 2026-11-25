@@ -10,8 +10,10 @@ import (
 
 // Two sends saved as separate turns while a crew builds are both run, in the
 // order they arrived, one after the other (#5571).
+const skipCfg = `{"image":"ubuntu:22.04"}`
+
 func TestProvisioningQueueRunsEverySavedTurnInOrder(t *testing.T) {
-	h, wsID, crewID, _ := resumeTestRig(t, "")
+	h, wsID, crewID, _ := resumeTestRig(t, skipCfg)
 	fake := newFakeChatResumer()
 	h.chatResumer = fake
 	job := covJob(crewID)
@@ -22,7 +24,7 @@ func TestProvisioningQueueRunsEverySavedTurnInOrder(t *testing.T) {
 			t.Fatal("attach failed")
 		}
 	}
-	h.runProvisioning(crewID, wsID, "", "", "", job)
+	h.runProvisioning(crewID, wsID, skipCfg, "", "", job)
 	var got []string
 	for i := 0; i < 2; i++ {
 		select {
