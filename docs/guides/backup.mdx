@@ -1033,7 +1033,7 @@ Three proofs, never collapsed into one flag:
 | Proof | How | What it shows |
 |---|---|---|
 | 1 · checksum | every new bundle | the file is the one that was written |
-| 2 · contents checked | `crewship admin instance backups check <path>` | decrypted, every section read, row counts and file digests match the manifest |
+| 2 · contents checked | `crewship admin instance backups check <path>` | decrypted, every section read, row counts and file digests match the manifest, and SQLite's `integrity_check` and `foreign_key_check` find nothing in the database snapshot (a bundle that predates the recorded check reads as unverified) |
 | 3 · test restore | `crewship backup drill --bundle <path> --post` | restored in isolation; attachments open, memory loads, credentials unlock, journals verify, routines stay held |
 
 A drill runs the same restore as `crewship recover` into a throwaway directory

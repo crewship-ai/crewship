@@ -36,6 +36,7 @@ const (
 	DrillCheckJournal     = "journal_verifies"
 	DrillCheckHeld        = "routines_held"
 	DrillCheckServiceData = "service_data_staged"
+	DrillCheckDatabase    = "database_integrity"
 
 	DrillStatusOK      = "ok"
 	DrillStatusFailed  = "failed"
@@ -133,6 +134,9 @@ func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error)
 
 	keys, source, chainSeed := drillKeys(restore.Kit(), opts.UseEnvKeys)
 	rep.KeySource = source
+	// SQLite's own checks first, on the throwaway copy and before anything
+	// opens it for writing.
+	dbCheck := drillDatabase(ctx, restore.DatabasePath)
 	db, err := database.Open("file:" + restore.DatabasePath)
 	if err != nil {
 		rep.Error = err.Error()
@@ -143,6 +147,7 @@ func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error)
 	defer func() { _ = db.Close() }()
 
 	rep.Checks = append(rep.Checks,
+		dbCheck,
 		drillAttachments(ctx, db.DB, RecoveredStoreDir(dataDir, StoreOutput)),
 		drillMemory(ctx, db.DB),
 		drillCredentials(ctx, db.DB, keys, source),
@@ -400,6 +405,17 @@ func drillJournal(ctx context.Context, db *sql.DB, chainSeed string, kits ...*Re
 	if c.Status == DrillStatusOK {
 		c.Detail = fmt.Sprintf("%d audit chain(s) verify (%d entries)", c.Checked, entries)
 	}
+	return c
+}
+
+func drillDatabase(ctx context.Context, path string) DrillCheck {
+	c := DrillCheck{Name: DrillCheckDatabase, Checked: 1}
+	r := CheckDatabaseFileIntegrity(ctx, path, 0)
+	if r.Verified() {
+		c.Status, c.Detail = DrillStatusOK, r.Summary()
+		return c
+	}
+	c.Status, c.Failed, c.Detail = DrillStatusFailed, 1, r.Summary()
 	return c
 }
 

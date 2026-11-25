@@ -140,6 +140,10 @@ type InstanceContents struct {
 	CrewArchives []string `json:"crew_archives,omitempty" yaml:"crew_archives,omitempty"`
 	// HoldMS is how long writes were held for the consistent copy.
 	HoldMS int64 `json:"hold_ms" yaml:"hold_ms"`
+	// DatabaseCheck is SQLite's own verdict on the database snapshot,
+	// taken on the private copy after writes were released. Nil on bundles
+	// written before the check existed: those read as unverified.
+	DatabaseCheck *DatabaseCheck `json:"database_check,omitempty" yaml:"database_check,omitempty"`
 }
 
 // InstanceWorkspace summarises one workspace in an instance bundle.
@@ -248,6 +252,10 @@ type InstanceOptions struct {
 	// bundle (disk_mbps). Zero / nil: library default, no cap.
 	EncoderConcurrency int
 	DiskThrottle       Throttle
+	// DatabaseCheckTimeout bounds the SQLite check of the snapshot (default
+	// DefaultDatabaseCheckTimeout). Running out records status "error"; it
+	// never fails the backup.
+	DatabaseCheckTimeout time.Duration
 }
 
 // InstanceResult is a finished instance bundle.
@@ -607,6 +615,20 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 
 	// The database image goes into the payload from memory; the in-memory
 	// database is freed as soon as it is serialized.
+	// SQLite's own checks run on the private in-memory copy, after the quiet
+	// window was released. A finding never fails the backup; it is recorded.
+	if beforeDatabaseCheck != nil {
+		beforeDatabaseCheck()
+	}
+	dbCheck := CheckDatabaseIntegrity(ctx, snap, opts.DatabaseCheckTimeout)
+	inst.DatabaseCheck = &dbCheck
+	contents.Incomplete = append(contents.Incomplete, databaseCheckIncomplete(dbCheck)...)
+	if dbCheck.Status != DatabaseCheckOK {
+		slog.Warn("instance backup: the database snapshot did not pass SQLite's checks", "status", dbCheck.Status, "findings", dbCheck.FindingsTotal, "error", dbCheck.Error)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	dbImage, err := memSnap.Serialize(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("backup: serialize database snapshot: %w", err)

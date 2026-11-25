@@ -240,6 +240,8 @@ var incompleteNoun = map[string][2]string{
 	backup.IncompleteFileMissing:        {"file missing", "files missing"},
 	backup.IncompleteFileMismatch:       {"file that does not match", "files that do not match"},
 	backup.IncompleteCredentialLocked:   {"credential that does not unlock", "credentials that do not unlock"},
+	backup.IncompleteDatabaseUnchecked:  {"database that could not be checked", "databases that could not be checked"},
+	backup.IncompleteDatabaseDamaged:    {"SQLite problem in the database", "SQLite problems in the database"},
 }
 
 // describeIncomplete sums the items per kind, in the order the kinds first

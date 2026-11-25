@@ -75,6 +75,9 @@ type RetentionCandidate struct {
 	// row written before gaps were recorded).
 	Complete   bool
 	Incomplete bool
+	// DatabaseDamaged: the catalog recorded a damaged database snapshot
+	// (database_damaged). Unverified or unchecked bundles are not damaged.
+	DatabaseDamaged bool
 }
 
 func (c RetentionCandidate) groupKey() string {
@@ -105,6 +108,7 @@ func PlanRetention(cands []RetentionCandidate, p RetentionPolicy, now time.Time)
 		})
 		checked := 0
 		restoredOK, completeChecked := false, false
+		intactKept := false
 		days, weeks, months := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for rank, i := range idx {
 			c := cands[i]
@@ -127,6 +131,12 @@ func PlanRetention(cands []RetentionCandidate, p RetentionPolicy, now time.Time)
 			// complete bundle whose test restore succeeded, and the newest
 			// complete bundle whose contents were checked. Neither can be
 			// displaced by newer partial or unchecked copies.
+			// The newest bundle whose database is not known damaged is never
+			// dropped because newer damaged copies took the floor.
+			if !c.DatabaseDamaged && !intactKept {
+				intactKept = true
+				kept[i] = true
+			}
 			if c.Complete && c.DrillResult == "ok" && !restoredOK {
 				restoredOK = true
 				kept[i] = true
@@ -258,6 +268,11 @@ func rotateWithPolicy(ctx context.Context, db *sql.DB, dir, workspaceID string, 
 			// nil Incomplete is "not recorded", never "complete".
 			c.Complete = m.Incomplete != nil && len(m.Incomplete) == 0
 			c.Incomplete = len(m.Incomplete) > 0
+			for _, it := range m.Incomplete {
+				if it.Kind == IncompleteDatabaseDamaged {
+					c.DatabaseDamaged = true
+				}
+			}
 			if m.ProofLevel > 0 {
 				c.ProofLevel = m.ProofLevel
 			}
