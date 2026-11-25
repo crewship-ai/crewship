@@ -1,0 +1,56 @@
+[
+  {
+    "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+    "label": "Node 22 (Debian)",
+    "description": "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
+    "recommended": true,
+    "colorKey": "node"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+    "label": "Debian 12 (bookworm)",
+    "description": "Minimal Debian with common utilities. Add features/runtimes as needed.",
+    "colorKey": "debian"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+    "label": "Ubuntu 24.04",
+    "description": "Ubuntu LTS with common utilities.",
+    "colorKey": "ubuntu"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+    "label": "Python 3.12 (Debian)",
+    "description": "Python 3.12 + pip + venv pre-installed on Debian.",
+    "colorKey": "python"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
+    "label": "Go 1.23 (Debian)",
+    "description": "Go 1.23 toolchain on Debian.",
+    "colorKey": "go"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/rust:bookworm",
+    "label": "Rust (Debian)",
+    "description": "Rust stable + cargo on Debian.",
+    "colorKey": "rust"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/java:21-bookworm",
+    "label": "Java 21 (OpenJDK)",
+    "description": "OpenJDK 21 + Maven/Gradle on Debian.",
+    "colorKey": "java"
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/universal:2",
+    "label": "Universal (kitchen sink)",
+    "description": "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB."
+  },
+  {
+    "image": "mcr.microsoft.com/devcontainers/base:alpine-3.20",
+    "label": "Alpine 3.20 (experimental)",
+    "description": "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
+    "colorKey": "alpine"
+  }
+]

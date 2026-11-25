@@ -18,6 +18,9 @@ type ImageReference struct {
 	Ref        string
 	Required   bool
 	BuildInput bool
+	// ConfiguredBaseOnly means every occurrence is a configured runtime or devcontainer base.
+	// A service or optional rollback selection takes precedence over this provenance.
+	ConfiguredBaseOnly bool
 }
 
 type ImageReferenceProtector interface {
@@ -76,11 +79,16 @@ func SelectedImageReferencesAt(ctx context.Context, q ImageSelectionQuery, now t
 		return nil, err
 	}
 	defer rows.Close()
-	wanted := map[string]bool{}
-	add := func(ref string, required bool) {
-		if ref != "" {
-			wanted[ref] = wanted[ref] || required
+	wanted := map[string]ImageReference{}
+	add := func(ref ImageReference) {
+		if ref.Ref == "" {
+			return
 		}
+		if existing, ok := wanted[ref.Ref]; ok {
+			ref.Required = existing.Required || ref.Required
+			ref.ConfiguredBaseOnly = existing.ConfiguredBaseOnly && ref.ConfiguredBaseOnly
+		}
+		wanted[ref.Ref] = ref
 	}
 	for rows.Next() {
 		var current, last, previous, base, config, deleted, services string
@@ -93,15 +101,15 @@ func SelectedImageReferencesAt(ctx context.Context, q ImageSelectionQuery, now t
 				continue
 			}
 		}
-		add(current, true)
-		add(last, false)
-		add(previous, false)
+		add(ImageReference{Ref: current, Required: true})
+		add(ImageReference{Ref: last})
+		add(ImageReference{Ref: previous})
 		inputs, err := ConfiguredImageReferences(base, config, services)
 		if err != nil {
 			return nil, err
 		}
 		for _, input := range inputs {
-			add(input.Ref, false)
+			add(input)
 		}
 
 	}
@@ -109,8 +117,8 @@ func SelectedImageReferencesAt(ctx context.Context, q ImageSelectionQuery, now t
 		return nil, err
 	}
 	refs := make([]ImageReference, 0, len(wanted))
-	for ref, required := range wanted {
-		refs = append(refs, ImageReference{Ref: ref, Required: required})
+	for _, ref := range wanted {
+		refs = append(refs, ref)
 	}
 	return refs, nil
 }
@@ -119,13 +127,13 @@ func SelectedImageReferencesAt(ctx context.Context, q ImageSelectionQuery, now t
 // exists. Unreadable configuration is incomplete evidence, never permission to
 // release references that could belong to it.
 func ConfiguredImageReferences(base, config, services string) ([]ImageReference, error) {
-	refs := []ImageReference{{Ref: base}}
+	refs := []ImageReference{{Ref: base, ConfiguredBaseOnly: true}}
 	if config != "" {
 		cfg, err := devcontainer.ParseBytes([]byte(config))
 		if err != nil {
 			return nil, fmt.Errorf("environment references unavailable: unreadable crew configuration: %w", err)
 		}
-		refs = append(refs, ImageReference{Ref: cfg.Image})
+		refs = append(refs, ImageReference{Ref: cfg.Image, ConfiguredBaseOnly: true})
 	}
 	if strings.TrimSpace(services) != "" {
 		plain, err := serviceconfig.Open(services)

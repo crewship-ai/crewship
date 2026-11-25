@@ -404,6 +404,9 @@ func (p *ImageReferences) releaseMissing(ctx context.Context, gate *resourcelife
 		// didn't record it. Only a confirmed resolution to another config ID
 		// establishes that this selection doesn't need the pin.
 		resolved, err := p.client.ImageInspect(ctx, ref.Ref)
+		if cerrdefs.IsNotFound(err) && absentConfiguredBase(ref, pin.Config.Labels) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("cannot resolve selection while reconciling missing image: %w", err)
 		}
@@ -428,6 +431,17 @@ func (p *ImageReferences) releaseMissing(ctx context.Context, gate *resourcelife
 	}
 	_, err = p.client.ContainerRemove(ctx, pin.ID, client.ContainerRemoveOptions{Force: false, RemoveVolumes: false})
 	return err
+}
+
+// A base that has never been pulled is normal. Its mutable tag cannot
+// currently resolve to this missing feature. Exact selections, recorded pin
+// aliases, and all uncertain inspections remain protected.
+func absentConfiguredBase(ref resourcelifecycle.ImageReference, labels map[string]string) bool {
+	if !ref.ConfiguredBaseOnly || ref.Required || ref.BuildInput || labels[devcontainer.ImageKindLabel] != devcontainer.ImageKindFeature || devcontainer.ImageAcquisitionRef(labels) == "" {
+		return false
+	}
+	// A registry miss for an operator snapshot or custom tag remains ambiguous.
+	return devcontainer.IsBuiltinBaseImage(ref.Ref)
 }
 
 func (p *ImageReferences) validateMissingPin(ctx context.Context, c client.ContainerInspectResult, containerID, id string) error {

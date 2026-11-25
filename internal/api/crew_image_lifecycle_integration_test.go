@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -269,27 +270,60 @@ func TestIsolatedFeatureTagReplacement(t *testing.T) {
 		}
 		return cmd("image", "inspect", "--format", "{{.Id}}", tag)
 	}
-	old := export("first")
+	// Each export moves the same feature tag. Keep the previous two config IDs
+	// in separate created references to exercise a backlog in one pass.
 	pins := dockerprovider.NewImageReferences(cli, owner)
-	if _, err := pins.Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: old, Required: true}}); err != nil {
-		t.Fatal(err)
+	var oldIDs []string
+	for _, generation := range []string{"first", "second"} {
+		id := export(generation)
+		if _, err := pins.Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+			t.Fatal(err)
+		}
+		oldIDs = append(oldIDs, id)
 	}
-	newID := export("second")
-	if old == newID {
+	newID := export("third")
+	if oldIDs[0] == oldIDs[1] || slices.Contains(oldIDs, newID) {
 		t.Fatal("fixture did not move tag")
 	}
-	_, inspectErr := cli.ImageInspect(ctx, old)
-	if inspectErr != nil && !errdefs.IsNotFound(inspectErr) {
-		t.Fatal(inspectErr)
+	missing := 0
+	for _, id := range oldIDs {
+		if _, err := cli.ImageInspect(ctx, id); errdefs.IsNotFound(err) {
+			missing++
+		} else if err != nil {
+			t.Fatal(err)
+		}
 	}
-	t.Logf("tag moved, prior config ID still inspectable=%t", inspectErr == nil)
-	if err := pins.Reconcile(ctx, &resourcelifecycle.ImageUse{}, func(context.Context) ([]resourcelifecycle.ImageReference, error) { return nil, nil }); err != nil {
+	t.Logf("reexported feature: %d/%d prior config IDs absent from the catalog", missing, len(oldIDs))
+	source := cmd("create", "--network", "none", "gc-fixture:base")
+	selectedTag := "crewship-cache:" + owner + "-333333333333"
+	cmd("commit", "--change", "LABEL "+devcontainer.ImageInstanceLabel+"="+owner, "--change", "LABEL "+devcontainer.ImageKindLabel+"=crew", source, selectedTag)
+	cmd("rm", source)
+	selected := cmd("image", "inspect", "--format", "{{.Id}}", selectedTag)
+	const base = "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm"
+	if _, err := cli.ImageInspect(ctx, base); !errdefs.IsNotFound(err) {
+		t.Fatalf("expected confirmed absent registry base, got %v", err)
+	}
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	for _, crew := range []string{"first", "second", "third"} {
+		seedCrewRow(t, db, crew, ws, crew, crew)
+		mustExec(t, db, "UPDATE crews SET runtime_image=?,cached_image=? WHERE id=?", base, selected, crew)
+	}
+	desired := func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		return resourcelifecycle.SelectedImageReferences(ctx, db)
+	}
+	if err := pins.Reconcile(ctx, resourcelifecycle.Images(db), desired); err != nil {
 		t.Fatal(err)
 	}
-	left := cmd("ps", "-aq", "--filter", "label=crewship.image.reference.instance-id="+owner)
-	if left != "" {
-		t.Fatalf("unselected fixture reference remains: %s", left)
+	left := strings.Fields(cmd("ps", "-aq", "--filter", "label=crewship.image.reference.instance-id="+owner))
+	if len(left) != 1 {
+		t.Fatalf("expected only the selected crew reference, got %d", len(left))
 	}
+	if id := cmd("inspect", "--format", "{{.Image}}", left[0]); strings.TrimPrefix(id, "sha256:") != strings.TrimPrefix(selected, "sha256:") {
+		t.Fatalf("remaining pin points at %s, expected %s", id, selected)
+	}
+
 }
 
 // A restored database can lack a still-valuable crew. Observe an empty,

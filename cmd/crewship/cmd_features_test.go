@@ -30,8 +30,7 @@ func TestFeaturesCmdStructure(t *testing.T) {
 
 // TestBaseImagesCatalogIntegrity pins the static catalog so a thoughtless
 // reorder or typo doesn't silently deliver a broken devcontainer image to
-// new crews. The list mirrors the frontend copy in runtime-config.tsx; if
-// they drift the CLI operator sees one menu and the UI user sees another.
+// new crews. The CLI and frontend read the same embedded catalog.
 func TestBaseImagesCatalogIntegrity(t *testing.T) {
 	t.Parallel()
 

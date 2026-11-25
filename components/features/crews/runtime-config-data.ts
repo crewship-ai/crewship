@@ -1,3 +1,4 @@
+import catalog from "@/config/base-images.json"
 import type { IconType } from "react-icons"
 import {
   SiAlpinelinux,
@@ -30,84 +31,33 @@ const CATEGORY_LABELS: Record<string, string> = {
 const CATEGORY_FILTERS: CategoryFilter[] = ["all", "languages", "tools", "cloud", "databases"]
 
 
-const BASE_IMAGES: Array<{
-  value: string
+const BASE_IMAGE_ICONS: Record<string, IconType> = {
+  node: SiNodedotjs,
+  debian: SiDebian,
+  ubuntu: SiUbuntu,
+  python: SiPython,
+  go: SiGo,
+  rust: SiRust,
+  java: SiOpenjdk,
+  alpine: SiAlpinelinux,
+}
+
+const baseImageRows: Array<{
+  image: string
   label: string
   description: string
-  icon: IconType
-  /** BRAND_COLORS key — used to tint the card icon with the official
-   *  brand color. Stored explicitly because img.value is a full
-   *  registry path (mcr.microsoft.com/devcontainers/…) and parsing
-   *  it for a brand key is brittle. */
   colorKey?: string
   recommended?: boolean
-}> = [
-  {
-    value: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
-    label: "Node 22 (Debian) — recommended",
-    description: "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
-    icon: SiNodedotjs,
-    colorKey: "node",
-    recommended: true,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:bookworm",
-    label: "Debian 12 (bookworm)",
-    description: "Minimal Debian with common utilities. Add features/runtimes as needed.",
-    icon: SiDebian,
-    colorKey: "debian",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
-    label: "Ubuntu 24.04",
-    description: "Ubuntu LTS with common utilities.",
-    icon: SiUbuntu,
-    colorKey: "ubuntu",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
-    label: "Python 3.12 (Debian)",
-    description: "Python 3.12 + pip + venv pre-installed on Debian.",
-    icon: SiPython,
-    colorKey: "python",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
-    label: "Go 1.23 (Debian)",
-    description: "Go 1.23 toolchain on Debian.",
-    icon: SiGo,
-    colorKey: "go",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/rust:bookworm",
-    label: "Rust (Debian)",
-    description: "Rust stable + cargo on Debian.",
-    icon: SiRust,
-    colorKey: "rust",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/java:21-bookworm",
-    label: "Java 21 (OpenJDK)",
-    description: "OpenJDK 21 + Maven/Gradle on Debian.",
-    icon: SiOpenjdk,
-    colorKey: "java",
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/universal:2",
-    label: "Universal (kitchen sink)",
-    description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
-    icon: Boxes,
-    // No colorKey — Boxes is a generic lucide icon, not a brand mark.
-    // Falls through to muted-foreground.
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:alpine-3.20",
-    label: "Alpine 3.20 (experimental)",
-    description: "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
-    icon: SiAlpinelinux,
-    colorKey: "alpine",
-  },
-]
+}> = catalog
+
+const BASE_IMAGES = baseImageRows.map(({ image, label, description, recommended, colorKey }) => ({
+  value: image,
+  label: recommended ? label + " — recommended" : label,
+  description,
+  icon: (colorKey && BASE_IMAGE_ICONS[colorKey]) || Boxes,
+  colorKey,
+  recommended,
+}))
 
 // ---- Helpers --------------------------------------------------------------
 

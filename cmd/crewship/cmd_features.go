@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 var featuresCmd = &cobra.Command{
@@ -122,63 +123,7 @@ var featuresInfoCmd = &cobra.Command{
 	},
 }
 
-// baseImageEntry mirrors the UI's BASE_IMAGES catalog in
-// components/features/crews/runtime-config.tsx. Keep these two lists in sync.
-type baseImageEntry struct {
-	Image       string `json:"image" yaml:"image"`
-	Label       string `json:"label" yaml:"label"`
-	Description string `json:"description" yaml:"description"`
-	Recommended bool   `json:"recommended,omitempty" yaml:"recommended,omitempty"`
-}
-
-var baseImagesCatalog = []baseImageEntry{
-	{
-		Image:       "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
-		Label:       "Node 22 (Debian)",
-		Description: "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
-		Recommended: true,
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/base:bookworm",
-		Label:       "Debian 12 (bookworm)",
-		Description: "Minimal Debian with common utilities. Add features/runtimes as needed.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
-		Label:       "Ubuntu 24.04",
-		Description: "Ubuntu LTS with common utilities.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
-		Label:       "Python 3.12 (Debian)",
-		Description: "Python 3.12 + pip + venv pre-installed on Debian.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
-		Label:       "Go 1.23 (Debian)",
-		Description: "Go 1.23 toolchain on Debian.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/rust:bookworm",
-		Label:       "Rust (Debian)",
-		Description: "Rust stable + cargo on Debian.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/java:21-bookworm",
-		Label:       "Java 21 (OpenJDK)",
-		Description: "OpenJDK 21 + Maven/Gradle on Debian.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/universal:2",
-		Label:       "Universal (kitchen sink)",
-		Description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
-	},
-	{
-		Image:       "mcr.microsoft.com/devcontainers/base:alpine-3.20",
-		Label:       "Alpine 3.20 (experimental)",
-		Description: "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
-	},
-}
+var baseImagesCatalog = devcontainer.BuiltinBaseImages()
 
 var featuresBaseImagesCmd = &cobra.Command{
 	Use:   "base-images",

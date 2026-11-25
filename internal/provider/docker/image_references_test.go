@@ -597,3 +597,80 @@ func TestImageReferenceRegistryDigestProtectsDistinctConfigID(t *testing.T) {
 		})
 	}
 }
+
+// The dormant feature has lost its catalog entry. A cache miss for an
+// optional external base is a different observation from a failed inspect.
+func TestMissingFeaturePinWithColdConfiguredBase(t *testing.T) {
+	const base = "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm"
+	modes := []string{"base not pulled", "base selects missing feature", "base selects another image", "engine failure", "unknown origin", "required reference", "active build input", "managed feature", "managed cache", "operator snapshot", "private base", "similar MCR repository", "similar MCR registry", "uncataloged tag", "service only", "absent digest", "recorded alias", "no feature provenance", "unparseable tag"}
+	for _, base := range devcontainer.BuiltinBaseImages() {
+		modes = append(modes, base.Image)
+	}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			f, id := referenceFixture(t)
+			pins := NewImageReferences(f, referenceBorrower)
+			if _, err := pins.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+				t.Fatal(err)
+			}
+			containerID := strings.Repeat("c", 64)
+			labels := f.containers[containerID].Container.Config.Labels
+			// Docker retains the source image labels that weren't overridden
+			// when the reference container was created.
+			labels[devcontainer.ImageInstanceLabel] = referenceOwner
+			labels[devcontainer.ImageKindLabel] = devcontainer.ImageKindFeature
+			labels[devcontainer.ImageAcquisitionKeyLabel] = strings.Repeat("a", 64)
+			img := f.images[id]
+			delete(f.images, id)
+			ref := resourcelifecycle.ImageReference{Ref: base, ConfiguredBaseOnly: true}
+			catalogBase := strings.HasPrefix(mode, "mcr.microsoft.com/")
+			if catalogBase {
+				ref.Ref = mode
+			}
+			switch mode {
+			case "base selects missing feature":
+				f.images[base] = img
+			case "base selects another image":
+				img.ID = "sha256:" + strings.Repeat("3", 64)
+				f.images[base] = img
+			case "engine failure":
+				pins.client = referenceInspectError{f, base}
+			case "active build input":
+				ref.BuildInput = true
+			case "unknown origin", "service only":
+				ref.ConfiguredBaseOnly = false
+			case "required reference":
+				ref.Required = true
+			case "managed feature":
+				ref.Ref = "docker.io/library/crewship-feat:other"
+			case "uncataloged tag":
+				ref.Ref = "mcr.microsoft.com/devcontainers/javascript-node:custom"
+			case "managed cache":
+				ref.Ref = "crewship-cache:other"
+			case "operator snapshot":
+				ref.Ref = "docker.io/crewship-env/ops:snapshot"
+			case "private base":
+				ref.Ref = "registry.example/private/base:dev"
+			case "similar MCR repository":
+				ref.Ref = "mcr.microsoft.com/devcontainers/javascript-node-local:22-bookworm"
+			case "similar MCR registry":
+				ref.Ref = "mcr.microsoft.com.example/devcontainers/javascript-node:22-bookworm"
+			case "absent digest":
+				ref.Ref = "registry.example/feature@sha256:" + strings.Repeat("3", 64)
+			case "recorded alias":
+				labels[imageReferenceTagsLabel] = base
+			case "no feature provenance":
+				delete(labels, devcontainer.ImageAcquisitionKeyLabel)
+			case "unparseable tag":
+				ref.Ref = "example.test/app:bad tag"
+			}
+			err := pins.Reconcile(t.Context(), &resourcelifecycle.ImageUse{}, func(context.Context) ([]resourcelifecycle.ImageReference, error) {
+				return []resourcelifecycle.ImageReference{ref}, nil
+			})
+			wantRelease := catalogBase || mode == "base not pulled" || mode == "base selects another image"
+			if (len(f.removed) == 1) != wantRelease || wantRelease && err != nil {
+				t.Fatalf("removed=%v err=%v", f.removed, err)
+			}
+		})
+	}
+}
