@@ -1,0 +1,338 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
+)
+
+// #5354: every synchronous routine entry point returns the WAITING receipt when
+// a step starts waiting for a person, instead of holding the request open. The
+// run continues without the request and a decision completes it once.
+
+const syncWaitHeldDef = `{"dsl_version":"1.0","name":"held-each","steps":[
+ {"id":"each","type":"foreach","foreach":{"items":"[\"a\"]","as":"host","parallelism":1,"steps":[
+  {"id":"create","type":"crewship","action":"issue.create","args":{"title":"Status {{ inputs.host }}"}}
+ ]}}
+]}`
+
+// syncWaitActions holds every call until its request carries the token of an
+// approved waitpoint of the same run.
+type syncWaitActions struct {
+	db   *sql.DB
+	mu   sync.Mutex
+	done int
+}
+
+func (s *syncWaitActions) Do(ctx context.Context, req pipeline.CrewshipRequest) (string, error) {
+	held := &pipeline.CrewshipApprovalRequired{Verb: req.Verb, Action: "mission_create", Level: "strict", CrewID: "held-crew", Decision: "inbox_approve"}
+	if req.ApprovalToken == "" {
+		return "", held
+	}
+	var status string
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM pipeline_waitpoints WHERE token = ? AND pipeline_run_id = ?`, req.ApprovalToken, req.RunID).Scan(&status); err != nil {
+		return "", err
+	}
+	if status != "approved" {
+		return "", held
+	}
+	s.mu.Lock()
+	s.done++
+	s.mu.Unlock()
+	return `{"identifier":"HLD-1"}`, nil
+}
+
+func (s *syncWaitActions) executed() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.done
+}
+
+type syncWaitRig struct {
+	h       *PipelineHandler
+	db      *sql.DB
+	user    string
+	ws      string
+	wp      *pipeline.SQLWaitpointStore
+	actions *syncWaitActions
+}
+
+func newSyncWaitRig(t *testing.T) *syncWaitRig {
+	t.Helper()
+	h, db, user, ws := runsHandlerRig(t)
+	runs := pipeline.NewRunStore(db)
+	h.SetRunStore(runs)
+	h.SetRunRegistry(pipeline.NewRunRegistry())
+	h.SetRunner(&stubRunner{output: "ok"})
+	wp := pipeline.NewSQLWaitpointStore(db)
+	t.Cleanup(wp.Close)
+	h.SetWaitpointStore(wp)
+	actions := &syncWaitActions{db: db}
+	h.SetCrewshipActions(actions)
+	lifecycle, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	h.SetLifecycleContext(lifecycle)
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, container_memory_mb, container_cpus) VALUES ('held-crew', ?, 'Crew', 'held-crew', 'free', 4096, 2.0)`, ws); err != nil {
+		t.Fatal(err)
+	}
+	return &syncWaitRig{h: h, db: db, user: user, ws: ws, wp: wp, actions: actions}
+}
+
+func (r *syncWaitRig) seedPipeline(t *testing.T, id, slug, def string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := r.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
+		VALUES (?, ?, ?, ?, ?, 'hash', ?, ?, ?)`, id, r.ws, slug, slug, def, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// syncWithin fails the test when f does not return in time: a synchronous call that
+// holds its request open for a person's decision hangs here.
+func syncWithin(t *testing.T, limit time.Duration, what string, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); f() }()
+	select {
+	case <-done:
+	case <-time.After(limit):
+		t.Fatalf("%s did not return within %s: it holds its request open while a person decides", what, limit)
+	}
+}
+
+type syncReceipt struct {
+	RunID          string `json:"run_id"`
+	PipelineID     string `json:"pipeline_id"`
+	Status         string `json:"status"`
+	WaitpointToken string `json:"waitpoint_token"`
+	CurrentStep    string `json:"current_step"`
+}
+
+func (r *syncWaitRig) mustWaiting(t *testing.T, rr *httptest.ResponseRecorder) syncReceipt {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var rc syncReceipt
+	if err := json.Unmarshal(rr.Body.Bytes(), &rc); err != nil {
+		t.Fatal(err)
+	}
+	if rc.Status != "WAITING" || rc.WaitpointToken == "" || rc.RunID == "" {
+		t.Fatalf("want a WAITING receipt, got %s", rr.Body.String())
+	}
+	return rc
+}
+
+func (r *syncWaitRig) approveAndWaitCompleted(t *testing.T, runID, token string) {
+	t.Helper()
+	if err := r.wp.CompleteApproval(t.Context(), r.ws, token, true, r.user, ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		var status string
+		_ = r.db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, runID).Scan(&status)
+		if strings.EqualFold(status, "completed") {
+			return
+		}
+		if strings.EqualFold(status, "failed") || strings.EqualFold(status, "cancelled") {
+			t.Fatalf("run %s ended %s after the approval", runID, status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not complete after the approval", runID)
+}
+
+func TestSyncWait_ReplayReturnsWaitingReceipt(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	seedRunRow(t, rig.db, rig.ws, "pln_held", "held-each", "run_src", "completed")
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/replay", strings.NewReader(`{}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("runId", "run_src")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 15*time.Second, "replay", func() { rig.h.ReplayRun(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+	rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
+	if got := rig.actions.executed(); got != 1 {
+		t.Fatalf("the approved action executed %d times, want once", got)
+	}
+}
+
+func TestSyncWait_ScheduleRunNowReturnsWaitingReceipt(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.h.SetScheduleStore(pipeline.NewScheduleStore(rig.db))
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	saved, err := pipeline.NewScheduleStore(rig.db).Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: rig.ws, Name: "held", TargetPipelineID: "pln_held", CronExpr: "0 8 * * *", Timezone: "UTC", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/schedule/run", nil), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("scheduleId", saved.ID)
+	rr := httptest.NewRecorder()
+	syncWithin(t, 15*time.Second, "schedule run-now", func() { rig.h.RunSchedule(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+	rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
+	if got := rig.actions.executed(); got != 1 {
+		t.Fatalf("the approved action executed %d times, want once", got)
+	}
+}
+
+// Every batch item that waits is reported as WAITING (neither success nor
+// error) and the rest of the batch still runs; each approval completes its own
+// run exactly once.
+func TestSyncWait_BatchReportsWaitingItemsAndKeepsGoing(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run_batch", strings.NewReader(`{"items":[{"inputs":{}},{"inputs":{}}]}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "batch", func() { rig.h.RunBatch(rr, req) })
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Count   int `json:"count"`
+		Results []struct {
+			Index          int    `json:"index"`
+			RunID          string `json:"run_id"`
+			Status         string `json:"status"`
+			Error          string `json:"error"`
+			WaitpointToken string `json:"waitpoint_token"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil || out.Count != 2 || len(out.Results) != 2 {
+		t.Fatalf("batch result: %v %s", err, rr.Body.String())
+	}
+	for _, it := range out.Results {
+		if it.Status != "WAITING" || it.WaitpointToken == "" || it.Error != "" {
+			t.Fatalf("item %d = %+v, want WAITING with a token and no error", it.Index, it)
+		}
+	}
+	for _, it := range out.Results {
+		rig.approveAndWaitCompleted(t, it.RunID, it.WaitpointToken)
+	}
+	if got := rig.actions.executed(); got != 2 {
+		t.Fatalf("approved actions executed %d times, want once per item (2)", got)
+	}
+}
+
+// A held action in a CALLED routine makes the synchronous run of the parent
+// return a receipt for the PARENT run, the run the caller started.
+func TestSyncWait_NestedRoutineReceiptNamesTheParentRun(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_child", "held-each", syncWaitHeldDef)
+	rig.seedPipeline(t, "pln_parent", "parent-call", `{"dsl_version":"1.0","name":"parent-call","steps":[{"id":"call","type":"call_pipeline","pipeline_slug":"held-each"}]}`)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "parent-call")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "run of a routine that calls a held routine", func() { rig.h.Run(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+	var pid, via string
+	if err := rig.db.QueryRow(`SELECT pipeline_id, triggered_via FROM pipeline_runs WHERE id = ?`, rc.RunID).Scan(&pid, &via); err != nil {
+		t.Fatal(err)
+	}
+	if pid != "pln_parent" || via == "call_pipeline" {
+		t.Fatalf("receipt run %s belongs to pipeline %s (%s), want the parent run the caller started", rc.RunID, pid, via)
+	}
+	rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
+	if got := rig.actions.executed(); got != 1 {
+		t.Fatalf("the approved action executed %d times, want once", got)
+	}
+}
+
+// A decision that arrives before the receipt has been sent must not cancel or
+// duplicate the run: either the finished result or the receipt is returned,
+// and the action ran once.
+func TestSyncWait_ApprovalBeforeTheReceiptIsSent(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	exec := rig.h.newExecutor()
+	input := pipeline.RunInput{PipelineID: "pln_held", WorkspaceID: rig.ws, Mode: pipeline.ModeRun,
+		OnHumanWait: func(_, _, token string) {
+			// Runs inside the run, before the wait is handed to the request.
+			go func() { _ = rig.wp.CompleteApproval(context.Background(), rig.ws, token, true, rig.user, "") }()
+		}}
+	var res, receipt *pipeline.RunResult
+	var err error
+	syncWithin(t, 20*time.Second, "run", func() { res, receipt, err = rig.h.runSynchronously(req, exec, input) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch {
+	case receipt != nil && receipt.Status == "WAITING", res != nil && res.Status == "COMPLETED":
+	default:
+		t.Fatalf("res=%+v receipt=%+v, want the finished result or a WAITING receipt", res, receipt)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for rig.actions.executed() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := rig.actions.executed(); got != 1 {
+		t.Fatalf("the approved action executed %d times, want once", got)
+	}
+}
+
+// A client that disconnects before anything waits still cancels the run, on
+// every synchronous entry point (#5353 keeps this by design).
+func TestSyncWait_DisconnectBeforeAnyWaitStillCancels(t *testing.T) {
+	for _, entry := range []string{"run", "batch"} {
+		t.Run(entry, func(t *testing.T) {
+			h, db, user, ws := runsHandlerRig(t)
+			runner := newBlockingRunner()
+			h.SetRunner(runner)
+			h.SetRunStore(pipeline.NewRunStore(db))
+			h.SetRunRegistry(pipeline.NewRunRegistry())
+			lifecycle, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.SetLifecycleContext(lifecycle)
+			seedAgentRunPipeline(t, db, ws, "pln_block", "block")
+			body := `{"inputs":{}}`
+			if entry == "batch" {
+				body = `{"items":[{"inputs":{}}]}`
+			}
+			req := withWorkspaceUser(httptest.NewRequest("POST", "/x", strings.NewReader(body)), user, ws, "OWNER")
+			req.SetPathValue("slug", "block")
+			reqCtx, disconnect := context.WithCancel(req.Context())
+			defer disconnect()
+			req = req.WithContext(reqCtx)
+			rr := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if entry == "batch" {
+					h.RunBatch(rr, req)
+				} else {
+					h.Run(rr, req)
+				}
+			}()
+			select {
+			case <-runner.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the run never started")
+			}
+			disconnect()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the handler kept running after the client left")
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for runner.observedCtxErr() == nil && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if runner.observedCtxErr() == nil {
+				t.Fatal("a disconnect before any wait did not cancel the run")
+			}
+		})
+	}
+}
