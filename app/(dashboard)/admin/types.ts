@@ -214,6 +214,7 @@ export type TabKey =
   | "reviews"
   | "notifications"
   | "ratelimits"
+  | "artifacts"
   | "posture"
   | "retention"
 

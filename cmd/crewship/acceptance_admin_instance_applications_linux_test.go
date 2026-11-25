@@ -305,11 +305,15 @@ func TestAcceptance_AdminInstanceApplications(t *testing.T) {
 	}
 
 	// Off with a drain, then at once.
-	if out, err := run(admin, "admin", "instance", "applications", "disable", "word", "--drain", "10m"); err != nil || !strings.Contains(out, "draining") {
+	startedDrain := time.Now()
+	if out, err := run(admin, "admin", "instance", "applications", "disable", "word", "--drain", "5m"); err != nil || !strings.Contains(out, "draining") {
 		t.Fatalf("disable with drain: %v\n%s", err, out)
 	}
 	if w := app(show(), "wordcraft"); w.State != "draining" || w.DrainUntil == nil {
 		t.Fatalf("draining = %+v", w)
+	}
+	if deadline := *app(show(), "wordcraft").DrainUntil; deadline.Before(startedDrain.Add(298*time.Second)) || deadline.After(time.Now().Add(300*time.Second)) {
+		t.Fatalf("expected a five-minute drain, deadline %s since %s", deadline, startedDrain)
 	}
 	if newWord() {
 		t.Fatal("New Word offered while Word drains")
@@ -333,9 +337,27 @@ func TestAcceptance_AdminInstanceApplications(t *testing.T) {
 	if m := docModes(); m["wordcraft"] != "closed" {
 		t.Fatalf("doc status while Word is off = %v", m)
 	}
+	if out, err := run(admin, "admin", "instance", "applications", "enable", "word"); err != nil {
+		t.Fatalf("re-enable Word: %v\n%s", err, out)
+	}
+	if w := app(show(), "wordcraft"); w.State != "ready" || w.DrainUntil != nil {
+		t.Fatalf("re-enabled Word = %+v", w)
+	}
+	if out, err := run(admin, "admin", "instance", "applications", "disable", "agents"); err != nil {
+		t.Fatalf("disable agents: %v\n%s", err, out)
+	}
+	if a := show().Agents; a.State != "disabled" {
+		t.Fatalf("agents off = %+v", a)
+	}
+	if out, err := run(admin, "admin", "instance", "applications", "enable", "agents"); err != nil {
+		t.Fatalf("re-enable agents: %v\n%s", err, out)
+	}
+	if view := show(); view.Agents.State != "ready" || app(view, "wordcraft").State != "ready" {
+		t.Fatalf("Word and agents did not recover: %+v", view)
+	}
 	var audited int
-	if err := db.QueryRow(`SELECT count(*) FROM instance_audit_logs WHERE action='instance.craft_application_set'`).Scan(&audited); err != nil || audited != 4 {
-		t.Fatalf("audit rows %d %v (agents on, word on, word draining, word closed)", audited, err)
+	if err := db.QueryRow(`SELECT count(*) FROM instance_audit_logs WHERE action='instance.craft_application_set'`).Scan(&audited); err != nil || audited != 7 {
+		t.Fatalf("audit rows %d %v (agents on, word on, word draining, word closed, word on, agents off, agents on)", audited, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM instance_audit_logs WHERE action='instance.craft_application_install'`).Scan(&audited); err != nil || audited != 2 {
 		t.Fatalf("install audit rows %d %v (two Sheet files)", audited, err)
