@@ -29,6 +29,9 @@ func TestRefuseLinkedRecoveryPathsCoversEveryFixedLocation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			elsewhere := t.TempDir()
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.Symlink(elsewhere, filepath.Join(dir, name)); err != nil {
 				t.Fatal(err)
 			}
@@ -38,6 +41,15 @@ func TestRefuseLinkedRecoveryPathsCoversEveryFixedLocation(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a link above a nested location is refused", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Symlink(t.TempDir(), filepath.Join(dir, filepath.Dir(RecoveredServicesDir))); err != nil {
+			t.Fatal(err)
+		}
+		if err := refuseLinkedRecoveryPaths(dir); err == nil {
+			t.Fatal("ancestor link accepted")
+		}
+	})
 	t.Run("all links are listed at once", func(t *testing.T) {
 		dir := t.TempDir()
 		for _, name := range []string{"output", "memory", "secrets.env"} {
