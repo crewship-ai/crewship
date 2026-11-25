@@ -458,3 +458,95 @@ func TestSyncWait_ContinuingRunStopsWhenTheRoutineIsDeleted(t *testing.T) {
 		t.Fatalf("run status %q, action executed %d times after the routine was deleted", status, rig.actions.executed())
 	}
 }
+
+// A routine disabled or sent back to "proposed" while its run waits does not
+// run the approved action either.
+func TestSyncWait_ContinuingRunStopsWhenTheRoutineIsNoLongerRunnable(t *testing.T) {
+	for _, status := range []string{"disabled", "proposed"} {
+		t.Run(status, func(t *testing.T) {
+			rig := newSyncWaitRig(t)
+			rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+			req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+			req.SetPathValue("slug", "held-each")
+			rr := httptest.NewRecorder()
+			syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
+			rc := rig.mustWaiting(t, rr)
+			if _, err := rig.db.Exec(`UPDATE pipelines SET status = ? WHERE id = 'pln_held'`, status); err != nil {
+				t.Fatal(err)
+			}
+			if err := rig.wp.CompleteApproval(t.Context(), rig.ws, rc.WaitpointToken, true, rig.user, ""); err != nil {
+				t.Fatalf("approve: %v", err)
+			}
+			deadline := time.Now().Add(15 * time.Second)
+			var st string
+			for time.Now().Before(deadline) {
+				_ = rig.db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, rc.RunID).Scan(&st)
+				if s := strings.ToLower(st); s == "failed" || s == "cancelled" || s == "completed" {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if strings.EqualFold(st, "completed") || rig.actions.executed() != 0 {
+				t.Fatalf("run status %q, action executed %d times for a %s routine", st, rig.actions.executed(), status)
+			}
+		})
+	}
+}
+
+// A client that leaves AFTER one batch item started waiting: that item still
+// completes with its approval, exactly once; the items not yet started are not
+// started; nothing runs twice.
+func TestSyncWait_BatchDisconnectAfterWaitingKeepsTheWaitingItem(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run_batch", strings.NewReader(`{"items":[{"inputs":{}},{"inputs":{}},{"inputs":{}}]}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	reqCtx, disconnect := context.WithCancel(req.Context())
+	defer disconnect()
+	req = req.WithContext(reqCtx)
+	// Leave as soon as the first item waits for a person.
+	go func() {
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			var n int
+			_ = rig.db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`).Scan(&n)
+			if n > 0 {
+				disconnect()
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "batch", func() { rig.h.RunBatch(rr, req) })
+	var out struct {
+		Results []struct {
+			RunID          string `json:"run_id"`
+			Status         string `json:"status"`
+			Error          string `json:"error"`
+			WaitpointToken string `json:"waitpoint_token"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil || len(out.Results) != 3 {
+		t.Fatalf("batch result: %v %s", err, rr.Body.String())
+	}
+	first := out.Results[0]
+	if first.Status != "WAITING" || first.WaitpointToken == "" {
+		t.Fatalf("first item = %+v, want WAITING", first)
+	}
+	for i, it := range out.Results[1:] {
+		if it.Error == "" || it.RunID != "" {
+			t.Fatalf("item %d = %+v after the client left, want it not started", i+1, it)
+		}
+	}
+	var runs int
+	_ = rig.db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE pipeline_id = 'pln_held'`).Scan(&runs)
+	if runs != 1 {
+		t.Fatalf("%d runs exist, want only the waiting one", runs)
+	}
+	rig.approveAndWaitCompleted(t, first.RunID, first.WaitpointToken)
+	time.Sleep(200 * time.Millisecond)
+	if got := rig.actions.executed(); got != 1 {
+		t.Fatalf("the approved action executed %d times, want once", got)
+	}
+}
