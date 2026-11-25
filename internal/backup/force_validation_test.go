@@ -5,6 +5,7 @@ package backup_test
 import (
 	"bytes"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -170,4 +171,135 @@ func TestForceValidationPublishedPaths(t *testing.T) {
 	if ref != filepath.Join(dir, "memory", "versions", f.memSHA[:2], f.memSHA) {
 		t.Errorf("memory reference = %s", ref)
 	}
+}
+
+// v140 is a foreground data migration. A ledger missing it but carrying
+// later entries exercises the same row-by-row decision Migrate makes on boot.
+func TestForceValidationMigrationKeyAuthority(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", instKeyV1)
+	t.Setenv("ENCRYPTION_KEY_V2", "")
+	t.Setenv(encryption.KeyVersionEnvVar, "v1")
+	db, err := database.Open("file:" + filepath.Join(t.TempDir(), "source.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := database.MigrateSkipping(t.Context(), db.DB, logger, "encrypt_webhook_secrets"); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO users(id,email,full_name) VALUES('u_admin','admin@example.test','Admin')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES('ws','Test','test')`,
+		`INSERT INTO crews(id,workspace_id,name,slug) VALUES('crew','ws','Test','test')`,
+		`INSERT INTO agents(id,crew_id,workspace_id,name,slug,status,webhook_secret) VALUES('agent','crew','ws','Test','test','IDLE','sample webhook')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	identity, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(t *testing.T, kit bool) string {
+		t.Helper()
+		bundle, err := backup.CreateInstanceBackup(t.Context(), db.DB, backup.InstanceOptions{OutputDir: t.TempDir(), Recipients: []age.Recipient{identity.Recipient()}, Actor: backup.Actor{UserID: "u_admin", Role: "instance_admin"}, RecoveryKit: kit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bundle.Path
+	}
+	recover := func(t *testing.T, path string) (*backup.RecoverReport, error) {
+		t.Helper()
+		return backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: path, Identities: []age.Identity{identity}, DataDir: t.TempDir(), Force: true})
+	}
+	noKit := create(t, false)
+	for _, tc := range []struct{ name, value, want string }{
+		{"missing key below ledger maximum", "", "pending migrations"},
+		{"malformed key with zero envelopes", "not-hex", "ENCRYPTION_KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ENCRYPTION_KEY", tc.value)
+			rep, err := recover(t, noKit)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || rep.Result != backup.RestoreResultFailed || rep.PreviousDataDir != "" {
+				t.Fatalf("expected refusal containing %q, got %v, report %+v", tc.want, err, rep)
+			}
+		})
+	}
+	t.Run("kit overrides host mint selector", func(t *testing.T) {
+		path := create(t, true)
+		t.Setenv("ENCRYPTION_KEY_V2", instKeyV2)
+		t.Setenv(encryption.KeyVersionEnvVar, "v2")
+		rep, err := recover(t, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.MigrationsApplied != 1 {
+			t.Fatalf("applied migrations = %d", rep.MigrationsApplied)
+		}
+		keys, err := backup.ReadEnvFile(rep.KeysFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if keys[encryption.KeyVersionEnvVar] != "v1" || keys["ENCRYPTION_KEY_V2"] != "" {
+			t.Fatal("recovered assignments did not select the kit's v1 key")
+		}
+		restored, err := database.Open("file:" + rep.DatabasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer restored.Close()
+		var envelope string
+		if err := restored.QueryRow("SELECT webhook_secret FROM agents WHERE id='agent'").Scan(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		key, err := hex.DecodeString(keys["ENCRYPTION_KEY"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain, err := encryption.DecryptWithKeys(envelope, map[string][]byte{"v1": key})
+		if err != nil || plain != "sample webhook" {
+			t.Fatalf("migrated webhook did not open with emitted v1 key: %v", err)
+		}
+		if os.Getenv(encryption.KeyVersionEnvVar) != "v2" || os.Getenv("ENCRYPTION_KEY_V2") != instKeyV2 {
+			t.Fatal("host key settings were not restored")
+		}
+	})
+	t.Run("recheck migrated envelope before publication", func(t *testing.T) {
+		// Model a legacy schema whose trigger damages a newly written webhook
+		// envelope. The snapshot itself contains only the valid plaintext row.
+		if _, err := db.Exec(`CREATE TRIGGER force_bad_webhook AFTER UPDATE OF webhook_secret ON agents
+			WHEN NEW.webhook_secret LIKE 'v1:%' AND NEW.webhook_secret != 'v1:damaged'
+			BEGIN UPDATE agents SET webhook_secret='v1:damaged' WHERE id=NEW.id; END`); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := db.Exec("DROP TRIGGER force_bad_webhook"); err != nil {
+				t.Error(err)
+			}
+		})
+		path := create(t, true)
+		rep, err := recover(t, path)
+		if err == nil || !strings.Contains(err.Error(), "cannot open agents.webhook_secret") || rep.Result != backup.RestoreResultFailed || rep.PreviousDataDir != "" {
+			t.Fatalf("damaged migrated envelope: report %+v, error %v", rep, err)
+		}
+	})
+	t.Run("historical envelope uses base key", func(t *testing.T) {
+		t.Setenv("ENCRYPTION_KEY_V7", "")
+		key, err := hex.DecodeString(instKeyV1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ciphertext, err := encryption.EncryptWithKey("v7", key, "sample webhook")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec("UPDATE agents SET webhook_secret=? WHERE id='agent'", ciphertext); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = recover(t, create(t, false)); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
