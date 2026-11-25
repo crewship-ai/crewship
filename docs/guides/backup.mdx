@@ -1034,6 +1034,16 @@ requires `--discard-workbooks` because the recovered instance will lack them.
 Keep the retained directory protected until you have verified the recovered
 instance and decided how long to keep the original.
 
+To roll back, stop Crewship and every writer and keep them stopped during
+both directory moves. Record the active path and the retained path from the
+report. Rename the active directory to an unused sibling on the same
+filesystem, then rename the retained directory to the original active path.
+If interrupted between moves, the active path is absent and both directories
+are still available at their recorded locations. Restore the service
+configuration and external vault key settings that belonged to the original
+installation before starting it. Keep the displaced recovered directory
+until you have checked the original installation.
+
 The restored server boots with automations **held**: routines and schedules
 do not fire, inbound webhooks answer `503`, queued work and notification
 retries do not start. Check the server, then resume each:
