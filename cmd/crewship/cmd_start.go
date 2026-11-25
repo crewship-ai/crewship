@@ -1735,6 +1735,9 @@ func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docke
 		catalog = quota.Client{Socket: cfg.Container.QuotaHelperSocket, Namespace: cfg.Container.QuotaHelperNamespace}
 	}
 	return docker.Config{
+		// Only an explicit docker choice may turn readiness red for runtime
+		// files the daemon cannot see; auto selection stays as it was.
+		ReportRuntimeReadiness:   cfg.Container.Provider == providerDocker,
 		QuotaCatalog:             catalog,
 		RuntimeImage:             cfg.Container.RuntimeImage,
 		DefaultRuntime:           cfg.Container.DefaultRuntime,

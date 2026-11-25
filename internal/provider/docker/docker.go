@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -36,6 +37,10 @@ var _ provider.VolumeManager = (*Provider)(nil)
 
 // Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
+	// ReportRuntimeReadiness makes RuntimeReady answer for the mandatory bind
+	// sources. Set only when the operator explicitly chose the docker provider.
+	ReportRuntimeReadiness bool
+
 	InstanceID  string                              // persisted installation identity; empty disables auto cleanup labels.
 	OwnerActive func(context.Context, string) error // installed once before serving requests.
 
@@ -140,7 +145,13 @@ type Provider struct {
 	cfg              Config
 	logger           *slog.Logger
 	detected         DetectResult
-	selinuxEnabled   bool
+
+	// bindProbeMu serialises the readiness probe; bindVerdict is its last result.
+	bindProbeMu sync.Mutex
+	bindVerdict atomic.Pointer[bindVerdict]
+	// inContainerFn replaces the container detection in tests.
+	inContainerFn  func() bool
+	selinuxEnabled bool
 
 	// digestResolver short-circuits repeated HEAD requests to the registry
 	// for the runtime image. Shared helper (see internal/dockerutil) so the
