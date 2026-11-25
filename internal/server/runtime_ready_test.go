@@ -23,11 +23,11 @@ func TestReadyzReportsRuntimeWithoutBreakingLiveness(t *testing.T) {
 		wantStatus  int
 		wantRuntime string // "" = the key must be absent
 	}{
-		{"runtime ready", func() *Server { return &Server{container: readyContainer{}} }, 200, "ok"},
+		{"runtime ready", func() *Server { return &Server{container: &readyContainer{}} }, 200, "ok"},
 		{"daemon cannot see the runtime files", func() *Server {
-			return &Server{container: readyContainer{err: errors.New("/secret/path must not appear")}}
+			return &Server{container: &readyContainer{err: errors.New("/secret/path must not appear")}}
 		}, 503, "unavailable"},
-		{"provider without a readiness opinion", func() *Server { return &Server{container: mockContainer{}} }, 200, ""},
+		{"provider without a readiness opinion", func() *Server { return &Server{container: &mockContainer{}} }, 200, ""},
 		{"no container provider (--no-docker)", func() *Server { return &Server{} }, 200, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
