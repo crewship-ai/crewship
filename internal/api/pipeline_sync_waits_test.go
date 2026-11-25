@@ -389,3 +389,43 @@ func TestSyncWait_ReceiptTokenCannotBeUsedByAnAgent(t *testing.T) {
 	}
 	rig.approveAndWaitCompleted(t, rc.RunID, rc.WaitpointToken)
 }
+
+// A run that keeps going after its WAITING receipt re-checks the invoking
+// person when it continues: if that person left the workspace meanwhile, the
+// approved action does not execute.
+func TestSyncWait_ContinuingRunRechecksTheInvokingPerson(t *testing.T) {
+	rig := newSyncWaitRig(t)
+	rig.seedPipeline(t, "pln_held", "held-each", syncWaitHeldDef)
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), rig.user, rig.ws, "OWNER")
+	req.SetPathValue("slug", "held-each")
+	rr := httptest.NewRecorder()
+	syncWithin(t, 20*time.Second, "run", func() { rig.h.Run(rr, req) })
+	rc := rig.mustWaiting(t, rr)
+
+	for _, q := range []string{
+		`INSERT INTO users (id, email, full_name) VALUES ('u_second_admin', 'second@example.test', 'Second')`,
+		`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm_second_admin', '` + rig.ws + `', 'u_second_admin', 'ADMIN')`,
+	} {
+		if _, err := rig.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := rig.db.Exec(`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, rig.ws, rig.user); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.wp.CompleteApproval(t.Context(), rig.ws, rc.WaitpointToken, true, "u_second_admin", ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	var status string
+	for time.Now().Before(deadline) {
+		_ = rig.db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, rc.RunID).Scan(&status)
+		if s := strings.ToLower(status); s == "failed" || s == "cancelled" || s == "completed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.EqualFold(status, "completed") || rig.actions.executed() != 0 {
+		t.Fatalf("run status %q, action executed %d times: a person who left the workspace still drove the action", status, rig.actions.executed())
+	}
+}
