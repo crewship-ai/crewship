@@ -69,15 +69,8 @@ func cloneForceTree(ctx context.Context, src, dst string, mount uint64) error {
 		}); err != nil {
 			return err
 		}
-	} else {
-		out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(RestoreWriter(ctx, out), uploadContextReader{ctx: ctx, reader: in})
-		if err = errors.Join(err, out.Close()); err != nil {
-			return err
-		}
+	} else if err := writeBlobDurable(ctx, dst, uploadContextReader{ctx: ctx, reader: in}, ""); err != nil {
+		return err
 	}
 
 	// Chown can clear set-ID and capability bits. Set those only after the
