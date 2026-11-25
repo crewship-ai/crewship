@@ -66,6 +66,65 @@ jobs:
         run: python3 scripts/ci/nightly-version.py
     if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion
       == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
+  craft-packages:
+    name: Verify the Word and Sheet packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - verified
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.verified.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
+        with:
+          cosign-release: v2.6.3
+      # The nightly publishes the pair from one earlier immutable release
+      # (tools/craft-components/nightly-source.json) rather than rebuilding it.
+      - name: Download the pinned release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -er .tag tools/craft-components/nightly-source.json)"
+          commit="$(jq -er .commit tools/craft-components/nightly-source.json)"
+          [ "$(jq -er .repository tools/craft-components/nightly-source.json)" = "$REPO" ] || { echo "::error::the source release is not in this repository"; exit 1; }
+          # The tag must still name the pinned commit.
+          [ "$(gh api "repos/$REPO/commits/$tag" --jq .sha)" = "$commit" ] || { echo "::error::tag $tag no longer names $commit"; exit 1; }
+          mkdir -p build/craft-download
+          gh release download "$tag" --repo "$REPO" --dir build/craft-download \
+            --pattern checksums.txt --pattern checksums.txt.sig --pattern checksums.txt.pem \
+            --pattern 'crewship-craft-*.craftpkg'
+      - name: Verify signature, digests and manifests against this commit's catalog
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/verify-craft-source.py \
+            --source tools/craft-components/nightly-source.json \
+            --catalog tools/craft-components/catalog.txt \
+            --dir build/craft-download --out build/craft-packages \
+            --receipt build/craft-source.json
+      - name: Read the pinned catalog
+        id: catalog
+        run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
+      - name: Verify the packages against their pins
+        env:
+          PINS: ${{ steps.catalog.outputs.pins }}
+        run: bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: nightly-craft-packages-${{ needs.verified.outputs.sha }}
+          path: |
+            build/craft-packages/*.craftpkg
+            build/craft-source.json
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
   docker:
     name: Nightly Docker image
     runs-on: ubuntu-latest
@@ -91,6 +150,9 @@ jobs:
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
         with:
           cosign-release: v2.6.3
+      - name: Read the pinned catalog
+        id: catalog
+        run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
       - name: Build immutable image candidate
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
@@ -109,6 +171,8 @@ jobs:
             DATE=${{ steps.meta.outputs.date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
+            CRAFT_COMPONENT_PINS=${{ steps.catalog.outputs.pins }}
+            CRAFT_COMPONENT_URL=https://github.com/${{ github.repository }}/releases/download/${{ needs.verified.outputs.version }}
           cache-from: type=gha,scope=server-image
           cache-to: type=gha,mode=max,scope=server-image
           provenance: mode=max
@@ -137,6 +201,7 @@ jobs:
         run: cosign sign --yes "$IMAGE"
     needs:
       - verified
+      - craft-packages
     permissions:
       contents: read
       packages: write
@@ -194,6 +259,23 @@ jobs:
           printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
           chmod 600 "$RUNNER_TEMP/crewship-signing.asc"
           echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
+      - name: Fetch the verified Word and Sheet packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: nightly-craft-packages-${{ needs.verified.outputs.sha }}
+          # Under the ignored build/ so goreleaser still sees a clean tree.
+          path: build/craft-fetched
+      - name: Read the pinned catalog
+        id: catalog
+        run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
+      - name: Verify the packages again before the binaries trust them
+        env:
+          PINS: ${{ steps.catalog.outputs.pins }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/craft-packages
+          cp build/craft-fetched/craft-packages/*.craftpkg build/craft-packages/
+          bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
       - name: Build snapshot binaries
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
@@ -204,6 +286,21 @@ jobs:
           GORELEASER_CURRENT_TAG: v0.0.0-nightly
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
           CREWSHIP_NIGHTLY_VERSION: ${{ needs.verified.outputs.version }}
+          CRAFT_COMPONENT_PINS: ${{ steps.catalog.outputs.pins }}
+          CRAFT_COMPONENT_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.verified.outputs.version }}
+      # checksums.txt (signed below) already lists the packages; publish them
+      # next to the archives after checking them once more.
+      - name: Publish the Word and Sheet packages with the archives
+        env:
+          PINS: ${{ steps.catalog.outputs.pins }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
+          cp build/craft-packages/crewship-craft-*.craftpkg dist/
+          for pkg in dist/crewship-craft-*.craftpkg; do
+            grep -Eq "^[0-9a-f]{64}  $(basename "$pkg")\$" dist/checksums.txt || { echo "::error::$pkg has no checksum"; exit 1; }
+          done
+          (cd dist && sha256sum -c --ignore-missing checksums.txt)
       - name: Verify legal contents of built artifacts
         run: |
           sudo apt-get update -qq
@@ -214,6 +311,8 @@ jobs:
           NIGHTLY_TAG: ${{ needs.verified.outputs.version }}
       - name: Reject binaries built with the test barrier tag
         run: bash scripts/check-no-test-barrier.sh dist
+      - name: Record where the packages came from
+        run: cp build/craft-fetched/craft-source.json dist/craft-source.json
       - name: Sign checksums.txt
         if: hashFiles('dist/checksums.txt') != ''
         run: |
@@ -253,6 +352,7 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.json
+            dist/*.craftpkg
             dist/checksums.txt
             dist/*.sig
             dist/*.pem
@@ -261,6 +361,7 @@ jobs:
           compression-level: 0
     needs:
       - verified
+      - craft-packages
     permissions:
       contents: read
       packages: read

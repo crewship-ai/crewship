@@ -118,3 +118,41 @@ crewship-heavy scripts/ci/craft-package-gate.sh ./crewship build/craft-component
 `$OUT` holds `server.log`, `seed.log`, `applications.txt`, `report.json` and
 `playwright/` (screenshot, trace and browser console of a failed test).
 Prefix the script with `taskset -c <one CPU>` to approximate a slow CI runner.
+
+## Nightly builds
+
+A nightly does not rebuild the packages. It publishes the pair of one earlier
+release, so the sources and the toolchain are not rebuilt on every run and the
+signed files stay the very ones that release published.
+`tools/craft-components/nightly-source.json` names the repository, the release
+tag, the commit its signing workflow ran for, and the SHA-256 of each package.
+The `craft-packages` job of `nightly.yml` downloads those two files with the
+release's signed checksums, and `scripts/ci/verify-craft-source.py` fails the
+run, with the reason, unless:
+
+- the directory holds exactly the checksums, their signature and certificate, and
+  the two packages;
+- the checksums are signed by `release.yml` of this repository at that tag and
+  commit (Sigstore certificate identity and workflow claims);
+- each package's SHA-256 equals the source file and the signed checksums;
+- each package's manifest is the one `catalog.txt` pins at the nightly's commit,
+  which `scripts/check-craft-packages.sh` then checks again.
+
+The binaries and the image of the nightly are built with that catalog and with
+the nightly's own release address, the packages are listed in the nightly's
+signed `checksums.txt`, and they are published next to the archives together
+with `craft-source.json`, which records where they came from. Nothing is
+published when the pair is missing or does not match.
+
+When `catalog.txt` changes, the nightly fails until a release (or a build with
+the release recipe) provides the matching pair and `nightly-source.json` names
+it. Update the file in the same change as the catalog.
+
+### Installations without internet access
+
+The two `crewship-craft-*.craftpkg` files are assets of every nightly release,
+listed in its signed `checksums.txt`. Copy them to the installation together
+with that file, check them with `sha256sum -c --ignore-missing checksums.txt`,
+and install each with `crewship admin instance applications install --file`.
+The server accepts a package only when its manifest is the one pinned in the
+binary, so a copied file that is not the matching one is refused.
