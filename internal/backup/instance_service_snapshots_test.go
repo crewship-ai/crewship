@@ -196,7 +196,7 @@ func TestForcedInstanceRecoveryReplacesQuotaStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	opts := RecoverOptions{BundlePath: result.Path, Identities: []age.Identity{identity}, DataDir: dir, Drill: true}
+	opts := RecoverOptions{BundlePath: result.Path, Identities: []age.Identity{identity}, DataDir: dir}
 	if _, err = RecoverInstance(t.Context(), opts); err != nil {
 		t.Fatal(err)
 	}
