@@ -9,6 +9,7 @@ describe("initialAdminTab", () => {
   it("returns the section from a valid ?tab= param", () => {
     expect(initialAdminTab("?tab=retention")).toBe("retention")
     expect(initialAdminTab("?tab=ratelimits")).toBe("ratelimits")
+    expect(initialAdminTab("?tab=artifacts")).toBe("artifacts")
   })
 
   it("falls back to overview for a missing param", () => {
@@ -68,8 +69,8 @@ describe("Backups pages", () => {
   })
   it("lists Backups under Data as one row that opens its own page, Data retention beside it", () => {
     const data = sections.find((s) => s.label === "Data")!
-    expect(data.items.map((i) => i.label)).toEqual(["Backups", "Data retention"])
-    expect(data.items[0].href).toBe("/admin/backups")
+    expect(data.items.map((i) => i.label)).toEqual(["Artifacts", "Backups", "Data retention"])
+    expect(data.items.find((item) => item.key === "backups-page")?.href).toBe("/admin/backups")
     expect(ALL_TABS).not.toContain("backups")
     expect(ALL_TABS).toContain("retention")
   })
