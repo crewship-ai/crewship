@@ -44,10 +44,10 @@ func TestAcceptance_SyncRunOfRoutineCallingHeldRoutineReturnsParentReceipt(t *te
 	if !strings.Contains(out, "WAITING") || id == nil || tok == nil {
 		t.Fatalf("want a WAITING receipt with a run id and an approve command:\n%s", out)
 	}
-	// The receipt's run is the parent: its detail names the parent routine.
-	detail, err := runRoutineDetailCLI(t, owner, "routine", "result", id[1])
-	if err != nil || !strings.Contains(detail, "held-parent") {
-		t.Fatalf("receipt run %s is not the parent run (err=%v):\n%s", id[1], err, detail)
+	// The receipt's run is the parent: it is listed under the parent routine.
+	records, err := runRoutineDetailCLI(t, owner, "routine", "records", "held-parent")
+	if err != nil || !strings.Contains(records, id[1]) {
+		t.Fatalf("receipt run %s is not a run of the parent routine (err=%v):\n%s", id[1], err, records)
 	}
 	if out, err := runCLIWithin(t, owner, 30*time.Second, "routine", "waitpoints", "approve", tok[1]); err != nil {
 		t.Fatalf("approve: %v\n%s", err, out)
