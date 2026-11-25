@@ -128,6 +128,22 @@ func shareLockFile(f *os.File, shared bool) {
 // already exists, or that another writer creates concurrently, is left
 // alone. Outside the shared tree it behaves like os.MkdirAll(dir, 0o755).
 func MkdirAllShared(dir string) error {
+	if crew, _, ok := splitCrewDir(dir); ok {
+		// The crew directory and what is above it belong to the server; the
+		// agent cannot have put anything there while it does not exist.
+		if _, err := os.Stat(crew); errors.Is(err, fs.ErrNotExist) {
+			if err := mkdirAllShared(crew, 0o755); err != nil {
+				return err
+			}
+		}
+	}
+	if root, rel, ok, err := crewRootFor(dir); ok {
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		return mkdirAllSharedRoot(root, rel, 0o755)
+	}
 	return mkdirAllShared(dir, 0o755)
 }
 

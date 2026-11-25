@@ -21,6 +21,20 @@ func (l *writeLock) Lock() error {
 	// arbitrary file (review #926). We deliberately do NOT add O_EXCL: the
 	// sentinel is a persistent on-disk file that legitimate repeated locks
 	// reuse, and O_EXCL would fail every lock after the first.
+	if root, rel, ok, err := crewRootFor(l.path); ok {
+		// Inside a crew directory the sentinel is opened through a root on
+		// it, so a link swapped into the chain cannot redirect the open.
+		if err != nil {
+			return fmt.Errorf("open lockfile: %w", err)
+		}
+		defer root.Close()
+		rl := &RootFileLock{root: root, name: rel}
+		if err := rl.Lock(); err != nil {
+			return err
+		}
+		l.f = rl.f
+		return nil
+	}
 	shared := inSharedTree(filepath.Dir(l.path))
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
 	if err != nil {

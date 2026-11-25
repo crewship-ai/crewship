@@ -4,9 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/literalfilter"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -426,10 +427,21 @@ func Quarantine(agentMemoryDir, sourcePath, original string, hit *ScanHit) (plac
 	sha = hex.EncodeToString(digest[:])
 
 	qDir := filepath.Join(agentMemoryDir, ".quarantine")
-	if err := os.MkdirAll(qDir, 0o755); err != nil {
+	qPath := filepath.Join(qDir, sha+".md")
+	memRoot, err := openPlainDir(agentMemoryDir)
+	if err != nil {
+		return "", "", fmt.Errorf("quarantine: open %s: %w", agentMemoryDir, err)
+	}
+	defer memRoot.Close()
+	if err := memRoot.Mkdir(".quarantine", 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", "", fmt.Errorf("quarantine: mkdir %s: %w", qDir, err)
 	}
-	qPath := filepath.Join(qDir, sha+".md")
+	// OpenRoot refuses a link that leaves the memory directory.
+	qRoot, err := memRoot.OpenRoot(".quarantine")
+	if err != nil {
+		return "", "", fmt.Errorf("quarantine: open %s: %w", qDir, err)
+	}
+	defer qRoot.Close()
 
 	// Wrap original with frontmatter recording category + source so
 	// operator triage tooling can route the alert without re-running
@@ -449,7 +461,7 @@ sha256: %q
 		time.Now().UTC().Format(time.RFC3339),
 		hit.Category, hit.Pattern, sourcePath, sha,
 	)
-	if err := writeFileDurable(qPath, []byte(header+original), 0o600); err != nil {
+	if err := WriteFileDurableRoot(qRoot, sha+".md", []byte(header+original), 0o600); err != nil {
 		return "", "", fmt.Errorf("quarantine: write %s: %w", qPath, err)
 	}
 

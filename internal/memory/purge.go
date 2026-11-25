@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 )
 
 // lockSuffix is the sentinel filename suffix every per-subject writer in
@@ -75,16 +76,22 @@ func anyExists(paths ...string) bool {
 // artefact — dropping it then would only remove the lock protecting a
 // file that still exists.
 func removeUnderLock(path, subsystem string) error {
-	lk := NewFileLock(path + lockSuffix)
+	root, err := openPlainDir(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("%s: lock: %w", subsystem, err)
+	}
+	defer root.Close()
+	name := filepath.Base(path)
+	lk := NewRootFileLock(root, name+lockSuffix)
 	if err := lk.Lock(); err != nil {
 		return fmt.Errorf("%s: lock: %w", subsystem, err)
 	}
 	var firstErr error
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		firstErr = fmt.Errorf("%s: remove: %w", subsystem, err)
 	}
 	if firstErr == nil {
-		if err := os.Remove(path + lockSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := root.Remove(name + lockSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			firstErr = fmt.Errorf("%s: remove lock sentinel: %w", subsystem, err)
 		}
 	}
