@@ -447,3 +447,24 @@ func TestPodmanReferenceInitialProbeFailureLeavesNoContainer(t *testing.T) {
 		t.Fatalf("retry: creates=%d err=%v", len(f.creates), err)
 	}
 }
+
+// A missing image record can outlive its cache tag and leave a created
+// reference behind. Pin the requested outcome separately from the existing
+// partial-sweep regression, which covers the current conservative behavior.
+func TestUnselectedReferenceWithMissingImageEventuallyReleased(t *testing.T) {
+	f, id := referenceFixture(t)
+	refs := NewImageReferences(f, referenceBorrower)
+	if _, err := refs.Preserve(t.Context(), []resourcelifecycle.ImageReference{{Ref: id, Required: true}}); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.images, id)
+	empty := func(context.Context) ([]resourcelifecycle.ImageReference, error) { return nil, nil }
+	gate := &resourcelifecycle.ImageUse{}
+	var err error
+	for range 2 {
+		err = refs.Reconcile(t.Context(), gate, empty)
+	}
+	if err != nil || len(f.containers) != 0 {
+		t.Fatalf("after two complete inventories: retained=%d err=%v", len(f.containers), err)
+	}
+}

@@ -58,6 +58,11 @@ type ImageSelectionQuery interface {
 // or committed selections during startup/reconciliation. Previous images and
 // configured bases are retained when present; current environments are exact.
 func SelectedImageReferences(ctx context.Context, q ImageSelectionQuery, crewIDs ...string) ([]ImageReference, error) {
+	return SelectedImageReferencesAt(ctx, q, time.Now(), crewIDs...)
+}
+
+// SelectedImageReferencesAt evaluates tombstones at the collection pass time.
+func SelectedImageReferencesAt(ctx context.Context, q ImageSelectionQuery, now time.Time, crewIDs ...string) ([]ImageReference, error) {
 	query := `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,''),COALESCE(services_json,'') FROM crews`
 	var args []any
 	if len(crewIDs) > 0 {
@@ -84,7 +89,7 @@ func SelectedImageReferences(ctx context.Context, q ImageSelectionQuery, crewIDs
 		}
 		if deleted != "" {
 			at, err := time.Parse(time.RFC3339Nano, deleted) // tsformat:allow: parse persisted deletion timestamp, never emit one
-			if err == nil && time.Since(at) > 7*24*time.Hour {
+			if err == nil && now.Sub(at) > 7*24*time.Hour {
 				continue
 			}
 		}

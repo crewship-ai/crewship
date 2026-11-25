@@ -69,7 +69,7 @@ func (h *ProvisioningHandler) reconcileImageReferences(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(writer.Context(), 30*time.Second)
 	defer cancel()
 	err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
-		return resourcelifecycle.SelectedImageReferences(ctx, h.db)
+		return resourcelifecycle.SelectedImageReferencesAt(ctx, h.db, h.gcNow())
 	})
 	h.mu.Lock()
 	if err == nil {
@@ -160,7 +160,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 		return
 	}
 	containers := listResult.Items
-	cutoff := time.Now().Add(-tempContainerMaxAge).Unix()
+	cutoff := h.gcNow().Add(-tempContainerMaxAge).Unix()
 	removed := 0
 	for i, c := range containers {
 		if i >= orphanGCSweepCap {

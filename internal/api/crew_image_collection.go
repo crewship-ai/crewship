@@ -83,6 +83,13 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 
 }
 
+func (h *ProvisioningHandler) gcNow() time.Time {
+	if h.gcClock != nil {
+		return h.gcClock()
+	}
+	return time.Now()
+}
+
 func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 	h.mu.RLock()
 	owner := h.instanceID
@@ -92,7 +99,7 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		h.logger.Warn("image collection: unused-image state unavailable; retaining images", "error", err)
 		return
 	}
-	now := time.Now()
+	now := h.gcNow()
 	if lastPass, known := unusedSince[lastPassMarker]; !known || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
 		// Nobody was watching: an image may have been used and released
 		// unseen. Start every window over rather than act on what was true
@@ -152,7 +159,7 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		h.logger.Warn("image collection: references unavailable; retaining images", "error", err)
 		return
 	}
-	cutoff := time.Now().Add(-ownedImageMinAge).Unix()
+	cutoff := now.Add(-ownedImageMinAge).Unix()
 	present := map[string]bool{}
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
@@ -305,7 +312,7 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 		// revived. A deletion time that cannot be read protects, never frees.
 		if deletedAt != "" {
 			at, err := time.Parse(time.RFC3339Nano, deletedAt) // tsformat:allow: parse only; deleted_at is read and compared as time.Time in Go
-			if err == nil && time.Since(at) > deletedCrewImageRetention {
+			if err == nil && h.gcNow().Sub(at) > deletedCrewImageRetention {
 				continue
 			}
 		}
