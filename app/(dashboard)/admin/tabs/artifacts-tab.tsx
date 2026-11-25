@@ -112,18 +112,6 @@ export function ArtifactsTab() {
   const [confirm, setConfirm] = useState<Application | null>(null)
   const [drain, setDrain] = useState(900)
   const [diagnostics, setDiagnostics] = useState<Partial<Record<Subject, Diagnostics>>>({})
-  const query = useQuery({
-    queryKey: QUERY_KEY,
-    retry: false,
-    gcTime: 0,
-    queryFn: ({ signal }) => request<ApplicationSettings>(APPLICATIONS_PATH, { signal }),
-    refetchInterval: ({ state: { data, error } }) => {
-      if (accessDenied(error)) return false
-      if (data?.applications.some(isInstalling)) return 2000
-      if (data?.applications.some((app) => app.state === "draining")) return 15000
-      return false
-    },
-  })
   const update = useMutation({
     mutationFn: updateApplication,
     onSuccess: async (settings) => {
@@ -133,6 +121,18 @@ export function ArtifactsTab() {
     onError: (error) => {
       toast.error(error.message)
       void client.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
+  const query = useQuery({
+    queryKey: QUERY_KEY,
+    retry: false,
+    gcTime: 0,
+    queryFn: ({ signal }) => request<ApplicationSettings>(APPLICATIONS_PATH, { signal }),
+    refetchInterval: ({ state: { data, error } }) => {
+      if (accessDenied(error)) return false
+      if (update.isPending || data?.applications.some(isInstalling)) return 2000
+      if (data?.applications.some((app) => app.state === "draining")) return 15000
+      return false
     },
   })
   const diagnose = useMutation({
@@ -165,7 +165,7 @@ export function ArtifactsTab() {
           key={app.id}
           app={app}
           busy={update.isPending}
-          updating={update.isPending && update.variables?.id === app.id}
+          pending={update.isPending && update.variables?.id === app.id ? update.variables : undefined}
           diagnostic={diagnostics[app.id]}
           diagnosticBusy={diagnose.isPending}
           diagnosing={diagnose.isPending && diagnose.variables === app.id}
@@ -217,7 +217,7 @@ export function ArtifactsTab() {
 interface CardProps {
   app: Application
   busy: boolean
-  updating: boolean
+  pending?: Update
   diagnostic?: Diagnostics
   diagnosing: boolean
   diagnosticBusy: boolean
@@ -226,7 +226,7 @@ interface CardProps {
   onDiagnose: () => void
 }
 
-function ApplicationCard({ app, busy, updating, diagnostic, diagnosing, diagnosticBusy, onToggle, onInstall, onDiagnose }: CardProps) {
+function ApplicationCard({ app, busy, pending, diagnostic, diagnosing, diagnosticBusy, onToggle, onInstall, onDiagnose }: CardProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const installing = isInstalling(app)
   const installable = INSTALLABLE.has(app.component?.reason ?? app.reason ?? "")
@@ -234,6 +234,12 @@ function ApplicationCard({ app, busy, updating, diagnostic, diagnosing, diagnost
   const status = installing ? { tone: "blue", label: "Installing" } as const : STATUS[app.state]
   const drainUntil = app.state === "draining" && app.drain_until ? new Date(app.drain_until) : null
   const toggle = app.desired === "enabled" ? "Turn off" : "Turn on"
+  let progress = installing ? `Installing ${app.label}…` : undefined
+  if (pending && "desired" in pending && !installing) {
+    progress = pending.desired === "enabled" ? `Turning on ${app.label}…` : `Turning off ${app.label}…`
+  } else if (pending && !("desired" in pending)) {
+    progress = pending.file ? `Uploading and verifying ${app.label}…` : `Installing ${app.label}…`
+  }
   return (
     <SettingsCard title={app.label} icon={ICON[app.id]} actions={<StatusPill {...status} live={installing} />}>
       <SettingsRow label="Access" description={locked ? "Managed by server configuration. This setting can only be changed on the server." : undefined}>
@@ -250,7 +256,7 @@ function ApplicationCard({ app, busy, updating, diagnostic, diagnosing, diagnost
         </div>
       )}
       {app.component?.detail && <p className="break-words border-t border-border px-4 py-3 text-label text-muted-foreground">{app.component.detail}</p>}
-      {(installing || updating) && <p className="sr-only" role="status">{installing ? `Installing ${app.label}` : `Updating ${app.label}`}</p>}
+      {progress && <p className="border-t border-border px-4 py-3 text-label text-muted-foreground" role="status">{progress}</p>}
       {!installing && (installable || app.component?.available) && (
         <div className="flex flex-wrap gap-2 border-t border-border px-4 py-3">
           {installable && (

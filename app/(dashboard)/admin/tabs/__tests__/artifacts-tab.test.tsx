@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ArtifactsTab } from "../artifacts-tab"
 
@@ -89,6 +89,48 @@ describe("Admin artifact applications", () => {
     await waitFor(() => expect(within(screen.getByRole("region", { name: "Word" })).getByText("Ready")).toBeInTheDocument(), {
       timeout: 5000,
     })
+  })
+
+  it("shows upload progress and reads the server status before the file response", async () => {
+    const missing = { ...word, state: "unavailable", reason: "component_not_installed", component: { available: false } }
+    const installing = { ...missing, reason: "component_installing", message: "Verifying the uploaded package." }
+    let finishUpload: (value: Response) => void = () => {}
+    const upload = new Promise<Response>((resolve) => { finishUpload = resolve })
+    mocks.apiFetch
+      .mockResolvedValueOnce(response(settings(missing)))
+      .mockReturnValueOnce(upload)
+      .mockResolvedValue(response(settings(installing)))
+    const { container } = view()
+    await screen.findByRole("button", { name: "Install Word from file" })
+    const input = container.querySelector("input[type=file]")!
+    const file = new File(["fixture"], "word.craftpkg")
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(await screen.findByText("Uploading and verifying Word…")).toBeVisible()
+    expect(mocks.apiFetch).toHaveBeenCalledWith(`${PATH}/wordcraft/install`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+    })
+    await waitFor(() => expect(screen.getByText("Verifying the uploaded package.")).toBeVisible(), { timeout: 5000 })
+    await act(async () => { finishUpload(response(settings())) })
+    await waitFor(() => expect(screen.queryByText("Uploading and verifying Word…")).not.toBeInTheDocument())
+  })
+
+  it("shows progress when enabling an application starts a download", async () => {
+    const missing = { ...word, desired: "disabled", state: "unavailable", reason: "component_not_installed", component: { available: false } }
+    const installing = { ...missing, desired: "enabled", reason: "component_installing" }
+    let finishPatch: (value: Response) => void = () => {}
+    const patch = new Promise<Response>((resolve) => { finishPatch = resolve })
+    mocks.apiFetch
+      .mockResolvedValueOnce(response(settings(missing)))
+      .mockReturnValueOnce(patch)
+      .mockResolvedValue(response(settings(installing)))
+    view()
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on Word" }))
+    expect(await screen.findByText("Turning on Word…")).toBeVisible()
+    expect(mocks.apiFetch).toHaveBeenCalledWith(`${PATH}/wordcraft`, expect.objectContaining({
+      method: "PATCH", body: JSON.stringify({ desired: "enabled" }),
+    }))
+    await act(async () => { finishPatch(response(settings(installing))) })
+    expect(await screen.findByText("Installing Word…")).toBeVisible()
   })
 
   it("shows a diagnostic failure without changing access", async () => {
