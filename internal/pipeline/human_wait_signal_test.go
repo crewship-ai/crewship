@@ -132,3 +132,54 @@ func TestOnHumanWait_NestedRoutineReportsTheParentRun(t *testing.T) {
 		t.Fatalf("run after approval: %+v", res)
 	}
 }
+
+// #5354: when the person denies the wait inside the called routine, the run the
+// caller started ends FAILED (not hung, not COMPLETED), and a second decision
+// is refused.
+func TestOnHumanWait_NestedDenialEndsTheParentRunOnce(t *testing.T) {
+	db := openResumeTestDB(t)
+	seedHeldActionMembers(t, db)
+	t.Cleanup(func() { db.Close() })
+	store := NewStore(db)
+	wp := NewSQLWaitpointStore(db)
+	t.Cleanup(wp.Close)
+	saveResumePipeline(t, store, "child-deny", `{"dsl_version":"1.0","name":"child-deny","steps":[
+ {"id":"each","type":"foreach","foreach":{"items":"[\"a\"]","as":"host","parallelism":1,"steps":[
+  {"id":"create","type":"crewship","action":"issue.create","args":{"title":"Status {{ inputs.host }}"}}
+ ]}}
+]}`)
+	parent := saveResumePipeline(t, store, "parent-deny", `{"dsl_version":"1.0","name":"parent-deny","steps":[
+ {"id":"call","type":"call_pipeline","pipeline_slug":"child-deny"}
+]}`)
+	exec := NewExecutor(store, NewResolver(db), newMockRunner(), &captureEmitter{}).
+		WithRunStore(NewRunStore(db)).WithWaitpointStore(wp).WithCrewshipActions(&heldCrewshipActions{db: db})
+	signals := make(chan string, 4)
+	finished := make(chan *RunResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() {
+		res, _ := exec.Run(ctx, RunInput{PipelineID: parent.ID, WorkspaceID: "ws_test", Mode: ModeRun,
+			OnHumanWait: func(_, _, token string) { signals <- token }})
+		finished <- res
+	}()
+	var token string
+	select {
+	case token = <-signals:
+	case <-ctx.Done():
+		t.Fatal("no signal")
+	}
+	var cards int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`).Scan(&cards); err != nil || cards != 1 {
+		t.Fatalf("pending waitpoints = %d (%v), want exactly one card", cards, err)
+	}
+	if err := wp.CompleteApproval(ctx, "ws_test", token, false, "u_admin", "no"); err != nil {
+		t.Fatal(err)
+	}
+	res := <-finished
+	if res == nil || res.Status != "FAILED" {
+		t.Fatalf("run after denial: %+v, want FAILED", res)
+	}
+	if err := wp.CompleteApproval(ctx, "ws_test", token, true, "u_admin", ""); err == nil {
+		t.Fatal("a second decision was accepted")
+	}
+}

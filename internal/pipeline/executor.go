@@ -1119,9 +1119,10 @@ type RunInput struct {
 	// run that cannot park), with the run, the step and the waitpoint token.
 	// In practice that is a held action inside foreach; a top-level step of
 	// a stored run parks it instead and does not call this. It is not
-	// passed to nested routines (buildNestedRunInput): their steps run as a
-	// child run and still block without a signal. The
-	// synchronous run endpoint uses it to return a WAITING receipt and let
+	// passed on as is to nested routines: a wait in a called routine is
+	// reported with the run id of the run the caller started
+	// (buildNestedRunInput). The synchronous run endpoint uses it to return a
+	// WAITING receipt and let
 	// the run continue without the request (#5348). It must not block.
 	OnHumanWait func(runID, stepID, token string)
 
@@ -2636,7 +2637,15 @@ func parentRunSlug(in RunInput) string {
 //     checked with GuardChainDepth, so the child spends from the same budget
 //     rather than starting a fresh one.
 func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string, chainDepth int) RunInput {
+	// A wait inside the called routine is reported as a wait of the run the
+	// caller started: the child's own run id means nothing to that caller.
+	// Nested calls chain through each level's own wrapper to the root run.
+	var onHumanWait func(runID, stepID, token string)
+	if parent.OnHumanWait != nil {
+		onHumanWait = func(_, stepID, token string) { parent.OnHumanWait(parentRunID, stepID, token) }
+	}
 	return RunInput{
+		OnHumanWait:           onHumanWait,
 		WorkspaceID:           parent.WorkspaceID,
 		AuthorCrewID:          target.AuthorCrewID, // nested runs in nested pipeline's author context
 		AuthorAgentID:         target.AuthorAgentID,
