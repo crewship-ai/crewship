@@ -1,1 +1,1 @@
-- Added Admin → Artifacts, where instance administrators can manage Word, Sheet, and agent access, check installation status, and let open editors finish saving before turning editing off.
+- **Admin → Artifacts.** Instance administrators can manage Word, Sheet, and agent access, check installation status, and let open editors finish saving before turning editing off.
