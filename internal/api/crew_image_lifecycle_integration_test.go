@@ -1,4 +1,4 @@
-//go:build integration && linux
+//go:build image_lifecycle_integration && linux
 
 package api
 
@@ -31,7 +31,7 @@ import (
 func TestIsolatedImageLifecycle(t *testing.T) {
 	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
 	if host == "" {
-		t.Skip("requires a dedicated engine")
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
 	}
 	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
 		t.Fatal("explicit isolated socket must match DOCKER_HOST")
@@ -220,7 +220,7 @@ func TestIsolatedImageLifecycle(t *testing.T) {
 func TestIsolatedFeatureTagReplacement(t *testing.T) {
 	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
 	if host == "" {
-		t.Skip("requires a dedicated engine")
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
 	}
 	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
 		t.Fatal("isolated socket mismatch")
@@ -331,7 +331,7 @@ func TestIsolatedFeatureTagReplacement(t *testing.T) {
 func TestIsolatedMissingCrewContainer(t *testing.T) {
 	host := os.Getenv("CREWSHIP_TEST_ISOLATED_ENGINE")
 	if host == "" {
-		t.Skip("requires a dedicated engine")
+		t.Fatal("CREWSHIP_TEST_ISOLATED_ENGINE is required")
 	}
 	if !strings.HasPrefix(host, "unix:///") || host != os.Getenv("DOCKER_HOST") {
 		t.Fatal("isolated socket mismatch")
