@@ -35,7 +35,22 @@ import (
 // confused-deputy write. writeFileDurable's rename already replaces a symlink
 // rather than writing through it; the explicit Lstat turns a planted link into
 // a loud refusal (and an attack signal) instead of a silent clobber.
+// afterDurableTemp is a test seam: it runs once the temporary file exists,
+// so a test can change the directory chain at the one moment a check-then-
+// write implementation would be exposed.
+var afterDurableTemp func()
+
 func writeMemoryFileNoFollow(path string, content []byte, perm os.FileMode) error {
+	if root, rel, ok, err := crewRootFor(path); ok {
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		if fi, lerr := root.Lstat(rel); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through symlinked path: %s", path)
+		}
+		return writeFileDurableRoot(root, rel, content, perm, false)
+	}
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write through symlinked path: %s", path)
 	}
@@ -87,6 +102,9 @@ func writeFileDurableRoot(root *os.Root, name string, content []byte, perm os.Fi
 		return fmt.Errorf("open tempfile: %w", err)
 	}
 	cleanup := func() { _ = root.Remove(tmpName) }
+	if afterDurableTemp != nil {
+		afterDurableTemp()
+	}
 	if _, err = f.Write(content); err != nil {
 		_ = f.Close()
 		cleanup()
@@ -142,6 +160,13 @@ func WriteFileNoFollow(path string, content []byte, perm os.FileMode) error {
 }
 
 func writeFileDurable(path string, content []byte, perm os.FileMode) (err error) {
+	if root, rel, ok, err := crewRootFor(path); ok {
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		return writeFileDurableRoot(root, rel, content, perm, false)
+	}
 	var randBuf [8]byte
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
 		return fmt.Errorf("rand for tempname: %w", rerr)

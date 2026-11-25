@@ -215,17 +215,23 @@ func ResetPersona(p PersonaPaths, layer PersonaLayer) error {
 	if err != nil {
 		return err
 	}
-	lk := NewFileLock(path + ".lock")
-	if err := lk.Lock(); err != nil {
-		// The lock is created beside the persona. A missing parent means
-		// this layer has never been written, so it is already reset.
+	root, err := openPlainDir(filepath.Dir(path))
+	if err != nil {
+		// A missing parent means this layer has never been written, so it is
+		// already reset.
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return fmt.Errorf("persona: lock: %w", err)
 	}
+	defer root.Close()
+	name := filepath.Base(path)
+	lk := NewRootFileLock(root, name+".lock")
+	if err := lk.Lock(); err != nil {
+		return fmt.Errorf("persona: lock: %w", err)
+	}
 	defer func() { _ = lk.Unlock() }()
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("persona: remove: %w", err)
 	}
 	return nil
