@@ -70,6 +70,19 @@ describe("Admin artifact applications", () => {
     expect(screen.getByRole("button", { name: "Turn on Word" })).toBeInTheDocument()
   })
 
+  it("explains why a build without a trusted package cannot turn Word on", async () => {
+    mocks.apiFetch.mockResolvedValue(response(settings({
+      ...word, desired: "disabled", state: "unavailable", reason: "component_missing",
+      component: { available: false, reason: "component_missing" },
+    })))
+    view()
+    const toggle = await screen.findByRole("button", { name: "Turn on Word" })
+    expect(toggle).toBeDisabled()
+    expect(screen.getByText(/This Crewship build has no trusted Word package/)).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Install Word" })).not.toBeInTheDocument()
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1)
+  })
+
   it("polls installation until the server reports the application ready", async () => {
     const missing = {
       ...word, state: "unavailable", reason: "component_not_installed", component: { available: false },

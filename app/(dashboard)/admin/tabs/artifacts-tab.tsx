@@ -231,6 +231,11 @@ function ApplicationCard({ app, busy, pending, diagnostic, diagnosing, diagnosti
   const installing = isInstalling(app)
   const installable = INSTALLABLE.has(app.component?.reason ?? app.reason ?? "")
   const locked = isLocked(app)
+  const untrustedBuild = app.reason === "component_missing" || app.component?.reason === "component_missing"
+  const unavailableToEnable = untrustedBuild && app.desired === "disabled"
+  const message = untrustedBuild
+    ? `This Crewship build has no trusted ${app.label} package. To turn it on, use a build that includes a trusted package.`
+    : app.message
   const status = installing ? { tone: "blue", label: "Installing" } as const : STATUS[app.state]
   const drainUntil = app.state === "draining" && app.drain_until ? new Date(app.drain_until) : null
   const toggle = app.desired === "enabled" ? "Turn off" : "Turn on"
@@ -243,13 +248,13 @@ function ApplicationCard({ app, busy, pending, diagnostic, diagnosing, diagnosti
   return (
     <SettingsCard title={app.label} icon={ICON[app.id]} actions={<StatusPill {...status} live={installing} />}>
       <SettingsRow label="Access" description={locked ? "Managed by server configuration. This setting can only be changed on the server." : undefined}>
-        <Button variant="outline" size="sm" disabled={busy || locked} onClick={onToggle}>
+        <Button variant="outline" size="sm" disabled={busy || locked || unavailableToEnable} onClick={onToggle}>
           {`${toggle} ${app.label}`}
         </Button>
       </SettingsRow>
-      {(app.message || drainUntil || app.documents !== undefined || app.component?.version) && (
+      {(message || drainUntil || app.documents !== undefined || app.component?.version) && (
         <div className="space-y-1 border-t border-border px-4 py-3 text-label text-muted-foreground" aria-live="polite">
-          {app.message && <p>{app.message}</p>}
+          {message && <p>{message}</p>}
           {drainUntil && <p>Open editors can save until <time dateTime={app.drain_until}>{drainUntil.toLocaleString()}</time>.</p>}
           {app.documents !== undefined && <p>{app.documents} {app.documents === 1 ? "document" : "documents"}</p>}
           {app.component?.version && <p>Installed version {app.component.version}{app.component.runtime && ` · ${app.component.runtime}`}</p>}
