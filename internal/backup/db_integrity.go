@@ -56,6 +56,10 @@ var beforeDatabaseCheck func()
 // database snapshot. The bundle is kept; it just is not a trusted copy.
 const IncompleteDatabaseDamaged = "database_damaged"
 
+// IncompleteDatabaseUnchecked: the check could not finish (time limit, open
+// error), so nobody knows whether the database is healthy.
+const IncompleteDatabaseUnchecked = "database_unchecked"
+
 // DatabaseCheck is the recorded result of the SQLite checks on a bundle's
 // database snapshot (manifest contents.instance.database_check).
 type DatabaseCheck struct {
@@ -205,6 +209,12 @@ func truncateFinding(s string) string {
 // databaseCheckIncomplete turns a damaged result into the manifest's gap
 // list entry, so every surface that lists gaps shows it.
 func databaseCheckIncomplete(c DatabaseCheck) []IncompleteItem {
+	if c.Status == DatabaseCheckError {
+		return []IncompleteItem{{
+			Kind: IncompleteDatabaseUnchecked, Count: 1,
+			Detail: "SQLite's checks could not finish on the database snapshot (" + c.Error + "), so this bundle's database is unverified",
+		}}
+	}
 	if c.Status != DatabaseCheckDamaged {
 		return nil
 	}

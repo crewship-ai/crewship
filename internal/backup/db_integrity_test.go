@@ -89,7 +89,7 @@ func TestInstanceBackupDamagedDatabaseIsRecordedWithoutValues(t *testing.T) {
 func TestInstanceBackupDatabaseCheckErrorIsNotOK(t *testing.T) {
 	f := newInstanceFixture(t)
 	res, err := backup.CreateInstanceBackup(context.Background(), f.db, backup.InstanceOptions{
-		OutputDir: f.outputDir, Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths,
+		OutputDir: f.outputDir, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "instance_admin"}, Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths,
 		Quiesce: quiesce.New(), Poll: 5 * time.Millisecond, DatabaseCheckTimeout: time.Nanosecond,
 	})
 	if err != nil {
@@ -98,6 +98,13 @@ func TestInstanceBackupDatabaseCheckErrorIsNotOK(t *testing.T) {
 	dc := res.Manifest.Contents.Instance.DatabaseCheck
 	if dc == nil || dc.Status != backup.DatabaseCheckError || dc.Verified() || dc.Error == "" {
 		t.Fatalf("database_check = %+v", dc)
+	}
+	var gap bool
+	for _, in := range res.Manifest.Contents.Incomplete {
+		gap = gap || in.Kind == backup.IncompleteDatabaseUnchecked
+	}
+	if !gap {
+		t.Fatalf("an unchecked database leaves no gap: %+v", res.Manifest.Contents.Incomplete)
 	}
 	if res.Manifest.Contents.Instance.DatabaseCheckState() == backup.DatabaseCheckOK {
 		t.Fatal("error state reads as ok")
@@ -112,7 +119,7 @@ func TestInstanceBackupDatabaseCheckRunsAfterWindowRelease(t *testing.T) {
 	undo := backup.SetBeforeDatabaseCheckForTest(func() { ran, holding = true, ctrl.Holding() })
 	defer undo()
 	if _, err := backup.CreateInstanceBackup(context.Background(), f.db, backup.InstanceOptions{
-		OutputDir: f.outputDir, Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths,
+		OutputDir: f.outputDir, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "instance_admin"}, Recipients: []age.Recipient{f.identity.Recipient()}, Paths: f.paths,
 		Quiesce: ctrl, Poll: 5 * time.Millisecond,
 	}); err != nil {
 		t.Fatal(err)
@@ -138,5 +145,22 @@ func TestInstanceBackupWithoutDatabaseCheckIsUnverified(t *testing.T) {
 	}
 	if old.DatabaseCheckState() != backup.DatabaseCheckUnverified {
 		t.Fatalf("old manifest state = %q", old.DatabaseCheckState())
+	}
+}
+
+// A damaged newest bundle must not cost the last intact checked one: it is
+// never counted as a checked copy, so the older intact bundle stays.
+func TestPlanRetentionDamagedNewestKeepsLastIntactCheckedCopy(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	cands := []backup.RetentionCandidate{
+		{Path: "damaged-newest", Scope: backup.ScopeInstance, CreatedAt: now.Add(-1 * time.Hour), ProofLevel: backup.ProofChecksum, Incomplete: true},
+		{Path: "intact-checked", Scope: backup.ScopeInstance, CreatedAt: now.Add(-48 * time.Hour), ProofLevel: backup.ProofContents, Complete: true},
+		{Path: "older", Scope: backup.ScopeInstance, CreatedAt: now.Add(-72 * time.Hour), ProofLevel: backup.ProofChecksum, Complete: true},
+	}
+	_, drop := backup.PlanRetention(cands, backup.RetentionPolicy{KeepMin: 1}, now)
+	for _, d := range drop {
+		if d.Path == "damaged-newest" || d.Path == "intact-checked" {
+			t.Fatalf("retention dropped %s", d.Path)
+		}
 	}
 }
