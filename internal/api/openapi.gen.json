@@ -16616,6 +16616,10 @@
           "editorURL": {
             "type": "string"
           },
+          "engineBuild": {
+            "description": "Qualified workbook engine build, when named by the installed package.",
+            "type": "string"
+          },
           "enginePin": {
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
@@ -17923,6 +17927,10 @@
             "type": "string"
           },
           "editorURL": {
+            "type": "string"
+          },
+          "engineBuild": {
+            "description": "Qualified workbook engine build, when named by the installed package.",
             "type": "string"
           },
           "enginePin": {

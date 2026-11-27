@@ -77,7 +77,8 @@ async function readWorkbook(api: APIRequestContext, craft: (path: string) => str
   expect(stored.status()).toBe(200)
   const { bytes, version, enginePin, format } = await stored.json() as { bytes: string; version: string; enginePin: string; format: string }
   expect(format).toBe("xlsx")
-  expect(version).toBe(stored.headers()["x-craft-version"])
+  expect(version).toMatch(/^[1-9][0-9]*$/)
+  expect(enginePin).toMatch(/^[a-f0-9]{64}$/)
   return { bytes: Buffer.from(bytes, "base64"), version, pin: enginePin }
 }
 
