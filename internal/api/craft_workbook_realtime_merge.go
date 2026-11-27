@@ -56,6 +56,9 @@ func craftRealtimeInputs(raw []byte, edits craftWorkbookEdits) (map[craftRealtim
 		if len(edits.cells[strings.ToLower(sheet)]) == 0 {
 			continue
 		}
+		if parts[name] == nil {
+			return nil, errCraftRealtimeUnproved
+		}
 		if _, err := craftWorksheetProjection(parts[name], sheet, edits); err != nil {
 			return nil, err
 		}
@@ -109,7 +112,7 @@ type craftRealtimeChanges struct {
 
 // Check that the journal covers the whole interval. A missing journal, unknown
 // write, or change by another human cannot establish the authority to rebase.
-func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, user, pin string, base, head int64) (craftRealtimeChanges, error) {
+func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, user, agent, chat, pin string, base, head int64) (craftRealtimeChanges, error) {
 	out := craftRealtimeChanges{agentRanges: []craftSheetRange{}}
 	rows, err := db.QueryContext(ctx, `SELECT version,base_version,actor_kind,actor_id,engine_pin,operation_id,replayable,ops
 		FROM craft_version_ops WHERE workspace_id=? AND page_id=? AND version>? AND version<=? ORDER BY version LIMIT 129`, scope.WorkspaceID, scope.ArtifactID, base, head)
@@ -130,10 +133,13 @@ func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.Edi
 		}
 		next = version
 		edits := &out.agent
-		if kind == "human" && actor == user && strings.HasPrefix(id, "realtime:") {
+		if kind == "human" && actor == user && strings.HasPrefix(id, craftRealtimeOperationPrefix(chat)) {
 			edits = &out.human
-		} else if kind != "agent" || !replayable {
+		} else if kind != "agent" || actor != agent || !replayable {
 			return out, errCraftRealtimeUnproved
+		}
+		if kind == "human" && ops == "[]" {
+			continue
 		}
 		reads, ok := craftUndoReads(json.RawMessage(ops))
 		if !ok {

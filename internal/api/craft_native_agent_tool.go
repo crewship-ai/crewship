@@ -337,7 +337,19 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 			writeJSON(w, 200, nativeAgentLeaseResult(renewed))
 			return
 		}
-		receipt, err := m.applyTool(bound.Context(), e, store, profile, input)
+		var receipt mooring.NativeSaveReceipt
+		applyCtx := bound.Context()
+		if store.Workbook() && e.chat != nil {
+			var cancel context.CancelFunc
+			applyCtx, cancel = context.WithTimeout(applyCtx, craftNativeChatRunEngineWindow)
+			defer cancel()
+		}
+		for retry := 0; retry < craftRealtimeRetries; retry++ {
+			receipt, err = m.applyTool(applyCtx, e, store, profile, input)
+			if !errors.Is(err, errCraftRealtimeAgentMoved) {
+				break
+			}
+		}
 		if err != nil {
 			if errors.Is(err, errCraftNativeAgentProposalRequired) {
 				craftNativeAgentMandateError(w, err)
@@ -539,12 +551,20 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if err != nil {
 		return zero, err
 	}
-	// A new base must be covered by this run's consent. An older request
-	// can be retried after a fresh read if the consented head still holds.
 	if e.chat != nil {
 		consented := e.chat.consentBase()
-		if state.LatestVersion != consented || base > consented {
+		moved, err := m.chatRunConsentMoved(ctx, e, consented, state.LatestVersion)
+		if err != nil {
+			return zero, err
+		}
+		if moved || base > state.LatestVersion {
 			return zero, errCraftNativeConsentStale
+		}
+		if store.Workbook() && base >= consented {
+			// The authorized intervening writes are human edits from this
+			// chat. Run the original cell operations on the current head and
+			// capture the inverse from that same head.
+			base = state.LatestVersion
 		}
 	}
 	if state.LatestVersion != base {
@@ -599,9 +619,13 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	undoable := store.Workbook()
 	if undoable {
 		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(input.Commands))()
-		ops, replayable := craftNativeAgentResolvedOps(input.Commands)
+		ops, err := resolveCraftWorkbookOps(input.Commands)
+		if err != nil {
+			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+			return zero, err
+		}
 		inverse, complete := craftUndoCapture(active, m.config.AgentInspect, profile, native, ops)
-		if !replayable || !complete || !craftVersionOpsFit(ops, inverse) || record == nil {
+		if !complete || !craftVersionOpsFit(ops, inverse) || record == nil {
 			forgetNativeAgentAttempt(e, input.RequestID, attempt)
 			return zero, errCraftNativeAgentUndoUnavailable
 		}
@@ -625,6 +649,10 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	// snapshot; it never reruns the original engine or advances the base.
 	attempt.undoable = undoable
 	receipt, err := store.SaveAttemptRecorded(active, attempt.lease, base, attempt.revision, attempt.hash, candidate, "", record)
+	if errors.Is(err, artifacts.ErrVersionConflict) && store.Workbook() && e.chat != nil {
+		forgetNativeAgentAttempt(e, input.RequestID, attempt)
+		return zero, errCraftRealtimeAgentMoved
+	}
 	if err != nil {
 		e.tool.uncertain = !knownNativeAgentRefusal(err)
 		if e.tool.uncertain {
@@ -845,12 +873,17 @@ func nativeAgentCandidateLimit(store *mooring.NativeStore) int {
 // gridcraft:execute takes it (cell.set, range.setValues, edit.clearContents). Not ok when any
 // command is not such a write or an address has no sheet; that version then has no operations.
 func craftNativeAgentResolvedOps(commands json.RawMessage) (json.RawMessage, bool) {
+	ops, err := resolveCraftWorkbookOps(commands)
+	return ops, err == nil
+}
+
+func resolveCraftWorkbookOps(commands json.RawMessage) (json.RawMessage, error) {
 	var entries []struct {
 		Command string                     `json:"command"`
 		Params  map[string]json.RawMessage `json:"params"`
 	}
 	if json.Unmarshal(commands, &entries) != nil || len(entries) == 0 {
-		return nil, false
+		return nil, ErrCraftNativeAgentEngine
 	}
 	type op struct {
 		Command string         `json:"command"`
@@ -869,13 +902,16 @@ func craftNativeAgentResolvedOps(commands json.RawMessage) (json.RawMessage, boo
 		if raw, err := json.Marshal(e.Params); err == nil {
 			lifted, ok := nativeAgentLiftSheet(e.Command, raw)
 			if !ok || json.Unmarshal(lifted, &e.Params) != nil {
-				return nil, false
+				return nil, ErrCraftNativeAgentEngine
 			}
 		}
 		address, err := nativeAgentSheetAddress("", e.Params, key)
 		// Without its sheet the editor would write the person's active sheet.
-		if err != nil || !strings.Contains(address, "!") {
-			return nil, false
+		if err != nil {
+			return nil, err
+		}
+		if !strings.Contains(address, "!") && (e.Command == "cell.set" || e.Command == "range.setValues" || e.Command == "range.clear") {
+			return nil, errCraftNativeSheetNameRequired
 		}
 		params := map[string]any{key: address}
 		name := e.Command
@@ -887,12 +923,11 @@ func craftNativeAgentResolvedOps(commands json.RawMessage) (json.RawMessage, boo
 		case "range.clear":
 			name = "edit.clearContents"
 		default:
-			return nil, false
+			return nil, ErrCraftNativeAgentEngine
 		}
 		out = append(out, op{Command: name, Params: params})
 	}
-	raw, err := json.Marshal(out)
-	return raw, err == nil
+	return json.Marshal(out)
 }
 
 // craftNativeAgentWorkbookRecord adds to the agent's version record the operations it applied,
@@ -917,6 +952,8 @@ func craftNativeAgentWorkbookRecord(e *craftNativeAgentEntry, store *mooring.Nat
 			ActorKind: "agent", ActorID: agent, OperationID: operation, EnginePin: pin, Calculate: "calculated", Replayable: true, Ops: ops, Inverse: inverse})
 	}
 }
+
+var errCraftRealtimeAgentMoved = errors.Join(artifacts.ErrVersionConflict, errors.New("workbook head moved during agent publication"))
 
 var errCraftNativeAgentUndoUnavailable = errors.New("native Craft agent change requires a complete inverse")
 

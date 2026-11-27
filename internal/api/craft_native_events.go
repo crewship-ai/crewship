@@ -186,8 +186,15 @@ func (m *craftNativeHTTP) streamSheetPresence(r *http.Request, entry *craftNativ
 				current[event.OpID] = event
 			}
 		}
-		if _, err := m.bound(r); err != nil {
+		fresh, err := m.bound(r)
+		if err != nil {
 			retire()
+			return
+		}
+		if fresh.realtimeWrite && !m.realtimeLeaseView(r, fresh).CanWrite {
+			if !send("session_retired", map[string]any{"delivery": "stopped", "reason": "write_revoked", "draft": "retain"}) {
+				return
+			}
 			return
 		}
 		if previous == nil {

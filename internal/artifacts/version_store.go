@@ -260,6 +260,12 @@ func (s *VersionStore) Read(ctx context.Context, k VersionKey, a VersionAuthoriz
 	return
 }
 
+// WithWriteFence runs metadata work under the same writer fence and
+// before-and-after authority checks as a version publication.
+func (s *VersionStore) WithWriteFence(ctx context.Context, k VersionKey, a VersionAuthorize, fn func(*sql.Tx) error) error {
+	return s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error { return fn(tx) })
+}
+
 // ReadVersionFenced reads one version inside a transaction that holds the
 // document writer fence, then runs after(tx, manifest, err) in that same
 // transaction before it commits. ErrVersionNotFound is passed to after, not

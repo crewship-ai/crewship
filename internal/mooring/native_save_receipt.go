@@ -33,8 +33,8 @@ var ErrNativeRetirementLimit = errors.New("native save attempt retirement limit 
 // lease generation. An editor has at most one unconfirmed save at a time.
 const nativeRetiredAttemptsPerPage = 8
 
-// validNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
-func validNativeAttemptID(id string) bool {
+// ValidNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
+func ValidNativeAttemptID(id string) bool {
 	if len(id) < 8 || len(id) > 64 {
 		return false
 	}
@@ -136,7 +136,7 @@ func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	if attemptID != "" && !validNativeAttemptID(attemptID) {
+	if attemptID != "" && !ValidNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
 	message, err := s.attemptMessage(l, base, editorRevision, contentHash, attemptID)
@@ -247,9 +247,7 @@ func (s *NativeStore) WithConcurrentWorkbookAuthority(ctx context.Context, l Edi
 	if !s.Workbook() {
 		return ErrNativeProfile
 	}
-	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), 0, s.holderAuthority(l, "write"), func(tx *sql.Tx, _ artifacts.VersionManifest, _ error) error {
-		return fn(tx)
-	})
+	return s.versions.WithWriteFence(ctx, nativeVersionKey(l.Scope), s.holderAuthority(l, "write"), fn)
 }
 
 // ReconcileSnapshot proves only the exact attempted successor, including when
@@ -271,7 +269,7 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	if attemptID != "" && !validNativeAttemptID(attemptID) {
+	if attemptID != "" && !ValidNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
 	anonymous, err := s.snapshotMessage(l, base, editorRevision, contentHash)

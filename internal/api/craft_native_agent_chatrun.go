@@ -889,7 +889,29 @@ func (m *craftNativeAgentManager) chatRunConsentStale(ctx context.Context, e *cr
 	if err != nil {
 		return false, err
 	}
-	return head != want, nil
+	return m.chatRunConsentMoved(ctx, e, want, head)
+}
+
+// A live run may advance over journaled changes made by its original
+// consenting human in the same chat. An unrelated save requires new consent.
+func (m *craftNativeAgentManager) chatRunConsentMoved(ctx context.Context, e *craftNativeAgentEntry, from, head int64) (bool, error) {
+	if from < 1 || head < from {
+		return true, nil
+	}
+	if head == from {
+		return false, nil
+	}
+	app, ok := m.documents.application(e.grant.Application)
+	if !ok || app.Store.Format != mooring.NativeFormatWorkbook {
+		return true, nil
+	}
+	a := e.chat.authority
+	pin := mooring.NewNativeStore(m.human.pages.db, app.Store).EnginePin()
+	history, err := craftReadRealtimeChanges(ctx, m.human.pages.db, e.grant.Scope, a.HumanUserID, a.AgentID, a.ChatID, pin, from, head)
+	if errors.Is(err, errCraftRealtimeUnproved) {
+		return true, nil
+	}
+	return len(history.agentRanges) > 0, err
 }
 
 type craftNativeChangeSummary struct {
