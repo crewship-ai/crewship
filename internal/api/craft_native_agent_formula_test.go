@@ -3,10 +3,25 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
+
+// formulaEngineProbe counts calls to the qualified engine boundary without
+// depending on the Linux-only native executable override.
+type formulaEngineProbe struct{ runs int }
+
+func (*formulaEngineProbe) Application() string { return "gridcraft" }
+func (*formulaEngineProbe) Runtime() string     { return craftengine.RuntimeWASM }
+func (*formulaEngineProbe) SHA256() string      { return strings.Repeat("b", 64) }
+func (*formulaEngineProbe) Root(string) string  { return craftengine.GuestRoot }
+func (p *formulaEngineProbe) Run(context.Context, string, []string, io.Writer, io.Writer) error {
+	p.runs++
+	return craftengine.ErrFailed
+}
 
 func TestNativeAgentEngineFormulaAllowlist(t *testing.T) {
 	good := []string{
@@ -53,8 +68,8 @@ func TestNativeAgentEngineFormulaAllowlist(t *testing.T) {
 // option, a formula passes the allowlist and a forbidden one is still refused
 // before the engine runs.
 func TestNativeAgentSheetFormulasOnlyWithTheOption(t *testing.T) {
-	p, marker := nativeAgentRejectProbe(t)
-	p.Application = "gridcraft"
+	probe := &formulaEngineProbe{}
+	p := CraftNativeDocumentProfile{Application: "gridcraft", Engine: probe}
 	doc := []byte(`{"sheets":[]}`)
 	formula := json.RawMessage(`[{"command":"cell.set","params":{"cell":"C2","input":"=SUM(A2:B2)","sheet":"Data"}},{"command":"range.setValues","params":{"range":"D1","values":[["=A1*2",3]]}}]`)
 
@@ -62,7 +77,9 @@ func TestNativeAgentSheetFormulasOnlyWithTheOption(t *testing.T) {
 	if _, err := off.Apply(context.Background(), p, doc, formula); err == nil {
 		t.Fatal("formula accepted without the option")
 	}
-	nativeAgentNotExecuted(t, marker)
+	if probe.runs != 0 {
+		t.Fatalf("forbidden formula reached the engine %d times", probe.runs)
+	}
 
 	on := NewCraftNativeAgentCLIAdapter(WithCraftNativeAgentFormulas())
 	for _, raw := range []string{
@@ -73,13 +90,14 @@ func TestNativeAgentSheetFormulasOnlyWithTheOption(t *testing.T) {
 		if _, err := on.Apply(context.Background(), p, doc, json.RawMessage(raw)); err == nil {
 			t.Fatalf("forbidden formula accepted with the option: %s", raw)
 		}
-		nativeAgentNotExecuted(t, marker)
+		if probe.runs != 0 {
+			t.Fatalf("forbidden formula reached the engine %d times", probe.runs)
+		}
 	}
-	// The safe formula reaches the (stub) executable: the stub then fails, so an
-	// error is expected, but the marker must exist.
-	_, _ = on.Apply(context.Background(), p, doc, formula)
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatal("a safe formula was refused before the engine ran")
+	// A safe formula reaches the engine's document-validation call.
+	_, err := on.Apply(t.Context(), p, doc, formula)
+	if probe.runs != 1 {
+		t.Fatalf("a safe formula reached the engine %d times: %v", probe.runs, err)
 	}
 }
 
@@ -87,26 +105,28 @@ func TestNativeAgentSheetFormulasOnlyWithTheOption(t *testing.T) {
 // the engine's to recalculate: only the commands an agent writes are checked,
 // never the document's own formulas, and a safe write next to them goes through.
 func TestNativeAgentFormulaCheckLooksOnlyAtWhatTheAgentWrites(t *testing.T) {
-	p, marker := nativeAgentRejectProbe(t)
-	p.Application = "gridcraft"
+	probe := &formulaEngineProbe{}
+	p := CraftNativeDocumentProfile{Application: "gridcraft", Engine: probe}
 	doc := []byte(`{"sheets":[{"name":"S","cells":{"A1":{"f":"=INDIRECT(\"B\"&1)"},"A2":{"f":"=OFFSET(A1,1,0)"},"A3":{"f":"=TODAY()"}}}]}`)
 	on := NewCraftNativeAgentCLIAdapter(WithCraftNativeAgentFormulas())
-	_, _ = on.Apply(context.Background(), p, doc, json.RawMessage(`[{"command":"cell.set","params":{"cell":"B1","input":"=SUM(C1:C9)"}}]`))
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatal("a safe write was refused because the book already holds volatile formulas")
+	_, err := on.Apply(t.Context(), p, doc, json.RawMessage(`[{"command":"cell.set","params":{"cell":"B1","input":"=SUM(C1:C9)"}}]`))
+	if probe.runs != 1 {
+		t.Fatalf("a safe write beside volatile formulas reached the engine %d times: %v", probe.runs, err)
 	}
 }
 
 // A forbidden function in a cell the agent read cannot be copied into a new one.
 func TestNativeAgentCannotCopyAForbiddenFormulaFromTheBook(t *testing.T) {
-	p, marker := nativeAgentRejectProbe(t)
-	p.Application = "gridcraft"
+	probe := &formulaEngineProbe{}
+	p := CraftNativeDocumentProfile{Application: "gridcraft", Engine: probe}
 	on := NewCraftNativeAgentCLIAdapter(WithCraftNativeAgentFormulas())
 	for _, copied := range []string{`=INDIRECT(\"B\"&1)`, `=OFFSET(A1,1,0)`, `=TODAY()`, `=HYPERLINK(\"http://x\",\"y\")`} {
 		raw := json.RawMessage(`[{"command":"range.setValues","params":{"range":"D1","values":[["` + copied + `"]]}}]`)
 		if _, err := on.Apply(context.Background(), p, []byte(`{"sheets":[]}`), raw); err == nil {
 			t.Fatalf("copied formula accepted: %s", copied)
 		}
-		nativeAgentNotExecuted(t, marker)
+		if probe.runs != 0 {
+			t.Fatalf("forbidden formula reached the engine %d times", probe.runs)
+		}
 	}
 }

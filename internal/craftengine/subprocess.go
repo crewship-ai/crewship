@@ -108,6 +108,7 @@ func StartWorker(spec WorkerSpec) (*Worker, error) {
 	_ = outW.Close() // the child holds its own copy
 	go func() {
 		defer close(w.readDone)
+		defer close(w.lines)
 		defer out.Close()
 		w.readLines(out, spec.MaxLineBytes)
 	}()
@@ -140,11 +141,18 @@ func (w *Worker) readLines(out io.Reader, max int) {
 		}
 		w.keepLast(line)
 		if !draining {
+			answer := bytes.TrimRight(append([]byte(nil), line...), "\r\n")
+			// A final answer can reach the pipe reader after cmd.Wait returns.
+			// Queue it when there is room, even if the process has exited.
 			select {
-			case w.lines <- bytes.TrimRight(append([]byte(nil), line...), "\r\n"):
-			case <-w.done:
-				// Nobody takes answers any more: read on to the end only for LastLine.
-				draining = true
+			case w.lines <- answer:
+			default:
+				select {
+				case w.lines <- answer:
+				case <-w.done:
+					// Bounded queue full with no more consumer. Keep reading for LastLine.
+					draining = true
+				}
 			}
 		}
 		line = line[:0]
@@ -183,8 +191,6 @@ func (w *Worker) Call(ctx context.Context, method string, params any) (json.RawM
 	case <-ctx.Done():
 		w.Kill()
 		return nil, fmt.Errorf("%w: %v", ErrFailed, ctx.Err())
-	case <-w.done:
-		return nil, ErrFailed
 	}
 	for {
 		select {
@@ -217,15 +223,6 @@ func (w *Worker) Call(ctx context.Context, method string, params any) (json.RawM
 		case <-ctx.Done():
 			w.Kill()
 			return nil, fmt.Errorf("%w: %v", ErrFailed, ctx.Err())
-		case <-w.done:
-			// the process ended; an answer it wrote before may still be queued
-			select {
-			case line := <-w.lines:
-				w.lines <- line
-				continue
-			default:
-				return nil, ErrFailed
-			}
 		}
 	}
 }

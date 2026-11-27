@@ -31,21 +31,32 @@ func wasiPrinting(msg string) []byte { return wasiPrintingExit(msg, 0) }
 
 // wasiPrintingExit writes msg to stdout and exits with code (0..63).
 func wasiPrintingExit(msg string, exitCode byte) []byte {
+	return wasiPrintingProgram(msg, exitCode, false)
+}
+
+func wasiPrintingProgram(msg string, exitCode byte, waitForInput bool) []byte {
 	types := section(1, []byte{3},
 		[]byte{0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f},
 		[]byte{0x60, 1, 0x7f, 0},
 		[]byte{0x60, 0, 0})
-	imports := section(2, []byte{2},
+	imports := section(2, []byte{3},
 		name("wasi_snapshot_preview1"), name("fd_write"), []byte{0, 0},
-		name("wasi_snapshot_preview1"), name("proc_exit"), []byte{0, 1})
+		name("wasi_snapshot_preview1"), name("proc_exit"), []byte{0, 1},
+		name("wasi_snapshot_preview1"), name("fd_read"), []byte{0, 0})
 	funcs := section(3, []byte{1, 2})
 	memory := section(5, []byte{1, 0}, uleb(1))
-	exports := section(7, []byte{2}, name("memory"), []byte{2, 0}, name("_start"), []byte{0, 2})
-	code := append(append([]byte{}, writeHello...), 0x41, exitCode, 0x10, 1)
+	exports := section(7, []byte{2}, name("memory"), []byte{2, 0}, name("_start"), []byte{0, 3})
+	var code []byte
+	if waitForInput {
+		// fd_read(0, iovec at 8, 1, bytes read at 256) blocks for the request.
+		code = append(code, 0x41, 0, 0x41, 8, 0x41, 1, 0x41, 0x80, 0x02, 0x10, 2, 0x1a)
+	}
+	code = append(code, writeHello...)
+	code = append(code, 0x41, exitCode, 0x10, 1)
 	body := append([]byte{0}, append(code, 0x0b)...)
 	codeSec := section(10, []byte{1}, uleb(uint32(len(body))), body)
 	iov := append([]byte{16, 0, 0, 0}, byte(len(msg)), 0, 0, 0)
-	data := append(append(iov, make([]byte, 8)...), msg...)
+	data := append(append(iov, 128, 0, 0, 0, 1, 0, 0, 0), msg...) // byte buffer at 128, length 1
 	dataSec := section(11, []byte{1, 0, 0x41, 0, 0x0b}, uleb(uint32(len(data))), data)
 	return bytes.Join([][]byte{{0, 'a', 's', 'm', 1, 0, 0, 0}, types, imports, funcs, memory, exports, codeSec, dataSec}, nil)
 }
@@ -69,7 +80,7 @@ func startTestWorker(t *testing.T, module []byte, sha string) (*Worker, error) {
 }
 
 func TestWorkerAnswersOneRequestOverStdio(t *testing.T) {
-	w, err := startTestWorker(t, wasiPrinting(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`+"\n"), "")
+	w, err := startTestWorker(t, wasiPrintingProgram(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`+"\n", 0, true), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +89,23 @@ func TestWorkerAnswersOneRequestOverStdio(t *testing.T) {
 	defer cancel()
 	res, err := w.Call(ctx, "ping", nil)
 	if err != nil || string(res) != `{"ok":true}` {
-		t.Fatalf("call: %s %v", res, err)
+		t.Fatalf("call: %s %v, worker stderr: %s", res, err, w.Stderr())
+	}
+}
+
+func TestWorkerDrainsRepliesAfterProcessExit(t *testing.T) {
+	w := &Worker{lines: make(chan []byte, 3), done: make(chan struct{})}
+	close(w.done)
+	w.readLines(strings.NewReader("first\nsecond\nfinal reply\n"), 256)
+	for _, want := range []string{"first", "second", "final reply"} {
+		select {
+		case got := <-w.lines:
+			if string(got) != want {
+				t.Fatalf("buffered reply %q, want %q", got, want)
+			}
+		default:
+			t.Fatalf("missing buffered reply %q", want)
+		}
 	}
 }
 
