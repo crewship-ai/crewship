@@ -85,7 +85,7 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 	}
 	touched = craftWorkbookTouchedSheets(touched, baseFile.Content, submitted)
 	edits := craftWorkbookHumanEdits(touched)
-	if lost := craftWorkbookPartsLost(baseFile.Content, submitted, edits); lost != nil {
+	if lost := craftWorkbookPartsLost(ctx, baseFile.Content, submitted, edits); lost != nil {
 		return nil, &craftsession.FidelityLossError{Parts: lost}
 	}
 

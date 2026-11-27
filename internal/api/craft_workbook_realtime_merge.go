@@ -232,7 +232,7 @@ func craftRealtimeReplay(ctx context.Context, agents *craftNativeAgentManager, p
 			return nil, err
 		}
 	}
-	if lost := craftWorkbookPartsLost(head, candidate, edits); lost != nil {
+	if lost := craftWorkbookPartsLost(ctx, head, candidate, edits); lost != nil {
 		return nil, &craftsession.FidelityLossError{Parts: lost}
 	}
 	after, ok := craftUndoReadValues(ctx, agents.config.AgentInspect, p, candidate, ops, true)
