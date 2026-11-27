@@ -40,9 +40,12 @@ it("a chosen cap counts bytes, not characters", async () => {
   store.close()
 })
 
-it("rejects a cap above 64 MiB before opening private storage", async () => {
+it("rejects a cap above 128 MiB before opening private storage, and opens at 128 MiB (a sealed 64 MiB workbook row)", async () => {
   storage()
   const open = vi.spyOn(indexedDB, "open")
-  await expect(openDocumentDrafts("h", "w", "p", { maxDraftBytes: 64 * 1024 * 1024 + 1 })).rejects.toBeInstanceOf(DocumentStorageError)
+  await expect(openDocumentDrafts("h", "w", "p", { maxDraftBytes: 128 * 1024 * 1024 + 1 })).rejects.toBeInstanceOf(DocumentStorageError)
   expect(open).not.toHaveBeenCalled()
+  const store = await openDocumentDrafts("h", "w", "p", { maxDraftBytes: 128 * 1024 * 1024 })
+  expect(open).toHaveBeenCalledOnce()
+  store.close()
 })

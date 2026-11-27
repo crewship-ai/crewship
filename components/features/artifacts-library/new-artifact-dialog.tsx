@@ -3,8 +3,10 @@
 import { useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Eye, Plus, Search, TriangleAlert } from "lucide-react"
+import { Eye, FileSpreadsheet, Plus, Search, TriangleAlert } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
+import { XLSX_IMPORT_LIMIT } from "@/lib/craft-xlsx-import"
+import { uploadWorkbook } from "@/components/features/chat/artifact-context/sheet/workbook-upload"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,6 +35,7 @@ import {
   type ArtifactKindKey,
 } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
+import { WORKBOOK_ACCEPT, workbookBaseName } from "@/components/features/chat/artifact-context/sheet/workbook-file"
 
 type Start = "blank" | "tmpl" | "upload" | "describe"
 
@@ -51,7 +54,10 @@ function startOptions(kind: ArtifactKindEntry): SegmentedOption<Start>[] {
   return [
     { value: "blank", label: "Blank" },
     tmpl,
-    { value: "upload", label: "Upload", disabled: true, title: `Coming: ${kind.uploadExtensions.join(" or ")}` },
+    // A Sheet takes an .xlsx workbook; no other kind has an upload yet.
+    kind.key === "sheet"
+      ? { value: "upload" as const, label: "Upload .xlsx or .xlsm" }
+      : { value: "upload" as const, label: "Upload", disabled: true, title: `Coming: ${kind.uploadExtensions.join(" or ")}` },
     ...(kind.drafted ? [{ value: "describe" as const, label: "Describe it" }] : []),
   ]
 }
@@ -116,6 +122,11 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   // Only a folder the caller may file into; one marked otherwise starts unfiled.
   const [folderPick, setFolderPick] = useState(() => folders.find(f => f.slug === defaultFolderSlug && f.canAcceptPages !== false)?.slug)
   const [created, setCreated] = useState<{ slug: string; id?: string; name: string; folder: string; error: string } | null>(null)
+  // A workbook to import into a new Sheet, how far the import is, and what did not come across.
+  const [file, setFile] = useState<File | null>(null)
+  const [importState, setImportState] = useState<"uploading">()
+  const [discarding, setDiscarding] = useState(false)
+  const importAbort = useRef<AbortController | null>(null)
   // A Page create has no idempotency key; an unconfirmed one is never repeated.
   const pageIntent = useRef<{ slug: string; created?: Created; uncertain?: boolean }>(undefined)
 
@@ -149,7 +160,16 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
     if (k.key === "word" || k.key === "sheet" || k.key === "docs") {
       const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: wordFormat }
         : k.key === "docs" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: "doc" }
-        : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
+        : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet",
+          ...(start === "upload" && file ? { prepareImport: async (pageId: string) => {
+            // The workbook itself becomes version 1, as it is: nothing is converted.
+            return async () => {
+              const abort = importAbort.current = new AbortController()
+              setImportState("uploading")
+              try { return await uploadWorkbook({ workspaceId, pageId, file, signal: abort.signal }) }
+              finally { setImportState(undefined); importAbort.current = null }
+            }
+          } } : {}) })
       const pageId = doc.nativePageId ?? (k.key === "docs" ? doc.pageId : undefined)
       return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(pageId ? { id: pageId } : {}) }
     }
@@ -172,6 +192,12 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   } })
 
   const busy = create.isPending
+  const discardEmpty = async () => {
+    setDiscarding(true)
+    try { await word.discardEmptyPage(); create.reset(); pageIntent.current = undefined }
+    catch { /* The refusal line stays; the Sheet can still be deleted from the library. */ }
+    finally { setDiscarding(false) }
+  }
   const frozen = busy || kindFrozen
   const close = () => { if (!busy) onOpenChange(false) }
   const open = (slug: string, id?: string) => { if (id) onCreated(slug, id); else onCreated(slug); onOpenChange(false) }
@@ -201,9 +227,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
     : kind?.live(caps) === true && (handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true))))
-  const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
-  const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true && (start !== "upload" || (Boolean(file) && (file?.size ?? 0) <= XLSX_IMPORT_LIMIT)))) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true))))
+  const primaryLabel = created ? "Open it" : start === "upload" && busy ? "Uploading…" : start === "upload" && !word.retrying ? "Upload and open" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
+  const cancelled = create.error?.name === "AbortError"
+  const refusal = cancelled ? "The upload was cancelled. The empty Sheet was created: choose the file again to continue, or open it from the library." : created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 
   return <CreateSurface open size="lg" restoreOpenerFocus restoreFocusTo={opener} onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">
     <CreateSurfaceHeader icon={Plus} context={folder ? `in ${folder.name}` : "Artifacts"} title="New artifact" description="Pick what you are making. An artifact holds one kind of content." onClose={busy ? undefined : close} />
@@ -255,12 +282,29 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
         </div>
 
         {start === "describe" && <CreateSurfaceField label={kind.make === "edit" ? "What should the first draft contain?" : "What should it contain?"} htmlFor="new-artifact-prompt"
-          hint={`Opens chat with this as a draft. Send it with ${kind.make === "edit" ? "Create document" : "Create artifact project"} on.`}>
+          hint={`Opens chat with this as a draft. Send it with New ${kind.make === "edit" ? "Word" : "Project"} picked under + › New artifact.`}>
           <Textarea id="new-artifact-prompt" rows={3} value={prompt} placeholder={kind.starterPrompts[0]} onChange={e => setPrompt(e.target.value)} />
         </CreateSurfaceField>}
         {start === "tmpl" && <div role="group" aria-label="Templates" className="flex flex-wrap gap-1.5">
           {kind.templates.map(t => <button key={t} type="button" aria-pressed={t === chosenTemplate} onClick={() => setTemplate(t)}
             className={cn("rounded-card border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-[44px]", t === chosenTemplate && "border-transparent ring-2 ring-primary")}>{t}</button>)}
+        </div>}
+        {start === "upload" && kind.key === "sheet" && <div className="flex flex-col gap-2">
+          <CreateSurfaceField label="Workbook" htmlFor="new-artifact-xlsx" hint={`An .xlsx or .xlsm file up to ${XLSX_IMPORT_LIMIT >> 20} MiB. It becomes the Sheet's first version as it is, macros kept and never run; your file stays yours.`}>
+            <input id="new-artifact-xlsx" type="file" accept={WORKBOOK_ACCEPT} disabled={busy}
+              className={cn(CREATE_SURFACE_INPUT, "rounded-md border bg-transparent px-2 py-1.5 file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs")}
+              onChange={event => {
+                const next = event.target.files?.[0] ?? null
+                setFile(next)
+                if (next && !name.trim()) setName(workbookBaseName(next.name).slice(0, 120))
+              }} />
+          </CreateSurfaceField>
+          {file && file.size > XLSX_IMPORT_LIMIT && <p role="alert" className="text-xs text-destructive">This workbook is over {XLSX_IMPORT_LIMIT >> 20} MiB, which is more than an import accepts.</p>}
+          {file && <p className="flex items-center gap-2 text-xs text-muted-foreground"><FileSpreadsheet aria-hidden className="size-3.5 shrink-0 text-sheet" /><span className="truncate">{file.name}</span><span>· {(file.size / (1024 * 1024)).toFixed(1)} MiB</span></p>}
+          {importState && <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2.5 text-xs">
+            <span className="min-w-0 flex-1">Uploading the workbook…</span>
+            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => importAbort.current?.abort()}>Cancel</Button>
+          </div>}
         </div>}
         {start === "blank" && <p className="text-micro text-muted-foreground-soft">{kind.make === "panels"
           ? "An empty Page. Crews add panels on their next run."
@@ -270,6 +314,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       </>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={refusal} />
+    {start === "upload" && kind?.key === "sheet" && !busy && create.isError && word.emptyPage && <div className="flex items-center gap-2 px-4 pb-2 text-xs">
+      <span className="min-w-0 flex-1 text-muted-foreground">The empty Sheet was created and the workbook was not stored in it.</span>
+      <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={discarding} onClick={() => void discardEmpty()}>{discarding ? "Deleting…" : "Delete the empty Sheet"}</Button>
+    </div>}
     <CreateSurfaceFooter
       hint={kind?.key === "docs" ? "Write together · versions" : kind?.make === "canvas" ? "Collaborative canvas · versions" : kind?.make === "edit" ? "One editor at a time · versions" : kind?.make === "panels" ? "Panels · no versions" : "Versions · comments for the agent"}
       onCancel={busy ? undefined : close} guardCancel={false}

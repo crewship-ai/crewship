@@ -49,6 +49,8 @@ interface VirtualConversationProps {
   onCopy: (s: string) => Promise<boolean>
   onFileClick: (s: string) => void
   onRegenerate?: () => void
+  /** The not-run note that offers Send again, and its action. */
+  sendAgain?: { turnId: string; run: () => void }
   onEditUserMessage?: (turnId: string, newContent: string) => void
   resolveAuthorName: (userId: string) => string | null
   /** Forwarded to TurnRenderer — see the prop's note there. */
@@ -89,6 +91,7 @@ export function VirtualConversation({
   onCopy,
   onFileClick,
   onRegenerate,
+  sendAgain,
   onEditUserMessage,
   resolveAuthorName,
   resolveAskProvenance,
@@ -143,6 +146,7 @@ export function VirtualConversation({
               onFileClick={onFileClick}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
               onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? onRegenerate : undefined}
+              onSendAgain={sendAgain?.turnId === turn.id ? sendAgain.run : undefined}
               onEditUserMessage={onEditUserMessage}
               animateAfter={animateAfter}
               agentId={agentId}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
@@ -99,26 +99,25 @@ describe("TurnRenderer", () => {
       "I've attached a file to this message. The path is relative to your working directory:\n\n" +
       "- attachments/sess-1/invoice.pdf"
 
-    it("shows the attachment paths of a sent message, line breaks intact", () => {
-      const { container } = render(
-        <TurnRenderer turn={userTurn(withAttachment)} onCopy={async () => true} onFileClick={noop} />,
-      )
-      expect(container.textContent).toContain("attachments/sess-1/invoice.pdf")
-      const bubble = screen.getByText(/attachments\/sess-1\/invoice\.pdf/)
-      expect(bubble.className).toContain("whitespace-pre-wrap")
+    // The block is for the agent; the person sees their words and a chip per file.
+    it("shows the person's words and the attached file as a chip, not the note to the agent", () => {
+      render(<TurnRenderer turn={userTurn(withAttachment)} onCopy={async () => true} onFileClick={noop} />)
+      expect(screen.getByText("have a look")).toBeInTheDocument()
+      expect(screen.getByTitle("attachments/sess-1/invoice.pdf")).toHaveTextContent("invoice.pdf")
+      expect(screen.queryByText(/I've attached/)).toBeNull()
     })
 
-    it("keeps the line breaks in the editable bubble too", () => {
-      render(
-        <TurnRenderer
-          turn={userTurn(withAttachment)}
-          onCopy={async () => true}
-          onFileClick={noop}
-          onEditUserMessage={noop}
-        />,
-      )
-      const bubble = screen.getByText(/attachments\/sess-1\/invoice\.pdf/)
-      expect(bubble.className).toContain("whitespace-pre-wrap")
+    it("does the same in the editable bubble, and keeps the files when the words are edited", () => {
+      const onEdit = vi.fn()
+      render(<TurnRenderer turn={userTurn(withAttachment)} onCopy={async () => true} onFileClick={noop} onEditUserMessage={onEdit} />)
+      expect(screen.getByTitle("attachments/sess-1/invoice.pdf")).toHaveTextContent("invoice.pdf")
+      expect(screen.queryByText(/I've attached/)).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: /edit/i }))
+      const box = screen.getByRole("textbox")
+      expect(box).toHaveValue("have a look")
+      fireEvent.change(box, { target: { value: "look again" } })
+      fireEvent.click(screen.getByRole("button", { name: /save|send/i }))
+      expect(onEdit).toHaveBeenCalledWith(expect.anything(), withAttachment.replace("have a look", "look again"))
     })
   })
 
@@ -253,6 +252,40 @@ describe("TurnRenderer", () => {
         />,
       )
       expect(screen.queryByText("Regenerate")).toBeNull()
+    })
+
+    it("shows Regenerate only on hover or keyboard focus, and always on touch", () => {
+      render(
+        <TurnRenderer
+          turn={assistantTurn("a1", false)}
+          onCopy={async () => true}
+          onFileClick={noop}
+          isLastAssistant
+          onRegenerate={vi.fn()}
+        />,
+      )
+      const row = screen.getByText("Regenerate").closest("button")!.parentElement!
+      for (const cls of ["opacity-0", "group-hover:opacity-100", "focus-within:opacity-100", "coarse:opacity-100"]) {
+        expect(row.className.split(/\s+/)).toContain(cls)
+      }
+    })
+
+    it("a failed run offers Try again in plain sight instead of Regenerate", () => {
+      const onRegenerate = vi.fn()
+      render(
+        <TurnRenderer
+          turn={{ ...assistantTurn("a1", false), turnState: "failed" }}
+          onCopy={async () => true}
+          onFileClick={noop}
+          isLastAssistant
+          onRegenerate={onRegenerate}
+        />,
+      )
+      expect(screen.queryByText("Regenerate")).toBeNull()
+      const retry = screen.getByRole("button", { name: "Try again" })
+      expect(retry.parentElement!.className).not.toContain("opacity-0")
+      fireEvent.click(retry)
+      expect(onRegenerate).toHaveBeenCalledTimes(1)
     })
 
     it("hides Regenerate when isLastAssistant is false", () => {

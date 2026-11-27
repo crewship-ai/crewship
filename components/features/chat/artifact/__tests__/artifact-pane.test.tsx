@@ -40,7 +40,9 @@ vi.mock("sonner", () => ({
 }))
 
 const apiFetch = vi.fn()
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
+// Only the network call is stubbed: the pane's other imports from this module (auth events, the session-expired
+// broadcast) stay real, so a new export never makes the test fail to load.
+vi.mock("@/lib/api-fetch", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/api-fetch")>(), apiFetch: (...args: unknown[]) => apiFetch(...args) }))
 
 // The editor is code-split behind next/dynamic; the stub stands in for
 // CodeMirror and exposes exactly what the pane hands it plus a way to save.

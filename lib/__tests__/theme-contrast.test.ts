@@ -414,3 +414,17 @@ describe.each(["day", "night"] as const)("app banner tones — %s theme", (theme
     }
   })
 })
+
+// A Sheet and an .xlsx file read as Excel, in green, everywhere (icon, panel accent, chip, card).
+// --sheet is a glyph and text colour, so it reads on the card and on its own soft fill, in both themes.
+describe("Sheet identity", () => {
+  it.each(["day", "night"] as const)("text-sheet on card and on bg-sheet-soft ≥ 4.5:1 (%s)", (theme) => {
+    const sheet = luminanceFromRgb(tokenRgb(theme, "sheet"))
+    expect(contrast(sheet, luminanceFromRgb(tokenRgb(theme, "card")))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(sheet, luminanceFromRgb(tokenRgb(theme, "sheet-soft")))).toBeGreaterThanOrEqual(4.5)
+  })
+  it("maps both to utilities", () => {
+    expect(css).toContain("--color-sheet: var(--sheet);")
+    expect(css).toContain("--color-sheet-soft: var(--sheet-soft);")
+  })
+})

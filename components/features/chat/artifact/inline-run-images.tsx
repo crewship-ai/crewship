@@ -36,16 +36,33 @@ export function runImageFiles(rows: FileEntry[], runId: string, crewId?: string 
   }).map(file => [file.path, file])).values()].slice(0, 8)
 }
 
+/** Why the run's images could not be read. `unreachable`: the server or the
+ *  crew's files could not be reached (5xx, network). Anything else is a refusal. */
+export class RunImagesError extends Error {
+  constructor(readonly unreachable: boolean) { super("Images unavailable") }
+}
+const failed = (response: Response) => new RunImagesError(response.status >= 500)
+/** A request that never got an answer is an unreachable server, not a refusal. */
+async function reach(request: Promise<Response>): Promise<Response> {
+  try { return await request } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error
+    throw new RunImagesError(true)
+  }
+}
+
 export async function loadRunImages(opts: { agentId: string; workspaceId: string; chatId: string; runId: string; crewId?: string | null; slug?: string | null; signal: AbortSignal }) {
   if (!opts.chatId || !/^[A-Za-z0-9_-]{1,80}$/.test(opts.runId)) return []
-  const profileResponse = await apiFetch(`/api/v1/chats/${encodeURIComponent(opts.chatId)}/execution-profile?workspace_id=${encodeURIComponent(opts.workspaceId)}`, { signal: opts.signal, cache: "no-store" })
-  if (!profileResponse.ok) throw new Error("Images unavailable")
+  const profileResponse = await reach(apiFetch(`/api/v1/chats/${encodeURIComponent(opts.chatId)}/execution-profile?workspace_id=${encodeURIComponent(opts.workspaceId)}`, { signal: opts.signal, cache: "no-store" }))
+  if (!profileResponse.ok) throw failed(profileResponse)
   const profile: unknown = await profileResponse.json()
   if (!profile || typeof profile !== "object" || !("mode" in profile) || profile.mode !== "trusted") return []
   const params = new URLSearchParams({ workspace_id: opts.workspaceId, recursive: "true", subdir: `runs/${opts.runId}` })
-  const response = await apiFetch(`/api/v1/agents/${encodeURIComponent(opts.agentId)}/files?${params}`, { signal: opts.signal, cache: "no-store" })
-  if (!response.ok) throw new Error("Images unavailable")
+  const response = await reach(apiFetch(`/api/v1/agents/${encodeURIComponent(opts.agentId)}/files?${params}`, { signal: opts.signal, cache: "no-store" }))
+  if (!response.ok) throw failed(response)
   const rows: unknown = await response.json()
+  // A run with no files lists as null: crewshipd sends its empty list as
+  // null and the agent file door forwards it as is. That is an empty run.
+  if (rows === null) return []
   if (!Array.isArray(rows)) throw new Error("Images unavailable")
   return Promise.all(runImageFiles(rows, opts.runId, opts.crewId, opts.slug).map(async file => {
     const snapshot = await readArtifactSnapshot({ ...opts, path: file.path })
@@ -86,7 +103,14 @@ function VisibleRunImages({ agentId, workspaceId, chatId, runId }: { agentId: st
   useRealtimeEventSafe("file.event", (event) => { if (isRunFileEvent(event.payload, agent?.slug, runId)) refreshSoon() })
   useRealtimeEventSafe("run.completed", (event) => { if (event.payload?.run_id === runId || (!event.payload?.run_id && event.payload?.agent_id === agentId)) refreshSoon() })
   useRealtimeEventSafe("realtime.reconnected", refresh)
+  // Whether this run has shown an image here. Only that fact is kept, never
+  // bytes or names: a run that never showed one and whose files cannot be
+  // reached right now has nothing to report.
+  const [shown, setShown] = useState(false)
+  const hasImages = (query.data?.length ?? 0) > 0
+  useEffect(() => { if (hasImages) setShown(true) }, [hasImages])
   if (!viewer) return null
+  if (query.isError && query.error instanceof RunImagesError && query.error.unreachable && !shown && !hasImages) return null
   // Never retain cached bytes/titles after a failed permission recheck.
   if (query.isError) return <div role="alert" className="text-xs text-muted-foreground">Images unavailable. <button type="button" className="underline coarse:min-h-[44px]" onClick={refresh}>Refresh images</button></div>
   if (query.isPending) return <p role="status" className="text-xs text-muted-foreground">Checking run images…</p>

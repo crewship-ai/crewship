@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render, screen, fireEvent, cleanup, within } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 
@@ -83,6 +83,12 @@ vi.mock("../reactions/turn-reactions", () => ({ TurnReactions: () => null }))
 vi.mock("../artifact/inline-run-images", () => ({ InlineRunImages: ({ agentId, workspaceId, runId }: { agentId: string; workspaceId: string; runId: string }) => <div data-testid="run-images">{`${agentId}:${workspaceId}:${runId}`}</div> }))
 
 import { AssistantTurn } from "../assistant-turn"
+
+/** Opens the turn's steps dialog from its activity line. */
+const openSteps = (root: HTMLElement) => {
+  fireEvent.click(root.querySelector("[data-testid='turn-activity'] button[data-activity-tone]") as HTMLElement)
+  return screen.getByRole("dialog")
+}
 
 function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart {
   return {
@@ -452,9 +458,12 @@ describe("safe canonical activity and reasoning", () => {
     expect(screen.queryByText("private legacy reasoning")).toBeNull()
   })
   it.each(["failed", "denied", "interrupted"] as const)("does not label %s activity Completed", state => {
-    render(<AssistantTurn turn={turn([part({ type: "tool_call", content: "Read", activity: { kind: "read", state }, metadata: { completed: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(screen.getByTestId("tool-header").getAttribute("data-state")).not.toBe("output-available")
-    expect(screen.getByText(state === "failed" ? "Failed" : state === "denied" ? "Denied" : "Interrupted")).toBeTruthy()
+    const view = render(<AssistantTurn turn={turn([part({ type: "tool_call", content: "Read", activity: { kind: "read", state }, metadata: { completed: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
+    expect(view.container.querySelector("[data-activity-tone]")!.textContent).not.toContain("Done")
+    const dialog = openSteps(view.container)
+    expect(within(dialog).getByTestId("activity-step").getAttribute("data-state")).toBe(state)
+    expect(within(dialog).getByText(state === "failed" ? "Failed" : state === "denied" ? "Denied" : "Interrupted")).toBeTruthy()
+    expect(within(dialog).queryByText("Completed")).toBeNull()
   })
 })
 
@@ -465,34 +474,42 @@ describe("honest activity completion", () => {
       part({ id: "a", type: "activity", tool_call_id: "a", activity: { kind: "read", state: "unknown" } }),
       part({ id: "b", type: "activity", tool_call_id: "b", activity: { kind: "read", state: "succeeded" } }),
     ])} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
     expect(screen.queryByText("Working")).toBeNull()
     expect(view.container.querySelector(".animate-spin")).toBeNull()
+    expect(view.container.querySelector("[data-testid='working-mark'][data-active='true']")).toBeNull()
+    const dialog = openSteps(view.container)
+    expect(within(dialog).getByText("Outcome unknown")).toBeTruthy()
   })
   it("marks a legacy single failed result's call as failed", () => {
     render(<AssistantTurn turn={turn([
       part({ id: "a", type: "tool_call", metadata: { tool_id: "a", tool_name: "Read" } }),
       part({ id: "r", type: "tool_result", content: "Failed to read", metadata: { tool_id: "a", is_error: true } }),
     ])} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(screen.getAllByTestId("tool-header").map(header => header.getAttribute("data-state"))).toEqual(["output-error", "output-error"])
+    expect(screen.getByText(/1 failed/)).toBeTruthy()
+    const dialog = openSteps(document.body)
+    expect(within(dialog).getAllByTestId("activity-step").map(row => row.getAttribute("data-state"))).toEqual(["failed"])
+    expect(dialog.textContent).toContain("Failed to read")
   })
 })
 
 describe("typed safe activity details", () => {
   beforeEach(() => cleanup())
   it("shows only typed output/diff and an explicit truncation marker", () => {
-    render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "safe-call", content: "raw legacy detail", metadata: { input: { command: "raw legacy detail" } }, activity: { kind: "read", state: "succeeded", output: "Safe bounded output", diff: "-before\n+after", truncated: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(screen.getByText("Safe bounded output")).toBeTruthy()
-    expect(screen.getAllByTestId("code-block").map(block => block.textContent)).toContain("-before\n+after")
-    expect(screen.getByText("Details truncated")).toBeTruthy()
-    expect(screen.queryByText(/raw legacy detail/)).toBeNull()
+    const view = render(<AssistantTurn turn={turn([part({ type: "activity", tool_call_id: "safe-call", content: "raw legacy detail", metadata: { input: { command: "raw legacy detail" } }, activity: { kind: "read", state: "succeeded", output: "Safe bounded output", diff: "-before\n+after", truncated: true } })])} onCopy={async () => true} onFileClick={() => {}} />)
+    const dialog = openSteps(view.container)
+    expect(within(dialog).getByText("Safe bounded output")).toBeTruthy()
+    expect(within(dialog).getByTestId("step-diff").textContent).toBe("-before\n+after")
+    expect(within(dialog).getByText("Details truncated")).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/raw legacy detail/)
   })
   it("never falls back to a legacy result body for a typed activity", () => {
-    render(<AssistantTurn turn={turn([
+    const view = render(<AssistantTurn turn={turn([
       part({ type: "activity", tool_call_id: "safe-call", activity: { kind: "read", state: "succeeded" } }),
       part({ type: "tool_result", content: "raw legacy detail", metadata: { tool_id: "safe-call" } }),
     ])} onCopy={async () => true} onFileClick={() => {}} />)
     expect(screen.queryByText("raw legacy detail")).toBeNull()
+    openSteps(view.container)
+    expect(document.body.textContent).not.toContain("raw legacy detail")
   })
 })
 
