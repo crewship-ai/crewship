@@ -17,15 +17,20 @@ func TestAgentFileIsReadableWithoutTheChipButNotWritable(t *testing.T) {
 	if text, refused := s.read(call, map[string]any{"command": "document.inspect", "params": map[string]any{}}); refused || !strings.Contains(text, `"name":"L"`) {
 		t.Fatalf("the agent's own file is not readable: %s", text)
 	}
-	var source string
-	if err := s.f.rig.db.QueryRow(`SELECT json_extract(payload,'$.source') FROM journal_entries WHERE workspace_id=? AND entry_type=? AND json_extract(payload,'$.page_id')='sheet-own' AND entry_hash <> '' ORDER BY seq DESC LIMIT 1`, s.f.a.WorkspaceID, auditActionCraftSheetRead).Scan(&source); err != nil || source != "agent_files" {
-		t.Fatalf("the read is not audited as agent_files: %q %v", source, err)
-	}
+	s.requireAgentFileReadAudit()
 	if text, refused := s.toolCall(call, "craft_sheet_acquire", map[string]any{}); !refused || !strings.Contains(text, "agent edits") {
 		t.Fatalf("the agent took the lease without the chip: %v %s", refused, text)
 	}
 	if s.head() != 1 {
 		t.Fatalf("the Sheet moved to %d", s.head())
+	}
+}
+
+func (s *sitScenario) requireAgentFileReadAudit() {
+	s.t.Helper()
+	var source string
+	if err := s.f.rig.db.QueryRow(`SELECT json_extract(payload,'$.source') FROM journal_entries WHERE workspace_id=? AND entry_type=? AND json_extract(payload,'$.page_id')='sheet-own' AND entry_hash <> '' ORDER BY seq DESC LIMIT 1`, s.f.a.WorkspaceID, auditActionCraftSheetRead).Scan(&source); err != nil || source != "agent_files" {
+		s.t.Fatalf("the read is not audited as agent_files: %q %v", source, err)
 	}
 }
 

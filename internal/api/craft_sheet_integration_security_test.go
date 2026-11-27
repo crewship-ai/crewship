@@ -96,10 +96,8 @@ func TestSheetITAgentFileAloneGrantsNothing(t *testing.T) {
 			t.Errorf("apply through agent_files alone must be 403 not_attached, told plainly: refused=%v %.200s", applyRefused, apply)
 		}
 		s.sitNothingWritten()
-		var audited int
-		_ = s.f.rig.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE json_extract(metadata,'$.source')='agent_files'`).Scan(&audited)
-		if !readRefused && audited == 0 {
-			t.Errorf("a read through agent_files is not audited with source agent_files")
+		if !readRefused {
+			s.requireAgentFileReadAudit()
 		}
 	})
 	for _, tc := range []struct {

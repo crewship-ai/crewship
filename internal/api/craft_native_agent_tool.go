@@ -536,10 +536,13 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if err != nil {
 		return zero, err
 	}
-	// Another writer invalidates consent. A stale command from this same run
-	// only needs a fresh read while the run's last version still holds.
-	if e.chat != nil && state.LatestVersion != e.chat.consentBase() {
-		return zero, errCraftNativeConsentStale
+	// A new base must be covered by this run's consent. An older request
+	// can be retried after a fresh read if the consented head still holds.
+	if e.chat != nil {
+		consented := e.chat.consentBase()
+		if state.LatestVersion != consented || base > consented {
+			return zero, errCraftNativeConsentStale
+		}
 	}
 	if state.LatestVersion != base {
 		return zero, artifacts.ErrVersionConflict
