@@ -110,7 +110,9 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			f, _, _ := craftNativeHTTPFixture(t)
 			mustExec(t, f.db, `DELETE FROM craft_native_documents WHERE page_id=?`, page)
-			mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id=?`, page)
+			if !scenario.history {
+				mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id=?`, page)
+			}
 			mustExec(t, f.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES(?,?,'gridcraft','e68d192282499bed81a9800d742cb9b239d367e5',?,?)`, page, f.wsID, strings.Repeat("a", 64), strings.Repeat("d", 64))
 			key := artifacts.VersionKey{WorkspaceID: f.wsID, PageID: page}
 			store := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft"})
@@ -349,8 +351,10 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 					shared.Format != "native" || !bytes.Equal(shared.Bytes, original) {
 					t.Fatalf("shared pin: %d %s", preview.Code, preview.Body)
 				}
-				if w := craftNativeVersionReadCall(router.craftNativeDocuments, peer, peerToken, "2"); w.Code != 403 {
-					t.Fatalf("shared reader received private history: %d %s", w.Code, w.Body)
+				for _, number := range []string{"1", "2", "3"} {
+					if w := craftNativeVersionReadCall(router.craftNativeDocuments, peer, peerToken, number); w.Code != 403 {
+						t.Fatalf("shared reader accessed private history version %s: %d %s", number, w.Code, w.Body)
+					}
 				}
 			}
 			if _, err := f.db.Exec(`DELETE FROM artifact_versions WHERE workspace_id=? AND page_id=? AND version=?`, f.wsID, page, sourceVersion); err == nil {
