@@ -93,6 +93,73 @@ async function editAndSave(page: Page, app: N.NativeApp, marker: string, cell: s
   return version!
 }
 
+test("WordCraft upgrade: old editor stays on its profile across live default activation", async ({ browser }, info) => {
+  const oldBundle = process.env.CRAFT_GATE_RETAINED_WORD_BUNDLE
+  test.skip(!oldBundle, "this run uses the historical WordCraft package as its default")
+  const nextArchive = process.env.CRAFT_GATE_NEW_WORD_PACKAGE
+  if (!nextArchive) throw new Error("the two-profile gate requires the next WordCraft package")
+
+  const log: string[] = []
+  const api = await apiAs(ORIGIN, owner)
+  try {
+    // This fixture is a synthetic demo document made with the historical model.
+    const fixture = new URL("../../cmd/crewship/seeddata/showcase/word/02-zapis-z-porady.json", import.meta.url)
+    const legacy = JSON.parse(await readFile(fixture, "utf8"))
+    const heading = legacy.body[0]
+    const table = legacy.body.find((block: { kind: string }) => block.kind === "table")
+    expect(heading.props.style).toBe("Heading1")
+    expect(table).toBeTruthy()
+    const media = { "image1.png": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAYAAAB3AH1ZAAAAKElEQVR4nGMQibrznxJ8R0ODIsww6oBRB4w6YNQBow4YdcCoAwbaAQCfenQ9EOdSfAAAAABJRU5ErkJggg==" }
+    legacy.media = media
+    legacy.body.push({ kind: "para", text: "\uFFFC", runs: [{ len: 3 }], objects: [{ type: "image", media: "image1.png", w: 32, h: 16, alt: "Synthetic picture" }] })
+
+    const original = Buffer.from(JSON.stringify(legacy))
+    const ref = await N.createNative(api, WORKSPACE, "wordcraft", "Retained Word profile", original)
+    expect((await N.readHead(api, ref)).hash).toBe(N.sha256(original))
+    const page = await open(browser, ref, log)
+    const frame = await N.acquire(page, "wordcraft")
+    expect(frame.url()).toContain(`/b/${oldBundle}/index.html`)
+    const previewURL = `/api/v1/pages/${encodeURIComponent("@" + ref.pageId)}/craft/preview?workspace_id=${encodeURIComponent(WORKSPACE)}`
+    await page.getByRole("button", { name: "Publish preview" }).click()
+    await expect.poll(async () => (await api.get(previewURL)).status(), { timeout: 30_000 }).toBe(200)
+
+    const install = await api.post("/api/v1/admin/instance/artifacts/applications/wordcraft/install", {
+      data: await readFile(nextArchive), headers: { "Content-Type": "application/octet-stream" }, timeout: 120_000,
+    })
+    expect(install.status(), (await install.text()).slice(0, 400)).toBe(200)
+    expect(frame.url()).toContain(`/b/${oldBundle}/index.html`)
+    const marker = "edit-through-retained-word-profile"
+    await frame.locator("canvas").first().click({ position: { x: 520, y: 420 } })
+    await N.typeMarker(page, frame, "wordcraft", marker, "B2")
+    await expect.poll(async () => edited(await N.status(page), ref.initVersion), { timeout: SAVE_MS }).toBe(true)
+    await page.keyboard.press("Control+s")
+    const saved = await N.waitSaved(page, SAVE_MS, ref.initVersion)
+    expect(saved).toBeTruthy()
+    await N.release(page)
+    await page.context().close()
+
+    const again = await open(browser, ref, log)
+    expect((await N.frameOf(again, "wordcraft")).url()).toContain(`/b/${oldBundle}/index.html`)
+    const head = await N.readHead(api, ref)
+    expect(head.version).toBe(saved)
+    expect(holds(head.text, marker)).toBe(true)
+    const current = JSON.parse(head.text)
+    expect(current.body[0]).toEqual(heading)
+    expect(current.body.find((block: { kind: string }) => block.kind === "table")).toEqual(table)
+    expect(current.media).toEqual(media)
+    const shared = await api.get(previewURL)
+    expect(shared.status()).toBe(200)
+    const pinned = await shared.json() as { version: string; bytes: string; editorBundle: string }
+    expect(pinned.version).toBe(ref.initVersion)
+    expect(pinned.editorBundle).toBe(oldBundle)
+    expect(N.sha256(Buffer.from(pinned.bytes, "base64"))).toBe(N.sha256(original))
+    await again.context().close()
+  } finally {
+    await info.attach("console", { body: log.join("\n") || "(none)", contentType: "text/plain" })
+    await api.dispose()
+  }
+})
+
 for (const app of ["wordcraft", "gridcraft"] as const) {
   test(`${N.APP_LABEL[app]} package: open, edit, save, reopen`, async ({ browser }, info) => {
     test.setTimeout(6 * 60_000)
@@ -103,6 +170,9 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const first = `gate-${app}-one-${Date.now().toString(36)}`, second = `gate-${app}-two-${Date.now().toString(36)}`
 
       const page = await open(browser, ref, log)
+      if (app === "wordcraft" && process.env.CRAFT_GATE_RETAINED_WORD_BUNDLE) {
+        expect((await N.frameOf(page, app)).url()).not.toContain(process.env.CRAFT_GATE_RETAINED_WORD_BUNDLE)
+      }
       const v1 = await editAndSave(page, app, first, "B2", ref.initVersion)
       const head1 = await N.readHead(api, ref)
       expect(head1.version).toBe(v1)

@@ -1,0 +1,10 @@
+{
+  "repository": "crewship-ai/crewship",
+  "tag": "v0.1.0-rc.2",
+  "commit": "3ec79d56698839379b00cb44d70598e076c12a51",
+  "workflow": ".github/workflows/release.yml",
+  "archive": "crewship-craft-wordcraft.craftpkg",
+  "archive_sha256": "8d89941ae9389c2e88488e906c504e013fd482ad28ab526dcb77f96cebca17c8",
+  "pin": "wordcraft=0.11.0+b0fb5cb571b6=50a30fdc4bb6ffc9c040cdeca2af4930a2cdbfecf0cbd18c5fdf7624bc7636e4",
+  "editor_bundle": "0ebd470c2c22ee48339b660bcfddc2b40838dffba49b54f980c197d0d654310d"
+}

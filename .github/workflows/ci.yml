@@ -3003,6 +3003,25 @@ jobs:
       - name: Install xvfb
         timeout-minutes: 4
         run: command -v xvfb-run || { sudo apt-get update -q && sudo apt-get install -y -q xvfb; }
+      - name: Install cosign for historical WordCraft verification
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
+        with:
+          cosign-release: v2.6.3
+      - name: Fetch the retained WordCraft release for the two-profile gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source=tools/craft-components/retained-word-source.json
+          retain="$(jq -er .pin "$source")"
+          pins="$(cat build/craft-components/dist/catalog.txt)"
+          if [[ ",$pins," != *",$retain,"* ]]; then
+            mkdir -p "$RUNNER_TEMP/craft-retained-word"
+            gh release download "$(jq -er .tag "$source")" --repo "$(jq -er .repository "$source")" \
+              --pattern checksums.txt --pattern checksums.txt.pem --pattern checksums.txt.sig \
+              --pattern crewship-craft-wordcraft.craftpkg --dir "$RUNNER_TEMP/craft-retained-word"
+            echo "CRAFT_GATE_RETAINED_WORD_DIR=$RUNNER_TEMP/craft-retained-word" >> "$GITHUB_ENV"
+          fi
       # Word and Sheet in one headed Chromium under xvfb, software WebGL.
       - name: Browser gate (open, edit, save, reopen through the real host)
         timeout-minutes: 15
