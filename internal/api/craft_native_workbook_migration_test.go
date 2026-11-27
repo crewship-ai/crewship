@@ -62,14 +62,15 @@ func (e *migrationTestGridCraft) Run(_ context.Context, dir string, args []strin
 	return err
 }
 
-func migrationTestWorkbook(t *testing.T, sheet string) []byte {
+func migrationTestWorkbook(t *testing.T, rows string) []byte {
 	t.Helper()
 	var result bytes.Buffer
 	archive := zip.NewWriter(&result)
 	for name, text := range map[string]string{
-		"[Content_Types].xml":      `<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>`,
-		"xl/workbook.xml":          `<workbook/>`,
-		"xl/worksheets/sheet1.xml": sheet,
+		"[Content_Types].xml":        `<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>`,
+		"xl/workbook.xml":            `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+		"xl/_rels/workbook.xml.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+		"xl/worksheets/sheet1.xml":   `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>` + rows + `</sheetData></worksheet>`,
 	} {
 		part, err := archive.Create(name)
 		if err != nil {
@@ -88,7 +89,7 @@ func migrationTestWorkbook(t *testing.T, sheet string) []byte {
 func TestCraftLegacyWorkbookConversion(t *testing.T) {
 	const page = "native-page"
 	original := []byte("{\n  \"sheets\":[{\"name\":\"Sheet1\",\"value\":7,\"formula\":\"=3+4\",\"style\":{\"bold\":true},\"pivots\":[{\"name\":\"Summary\"}]}], \"names\":[\"Total\"]\n}\n")
-	workbook := migrationTestWorkbook(t, "<worksheet/>")
+	workbook := migrationTestWorkbook(t, "")
 	for _, scenario := range []struct {
 		name, altered              string
 		moveHead                   bool
@@ -285,7 +286,7 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 			}
 			if scenario.upgrade {
 				wantHead = "3"
-				wantWorkbook = migrationTestWorkbook(t, `<worksheet><sheetData><row r="2"><c r="B2"><v>17</v></c></row></sheetData></worksheet>`)
+				wantWorkbook = migrationTestWorkbook(t, `<row r="2"><c r="B2"><v>17</v></c></row>`)
 				status, raw = call(http.MethodPost, page, "lease/acquire", bearer, token, struct{}{})
 				var lease craftNativeLeaseResponse
 				if status != 200 || json.Unmarshal(raw, &lease) != nil || lease.Generation == nil {
