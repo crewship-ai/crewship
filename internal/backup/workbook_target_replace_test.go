@@ -90,7 +90,7 @@ func TestReplaceRestoreRefusesTargetNativeWorkbookHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"converted workbook", "native head without receipt", "receipt with a legacy head"} {
+	for _, mode := range []string{"converted workbook", "native head without receipt", "receipt with a legacy head", "operations with a legacy head", "undo with a legacy head", "signature warning with a legacy head"} {
 		t.Run(mode, func(t *testing.T) {
 			target := openDurableArtifactBackupDB(t)
 			if err := backup.RestoreDump(t.Context(), target, dump); err != nil {
@@ -102,6 +102,23 @@ func TestReplaceRestoreRefusesTargetNativeWorkbookHistory(t *testing.T) {
 				replacementExec(t, target, "DELETE FROM craft_workbook_migrations WHERE page_id=?", scope.ArtifactID)
 			case "receipt with a legacy head":
 				replacementExec(t, target, "UPDATE artifact_version_heads SET latest_version=1 WHERE page_id=?", scope.ArtifactID)
+			case "operations with a legacy head", "undo with a legacy head", "signature warning with a legacy head":
+				replacementExec(t, target, "DELETE FROM craft_workbook_migrations WHERE page_id=?", scope.ArtifactID)
+				replacementExec(t, target, "UPDATE artifact_version_heads SET latest_version=1 WHERE page_id=?", scope.ArtifactID)
+				switch mode {
+				case "operations with a legacy head":
+					replacementExec(t, target, `INSERT INTO craft_version_ops
+						(workspace_id,page_id,version,base_version,actor_kind,actor_id,operation_id,engine_pin,calculate,replayable,ops,created_at)
+						VALUES(?,?,3,2,'agent','agent-test','test-op','test-pin','saved',0,'[]',CURRENT_TIMESTAMP)`, scope.WorkspaceID, scope.ArtifactID)
+				case "undo with a legacy head":
+					replacementExec(t, target, `INSERT INTO craft_version_undos
+						(workspace_id,page_id,operation_id,version,skipped,created_at)
+						VALUES(?,?,'test-op',3,0,CURRENT_TIMESTAMP)`, scope.WorkspaceID, scope.ArtifactID)
+				case "signature warning with a legacy head":
+					replacementExec(t, target, `INSERT INTO craft_version_signature_breaks
+						(workspace_id,page_id,version,created_at)
+						VALUES(?,?,3,CURRENT_TIMESTAMP)`, scope.WorkspaceID, scope.ArtifactID)
+				}
 			}
 			opts := backup.RestoreOptions{
 				Path: bundle.Path, Identities: []age.Identity{f.identity}, Replace: true,

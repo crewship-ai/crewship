@@ -156,13 +156,16 @@ func targetWorkbookPages(ctx context.Context, q workbookTargetQuerier, workspace
 // workbookPageIDs lists workbook Page IDs in workspaceIDs, or in the whole
 // database when workspaceIDs is empty (offline recovery replaces all of it).
 func workbookPageIDs(ctx context.Context, q workbookTargetQuerier, workspaceIDs []string) ([]string, error) {
-	var gridcraft, native, migrations bool
+	var gridcraft, native, migrations, operations, undos, signatures bool
 	const schemas = `SELECT
 		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads'),
 		(SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN (
 			'craft_native_documents', 'artifact_version_heads', 'artifact_versions')) = 3,
-		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_workbook_migrations')`
-	if err := q.QueryRowContext(ctx, schemas).Scan(&gridcraft, &native, &migrations); err != nil {
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_workbook_migrations'),
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_version_ops'),
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_version_undos'),
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_version_signature_breaks')`
+	if err := q.QueryRowContext(ctx, schemas).Scan(&gridcraft, &native, &migrations, &operations, &undos, &signatures); err != nil {
 		return nil, err
 	}
 	var sources []string
@@ -181,6 +184,17 @@ func workbookPageIDs(ctx context.Context, q workbookTargetQuerier, workspaceIDs 
 	}
 	if migrations {
 		sources = append(sources, "SELECT workspace_id,page_id FROM craft_workbook_migrations")
+	}
+	// Retained operations, Undo receipts and signature warnings belong to
+	// workbook history, even when the current head is a legacy document.
+	if operations {
+		sources = append(sources, "SELECT workspace_id,page_id FROM craft_version_ops")
+	}
+	if undos {
+		sources = append(sources, "SELECT workspace_id,page_id FROM craft_version_undos")
+	}
+	if signatures {
+		sources = append(sources, "SELECT workspace_id,page_id FROM craft_version_signature_breaks")
 	}
 	if len(sources) == 0 {
 		return nil, nil

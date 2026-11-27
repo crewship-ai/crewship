@@ -331,7 +331,7 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 				status, raw = call(http.MethodGet, page, "document/versions", bearer, token, nil)
 				var history craftNativeVersionsResponse
 				if status != 200 || json.Unmarshal(raw, &history) != nil || history.CurrentVersion != "3" ||
-					len(history.Versions) != 3 || history.Versions[0].Format != "" || history.Versions[1].Format != "native" || history.Versions[2].Format != "native" {
+					len(history.Versions) != 3 || history.Versions[0].Format != "xlsx" || history.Versions[0].ContentHash != craftContentHash(wantWorkbook) || history.Versions[1].Format != "native" || history.Versions[2].Format != "native" {
 					t.Fatalf("history listing: %d %s", status, raw)
 				}
 				for i, saved := range [][]byte{original, source} {
