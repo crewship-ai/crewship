@@ -900,10 +900,10 @@ index 0000000000000000000000000000000000000000..51bed730735790c4f58a0f26de55a055
 +}
 diff --git a/apps/wordcraft-web/src/snapshot.rs b/apps/wordcraft-web/src/snapshot.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..750e827eb33943cb24d947636fa96bc308b4fa05
+index 0000000000000000000000000000000000000000..bb2f85e01dbe73bf3a0762d6c3bf144fe7c38a84
 --- /dev/null
 +++ b/apps/wordcraft-web/src/snapshot.rs
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,122 @@
 +//! Native JSON snapshots for a host that stores complete editor versions.
 +
 +use wordcraft_engine::Session;
@@ -968,6 +968,7 @@ index 0000000000000000000000000000000000000000..750e827eb33943cb24d947636fa96bc3
 +            alt: "Large image".into(),
 +            float: Default::default(),
 +            crop: [0.; 4],
++            fx: Default::default(),
 +            ole: None,
 +        });
 +        session.doc.body.push(wordcraft_doc::para_block(para));
