@@ -34,7 +34,6 @@ type craftNativeVersionProposalResponse struct {
 }
 type craftNativeVersionResponse struct {
 	Version      string                              `json:"version"`
-	Format       string                              `json:"format,omitempty"`
 	CreatedAt    string                              `json:"createdAt"`
 	Author       craftNativeVersionAuthorResponse    `json:"author"`
 	RestoredFrom string                              `json:"restoredFrom,omitempty"`
