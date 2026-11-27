@@ -792,7 +792,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      const acknowledgement=(async()=>{
       if(!live(r)||!r.writable)return false
       try{
-       const acknowledged=await r.port.ack(receipt,captureId)
+       const acknowledged=await (captureId===undefined?r.port.ack(receipt):r.port.ack(receipt,captureId))
        if(!live(r)||!r.writable)return false
        if(!acknowledged){failNative(r,'The editor confirmation failed. The last changes are not confirmed; the original editor stays locked.');return false}
        if(r.edit===edit)r.ackedVersion=receipt.version
