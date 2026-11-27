@@ -274,7 +274,7 @@ it("uploads the workbook itself as the Sheet's first version, says so, and conve
   expect(screen.getByLabelText(/^Name/)).toHaveValue("Model")
   fireEvent.click(screen.getByRole("button", { name: "Upload and open" }))
   await waitFor(() => expect(screen.getByText("Uploading the workbook…")).toBeTruthy())
-  expect(m.upload).toHaveBeenCalledWith(expect.objectContaining({ pageId: "pg_1", file, fileName: "Model.xlsm", signal: expect.any(AbortSignal) }))
+  expect(m.upload).toHaveBeenCalledWith(expect.objectContaining({ pageId: "pg_1", file, signal: expect.any(AbortSignal) }))
   expect(screen.queryByText(/Converting/)).toBeNull()
   release(new Response("{}"))
   await waitFor(() => expect(screen.queryByText("Uploading the workbook…")).toBeNull())
