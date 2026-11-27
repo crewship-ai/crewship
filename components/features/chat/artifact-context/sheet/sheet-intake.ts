@@ -10,10 +10,10 @@ import { useComposerStore } from "@/stores/composer-store"
 export interface SheetOffer { file: File; /** False for a workbook too large to attach: it can only be a Sheet. */ attached: boolean }
 
 /** Which of the added files can become a Sheet, and which are attached as usual. */
-export function splitForSheets(files: File[]): { offers: SheetOffer[]; attach: File[] } {
+export function splitForSheets(files: File[], workbookLimit = XLSX_IMPORT_LIMIT): { offers: SheetOffer[]; attach: File[] } {
   const offers: SheetOffer[] = [], attach: File[] = []
   for (const file of files) {
-    const workbook = isWorkbookName(file.name) && file.size > 0 && file.size <= XLSX_IMPORT_LIMIT
+    const workbook = isWorkbookName(file.name) && file.size > 0 && file.size <= workbookLimit
     const attached = file.size <= PROVISIONAL_ATTACHMENT_LIMITS.maxBytes
     if (workbook) offers.push({ file, attached })
     // Too large for both stays here too, so the ordinary refusal says so.

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { FileSpreadsheet, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { XLSX_IMPORT_LIMIT, XlsxImportError } from "@/lib/craft-xlsx-import"
-import { uploadWorkbook, WORKBOOK_REFUSAL } from "./workbook-upload"
+import { uploadWorkbook, WORKBOOK_REFUSAL, WORKBOOK_UPLOAD_LIMIT } from "./workbook-upload"
 import { PROVISIONAL_ATTACHMENT_LIMITS } from "@/lib/chat-attachment-queue"
 import { useWordDocumentCreation } from "@/components/features/pages/use-word-document-creation"
 import { artifactsItemHref } from "../artifacts-href"
@@ -97,6 +97,7 @@ export function SheetFromFileRow({ workspaceId, userId, chatId, ensureChat, onWo
   leftBehind.current = () => { if (phase.at === "working" && creation.emptyPage && userId) noteUnfinishedImport({ userId, workspaceId }, creation.emptyPage.id) }
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; leftBehind.current(); abort.current?.abort() } }, [])
   const available = creation.availability.gridcraftNative === true
+  const workbookLimit = creation.availability.gridcraftWorkbook === true ? WORKBOOK_UPLOAD_LIMIT : XLSX_IMPORT_LIMIT
   const name = sheetName ?? workbookBaseName(file.name)
   // Whether the attachment itself arrived is its own chip's to say.
   const kept = " Your original file did not change, and neither did your message or its files."
@@ -136,7 +137,7 @@ export function SheetFromFileRow({ workspaceId, userId, chatId, ensureChat, onWo
   }
 
   // On a workbook server an .xlsx or .xlsm opens as a Sheet at once; the server still decides.
-  const autoOpen = creation.availability.gridcraftWorkbook === true && available && creation.allowed && isWorkbookName(file.name) && file.size <= XLSX_IMPORT_LIMIT
+  const autoOpen = creation.availability.gridcraftWorkbook === true && available && creation.allowed && isWorkbookName(file.name) && file.size <= workbookLimit
   const autoStarted = useRef(false)
   useEffect(() => {
     if (!autoOpen || autoStarted.current || creation.availability.isPending) return
@@ -153,7 +154,7 @@ export function SheetFromFileRow({ workspaceId, userId, chatId, ensureChat, onWo
   if (creation.availability.isPending) return null
   // Open beside the chat: the Sheet's own chip above the composer is the one row for this file.
   if (phase.at === "done" && sideBySide) return null
-  const reason = !available ? "Sheet is not available on this server." : !creation.allowed ? "You may not create Sheets in this workspace." : null
+  const reason = !available ? "Sheet is not available on this server." : !creation.allowed ? "You may not create Sheets in this workspace." : file.size > workbookLimit ? `This workbook is larger than a Sheet can open (limit ${mb(workbookLimit)}).` : null
   return <div ref={rowRef} role="group" aria-label={`${file.name} as a Sheet`} data-testid="sheet-from-file" data-phase={phase.at}
     className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1 text-xs">
     <span className="flex min-w-0 flex-1 basis-40 items-center gap-2">
@@ -169,8 +170,8 @@ export function SheetFromFileRow({ workspaceId, userId, chatId, ensureChat, onWo
       {phase.at === "done" && <p>{sideBySide ? "Opened beside the chat." : "The Sheet is ready."}</p>}
     </div>
     {phase.at === "offer" && <p className="basis-full text-muted-foreground">{reason ? `${reason}${tooLarge}`
-      : attached ? `Edit it together with the agent. Files up to ${mb(PROVISIONAL_ATTACHMENT_LIMITS.maxBytes)} can be attached, workbooks up to ${mb(XLSX_IMPORT_LIMIT)} opened as a Sheet.`
-      : `Too large to attach (limit ${mb(PROVISIONAL_ATTACHMENT_LIMITS.maxBytes)}). It can still be opened as a Sheet (limit ${mb(XLSX_IMPORT_LIMIT)}).`}</p>}
+      : attached ? `Edit it together with the agent. Files up to ${mb(PROVISIONAL_ATTACHMENT_LIMITS.maxBytes)} can be attached, workbooks up to ${mb(workbookLimit)} opened as a Sheet.`
+      : `Too large to attach (limit ${mb(PROVISIONAL_ATTACHMENT_LIMITS.maxBytes)}). It can still be opened as a Sheet (limit ${mb(workbookLimit)}).`}</p>}
     {phase.at === "failed" && <div role="alert" className="flex basis-full flex-wrap items-center gap-2 text-destructive">
       <p>{phase.message} {phase.next}{kept}{attached && onSendPlain ? " The message waits until you try again or send the workbook as a plain file." : ""}</p>
       {attached && onSendPlain && <Button type="button" size="xs" variant="outline" className="coarse:min-h-[44px]" onClick={onSendPlain}>Send as a plain file</Button>}
