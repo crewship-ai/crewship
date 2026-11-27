@@ -13,6 +13,7 @@ type craftNativeDocumentResponse struct {
 	Format        string                           `json:"format,omitempty"`
 	Bytes         []byte                           `json:"bytes"`
 	ApplicationID string                           `json:"applicationId"`
+	EngineBuild   string                           `json:"engineBuild,omitempty"`
 	EnginePin     string                           `json:"enginePin"`
 	EditorBundle  string                           `json:"editorBundle"`
 	EditorURL     string                           `json:"editorURL"`
