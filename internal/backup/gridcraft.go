@@ -190,20 +190,22 @@ func fenceGridCraftTarget(ctx context.Context, tx *sql.Tx, workspace, page strin
 // A portable bundle is a coherent source history, not a patch to a target
 // workbook. Refuse collisions before a replace hook can erase target fences.
 func rejectGridCraftHistoryCollision(ctx context.Context, q collabRestoreQuerier, dump *DBDump) error {
-	if dump == nil || len(dump.Tables["gridcraft_heads"]) == 0 {
+	if dump == nil {
 		return nil
 	}
-	for _, row := range dump.Tables["gridcraft_heads"] {
-		page, ok := row["page_id"].(string)
-		if !ok || page == "" {
-			return fmt.Errorf("backup: malformed workbook scope")
-		}
-		var exists bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=?)`, page).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return fmt.Errorf("backup: workbook history merge is not qualified; restore into an empty Page destination or fork")
+	for _, table := range []string{"gridcraft_heads", "craft_workbook_migrations"} {
+		for _, row := range dump.Tables[table] {
+			page, ok := row["page_id"].(string)
+			if !ok || page == "" {
+				return fmt.Errorf("backup: malformed workbook scope")
+			}
+			var exists bool
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=?)`, page).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("backup: workbook history merge is not qualified; restore into an empty Page destination or fork")
+			}
 		}
 	}
 	return nil

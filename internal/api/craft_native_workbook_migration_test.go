@@ -86,9 +86,11 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 	for _, scenario := range []struct {
 		name, altered string
 		moveHead      bool
+		liveLease     bool
 	}{
 		{name: "faithful"},
 		{name: "concurrent edit", moveHead: true},
+		{name: "live lease", liveLease: true},
 		{name: "value", altered: `"value":7|"value":9`},
 		{name: "formula", altered: `"formula":"=3+4"|"formula":"=7"`},
 		{name: "style", altered: `"bold":true|"bold":false`},
@@ -157,7 +159,22 @@ func TestCraftLegacyWorkbookConversion(t *testing.T) {
 			if status != 409 || !bytes.Contains(raw, []byte(`"legacy_workbook"`)) {
 				t.Fatalf("legacy read: %d %s", status, raw)
 			}
+			if scenario.liveLease {
+				status, raw = call(http.MethodPost, page, "lease/acquire", bearer, token, struct{}{})
+				if status != 200 {
+					t.Fatalf("establish live lease: %d %s", status, raw)
+				}
+			}
 			status, raw = call(http.MethodPost, page, "document/migrate-workbook", bearer, token, nil)
+			if scenario.liveLease {
+				state, err := store.Read(t.Context(), key, author)
+				if status != 409 || !bytes.Contains(raw, []byte("legacy_workbook_busy")) || err != nil || state.LatestVersion != 1 {
+					t.Fatalf("live lease: migration HTTP %d, head %d, state error %v", status, state.LatestVersion, err)
+				}
+				checkSource(call(http.MethodGet, page, "document/original-workbook", bearer, token, nil))
+				return
+			}
+
 			if scenario.moveHead {
 				state, err := store.Read(t.Context(), key, author)
 				if status != 409 || err != nil || state.LatestVersion != 2 || !bytes.Equal(state.Manifest.Files["document.json"].Content, concurrentSource) {

@@ -28,11 +28,15 @@ const (
 	// Never changes document bytes and takes no generation by design; the test
 	// proves it leaves versions untouched.
 	craftNoDocumentWrite craftLeaseClass = "no-document-write"
+	// Conversion appends an exact legacy successor only while custody is vacant.
+	// TestCraftLegacyWorkbookConversion exercises its live-lease refusal.
+	craftLegacyMigration craftLeaseClass = "vacant-legacy-migration"
 )
 
 var craftNativeWriteRoutes = map[string]craftLeaseClass{
 	"POST /api/v1/pages/{slug}/craft/document/save":                 craftFencedContent,
 	"POST /api/v1/pages/{slug}/craft/document/import":               craftFencedContent,
+	"POST /api/v1/pages/{slug}/craft/document/migrate-workbook":     craftLegacyMigration,
 	"POST /api/v1/pages/{slug}/craft/document/restore":              craftFencedContent,
 	"POST /api/v1/pages/{slug}/craft/document/share":                craftFencedContent,
 	"POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/accept": craftFencedContent,
@@ -139,7 +143,7 @@ func TestCraftNativeFencedWriteRoutesRefuseStaleOrMissingLease(t *testing.T) {
 	}
 	// Every fenced route of the classification table (the agent route has its own test).
 	for route, class := range craftNativeWriteRoutes {
-		if class == craftNoDocumentWrite || route == "POST /api/v1/internal/craft-native/task" {
+		if (class != craftFencedContent && class != craftFencedCustody) || route == "POST /api/v1/internal/craft-native/task" {
 			continue
 		}
 		if _, ok := routes[route]; !ok {

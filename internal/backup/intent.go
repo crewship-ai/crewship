@@ -87,6 +87,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
 	"mooring_edit_lease_requests":   IntentExcludeRuntime,
 
+	"craft_workbook_migrations":     IntentInclude,        // durable Sheet conversion and exact source references
 	"craft_native_documents":        IntentInclude,        // immutable native compatibility pins, never runtime authority
 	"craft_native_proposals":        IntentInclude,        // reviewable document DATA; accept re-checks live rights and lease
 	"craft_native_retired_attempts": IntentExcludeRuntime, // fences in-flight save attempts of live admissions; never portable

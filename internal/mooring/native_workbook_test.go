@@ -94,11 +94,17 @@ func TestWorkbookStoreKeepsTheFileAsTheVersion(t *testing.T) {
 	if err != nil || reconciled != r2 {
 		t.Fatalf("reconcile: %+v %v, want %+v", reconciled, err, r2)
 	}
-	state, _ = s.Read(t.Context(), scope)
+	state, err = s.Read(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if f, err = s.DocumentFile(state.Manifest); err != nil || f.Format != "xlsx" || f.MediaType != WorkbookMediaTypeXLSX || !bytes.Equal(f.Content, edited) {
 		t.Fatalf("v2 file %+v %v", f.Name, err)
 	}
 	v1, _, err := s.ReadVersion(t.Context(), scope, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if f, err = s.DocumentFile(v1); err != nil || !bytes.Equal(f.Content, original) {
 		t.Fatalf("version 1 is not the original: %v", err)
 	}

@@ -10,6 +10,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
+type craftNativeWorkbookMigrationResponse struct {
+	Version string `json:"version"`
+}
+
 // Conversion runs outside the SQL writer. Limit concurrent exports on this
 // server; publication independently rechecks the source and the caller.
 var craftWorkbookConversions = make(chan struct{}, 2)
@@ -63,7 +67,7 @@ func (d *craftNativeDocumentsHTTP) migrateWorkbook(w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	writeJSON(w, 200, map[string]string{"version": strconv.FormatInt(converted, 10)})
+	writeJSON(w, 200, craftNativeWorkbookMigrationResponse{Version: strconv.FormatInt(converted, 10)})
 }
 
 func (d *craftNativeDocumentsHTTP) downloadLegacyWorkbook(w http.ResponseWriter, r *http.Request) {
