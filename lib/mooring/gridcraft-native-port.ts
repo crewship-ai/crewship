@@ -87,7 +87,6 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       if (opened) throw new Error("native_bootstrap_unavailable")
       if (options.applicationId !== "gridcraft") throw new Error("invalid_native_port")
       const result = await inner.open({ name: options.fileName, bytes }, { calculate: false, autoFit: false }, signal, timeoutMs)
-      if (!options.fileName.endsWith("." + result.format)) throw new Error("native_workbook_format_mismatch")
       if (!options.fileName.toLowerCase().endsWith("." + result.format)) throw new Error("native_workbook_format_mismatch")
       opened = true; openedFormat = result.format
       try { options.onOpened?.(result) } catch { /* reporting only */ }
