@@ -47,6 +47,8 @@ var workspaceTablesNotBundled = map[string]string{
 	"artifact_storage_reservations":    "in-flight upload reservations expire within minutes and never survive a restore",
 	"artifact_storage_workspaces":      "target-local capacity counters; restored payload rows recharge them through triggers",
 	"artifact_project_message_intents": "original-message run authority requires fresh admission after restore",
+	"artifact_chat_refs":               "the destination must admit chat attachments against its live authority",
+	"agent_files":                      "initialize agent file access by attaching the Sheet on the destination",
 	"artifact_message_refs":            "checked chat references require fresh admission after restore; bundles must not replay them",
 	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
 	"page_grant_retired_issuances":     "target-local memory of retired grants must survive logical replacement; a bundle must neither reset it nor bring a copy",
