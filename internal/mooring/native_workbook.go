@@ -214,3 +214,14 @@ func ValidateWorkbook(ctx context.Context, raw []byte) error {
 	}
 	return nil
 }
+
+// WorkbookFormatOf is the format a version's entry point names: xlsx, xlsm, or native.
+func WorkbookFormatOf(entryPoint string) string {
+	switch entryPoint {
+	case "workbook.xlsx":
+		return "xlsx"
+	case "workbook.xlsm":
+		return "xlsm"
+	}
+	return "native"
+}

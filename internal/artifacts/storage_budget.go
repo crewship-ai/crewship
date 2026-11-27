@@ -76,6 +76,15 @@ const MaxStorageUploadBytes int64 = 64 << 20
 const maxStorageUploads = 8
 const maxWorkspaceStorageUploads = 4
 
+// maxActorStorageUploads bounds one person's (or one agent run's) uploads in progress, so they
+// cannot hold every slot of their workspace.
+const maxActorStorageUploads = 2
+
+// storageActor is the person behind an authority's actor: "user:<id>" and "<id>" are the same.
+func storageActor(actor string) string {
+	return strings.TrimPrefix(actor, "user:")
+}
+
 type storageUploadContextKey struct{}
 type StorageUpload struct {
 	db                  *sql.DB
@@ -106,7 +115,7 @@ func (s *VersionStore) ReserveUpload(ctx context.Context, k VersionKey, size int
 		return nil, ErrVersionInvalid
 	}
 	var upload *StorageUpload
-	err := s.transactionScope(ctx, k, a, func(tx *sql.Tx, _ string) error {
+	err := s.transactionScope(ctx, k, a, func(tx *sql.Tx, actor string) error {
 		if err := expireStorageUploads(ctx, tx); err != nil {
 			return err
 		}
@@ -146,8 +155,18 @@ func (s *VersionStore) ReserveUpload(ctx context.Context, k VersionKey, size int
 		if k.PageID != "" {
 			page = k.PageID
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO artifact_storage_reservations(id,workspace_id,page_id,bytes,created_at,expires_at) VALUES(?,?,?,?,?,?)`, upload.id, k.WorkspaceID, page, size, tsformat.Format(now), tsformat.Format(expiry))
-		return err
+		if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_storage_reservations(id,workspace_id,page_id,bytes,created_at,expires_at,actor) VALUES(?,?,?,?,?,?,?)`, upload.id, k.WorkspaceID, page, size, tsformat.Format(now), tsformat.Format(expiry), storageActor(actor)); err != nil {
+			return err
+		}
+		// Counted after the quota triggers ran, so a full workspace still says "quota".
+		var mine int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_storage_reservations WHERE actor=?`, storageActor(actor)).Scan(&mine); err != nil {
+			return err
+		}
+		if mine > maxActorStorageUploads {
+			return ErrStorageBusy
+		}
+		return nil
 	}, true, false)
 	if err != nil {
 		return nil, err

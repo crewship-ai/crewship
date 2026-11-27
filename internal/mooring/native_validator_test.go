@@ -93,3 +93,56 @@ func enginePath(t *testing.T, v NativeCLIValidator) string {
 	}
 	return n.Path()
 }
+
+// prettyProbe is an engine whose output is the candidate behind pad bytes of indentation, like
+// the engine's indented export of a large document.
+func prettyProbe(t *testing.T, pad int64, extra string) NativeCLIValidator {
+	v := nativeCLIProbe(t, "gridcraft", fmt.Sprintf(`%s
+{ head -c %d /dev/zero | tr '\0' ' '; cat "$2"; } > "$3"
+echo "wrote $3 ($(stat -c %%s "$3") bytes)" >&2`, extra, pad))
+	v.Timeout = time.Minute
+	return v
+}
+
+// A document under 32 MiB whose indented export is larger than 64 MiB is still validated: the
+// export is compacted while it is read, under its own limits for the file and the compact model.
+func TestNativeCLIValidatorAcceptsAnIndentedExportOver64MiB(t *testing.T) {
+	if err := prettyProbe(t, 70<<20, "").Validate(t.Context(), []byte(`{"sheets":[{"name":"A"}]}`)); err != nil {
+		t.Fatalf("a 70 MiB indented export: %v", err)
+	}
+}
+
+func TestNativeCLIValidatorRefusesAnExportOverItsFileLimit(t *testing.T) {
+	if err := prettyProbe(t, MaxValidationOutputBytes+1, "").Validate(t.Context(), []byte(`{}`)); err == nil {
+		t.Fatal("an export over the file limit was admitted")
+	}
+}
+
+func TestNativeCLIValidatorRefusesACompactExportOverItsLimit(t *testing.T) {
+	v := nativeCLIProbe(t, "gridcraft", `{ printf '{"a":"'; head -c `+fmt.Sprint(MaxValidatedCompactBytes)+` /dev/zero | tr '\0' x; printf '"}'; } > "$3"; echo "wrote $3 ($(stat -c %s "$3") bytes)" >&2`)
+	v.Timeout = time.Minute
+	if err := v.Validate(t.Context(), []byte(`{}`)); err == nil {
+		t.Fatal("a compact export over its limit was admitted")
+	}
+}
+
+// At most MaxConcurrentValidations engines validate at once; the others wait.
+func TestNativeCLIValidatorBoundsConcurrentValidations(t *testing.T) {
+	shared := t.TempDir()
+	v := prettyProbe(t, 0, fmt.Sprintf(`touch '%[1]s/run.'$$; ls '%[1]s' | grep -c '^run\.' >> '%[1]s/counts' || true; sleep 0.3; rm -f '%[1]s/run.'$$`, shared))
+	done := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		go func() { done <- v.Validate(context.Background(), []byte(`{}`)) }()
+	}
+	for i := 0; i < 5; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := os.ReadFile(filepath.Join(shared, "counts"))
+	for _, n := range strings.Fields(string(raw)) {
+		if n > fmt.Sprint(MaxConcurrentValidations) {
+			t.Fatalf("%s engines validated at once: %q", n, raw)
+		}
+	}
+}

@@ -126,6 +126,13 @@ func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64,
 // transaction, after the writer fence, so validation that was still running
 // when the reconcile answered cannot publish afterwards.
 func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte, attemptID string) (NativeSaveReceipt, error) {
+	return s.SaveAttemptRecorded(ctx, l, base, editorRevision, contentHash, raw, attemptID, nil)
+}
+
+// SaveAttemptRecorded is SaveAttempt with a record that runs on the saving
+// transaction of a new version (never for an unchanged repeat or a refusal);
+// its error rolls the version back.
+func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte, attemptID string, record NativeRecord) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
@@ -167,6 +174,7 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	}
 	request := s.manifest(base, b)
 	request.Message = message
+	request.Record = record.of(b)
 	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
 	if errors.Is(err, artifacts.ErrVersionConflict) {
 		// Attempt idempotence: this same identified attempt already committed.
