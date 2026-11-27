@@ -513,8 +513,8 @@ func TestChatRunSheetRefusalsCarryAStableReason(t *testing.T) {
 	if got := reasonOf(r.call(r.token, `{"operation":"read","page_id":"x"}`)); got != CraftSheetReasonInvalid {
 		t.Fatalf("foreign field: %q", got)
 	}
-	if got := reasonOf(apply("2", "f", "=1+1")); got != CraftSheetReasonFormula {
-		t.Fatalf("formula: %q", got)
+	if got := reasonOf(apply("1", "f", "=1+1")); got != CraftSheetReasonStale {
+		t.Fatalf("formula on a stale base: %q", got)
 	}
 	other := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(r.f.pages.artifactMasterToken, r.a.WorkspaceID, r.a.CrewID), r.a.WorkspaceID, r.a.AgentID, "another-run")
 	if w := r.call(other, `{"operation":"acquire"}`); w.Code == 200 {

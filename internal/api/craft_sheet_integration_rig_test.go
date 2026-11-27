@@ -571,6 +571,7 @@ func newSheetITScenarioWithWorkbook(t *testing.T, v1 []byte, entryPoint, mediaTy
 	t.Cleanup(func() { _ = writer.Close() })
 	internal := NewInternalHandler(db, master, newTestLogger())
 	internal.SetJournal(writer)
+	f.pages.SetJournal(writer)
 	router := &Router{db: db, logger: newTestLogger(), mux: newRouteMux()}
 	guard := func(next http.HandlerFunc) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
 	router.mux.Handle("POST /api/v1/internal/craft-native/chat-run", guard(func(w http.ResponseWriter, r *http.Request) {
