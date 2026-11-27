@@ -547,6 +547,7 @@ func TestSheetITRealtimeRestoreRejectsOldAttempts(t *testing.T) {
 		t.Fatal("workspace backup must carry the saved operations and exclude live attempts")
 	}
 
+	s.sitRunEnds()
 	const passphrase = "synthetic-sheet-recovery-passphrase"
 	bundle, err := backup.CreateInstanceBackup(ctx, source, backup.InstanceOptions{
 		OutputDir: t.TempDir(), Passphrase: passphrase, Quiesce: quiesce.New(),
