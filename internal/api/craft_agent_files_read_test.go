@@ -3,6 +3,8 @@ package api
 import (
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // The agent knows a Sheet it was given (agent_files) in every private chat of the same person with
@@ -29,7 +31,7 @@ func TestAgentFileIsReadableWithoutTheChipButNotWritable(t *testing.T) {
 func (s *sitScenario) requireAgentFileReadAudit() {
 	s.t.Helper()
 	var source string
-	if err := s.f.rig.db.QueryRow(`SELECT json_extract(payload,'$.source') FROM journal_entries WHERE workspace_id=? AND entry_type=? AND json_extract(payload,'$.page_id')='sheet-own' AND entry_hash <> '' ORDER BY seq DESC LIMIT 1`, s.f.a.WorkspaceID, auditActionCraftSheetRead).Scan(&source); err != nil || source != "agent_files" {
+	if err := s.f.rig.db.QueryRow(`SELECT json_extract(payload,'$.source') FROM journal_entries WHERE workspace_id=? AND entry_type=? AND json_extract(payload,'$.page_id')='sheet-own' AND entry_hash <> '' ORDER BY seq DESC LIMIT 1`, s.f.a.WorkspaceID, journal.EntryArtifactSheetRead).Scan(&source); err != nil || source != "agent_files" {
 		s.t.Fatalf("the read is not audited as agent_files: %q %v", source, err)
 	}
 }

@@ -204,6 +204,23 @@ func TestCraftSheetExportXLSXFailuresAndOtherApplications(t *testing.T) {
 	}
 }
 
+func TestCraftSheetExportXLSXRefusesFidelityLoss(t *testing.T) {
+	rig := sheetExportFixture(t)
+	craftNativeEnableVersionHistory(t, rig.f.db, true)
+	rig.fail = &craftsession.FidelityLossError{Parts: []craftsession.FidelityPart{{Code: "charts", Count: 1}}}
+
+	for _, query := range []string{"", "?version=1"} {
+		w := rig.export(rig.owner, rig.token, query)
+		if w.Code != http.StatusUnprocessableEntity || w.Header().Get("Content-Disposition") != "" ||
+			w.Header().Get("Content-Type") != "application/json" || !strings.Contains(w.Body.String(), "without losing parts") {
+			t.Fatalf("export %q: %d %s %v", query, w.Code, w.Body, w.Header())
+		}
+	}
+	if rows := auditRowsOf(t, rig.f.db, auditActionCraftSheetExported, "native-page"); len(rows) != 0 {
+		t.Fatalf("refused exports were recorded as downloads: %+v", rows)
+	}
+}
+
 // The file name keeps the page name readable and safe in a header.
 func TestCraftExportFilename(t *testing.T) {
 	for in, want := range map[string]string{

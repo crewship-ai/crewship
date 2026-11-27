@@ -691,7 +691,7 @@ func (m *craftNativeAgentManager) auditChatRunAgentFileRead(ctx context.Context,
 	defer tx.Rollback()
 	notify, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
 		WorkspaceID: e.grant.Scope.WorkspaceID,
-		Type:        auditActionCraftSheetRead,
+		Type:        journal.EntryArtifactSheetRead,
 		ActorType:   journal.ActorUser,
 		ActorID:     e.grant.Source.UserID,
 		AgentID:     e.grant.AgentID,
@@ -710,8 +710,6 @@ func (m *craftNativeAgentManager) auditChatRunAgentFileRead(ctx context.Context,
 	}
 	notify()
 }
-
-const auditActionCraftSheetRead journal.EntryType = "artifact.sheet_read"
 
 // craftNativeChatPrewarmRequest recognises the one request that is not a Sheet
 // operation: {"operation":"prewarm"} and nothing else.

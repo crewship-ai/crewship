@@ -282,7 +282,7 @@ documented in [`crewship craft`](/cli/craft).
 | GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
 | GET | `/api/v1/pages/{slug}/craft/document/versions` | Version history, newest first (needs the `craft_version_history` workspace flag) |
 | GET | `/api/v1/pages/{slug}/craft/document/versions/{version}` | One saved version's bytes and metadata, read-only, same rights and admin audit as the document read (needs the `craft_version_history` workspace flag) |
-| GET | `/api/v1/pages/{slug}/craft/document/export.xlsx` | The Sheet as an `.xlsx` download (head, or `?version=N` with the `craft_version_history` flag), same rights and admin audit as the document read; each export is audited as `artifact.sheet_exported` without cell values |
+| GET | `/api/v1/pages/{slug}/craft/document/export.xlsx` | Download the Sheet (head, or `?version=N` with the `craft_version_history` flag) under the document read permissions. Saved workbook files are sent as stored. A legacy JSON export returns 422 if the conversion would lose workbook parts. Each successful download is audited as `artifact.sheet_exported` without cell values |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Save a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |

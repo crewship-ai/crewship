@@ -80,7 +80,7 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 		return
 	}
 	native := file.Content
-	convert, err := d.exporter()
+	convert, err := d.faithfulExporter()
 	if err != nil {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
 		return
@@ -101,11 +101,14 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 	data, err := convert(ctx, native)
 	cancel()
 	if err != nil {
-		if errors.Is(err, craftsession.ErrTooLarge) {
+		switch {
+		case errors.Is(err, craftsession.ErrTooLarge):
 			replyError(w, 413, "the exported workbook is larger than the export limit")
-			return
+		case errors.Is(err, craftsession.ErrFidelityLoss):
+			replyError(w, 422, "the workbook could not be exported without losing parts")
+		default:
+			replyError(w, 500, "the workbook could not be exported")
 		}
-		replyError(w, 500, "the workbook could not be exported")
 		return
 	}
 	sendExport(data, "xlsx", mooring.WorkbookMediaTypeXLSX)
@@ -152,8 +155,9 @@ func (d *craftNativeDocumentsHTTP) exportSource(w http.ResponseWriter, r *http.R
 	return file, m.Version, true
 }
 
-// exporter is the one-shot Sheet engine conversion (the import's engine module).
-func (d *craftNativeDocumentsHTTP) exporter() (func(context.Context, []byte) ([]byte, error), error) {
+// faithfulExporter converts legacy JSON with the qualified engine's
+// fidelity check. A conversion may hand out bytes only after that check.
+func (d *craftNativeDocumentsHTTP) faithfulExporter() (func(context.Context, []byte) ([]byte, error), error) {
 	im := d.importer()
 	if im.export != nil {
 		return im.export, nil
@@ -167,27 +171,7 @@ func (d *craftNativeDocumentsHTTP) exporter() (func(context.Context, []byte) ([]
 		return nil, err
 	}
 	return func(ctx context.Context, native []byte) ([]byte, error) {
-		return craftsession.ExportXLSX(ctx, launch, im.tempRoot, native, 0)
-	}, nil
-}
-
-// faithfulExporter is exporter with the engine's fidelity check: a workbook that would lose parts
-// (pivot fields, charts, …) is a *craftsession.FidelityLossError, never bytes.
-func (d *craftNativeDocumentsHTTP) faithfulExporter() (func(context.Context, []byte) ([]byte, error), error) {
-	im := d.importer()
-	if im.exportFaithful != nil {
-		return im.exportFaithful, nil
-	}
-	profile, ok := d.profile("gridcraft")
-	if !ok {
-		return nil, mooring.ErrNativeDisabled
-	}
-	launch, err := im.launch(profile)
-	if err != nil {
-		return nil, err
-	}
-	return func(ctx context.Context, native []byte) ([]byte, error) {
-		return craftsession.ExportXLSXFaithful(ctx, launch, im.tempRoot, native, mooring.MaxWorkbookBytes)
+		return craftsession.ExportXLSXFaithful(ctx, launch, im.tempRoot, native, 0)
 	}, nil
 }
 

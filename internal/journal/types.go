@@ -695,6 +695,9 @@ const (
 	// instead of redeclaring the string.
 	EntryPageProduceDenied EntryType = "page.produce_denied"
 
+	// EntryArtifactSheetRead records an agent reading its linked Sheet.
+	EntryArtifactSheetRead EntryType = "artifact.sheet_read"
+
 	// EntryPagePanelUpdated is emitted on every successful panel push
 	// (§5) and doubles as the realtime broadcast type consumed by
 	// hooks/use-realtime.tsx's VALID_REALTIME_TYPES allowlist.

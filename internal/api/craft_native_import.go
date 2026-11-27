@@ -79,10 +79,8 @@ type craftNativeImports struct {
 	convert  func(ctx context.Context, data []byte) (*craftsession.ImportResult, error)
 	tempRoot string
 	maxXLSX  int64
-	// export replaces the engine's xlsx export in tests (craft_native_export.go).
+	// export replaces the engine's fidelity-checked XLSX export in tests.
 	export func(ctx context.Context, native []byte) ([]byte, error)
-	// exportFaithful, when set, replaces the engine's fidelity-checked export (tests).
-	exportFaithful func(ctx context.Context, native []byte) ([]byte, error)
 	// exporting counts the exports in flight against craftNativeExportMaxActive.
 	exporting int
 }

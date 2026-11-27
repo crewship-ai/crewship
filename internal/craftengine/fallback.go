@@ -60,11 +60,13 @@ func NewDegraded(secondary Engine, reason string, warn func(reason string)) (*Fa
 	return f, nil
 }
 
-func (f *Fallback) active() Engine {
-	if f.primary != nil {
-		return f.primary
+func (f *Fallback) primaryIfAvailable() Engine {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.degraded {
+		return nil
 	}
-	return f.secondary
+	return f.primary
 }
 
 func (f *Fallback) Application() string { return f.secondary.Application() }
@@ -110,10 +112,10 @@ func (f *Fallback) note(runtime string, degraded bool, reason string) {
 }
 
 func (f *Fallback) Run(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) error {
-	if f.primary != nil && !f.degraded {
-		err := f.primary.Run(ctx, dir, args, stdout, stderr)
+	if primary := f.primaryIfAvailable(); primary != nil {
+		err := primary.Run(ctx, dir, args, stdout, stderr)
 		if err == nil || !errors.Is(err, ErrUnavailable) || errors.Is(err, ErrFailed) {
-			f.note(f.primary.Runtime(), false, "")
+			f.note(primary.Runtime(), false, "")
 			return err
 		}
 		f.note(f.secondary.Runtime(), true, "the worker process could not start")

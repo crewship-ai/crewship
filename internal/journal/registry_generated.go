@@ -39,6 +39,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("artifact.returned_to_private"),      // journalArtifactReturnedToPrivate, internal/api/pages_return_private.go:20:7
 	EntryType("artifact.run_capability_lost"),      // journalArtifactRunCapabilityLost, internal/api/pages_artifact_unattended_run.go:73:7
 	EntryType("artifact.run_capability_withheld"),  // EntryArtifactRunCapabilityWithheld, internal/pipeline/routine_artifact_run.go:18:7
+	EntryArtifactSheetRead,
 	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
