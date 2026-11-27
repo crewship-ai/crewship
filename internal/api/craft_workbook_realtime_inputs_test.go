@@ -39,7 +39,10 @@ func TestSheetITRealtimeTypedWorksheetInputEquality(t *testing.T) {
 	shared := craftSharedStringReader(parts)
 	read := func(attr, content string) (input, structure [32]byte) {
 		t.Helper()
-		d := xml.NewDecoder(strings.NewReader(`<c xmlns="` + craftSpreadsheetNS + `" r="B3"` + attr + `>` + content + `</c>`))
+		d := xml.NewDecoder(strings.NewReader(`<row xmlns="` + craftSpreadsheetNS + `"><c r="B3"` + attr + `>` + content + `</c></row>`))
+		if _, err := d.Token(); err != nil {
+			t.Fatal(err)
+		}
 		token, err := d.Token()
 		if err != nil {
 			t.Fatal(err)
