@@ -29,11 +29,7 @@ func (d *craftNativeDocumentsHTTP) mutateRealtimeWorkbook(w http.ResponseWriter,
 	ctx := context.WithValue(r.Context(), craftRealtimeWriteKey{}, true)
 	if operation == "reconcile" {
 		out, err := a.lookup(ctx, s, lease, d.human.clock, true)
-		if err != nil {
-			craftNativeDocumentError(w, err)
-		} else {
-			writeJSON(w, 200, out)
-		}
+		craftRealtimeWorkbookResult(w, out, err)
 		return
 	}
 	if craftContentHash(body.Bytes) != body.ContentHash {
@@ -46,10 +42,16 @@ func (d *craftNativeDocumentsHTTP) mutateRealtimeWorkbook(w http.ResponseWriter,
 		return
 	}
 	out, err := d.saveRealtimeWorkbook(ctx, s, lease, a, body.Bytes, touched)
+	craftRealtimeWorkbookResult(w, out, err)
+}
+
+func craftRealtimeWorkbookResult(w http.ResponseWriter, out any, err error) {
 	var loss *craftsession.FidelityLossError
 	switch {
 	case errors.As(err, &loss):
 		craftWorkbookFidelityRefusal(w, loss.Parts)
+	case errors.Is(err, errCraftRealtimeTooManyRanges):
+		writeJSON(w, 422, map[string]string{"reason": "too_many_ranges", "error": craftRealtimeRangeMessage})
 	case errors.Is(err, errCraftRealtimeUnproved):
 		replyCode(w, 409, "realtime_unproved", "the changes could not be safely combined; keep the local draft")
 	case errors.Is(err, ErrCraftNativeSheetBusy):
@@ -118,8 +120,8 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 				return nil, err
 			}
 		}
-		if len(candidate) > 32<<20 {
-			return nil, artifacts.ErrVersionQuota
+		if err = meta.validate(candidate); err != nil {
+			return nil, err
 		}
 		hash := craftContentHash(candidate)
 		audit := craftSheetRecord(scope, entry.application, entry.source.UserID, craftSheetSavedByEditor)
@@ -188,6 +190,26 @@ func (d *craftNativeDocumentsHTTP) mergeRealtimeWorkbook(ctx context.Context, s 
 		}
 		kept = append(kept, cell)
 	}
+	names, ok := craftWorkbookSheetNames(head)
+	if !ok {
+		return nil, nil, nil, nil, errCraftRealtimeUnproved
+	}
+	canonical := make(map[string]string, len(names))
+	for name := range names {
+		canonical[strings.ToLower(name)] = name
+	}
+	for i := range history.agentRanges {
+		ref := &history.agentRanges[i]
+		ref.Sheet = canonical[strings.ToLower(ref.Sheet)]
+	}
+	agentRanges, err := craftCompactSheetRanges(history.agentRanges)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	overlap, err = craftCompactSheetRanges(overlap)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	candidate, err := craftRealtimeReplay(ctx, agents, profile, head, submitted, kept)
-	return candidate, craftRealtimeOps(kept), overlap, history.agentRanges, err
+	return candidate, craftRealtimeOps(kept), overlap, agentRanges, err
 }

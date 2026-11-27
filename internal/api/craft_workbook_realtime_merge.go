@@ -170,9 +170,6 @@ func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.Edi
 				out.agentRanges = append(out.agentRanges, craftSheetRange{Sheet: read.sheet, A1: read.rng})
 			}
 		}
-		if len(out.agentRanges) > craftRealtimeCellLimit {
-			return out, errCraftRealtimeUnproved
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return out, err

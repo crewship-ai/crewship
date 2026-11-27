@@ -143,7 +143,7 @@ func TestSheetITRealtimeOrdersAndExactReconcile(t *testing.T) {
 					merged.Submitted.ContentHash != craftContentHash(submission) || merged.Receipt.BaseVersion != "2" ||
 					merged.Receipt.Version != "3" || merged.Receipt.CandidateHash != craftContentHash(merged.Bytes) ||
 					!bytes.Equal(merged.Bytes, s.stored(3)) || !reflect.DeepEqual(merged.AgentRanges, []craftSheetRange{{"L", "B3:B5"}}) ||
-					!reflect.DeepEqual(merged.Overlap, []craftSheetRange{{"L", "B3"}, {"L", "B4"}}) {
+					!reflect.DeepEqual(merged.Overlap, []craftSheetRange{{"L", "B3:B4"}}) {
 					t.Fatalf("invalid merge response: %+v (%v)", merged.Receipt, err)
 				}
 			}
@@ -420,7 +420,7 @@ func TestSheetITRealtimeSaveRetriesCASAgainstBothAgentWrites(t *testing.T) {
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &data) != nil || mergeCalls != 2 ||
 			data.Receipt.BaseVersion != "3" || data.Receipt.Version != "4" ||
 			!reflect.DeepEqual(data.Overlap, []craftSheetRange{{"L", "B7"}}) ||
-			!reflect.DeepEqual(data.AgentRanges, []craftSheetRange{{"L", "B8"}, {"L", "B7"}}) {
+			!reflect.DeepEqual(data.AgentRanges, []craftSheetRange{{"L", "B7:B8"}}) {
 			t.Fatalf("CAS did not rebase against both changes: code=%d calls=%d receipt=%+v overlaps=%v ranges=%v",
 				w.Code, mergeCalls, data.Receipt, data.Overlap, data.AgentRanges)
 		}
@@ -540,7 +540,7 @@ func TestSheetITRealtimeCanMergeAcrossUndoInTheSameChat(t *testing.T) {
 }
 
 func TestSheetITRealtimePresenceRangeLimit(t *testing.T) {
-	const wireLimit = 64
+	const wireLimit = 32
 	columns := make([]map[string]string, 0, wireLimit+1)
 	for i := 1; i <= wireLimit+1; i++ {
 		columns = append(columns, map[string]string{"sheet": "L", "range": "A" + strconv.Itoa(i)})
@@ -549,8 +549,108 @@ func TestSheetITRealtimePresenceRangeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ranges := craftSheetPresenceResolved(raw)
-	if len(ranges) != wireLimit || ranges[wireLimit-1] != (craftSheetRange{"L", "A64"}) {
-		t.Fatalf("presence ranges at the wire limit: %d", len(ranges))
+	ranges, truncated := craftClipSheetPresenceRanges(craftSheetPresenceResolved(raw))
+	if len(ranges) != wireLimit || !truncated || ranges[wireLimit-1] != (craftSheetRange{"L", "A32"}) {
+		t.Fatalf("presence ranges at the wire limit: %d, truncated=%v", len(ranges), truncated)
+	}
+}
+
+func TestSheetITRealtimeCompacts257OverlapsAndReopens(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Fill a column of status cells", true)
+	call, editor := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	const count = 257
+	values := make([][]string, count)
+	cells := sitInitialL()
+	for i := range count {
+		values[i] = []string{"agent value"}
+		cells["B"+strconv.Itoa(100+i)] = "human value"
+	}
+	touched := map[string]string{"X-Craft-Touched": `["'L'!B100:B356"]`}
+	submitted := sitWorkbook(cells, sitInitialOther())
+	if got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"base_version": "1", "generation": generation, "request_id": "realtime-many-overlaps",
+		"commands": sitCommands(sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "B100:B356", "values": values})),
+	}); refused {
+		t.Fatal(got)
+	}
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", submitted, "realtime-contiguous-submit", "", touched)
+	var merged craftRealtimeMerged
+	want := []craftSheetRange{{"L", "B100:B356"}}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.Kind != "merged" ||
+		!merged.Receipt.Unchanged || !reflect.DeepEqual(merged.Overlap, want) || !reflect.DeepEqual(merged.AgentRanges, want) {
+		t.Fatalf("257 contiguous overlaps: HTTP %d, receipt %+v and %d overlap ranges", w.Code, merged.Receipt, len(merged.Overlap))
+	}
+	reopened := s.realtimeAdmission()
+	actual := s.headSheets(reopened.SessionToken)["L"]
+	for i := range count {
+		a := "B" + strconv.Itoa(100+i)
+		if actual[a] != "agent value" {
+			t.Fatalf("reopened %s = %q", a, actual[a])
+		}
+	}
+}
+
+func TestSheetITRealtimeRejects257SeparateAgentRangesBeforeSaving(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Fill non-adjacent status cells", true)
+	call, editor := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	const total = 257
+	for offset := 0; offset < total; offset += 64 {
+		commands := make([]map[string]any, 0, min(64, total-offset))
+		for i := offset; i < min(offset+64, total); i++ {
+			commands = append(commands, sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "B" + strconv.Itoa(100+2*i), "input": "agent"}))
+		}
+		if got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+			"base_version": strconv.FormatInt(s.head(), 10), "generation": generation,
+			"request_id": fmt.Sprintf("realtime-separated-%d", offset), "commands": sitCommands(commands...),
+		}); refused {
+			t.Fatalf("agent batch %d: %s", offset, got)
+		}
+	}
+	before, count := s.head(), len(s.opsRows())
+	cells := sitInitialL()
+	cells["B2"] = "independent edit"
+	body := sitWorkbook(cells, sitInitialOther())
+	const attempt = "realtime-separated-save"
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", body, attempt, "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), `"reason":"too_many_ranges"`) || s.head() != before || len(s.opsRows()) != count {
+		t.Fatalf("257 separate ranges: HTTP %d %s, head %d, journal %d", w.Code, w.Body, s.head(), len(s.opsRows()))
+	}
+	var published int
+	if err := s.f.rig.db.QueryRow(`SELECT count(*) FROM craft_realtime_attempts WHERE attempt_id=?`, attempt).Scan(&published); err != nil || published != 0 {
+		t.Fatalf("failed save left a receipt: %d %v", published, err)
+	}
+}
+
+func TestSheetITRealtimeCompactionKeepsHolesAndSheetBoundaries(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Change three cells in L and one in Other", true)
+	call, editor := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	if got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"base_version": "1", "generation": generation, "request_id": "realtime-L-shape",
+		"commands": sitCommands(
+			sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "A1:A2", "values": [][]string{{"agent A1"}, {"agent A2"}}}),
+			sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "B1", "input": "agent B1"}),
+			sitCmd("cell.set", map[string]any{"sheet": "Other", "cell": "A1", "input": "agent Other A1"}),
+		),
+	}); refused {
+		t.Fatal(got)
+	}
+	cells := sitInitialL()
+	cells["B2"] = "keep this"
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", sitWorkbook(cells, sitInitialOther()), "realtime-human-in-hole", "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	var merged craftRealtimeMerged
+	want := []craftSheetRange{{"L", "A1:B1"}, {"L", "A2"}, {"Other", "A1"}}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil ||
+		len(merged.Overlap) != 0 || !reflect.DeepEqual(merged.AgentRanges, want) {
+		t.Fatalf("exact union: HTTP %d, ranges=%v overlap=%v", w.Code, merged.AgentRanges, merged.Overlap)
+	}
+	reopened := s.realtimeAdmission()
+	if got := s.headSheets(reopened.SessionToken)["L"]["B2"]; got != "keep this" {
+		t.Fatalf("B2 was swallowed by the L shape: %q", got)
 	}
 }

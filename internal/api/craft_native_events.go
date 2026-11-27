@@ -214,7 +214,7 @@ func (m *craftNativeHTTP) streamSheetPresence(r *http.Request, entry *craftNativ
 				if _, active := current[id]; active {
 					continue
 				}
-				event.Phase, event.Ranges, event.TTL = "ended", []craftSheetRange{}, 0
+				event.Phase, event.Ranges, event.TTL, event.Truncated = "ended", []craftSheetRange{}, 0, false
 				if !send("sheet_agent_presence", event) {
 					return
 				}

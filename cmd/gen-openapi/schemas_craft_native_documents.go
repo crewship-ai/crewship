@@ -62,14 +62,14 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	rangeName := ref("NativeCraftSheetRange")
 	presenceRanges := array(rangeName)
-	presenceRanges["maxItems"] = 64
+	presenceRanges["maxItems"] = 32
 	mergeRanges := array(rangeName)
-	mergeRanges["maxItems"] = 2000
+	mergeRanges["maxItems"] = 256
 	schemas["NativeCraftSheetRange"] = obj(map[string]any{"sheet": str(), "a1": str()}, "sheet", "a1")
 	schemas["NativeCraftSheetPresence"] = obj(map[string]any{
 		"op_id": str(), "run_id": str(),
 		"agent": obj(map[string]any{"id": str(), "name": str()}, "id", "name"),
-		"phase": enum("started", "updated", "ended"), "ranges": presenceRanges, "ttl_ms": nonnegative(),
+		"phase": enum("started", "updated", "ended"), "ranges": presenceRanges, "ttl_ms": nonnegative(), "truncated": map[string]any{"type": "boolean"},
 	}, "op_id", "run_id", "agent", "phase", "ranges", "ttl_ms")
 	schemas["NativeCraftSheetPresenceSnapshot"] = obj(map[string]any{"operations": array(ref("NativeCraftSheetPresence"))}, "operations")
 	schemas["NativeCraftMergedSheetSave"] = obj(map[string]any{

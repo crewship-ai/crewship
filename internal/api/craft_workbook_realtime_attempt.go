@@ -38,6 +38,29 @@ type craftRealtimeAttemptMetadata struct {
 	AgentRanges []craftSheetRange `json:"agent_ranges"`
 }
 
+// Both publication branches and reconciliation check the same wire limits.
+func (m craftRealtimeAttemptMetadata) validate(candidate []byte) error {
+	if len(candidate) == 0 || len(candidate) > 32<<20 {
+		return artifacts.ErrVersionQuota
+	}
+	if m.Merged {
+		for _, ranges := range [][]craftSheetRange{m.Overlap, m.AgentRanges} {
+			if len(ranges) > craftRealtimeRangeLimit {
+				return errCraftRealtimeTooManyRanges
+			}
+			if ranges == nil {
+				return errCraftRealtimeUnproved
+			}
+			for _, r := range ranges {
+				if _, ok := craftWireSheetRange(r); !ok {
+					return errCraftRealtimeUnproved
+				}
+			}
+		}
+	}
+	return nil
+}
+
 type craftRealtimeAttempt struct {
 	entry     *craftNativeSession
 	submitted craftRealtimeSubmission
@@ -144,6 +167,10 @@ func (a craftRealtimeAttempt) lookup(ctx context.Context, s *mooring.NativeStore
 		if !base.Valid || !hash.Valid || !raw.Valid || json.Unmarshal([]byte(raw.String), &meta) != nil {
 			return mooring.ErrNativeUnconfirmed
 		}
+		if base.Int64 < a.base || version.Int64 < base.Int64 || version.Int64-base.Int64 > 1 ||
+			meta.Merged != (base.Int64 > a.base) || !meta.Merged && hash.String != submittedHash {
+			return mooring.ErrNativeUnconfirmed
+		}
 		receipt = s.ConcurrentWorkbookReceipt(l, base.Int64, version.Int64, revision, hash.String)
 		return nil
 	})
@@ -159,9 +186,6 @@ func (a craftRealtimeAttempt) lookup(ctx context.Context, s *mooring.NativeStore
 	if receipt.Version == "" {
 		return nil, nil
 	}
-	if !meta.Merged {
-		return craftWorkbookSaveReceipt{NativeSaveReceipt: receipt, SignatureInvalidated: meta.Signed}, nil
-	}
 	v, _ := strconv.ParseInt(receipt.Version, 10, 64)
 	manifest, _, err := s.ReadVersion(ctx, e.scope, v)
 	if err != nil {
@@ -173,6 +197,9 @@ func (a craftRealtimeAttempt) lookup(ctx context.Context, s *mooring.NativeStore
 	}
 	if craftContentHash(file.Content) != receipt.ContentHash {
 		return nil, mooring.ErrNativeUnconfirmed
+	}
+	if err = meta.validate(file.Content); err != nil {
+		return nil, err
 	}
 	if err = s.WithConcurrentWorkbookAuthority(ctx, l, func(*sql.Tx) error { return nil }); err != nil {
 		return nil, err
