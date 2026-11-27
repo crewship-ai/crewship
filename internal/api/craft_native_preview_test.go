@@ -95,7 +95,7 @@ func TestCraftNativePreviewRejectsWrongWorkspaceProfileAndCredential(t *testing.
 	profile := d.applications["wordcraft"]
 	profile.Store.EditorBundle = strings.Repeat("d", 64)
 	d.applications["wordcraft"] = profile
-	if w := craftNativePreviewCall(d, ctx); w.Code != 403 {
+	if w := craftNativePreviewCall(d, ctx); w.Code != 503 {
 		t.Fatalf("mismatched immutable profile: %d %s", w.Code, w.Body)
 	}
 	d.human.enabled = false

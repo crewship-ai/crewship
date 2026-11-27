@@ -19,6 +19,7 @@ type craftNativeSession struct {
 	scope                 mooring.EditLeaseScope
 	application, memberID string
 	memberRevision        int64
+	pin                   craftNativeDocumentPin
 	// Author-relevant user/Page generations, not the broad workspace epoch.
 	generations craftNativeGenerations
 	boot        string

@@ -35,6 +35,9 @@ function nativeProposal(raw:unknown):NativeProposal|null{
  if(typeof v.id!=='string'||!PROPOSAL_ID.test(v.id)||!Number.isSafeInteger(v.base_version)||(v.base_version as number)<1||typeof v.summary!=='string'||typeof v.created_at!=='string'||!['open','accepted','rejected','stale'].includes(v.state as string)||!author||author.kind!=='agent'||typeof author.display_name!=='string')return null
  return {id:v.id,authorName:author.display_name,baseVersion:String(v.base_version),summary:v.summary,createdAt:v.created_at,state:v.state as NativeProposal['state'],...(Number.isSafeInteger(v.result_version)?{resultVersion:String(v.result_version)}:{})}
 }
+export class WordProfileUnavailableError extends Error {
+ constructor(){super("word_profile_unavailable")}
+}
 export class LegacyWorkbookError extends Error {
  constructor(readonly code?: string) { super("legacy_workbook_unavailable") }
 }
@@ -388,6 +391,10 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
      response=await read()
      ready()
     }
+   }
+   if(applicationId==="wordcraft"&&response.status===503){
+    const reason=await response.json().catch(()=>null)
+    if(reason?.code==="word_profile_unavailable")throw new WordProfileUnavailableError()
    }
    // The admission stays valid: 403 here means no private read, not read loss.
    if(response.status===403)throw new Error("native_private_read_refused")

@@ -234,7 +234,7 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 		replyError(w, 413, "document file exceeds 32 MiB")
 		return
 	}
-	profile, qualified := d.application(body.ApplicationID)
+	profile, qualified := d.creationProfile(body.ApplicationID)
 	if !qualified {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
 		return
@@ -259,6 +259,10 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 	proof, err := m.initializeOwnerProof(ctx, tx, source, scope, true)
 	if err != nil {
 		craftNativeInitializeRefused(w, "owner", err)
+		return
+	}
+	if err = d.checkWordCreation(ctx, tx, body.ApplicationID); err != nil {
+		craftNativeDocumentError(w, err)
 		return
 	}
 	token, err := craftNativeOpaque()
@@ -294,7 +298,7 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 		craftNativeInitializeRefused(w, "generations", err)
 		return
 	}
-	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: body.ApplicationID, memberID: proof.memberID, memberRevision: proof.memberRevision, generations: generations, boot: boot, deadline: now + cap}
+	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: body.ApplicationID, pin: profile.documentPin(), memberID: proof.memberID, memberRevision: proof.memberRevision, generations: generations, boot: boot, deadline: now + cap}
 	if err = tx.Commit(); err != nil {
 		craftNativeInitializeFault(w, "commit", err)
 		return
@@ -348,6 +352,9 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 		if intent == "write" {
 			return m.authorizeNative(ctx, tx, k, intent)
 		}
+		if e = d.checkWordCreation(ctx, tx, entry.application); e != nil {
+			return mooring.EditLeasePrincipal{}, e
+		}
 		return craftNativePrincipal(entry), nil
 	}
 	cfg.Authorize = func(ctx context.Context, tx *sql.Tx, k mooring.EditLeaseScope, intent string) (mooring.EditLeasePrincipal, error) {
@@ -370,6 +377,8 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 	if err != nil {
 		if errors.Is(err, errCraftPrivateRequired) {
 			replyCode(w, 409, "private_required", "This Sheet could not be made private, so nothing was saved. Try again.")
+		} else if errors.Is(err, errWordDocumentProfileUnavailable) {
+			craftNativeDocumentError(w, err)
 		} else if storeRefused || errors.Is(err, sql.ErrNoRows) {
 			craftNativeInitializeRefused(w, "store_authority", errCraftNativeAccess)
 		} else {

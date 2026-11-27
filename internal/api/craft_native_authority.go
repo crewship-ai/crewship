@@ -33,6 +33,7 @@ type craftNativeProof struct {
 	expiry                   time.Time
 	record                   *pageRecord
 	application              string
+	pin                      craftNativeDocumentPin
 	// privateRead is current authority over everything but the shared pin:
 	// latest bytes, history and proposals. Read and Comment never carry it.
 	privateRead bool
@@ -94,7 +95,7 @@ func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, 
 	if !visible || write && !m.pages.mayEditSpec(ctx, scope.WorkspaceID, source.UserID, role, rec) {
 		return result, errCraftNativeAccess
 	}
-	if err = tx.QueryRowContext(ctx, `SELECT d.application_id,CAST(w.authority_revision AS TEXT),wm.id,wm.access_revision FROM craft_native_documents d JOIN workspaces w ON w.id=d.workspace_id JOIN workspace_members wm ON wm.workspace_id=w.id WHERE d.page_id=? AND d.workspace_id=? AND wm.user_id=? AND w.deleted_at IS NULL`, scope.ArtifactID, scope.WorkspaceID, source.UserID).Scan(&result.application, &result.workspaceEpoch, &result.memberID, &result.memberRevision); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT d.application_id,d.engine_revision,d.engine_sha256,d.editor_bundle,CAST(w.authority_revision AS TEXT),wm.id,wm.access_revision FROM craft_native_documents d JOIN workspaces w ON w.id=d.workspace_id JOIN workspace_members wm ON wm.workspace_id=w.id WHERE d.page_id=? AND d.workspace_id=? AND wm.user_id=? AND w.deleted_at IS NULL`, scope.ArtifactID, scope.WorkspaceID, source.UserID).Scan(&result.application, &result.pin.revision, &result.pin.sha256, &result.pin.bundle, &result.workspaceEpoch, &result.memberID, &result.memberRevision); err != nil {
 		return result, err
 	}
 	if result.application != "wordcraft" && result.application != "gridcraft" {

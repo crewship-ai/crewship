@@ -28,6 +28,12 @@ type CraftNativeConfig struct {
 	// ComponentURL replaces where the packages are downloaded from (a
 	// mirror). A package is installed only if it matches a pin.
 	ComponentURL string `yaml:"component_url"`
+	// RetainedWordPin names a second trusted WordCraft package. The release
+	// supplies its previous pin by default. "off" explicitly revokes it.
+	RetainedWordPin string `yaml:"retained_word_pin"`
+	// RetainedWordArchive optionally stages the package from a local file,
+	// including on an offline restore. Its manifest must match the pin.
+	RetainedWordArchive string `yaml:"retained_word_archive"`
 	// EnabledFromEnv and AgentsEnabledFromEnv record that
 	// CREWSHIP_CRAFT_NATIVE_ENABLED / _AGENTS_ENABLED fixed the value; Admin
 	// then shows the setting as fixed by the server configuration.
@@ -102,7 +108,8 @@ func applyCraftNativeEnv(c *CraftNativeConfig) {
 		c.AgentsEnabledFromEnv = true
 	}
 	for name, field := range map[string]*string{"CREWSHIP_CRAFT_COMPONENTS_DIR": &c.ComponentsDir,
-		"CREWSHIP_CRAFT_COMPONENT_PINS": &c.ComponentPins, "CREWSHIP_CRAFT_COMPONENT_URL": &c.ComponentURL} {
+		"CREWSHIP_CRAFT_COMPONENT_PINS": &c.ComponentPins, "CREWSHIP_CRAFT_COMPONENT_URL": &c.ComponentURL,
+		"CREWSHIP_CRAFT_RETAINED_WORD_PIN": &c.RetainedWordPin, "CREWSHIP_CRAFT_RETAINED_WORD_ARCHIVE": &c.RetainedWordArchive} {
 		if value, ok := os.LookupEnv(name); ok {
 			*field = value
 		}

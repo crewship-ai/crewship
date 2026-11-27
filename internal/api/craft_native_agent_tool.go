@@ -248,14 +248,18 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 		craftNativeDocumentError(w, err)
 		return
 	}
-	application, ok := m.documents.application(e.grant.Application)
-	profile, pinned := m.documents.profile(e.grant.Application)
-	// Workbook Sheets are supported by the attachment-bound chat adapter.
-	if !ok || !pinned || application.Store.Format == mooring.NativeFormatWorkbook && e.chat == nil {
-		replyError(w, 503, "native Craft profile unavailable")
+	qualified, ok := m.documents.resolveDocument(e.grant.Application, e.grant.Proof.pin)
+	if !ok || qualified.profile.Application == "" {
+		craftNativeDocumentError(w, missingNativeDocumentProfile(e.grant.Application))
 		return
 	}
-	cfg := application.Store
+	// Workbook Sheets are supported by the attachment-bound chat adapter.
+	if qualified.application.Store.Format == mooring.NativeFormatWorkbook && e.chat == nil {
+		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
+		return
+	}
+	profile := qualified.profile
+	cfg := qualified.application.Store
 	cfg.Enabled = m.human.enabled
 	cfg.Leases = m.human.leases
 	cfg.Authorize = m.human.authorizeNative

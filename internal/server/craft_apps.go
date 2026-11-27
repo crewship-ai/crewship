@@ -34,9 +34,11 @@ type craftApps struct {
 	store      craftassets.Store
 	components map[string]craftapps.Component
 	// installed are the packages found in the store at startup.
-	installed map[string]*craftassets.Installed
-	locked    map[string]bool
-	logger    *slog.Logger
+	installed                map[string]*craftassets.Installed
+	retainedWord             *craftassets.Installed
+	requireWordCompatibility bool
+	locked                   map[string]bool
+	logger                   *slog.Logger
 
 	mu sync.RWMutex
 	// pins are the editor bundles of every running application; the native
@@ -71,7 +73,7 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 			"pins", craftassets.String(catalog.Pins))
 	}
 	a.store = craftassets.Store{Root: n.ComponentsDir}
-	if a.store.Root == "" && len(catalog.Pins) > 0 {
+	if a.store.Root == "" && (len(catalog.Pins) > 0 || n.RetainedWordPin != "") {
 		if root, err := database.ResolveDataDirRoot(""); err == nil {
 			a.store.Root = filepath.Join(root, "craft-components")
 		} else {
@@ -90,6 +92,16 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 	}
 	if err := a.store.Sweep(); err != nil {
 		logger.Warn("could not remove an interrupted Craft component installation", "error", err)
+	}
+	retainedPin, retainErr := retainedWordPackagePin(n.RetainedWordPin, catalog)
+	a.requireWordCompatibility = retainedPin.ManifestSHA256 != "" || retainErr != nil
+	if retainErr != nil {
+		logger.Error("retained WordCraft catalog refused", "error", retainErr)
+	} else if retainedPin.ManifestSHA256 != "" {
+		a.retainedWord, retainErr = openRetainedWordPackage(a.store, retainedPin, n.RetainedWordArchive)
+		if retainErr != nil {
+			logger.Warn("retained WordCraft package is unavailable", "version", retainedPin.Version, "error", retainErr)
+		}
 	}
 	for _, app := range craftapps.Applications {
 		if p, ok := a.operator[app]; ok {
@@ -118,6 +130,54 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 	return a
 }
 
+// The published release manifest pin, independently of the new default.
+const previousWordPackagePin = "wordcraft=0.11.0+b0fb5cb571b6=50a30fdc4bb6ffc9c040cdeca2af4930a2cdbfecf0cbd18c5fdf7624bc7636e4"
+
+func retainedWordPackagePin(setting string, catalog craftassets.Catalog) (craftassets.Pin, error) {
+	var zero craftassets.Pin
+	if setting == "off" {
+		return zero, nil
+	}
+	current := catalog.Pins["wordcraft"]
+	if setting == "" {
+		if catalog.Operator || current.ManifestSHA256 == "" {
+			return zero, nil
+		}
+		setting = previousWordPackagePin
+	}
+	pins, err := craftassets.ParsePins(setting)
+	pin, ok := pins["wordcraft"]
+	if err != nil || len(pins) != 1 || !ok {
+		return zero, errors.New("retained WordCraft package needs exactly one WordCraft manifest pin")
+	}
+	if current == pin {
+		return zero, nil
+	}
+	return pin, nil
+}
+
+func openRetainedWordPackage(store craftassets.Store, pin craftassets.Pin, archive string) (*craftassets.Installed, error) {
+	if archive == "" {
+		return store.OpenVerified(pin)
+	}
+	if !filepath.IsAbs(archive) || filepath.Clean(archive) != archive {
+		return nil, errors.New("retained WordCraft archive must be an absolute path")
+	}
+	info, err := os.Stat(archive)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("retained WordCraft archive must be a regular file")
+	}
+	file, err := os.Open(archive)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return store.Install(pin, file)
+}
+
 // componentOf describes an installed package; it is a development override
 // when the operator, not this release, named its pin.
 func (a *craftApps) componentOf(inst *craftassets.Installed) craftapps.Component {
@@ -134,6 +194,7 @@ func craftAppsOr(cfg *config.Config, craft *craftApps) *craftApps {
 	}
 	c := *cfg
 	c.CraftNative.ComponentPins, c.CraftNative.ComponentURL = "", ""
+	c.CraftNative.RetainedWordPin, c.CraftNative.RetainedWordArchive = "off", ""
 	a := resolveCraftApps(&c, slog.New(slog.DiscardHandler))
 	a.catalog.Pins = nil
 	for app, comp := range a.components {
@@ -147,7 +208,7 @@ func craftAppsOr(cfg *config.Config, craft *craftApps) *craftApps {
 
 // enabled reports whether Word or Sheet runs or can be installed.
 func (a *craftApps) enabled() bool {
-	return a != nil && (len(a.operator) > 0 || len(a.catalog.Pins) > 0)
+	return a != nil && (len(a.operator) > 0 || len(a.catalog.Pins) > 0 || a.retainedWord != nil)
 }
 
 // installable reports whether packages can be installed while running.

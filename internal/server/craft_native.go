@@ -51,10 +51,19 @@ func nativeCraftHTTPConfigWith(cfg *config.Config, craft *craftApps, editor *edi
 		}
 		out.Profiles[app], out.Components[app] = p, c
 	}
+	out.RequireWordCompatibility = craft.requireWordCompatibility
+	if craft.retainedWord != nil {
+		profile, _, err := craft.activate(editor, craft.retainedWord)
+		if err != nil {
+			craft.logger.Error("retained WordCraft profile cannot run", "error", err)
+		} else {
+			out.RetainedWordProfiles = []goapi.CraftNativeDocumentProfile{profile}
+		}
+	}
 	if craft.installable() && editor != nil {
 		out.Install = craft.installer(editor)
 	}
-	out.Enabled = len(out.Profiles) > 0 || out.Install != nil
+	out.Enabled = len(out.Profiles) > 0 || len(out.RetainedWordProfiles) > 0 || out.Install != nil
 	out.AgentsEnabled = out.Enabled
 	if !out.Enabled {
 		out.AgentApply, out.AgentInspect = nil, nil

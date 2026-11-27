@@ -79,7 +79,7 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 503, "native Craft unavailable")
 		return
 	}
-	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: proof.application, memberID: proof.memberID, memberRevision: proof.memberRevision, generations: generations, boot: boot, deadline: now + cap}
+	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: proof.application, pin: proof.pin, memberID: proof.memberID, memberRevision: proof.memberRevision, generations: generations, boot: boot, deadline: now + cap}
 	if _, err = m.checkEntry(ctx, tx, entry, false); err != nil {
 		replyError(w, 403, "native Craft access denied")
 		return
