@@ -69,6 +69,24 @@ class SBOM(unittest.TestCase):
         self.assertIn('craft-fonts', {c['name'] for c in bom['components']})
 
 
+class DocumentFormat(unittest.TestCase):
+    def test_a_workbook_component_says_so_and_a_native_one_says_nothing(self):
+        self.assertEqual(build.document_format({'application': 'gridcraft', 'document_format': 'workbook'}), {'document_format': 'workbook'})
+        self.assertEqual(build.document_format({'application': 'wordcraft'}), {})
+
+    def test_an_unknown_format_or_a_word_workbook_fails(self):
+        for c in [{'application': 'gridcraft', 'document_format': 'native'},
+                  {'application': 'gridcraft', 'document_format': ''},
+                  {'application': 'wordcraft', 'document_format': 'workbook'}]:
+            with self.assertRaises(ValueError):
+                build.document_format(c)
+
+    def test_the_committed_sheet_recipe_is_a_workbook(self):
+        recipe = build.load_recipe()
+        sheet = next(c for c in recipe['components'] if c['application'] == 'gridcraft')
+        self.assertEqual(build.document_format(sheet), {'document_format': 'workbook'})
+
+
 class ExpectedCatalog(unittest.TestCase):
     def test_other_pins_fail_and_update_writes(self):
         with tempfile.TemporaryDirectory() as d:
