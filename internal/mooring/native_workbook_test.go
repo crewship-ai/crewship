@@ -144,15 +144,31 @@ func TestWorkbookStoreRefusesWhatIsNotAWorkbook(t *testing.T) {
 // restores one: it would put native JSON back as the document.
 func TestWorkbookStoreDoesNotRestoreALegacyNativeVersion(t *testing.T) {
 	legacy, db, scope, p := workbookStoreFixture(t, "")
+	legacy.config.EngineRevision = legacyGridCraftRevision
 	l, _, err := legacy.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := legacy.config.Leases.Release(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
 	cfg := legacy.config
+	cfg.EngineRevision = strings.Repeat("d", 40)
 	cfg.Format = NativeFormatWorkbook
 	cfg.Validate = func(context.Context, []byte) error { return nil } // the host's archive check
 	s := NewNativeStore(db, cfg)
-	if _, err := s.Save(t.Context(), l, 1, testWorkbook(t, "xlsx", nil)); err != nil {
+	source, err := s.LegacyWorkbook(t.Context(), scope, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version, err := s.MigrateLegacyWorkbook(t.Context(), scope, source, testWorkbook(t, "xlsx", nil)); err != nil || version != 2 {
+		t.Fatalf("migrate workbook: version %d, error %v", version, err)
+	}
+	if _, err := legacy.Read(t.Context(), scope); !errors.Is(err, ErrNativeProfile) {
+		t.Fatalf("read through the retired JSON profile: %v", err)
+	}
+	l, err = cfg.Leases.Acquire(t.Context(), scope, p)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Restore(t.Context(), l, 2, 1); !errors.Is(err, ErrNativeLegacy) {
