@@ -213,8 +213,11 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 			} else if fb, fbErr := craftengine.NewFallback(proc, wasm, warn); fbErr == nil {
 				engine = fb
 			}
-		} else if fb, fbErr := craftengine.NewDegraded(wasm, reason, warn); fbErr == nil {
-			engine = fb
+		}
+		if reason != "" {
+			if fb, fbErr := craftengine.NewDegraded(wasm, reason, warn); fbErr == nil {
+				engine = fb
+			}
 		}
 	}
 	if editor == nil {
