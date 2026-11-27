@@ -241,8 +241,15 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 	}
 	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, EngineBuild: build, Engine: engine,
 		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), EngineModule: &goapi.EngineModuleSource{Load: inst.EngineLoader()}, CompatEditors: craftCompatEditors[c.Application], Bundled: true,
-		// Writable chat requires a separately qualified editor and engine pin.
-		Workbook: workbook, ChatSheetPreviewOnly: workbook}, comp, nil
+		Workbook: workbook, ChatSheetPreviewOnly: workbook && !craftRealtimeChatSheetPin(c)}, comp, nil
+}
+
+// Only the editor and engine built for the chat realtime pilot may enable
+// its write path. Another workbook package can still serve a preview.
+func craftRealtimeChatSheetPin(c craftassets.Component) bool {
+	return c.Application == craftapps.Sheet && c.DocumentFormat == craftassets.DocumentFormatWorkbook &&
+		c.Engine.SHA256 == "efd47c329c2c4087860bc2c4d895bc0d1d76d4e551e9fb4ce15233bee000a300" &&
+		c.Editor.Digest == "76b6cda379bec2abcbea7ab3de31601b80b43ddf92aa003b481e786dd9f44271"
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the
