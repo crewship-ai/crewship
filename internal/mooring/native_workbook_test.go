@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +161,48 @@ func TestWorkbookStoreDoesNotRestoreALegacyNativeVersion(t *testing.T) {
 	v1, _, _ := s.ReadVersion(t.Context(), scope, 1)
 	if f, err := s.DocumentFile(v1); !errors.Is(err, ErrNativeLegacy) || f.Format != "native" || string(f.Content) != `{"v":1}` {
 		t.Fatalf("legacy version file %+v %v", f, err)
+	}
+}
+
+// Exercise the same XML parts that the browser packages for a new Sheet.
+func TestBlankGridCraftWorkbookPassesServerValidation(t *testing.T) {
+	raw, err := os.ReadFile("../../lib/mooring/gridcraft-empty-workbook-parts.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts map[string][]string
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		t.Fatal(err)
+	}
+	var workbook bytes.Buffer
+	archive := zip.NewWriter(&workbook)
+	for name, lines := range parts {
+		part, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(part, strings.Join(lines, "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture, db, scope, principal := workbookStoreFixture(t, NativeFormatWorkbook)
+	cfg := fixture.config
+	cfg.Validate = ValidateWorkbook
+	store := NewNativeStore(db, cfg)
+	_, receipt, err := store.Initialize(t.Context(), scope, principal, workbook.Bytes())
+	if err != nil || receipt.Version != 1 {
+		t.Fatalf("initialize blank Sheet: version=%d, %v", receipt.Version, err)
+	}
+	state, err := store.Read(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := store.DocumentFile(state.Manifest)
+	if err != nil || file.Format != "xlsx" || !bytes.Equal(file.Content, workbook.Bytes()) {
+		t.Fatalf("read initialized Sheet: format=%q, %v", file.Format, err)
 	}
 }
