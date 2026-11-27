@@ -244,12 +244,12 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 		Workbook: workbook, ChatSheetPreviewOnly: workbook && !craftRealtimeChatSheetPin(c)}, comp, nil
 }
 
-// Only the editor and engine built for the chat realtime pilot may enable
+// Only the editor and engine built with head-ranges-v1 may enable
 // its write path. Another workbook package can still serve a preview.
 func craftRealtimeChatSheetPin(c craftassets.Component) bool {
 	return c.Application == craftapps.Sheet && c.DocumentFormat == craftassets.DocumentFormatWorkbook &&
-		c.Engine.SHA256 == "efd47c329c2c4087860bc2c4d895bc0d1d76d4e551e9fb4ce15233bee000a300" &&
-		c.Editor.Digest == "76b6cda379bec2abcbea7ab3de31601b80b43ddf92aa003b481e786dd9f44271"
+		c.Engine.SHA256 == "896aa0acefb35ef6f2d2fd400ff6db346df4de9c7949690d4f5dd5c787229c2f" &&
+		c.Editor.Digest == "9fbaa966d143feea52b64e91a12e475b5d6efb6e304e380cdcade56a8b334515"
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the
