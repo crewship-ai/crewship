@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -19,6 +20,8 @@ import (
 )
 
 var ErrCraftNativeAgentEngine = errors.New("native Craft agent engine operation refused")
+
+var errCraftNativeAgentFormula = fmt.Errorf("%w: formula not allowed", ErrCraftNativeAgentEngine)
 
 // CraftNativeAgentCLIAdapter accepts a small command language, not an engine
 // script. Executables and document paths come exclusively from trusted code.
@@ -62,6 +65,22 @@ func (r nativeAgentEngineRules) text(value string) bool {
 		return nativeAgentEngineFormula(value)
 	}
 	return nativeAgentEngineScalar(value)
+}
+
+func (r nativeAgentEngineRules) checkText(text string) error {
+	if r.text(text) {
+		return nil
+	}
+	if nativeAgentFormulaText(text) {
+		return errCraftNativeAgentFormula
+	}
+	return ErrCraftNativeAgentEngine
+}
+
+func nativeAgentFormulaText(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "=") || strings.HasPrefix(text, "@") ||
+		(len(text) > 1 && (text[0] == '+' || text[0] == '-') && !nativeAgentEngineScalar(text))
 }
 
 type nativeAgentEngineCommand struct {
@@ -237,55 +256,66 @@ func nativeAgentEngineRange(raw json.RawMessage) (nativeAgentEngineArea, bool) {
 // null and strings. A multi-cell range must match the size of the values, a
 // single address anchors them, and nothing may run past the sheet's last cell.
 // Strings go through the same scalar rule as cell.set.
-func nativeAgentEngineValues(rangeRaw, valuesRaw json.RawMessage, rules nativeAgentEngineRules) bool {
+func nativeAgentEngineValues(rangeRaw, valuesRaw json.RawMessage, rules nativeAgentEngineRules) error {
 	area, ok := nativeAgentEngineRange(rangeRaw)
 	if !ok {
-		return false
+		return ErrCraftNativeAgentEngine
 	}
 	var rows []json.RawMessage
 	if json.Unmarshal(valuesRaw, &rows) != nil || len(rows) == 0 || len(rows) > nativeAgentWriteRows {
-		return false
+		return ErrCraftNativeAgentEngine
 	}
 	width := 0
 	for _, rowRaw := range rows {
 		var row []json.RawMessage
 		if json.Unmarshal(rowRaw, &row) != nil || len(row) == 0 || len(row) > nativeAgentWriteCols {
-			return false
+			return ErrCraftNativeAgentEngine
 		}
-		if len(row) > width {
-			width = len(row)
-		}
+		width = max(width, len(row))
 		for _, cellRaw := range row {
-			if !nativeAgentEngineValue(cellRaw, rules) {
-				return false
+			if err := nativeAgentEngineValue(cellRaw, rules); err != nil {
+				return err
 			}
 		}
 	}
 	if area.cells() > 1 && (area.height() != len(rows) || area.width() != width) {
-		return false
+		return ErrCraftNativeAgentEngine
 	}
-	return area.col1+width-1 <= nativeAgentMaxColumns && area.row1+len(rows)-1 <= nativeAgentMaxRows
+	if area.col1+width-1 > nativeAgentMaxColumns || area.row1+len(rows)-1 > nativeAgentMaxRows {
+		return ErrCraftNativeAgentEngine
+	}
+	return nil
 }
 
-func nativeAgentEngineValue(raw json.RawMessage, rules nativeAgentEngineRules) bool {
+func nativeAgentEngineValue(raw json.RawMessage, rules nativeAgentEngineRules) error {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return false
+		return ErrCraftNativeAgentEngine
 	}
 	switch trimmed[0] {
 	case 'n':
-		return string(trimmed) == "null"
+		if string(trimmed) == "null" {
+			return nil
+		}
 	case 't', 'f':
 		var value bool
-		return json.Unmarshal(trimmed, &value) == nil
+		if json.Unmarshal(trimmed, &value) == nil {
+			return nil
+		}
 	case '"':
 		var text string
-		return json.Unmarshal(trimmed, &text) == nil && len(text) <= 32<<10 && utf8.ValidString(text) && rules.text(text)
+		if json.Unmarshal(trimmed, &text) == nil && len(text) <= 32<<10 && utf8.ValidString(text) {
+			return rules.checkText(text)
+		}
 	case '[', '{':
-		return false
+		return ErrCraftNativeAgentEngine
+	default:
+		var number float64
+		if json.Unmarshal(trimmed, &number) == nil && !math.IsNaN(number) && !math.IsInf(number, 0) {
+			return nil
+		}
 	}
-	var number float64
-	return json.Unmarshal(trimmed, &number) == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
+	return ErrCraftNativeAgentEngine
 }
 
 func nativeAgentEngineCommands(application string, raw json.RawMessage, inspect bool) ([]nativeAgentEngineCommand, error) {
@@ -335,7 +365,12 @@ func nativeAgentEngineCommandsFor(application string, raw json.RawMessage, inspe
 			var input string
 			var p map[string]json.RawMessage
 			p, ok = nativeAgentEngineParams(params, []string{"cell", "input"}, "sheet")
-			ok = ok && nativeAgentEngineCell(p["cell"]) && nativeAgentEngineOptionalSheet(p) && len(p["input"]) > 0 && p["input"][0] == '"' && json.Unmarshal(p["input"], &input) == nil && len(input) <= 32<<10 && utf8.ValidString(input) && rules.text(input)
+			ok = ok && nativeAgentEngineCell(p["cell"]) && nativeAgentEngineOptionalSheet(p) && len(p["input"]) > 0 && p["input"][0] == '"' && json.Unmarshal(p["input"], &input) == nil && len(input) <= 32<<10 && utf8.ValidString(input)
+			if ok {
+				if err := rules.checkText(input); err != nil {
+					return nil, err
+				}
+			}
 			mutates = true
 		case application == "gridcraft" && !inspect && name == "formulas.calculateNow":
 			// Every write recalculates already: accepted, an effect of the writes, changes nothing alone.
@@ -351,7 +386,12 @@ func nativeAgentEngineCommandsFor(application string, raw json.RawMessage, inspe
 		case application == "gridcraft" && !inspect && name == "range.setValues":
 			var p map[string]json.RawMessage
 			p, ok = nativeAgentEngineParams(params, []string{"range", "values"}, "sheet")
-			ok = ok && nativeAgentEngineOptionalSheet(p) && nativeAgentEngineValues(p["range"], p["values"], rules)
+			ok = ok && nativeAgentEngineOptionalSheet(p)
+			if ok {
+				if err := nativeAgentEngineValues(p["range"], p["values"], rules); err != nil {
+					return nil, err
+				}
+			}
 			mutates = true
 		case application == "gridcraft" && inspect && name == "cell.get":
 			var p map[string]json.RawMessage

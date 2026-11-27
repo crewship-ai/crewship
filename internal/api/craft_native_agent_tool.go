@@ -930,10 +930,12 @@ func craftNativeAgentWorkbookRecord(e *craftNativeAgentEntry, store *mooring.Nat
 }
 
 // nativeAgentChangeRefused answers the refusals of an agent change that tell the agent what to do
-// instead: a write without its sheet, a save that would lose parts of the workbook file.
+// instead: a disallowed formula, a write without its sheet, or a save that would lose workbook parts.
 func nativeAgentChangeRefused(w http.ResponseWriter, err error) bool {
 	var loss *craftsession.FidelityLossError
 	switch {
+	case errors.Is(err, errCraftNativeAgentFormula):
+		replyChatSheetRefusal(w, http.StatusBadRequest, CraftSheetReasonFormula)
 	case errors.Is(err, errCraftNativeSheetNameRequired):
 		writeJSON(w, 400, map[string]string{"error": errCraftNativeSheetNameRequired.Error(), "reason": CraftSheetReasonInvalid})
 	case errors.As(err, &loss):

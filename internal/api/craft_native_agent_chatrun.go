@@ -385,7 +385,7 @@ func craftNativeChatReason(status int, body []byte, input craftNativeAgentToolRe
 		return CraftSheetReasonFidelityLoss
 	case status == http.StatusRequestEntityTooLarge:
 		return CraftSheetReasonTooLarge
-	case status == http.StatusBadRequest && parsed && nativeAgentFormulaLike(input.Commands):
+	case status == http.StatusBadRequest && (answer.Reason == CraftSheetReasonFormula || parsed && nativeAgentFormulaLike(input.Commands)):
 		return CraftSheetReasonFormula
 	case status == http.StatusBadRequest:
 		return CraftSheetReasonInvalid
@@ -405,18 +405,14 @@ func nativeAgentFormulaLike(commands json.RawMessage) bool {
 	if json.Unmarshal(commands, &entries) != nil {
 		return false
 	}
-	formula := func(text string) bool {
-		t := strings.TrimSpace(text)
-		return strings.HasPrefix(t, "=") || strings.HasPrefix(t, "@") || (len(t) > 1 && (t[0] == '+' || t[0] == '-') && !nativeAgentEngineScalar(t))
-	}
 	for _, entry := range entries {
-		if formula(entry.Params.Input) {
+		if nativeAgentFormulaText(entry.Params.Input) {
 			return true
 		}
 		for _, row := range entry.Params.Values {
 			for _, cell := range row {
 				var text string
-				if json.Unmarshal(cell, &text) == nil && formula(text) {
+				if json.Unmarshal(cell, &text) == nil && nativeAgentFormulaText(text) {
 					return true
 				}
 			}

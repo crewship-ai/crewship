@@ -255,7 +255,10 @@ func newChatRunToolRig(t *testing.T) *chatRunToolRig {
 	r.m.documents.applications["gridcraft"] = craftNativeApplication{Store: cfg}
 	r.m.documents.profiles = map[string]CraftNativeDocumentProfile{"gridcraft": {Application: "gridcraft"}}
 	calls := new(int)
-	r.m.config.AgentApply = func(context.Context, CraftNativeDocumentProfile, []byte, json.RawMessage) ([]byte, error) {
+	r.m.config.AgentApply = func(_ context.Context, profile CraftNativeDocumentProfile, _ []byte, commands json.RawMessage) ([]byte, error) {
+		if _, err := nativeAgentEngineCommands(profile.Application, commands, false); err != nil {
+			return nil, err
+		}
 		*calls++
 		return fmt.Appendf(nil, `{"sheets":[{"name":"S","edit":%d}]}`, *calls), nil
 	}
@@ -513,8 +516,15 @@ func TestChatRunSheetRefusalsCarryAStableReason(t *testing.T) {
 	if got := reasonOf(r.call(r.token, `{"operation":"read","page_id":"x"}`)); got != CraftSheetReasonInvalid {
 		t.Fatalf("foreign field: %q", got)
 	}
-	if got := reasonOf(apply("1", "f", "=1+1")); got != CraftSheetReasonStale {
-		t.Fatalf("formula on a stale base: %q", got)
+	if got := reasonOf(apply("2", "f", "=1+1")); got != CraftSheetReasonFormula {
+		t.Fatalf("formula on the consented base: %q", got)
+	}
+	bulk := r.call(r.token, fmt.Sprintf(`{"operation":"apply","generation":%q,"base_version":"2","request_id":"bulk-f","commands":[{"command":"range.setValues","params":{"range":"A1","values":[["=1+1"]]}}]}`, lease.Generation))
+	if got := reasonOf(bulk); got != CraftSheetReasonFormula {
+		t.Fatalf("bulk formula on the consented base: %q", got)
+	}
+	if *r.calls != 1 {
+		t.Fatalf("refused commands ran the engine %d times after one successful write", *r.calls)
 	}
 	other := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(r.f.pages.artifactMasterToken, r.a.WorkspaceID, r.a.CrewID), r.a.WorkspaceID, r.a.AgentID, "another-run")
 	if w := r.call(other, `{"operation":"acquire"}`); w.Code == 200 {
