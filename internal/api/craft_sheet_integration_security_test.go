@@ -302,8 +302,11 @@ func sitLargeWorkbook(t *testing.T, size int) []byte {
 // 32 MiB is the workbook limit of the JSON editor. A file just under it is saved; the storage
 // reservation adds 256 KiB of overhead and must not refuse it as an invalid manifest.
 func TestSheetITWorkbookJustUnderTheLimitIsSaved(t *testing.T) {
-	rig := workbookDocumentsFixture(t)
-	body := sitLargeWorkbook(t, (32<<20)-(64<<10))
+	base := sitLargeWorkbook(t, (32<<20)-(64<<10))
+	rig := workbookDocumentsFixture(t, base)
+	cells := sitInitialL()
+	cells["B8"] = "done"
+	body := workbookEdited(t, base, "", map[string]string{"xl/worksheets/sheet1.xml": sitSheetXML(cells)})
 	w := rig.sitSaveAttempt(body, "1", "sit-large")
 	if w.Code != 200 || rig.sitHead(t) != 2 {
 		t.Fatalf("BUG a %d-byte workbook (under the JSON editor limit) is refused: %d %s (saveWorkbook reserves ContentLength+256 KiB, ReserveUpload allows at most %d)", len(body), w.Code, w.Body, artifacts.MaxStorageUploadBytes)

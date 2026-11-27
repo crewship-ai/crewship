@@ -224,10 +224,17 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	}
 	// In a workbook file every write names its sheet: the file's active sheet on the server is not
 	// the sheet the person sees.
-	workbook := craftNativeSheetWorkbook(raw)
+	workbook := p.Workbook || craftNativeSheetWorkbook(raw)
+	var edits craftWorkbookEdits
 	if workbook {
+		if _, err := mooring.DetectWorkbook(raw); err != nil {
+			return nil, &craftsession.FidelityLossError{Parts: []craftsession.FidelityPart{{Code: "package", Count: 1}}}
+		}
+		if signed := craftWorkbookEditSignatures(raw); len(signed) != 0 {
+			return nil, &craftsession.FidelityLossError{Parts: signed}
+		}
 		for _, st := range steps {
-			if !strings.Contains(st.cell+st.rng+st.clear, "!") {
+			if !edits.add(st.cell + st.rng + st.clear) {
 				return nil, errCraftNativeSheetNameRequired
 			}
 		}
@@ -236,6 +243,11 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	if err != nil {
 		if errors.Is(err, ErrCraftNativeSheetBusy) {
 			return nil, ErrCraftNativeSheetBusy
+		}
+		if workbook {
+			if lost := craftWorkbookPartsLost(raw, raw, edits); lost != nil {
+				return nil, &craftsession.FidelityLossError{Parts: lost}
+			}
 		}
 		return nil, ErrCraftNativeAgentEngine
 	}
@@ -283,9 +295,9 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	if err != nil || len(snapshot) == 0 || len(snapshot) > limit {
 		return nil, ErrCraftNativeAgentEngine
 	}
-	// The engine's own report is not enough: every part it does not change stays byte for byte.
+	// Verify the export independently, using the resolved edit ranges.
 	if workbook {
-		if lost := craftWorkbookPartsLost(raw, snapshot); lost != nil {
+		if lost := craftWorkbookPartsLost(raw, snapshot, edits); lost != nil {
 			a.engine.Discard(session)
 			return nil, &craftsession.FidelityLossError{Parts: lost}
 		}

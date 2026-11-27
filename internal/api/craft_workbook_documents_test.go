@@ -30,8 +30,9 @@ func craftTestWorkbook(t *testing.T, format, marker string) []byte {
 	zw := zip.NewWriter(&buf)
 	for _, part := range [][2]string{
 		{"[Content_Types].xml", `<Types><Override PartName="/xl/workbook.xml" ContentType="` + main + `"/></Types>`},
-		{"xl/workbook.xml", `<workbook><sheets><sheet name="L" sheetId="1"/></sheets></workbook>`},
-		{"xl/worksheets/sheet1.xml", `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>` + marker + `</t></is></c></row></sheetData></worksheet>`},
+		{"xl/workbook.xml", `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="L" sheetId="1" r:id="rId1"/></sheets></workbook>`},
+		{"xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`},
+		{"xl/worksheets/sheet1.xml", `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>` + marker + `</t></is></c></row></sheetData></worksheet>`},
 	} {
 		w, _ := zw.Create(part[0])
 		_, _ = w.Write([]byte(part[1]))
@@ -67,7 +68,7 @@ type workbookRig struct {
 
 // workbookDocumentsFixture: a gridcraft page that keeps workbook files, version 1 the uploaded
 // xlsm, the owner admitted with the edit lease.
-func workbookDocumentsFixture(t *testing.T) *workbookRig {
+func workbookDocumentsFixture(t *testing.T, initial ...[]byte) *workbookRig {
 	t.Helper()
 	f, h, ctx := craftNativeHTTPFixture(t)
 	mustExec(t, f.db, `DELETE FROM craft_native_documents WHERE page_id='native-page'`)
@@ -79,7 +80,10 @@ func workbookDocumentsFixture(t *testing.T) *workbookRig {
 	cfg := mooring.NativeStoreConfig{Application: "gridcraft", Format: mooring.NativeFormatWorkbook, EngineRevision: strings.Repeat("a", 40), EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64), Validate: craftWorkbookValidate}
 	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"gridcraft": {Store: cfg, EditorURL: "/_editor/b/" + cfg.EditorBundle + "/index.html"}})
 	original := craftTestWorkbook(t, "xlsm", "original")
-	s := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft"})
+	if len(initial) != 0 {
+		original = initial[0]
+	}
+	s := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft", MaxVersionBytes: mooring.MaxWorkbookBytes})
 	if _, err := s.Apply(t.Context(), artifacts.VersionKey{WorkspaceID: f.wsID, PageID: "native-page"}, artifacts.VersionRequest{BaseVersion: 0, EntryPoint: "workbook.xlsm", Files: map[string]artifacts.VersionFile{"workbook.xlsm": {Content: original, MediaType: mooring.WorkbookMediaTypeXLSM}}}, func(context.Context, *sql.Tx) (string, error) { return "user:" + f.userID, nil }); err != nil {
 		t.Fatal(err)
 	}

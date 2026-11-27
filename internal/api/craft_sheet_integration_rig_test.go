@@ -48,7 +48,7 @@ type sitPart struct{ name, body string }
 type sitCells map[string]string
 
 // sitWorkbook is a synthetic xlsm: sheet L (a header row Name|Status and eight rows), sheet Other,
-// a VBA project with its signatures, an XML digital signature, and two pivot caches: one over
+// an unsigned VBA project and two pivot caches: one over
 // L!A1:B9, one over Other!A1:A3.
 func sitWorkbook(l, other sitCells, extra ...sitPart) []byte {
 	parts := sitBaseParts()
@@ -76,17 +76,11 @@ func sitBaseParts() []sitPart {
 		vba = append(vba, byte(i*31+7))
 	}
 	return []sitPart{
-		{"[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/><Default Extension="sigs" ContentType="application/vnd.openxmlformats-package.digital-signature-origin"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`},
-		{"_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin" Target="_xmlsignatures/origin.sigs"/></Relationships>`},
+		{"[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`},
+		{"_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
 		{"xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="L" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets><pivotCaches><pivotCache cacheId="1" r:id="rId4"/><pivotCache cacheId="2" r:id="rId5"/></pivotCaches></workbook>`},
 		{"xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition2.xml"/></Relationships>`},
 		{"xl/vbaProject.bin", string(vba)},
-		{"xl/_rels/vbaProject.bin.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/><Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2014/relationships/vbaProjectSignatureAgile" Target="vbaProjectSignatureAgile.bin"/></Relationships>`},
-		{"xl/vbaProjectSignature.bin", "\x30\x82synthetic-vba-signature-v1"},
-		{"xl/vbaProjectSignatureAgile.bin", "\x30\x82synthetic-vba-signature-agile"},
-		{"_xmlsignatures/origin.sigs", ""},
-		{"_xmlsignatures/_rels/origin.sigs.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature" Target="sig1.xml"/></Relationships>`},
-		{"_xmlsignatures/sig1.xml", `<?xml version="1.0" encoding="UTF-8"?><Signature xmlns="http://www.w3.org/2000/09/xmldsig#" Id="idPackageSignature"><SignedInfo><SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/></SignedInfo><SignatureValue>c3ludGhldGlj</SignatureValue></Signature>`},
 		{"xl/pivotCache/pivotCacheDefinition1.xml", `<?xml version="1.0" encoding="UTF-8"?><pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="8"><cacheSource type="worksheet"><worksheetSource ref="A1:B9" sheet="L"/></cacheSource><cacheFields count="2"><cacheField name="Name"/><cacheField name="Status"/></cacheFields></pivotCacheDefinition>`},
 		{"xl/pivotCache/pivotCacheDefinition2.xml", `<?xml version="1.0" encoding="UTF-8"?><pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="2"><cacheSource type="worksheet"><worksheetSource ref="A1:A3" sheet="Other"/></cacheSource><cacheFields count="1"><cacheField name="Code"/></cacheFields></pivotCacheDefinition>`},
 		{"customXml/item1.xml", `<?xml version="1.0" encoding="UTF-8"?><sit:data xmlns:sit="urn:synthetic:sit">synthetic custom data</sit:data>`},
@@ -204,21 +198,29 @@ func sitRecalc(sheets map[string]sitCells) {
 			var parts []string
 			for _, ref := range strings.Split(expr, `&"+"&`) {
 				sheet, cell, _ := strings.Cut(ref, "!")
-				parts = append(parts, sheets[sheet][cell])
+				parts = append(parts, strings.TrimPrefix(sheets[sheet][cell], "'"))
 			}
 			cells[a] = "=" + expr + "|" + strings.Join(parts, "+")
 		}
 	}
 }
 
-func sitParseSheet(x string) sitCells {
+func sitParseSheet(x string) sitCells { return sitReadCells(x, false) }
+
+func sitReadCells(x string, keepInputType bool) sitCells {
 	out := sitCells{}
 	unescape := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&")
 	for _, m := range sitFormulaXML.FindAllStringSubmatch(x, -1) {
 		out[m[1]] = "=" + unescape.Replace(m[2]) + "|" + unescape.Replace(m[3])
 	}
 	for _, m := range sitCellXML.FindAllStringSubmatch(x, -1) {
-		out[m[1]] = unescape.Replace(m[2] + m[3])
+		value := unescape.Replace(m[2] + m[3])
+		if keepInputType && m[3] != "" {
+			if _, err := strconv.ParseFloat(value, 64); err == nil || strings.HasPrefix(value, "=") || strings.HasPrefix(value, "'") {
+				value = "'" + value
+			}
+		}
+		out[m[1]] = value
 	}
 	return out
 }
@@ -260,6 +262,7 @@ type sitEngine struct {
 	opens   int
 	applies int
 	drop    map[string]bool
+	edit    func(part, xml string) string
 	loss    *craftsession.FidelityLossError
 }
 
@@ -275,7 +278,7 @@ func (e *sitEngine) Open(_ context.Context, base []byte) (CraftNativeSheetSessio
 				rc, _ := f.Open()
 				b, _ := io.ReadAll(rc)
 				rc.Close()
-				s.cells[name] = sitParseSheet(string(b))
+				s.cells[name] = sitReadCells(string(b), true)
 			}
 		}
 	}
@@ -484,7 +487,27 @@ func (s *sitSession) Snapshot(context.Context) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, _ = w.Write([]byte(sitSheetXML(s.cells[sheet])))
+		r, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		original, err := io.ReadAll(r)
+		r.Close()
+		if err != nil {
+			return nil, err
+		}
+		prefix, _, ok := strings.Cut(string(original), "<sheetData>")
+		_, suffix, closed := strings.Cut(string(original), "</sheetData>")
+		_, edited, _ := strings.Cut(sitSheetXML(s.cells[sheet]), "<sheetData>")
+		data, _, _ := strings.Cut(edited, "</sheetData>")
+		if !ok || !closed {
+			return nil, errors.New("fixture missing sheetData")
+		}
+		part := prefix + "<sheetData>" + data + "</sheetData>" + suffix
+		if s.engine.edit != nil {
+			part = s.engine.edit(f.Name, part)
+		}
+		_, _ = io.WriteString(w, part)
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
@@ -514,9 +537,19 @@ type sitScenario struct {
 	agentN string
 }
 
-func newSheetITScenario(t *testing.T) *sitScenario {
+func newSheetITScenario(t *testing.T, initial ...[]byte) *sitScenario {
 	t.Helper()
-	return newSheetITScenarioWithWorkbook(t, sitWorkbook(sitInitialL(), sitInitialOther()), "workbook.xlsm", mooring.WorkbookMediaTypeXLSM)
+	if len(initial) == 0 {
+		return newSheetITScenarioWithWorkbook(t, sitWorkbook(sitInitialL(), sitInitialOther()), "workbook.xlsm", mooring.WorkbookMediaTypeXLSM)
+	}
+	format, err := mooring.DetectWorkbook(initial[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format == "xlsx" {
+		return newSheetITScenarioWithWorkbook(t, initial[0], "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
+	}
+	return newSheetITScenarioWithWorkbook(t, initial[0], "workbook.xlsm", mooring.WorkbookMediaTypeXLSM)
 }
 
 func newSheetITScenarioWithWorkbook(t *testing.T, v1 []byte, entryPoint, mediaType string) *sitScenario {

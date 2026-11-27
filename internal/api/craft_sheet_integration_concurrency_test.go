@@ -61,7 +61,7 @@ func TestSheetITConcurrentWorkbookSavesOverOneBase(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			body := sitWorkbook(sitCells{"A1": fmt.Sprintf("editor %d", i)}, sitInitialOther())
+			body := craftTestWorkbook(t, "xlsm", fmt.Sprintf("editor %d", i))
 			pause := 5 * time.Millisecond
 			for try := 0; try < tries; try++ {
 				w := rig.sitSaveAttempt(body, "1", fmt.Sprintf("sit-race-%d", i))
@@ -97,7 +97,7 @@ func TestSheetITConcurrentWorkbookSavesOverOneBase(t *testing.T) {
 // the compare-and-swap: over a stale base it is still moved.
 func TestSheetITWorkbookSaveRetryAndKeepLocalStayOneCAS(t *testing.T) {
 	rig := workbookDocumentsFixture(t)
-	body := sitWorkbook(sitInitialL(), sitInitialOther())
+	body := craftTestWorkbook(t, "xlsm", "retry")
 	first := rig.sitSaveAttempt(body, "1", "sit-attempt-1")
 	again := rig.sitSaveAttempt(body, "1", "sit-attempt-1")
 	if first.Code != 200 || again.Code != 200 || rig.sitHead(t) != 2 {
@@ -109,7 +109,7 @@ func TestSheetITWorkbookSaveRetryAndKeepLocalStayOneCAS(t *testing.T) {
 	if r1.Version != "2" || r2.Version != "2" || r1.ContentHash != r2.ContentHash {
 		t.Fatalf("retry receipts %+v %+v", r1, r2)
 	}
-	other := sitWorkbook(sitCells{"A1": "other"}, sitInitialOther())
+	other := craftTestWorkbook(t, "xlsm", "other")
 	if w := rig.sitSaveAttempt(other, "1", "sit-attempt-1"); w.Code == 200 || rig.sitHead(t) != 2 {
 		t.Fatalf("the same attempt with another body: %d %s, head %d", w.Code, w.Body, rig.sitHead(t))
 	}
