@@ -200,15 +200,22 @@ func TestSheetITUndoWithTheRealEngine(t *testing.T) {
 				s.send("Set the selected cells to done", true)
 				call := s.agent()
 				generation := s.acquire(call)
-				applied := s.tool(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "real-undo-apply", "commands": sitCommands(commands...)})
-				if json.Unmarshal([]byte(applied), &result) != nil || result.OperationID == "" || s.head() != 2 {
+				applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "real-undo-apply", "commands": sitCommands(commands...)})
+				if tc.held {
+					if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 1 || len(s.opsRows()) != 0 {
+						t.Fatalf("apply over a held formula: refused=%v response=%s head=%d", refused, applied, s.head())
+					}
+					return
+				}
+
+				if refused || json.Unmarshal([]byte(applied), &result) != nil || result.OperationID == "" || s.head() != 2 {
 					t.Fatalf("apply: %s (head %d)", applied, s.head())
 				}
 				s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
 			}
 			w := s.undo(human, s.humanLease(human), result.OperationID)
 			if tc.held {
-				if (!tc.legacy && result.Undoable) || w.Code != 409 || !strings.Contains(w.Body.String(), `"code":"not_undoable"`) || s.head() != 2 {
+				if w.Code != 409 || !strings.Contains(w.Body.String(), `"code":"not_undoable"`) || s.head() != 2 {
 					t.Fatalf("the held Excel value cannot be restored: card undoable=%v, Undo %d %s, head %d", result.Undoable, w.Code, w.Body, s.head())
 				}
 				return
