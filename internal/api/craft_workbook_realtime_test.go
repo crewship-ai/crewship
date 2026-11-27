@@ -550,7 +550,8 @@ func TestSheetITRealtimeRestoreRejectsOldAttempts(t *testing.T) {
 	const passphrase = "synthetic-sheet-recovery-passphrase"
 	bundle, err := backup.CreateInstanceBackup(ctx, source, backup.InstanceOptions{
 		OutputDir: t.TempDir(), Passphrase: passphrase, Quiesce: quiesce.New(),
-		Actor: backup.Actor{UserID: s.f.a.HumanUserID, Role: "ADMIN"},
+		Actor:    backup.Actor{UserID: s.f.a.HumanUserID, Role: "ADMIN"},
+		BusyWait: 3 * time.Second, Poll: 10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
