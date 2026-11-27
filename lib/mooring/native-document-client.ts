@@ -1,6 +1,8 @@
+import {GZIP_THRESHOLD,base64Parts,gzipBlob} from "./native-compact"
+import { engineBuildToken } from "./native-editor-port"
 import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
-import {validNativeDraft,validNativeVersion} from "./native-draft"
+import {MAX_WORKBOOK_BYTES,validNativeDraft,validNativeVersion,validWorkbookFormat,type NativeFileFormat} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 import {nativeAppOffFrom} from "./native-app-off"
 import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
@@ -13,6 +15,10 @@ export interface NativeDocumentClientOptions {
 }
 export interface NativeDocumentSnapshot {
  version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ /** The engine build the server runs for this Sheet (X-Craft-Document engineBuild); absent when the package does not name it. */
+ engineBuild?:string
+ /** A workbook Sheet: the stored file's format, download name and SHA-256 (checked against the bytes). */
+ format?:NativeFileFormat;fileName?:string;contentHash?:string
  /** `level` (near 80 %, critical 95 %, full) when the server reports it; older servers send only `warning`. */
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string;level?:"none"|"near"|"critical"|"full"}
 }
@@ -37,6 +43,8 @@ export interface NativeDocumentClient {
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
  share(request:NativeShareRequest,signal:AbortSignal):Promise<NativeShareReceipt>
+ /** Undo of an agent's change under this session and its lease generation: the server's response as it is. */
+ undo(operationId:string,generation:string,signal:AbortSignal):Promise<Response>
  proposals(signal:AbortSignal):Promise<NativeProposal[]>
  proposalBytes(id:string,signal:AbortSignal):Promise<Uint8Array>
  /** Accept is this admission's own fenced save; a "stale" result changed nothing. */
@@ -45,15 +53,81 @@ export interface NativeDocumentClient {
  versions(signal:AbortSignal):Promise<NativeVersionList|null>
  /** One saved version's bytes under this admission's Read authority, read-only; never a lease or a write. */
  version(version:string,signal:AbortSignal):Promise<NativeVersionDocument>
+ /** The Sheet as an .xlsx file under this admission's Read authority: the confirmed head, or a saved version. */
+ exportXlsx(signal:AbortSignal,version?:string):Promise<NativeExport>
  /** The existing fenced restore: holder, generation and base version, like a save. Appends a new version. */
  restore(request:NativeRestoreRequest,signal:AbortSignal):Promise<NativeRestoreReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
 }
+export interface NativeExport {blob:Blob;filename:string;version:string}
+export type NativeExportReason="bad_version"|"forbidden"|"not_found"|"too_large"|"not_sheet"|"failed"|"busy"
+/** A refused or failed xlsx export; `busy` carries the server's Retry-After. */
+export class NativeExportError extends Error {
+ constructor(readonly reason:NativeExportReason,readonly retryAfterSeconds?:number){super(`native_export_${reason}`)}
+}
+const EXPORT_VERSION=/^[1-9]\d{0,17}$/
+const EXPORT_STATUS:Record<number,NativeExportReason>={400:"bad_version",401:"forbidden",403:"forbidden",404:"not_found",413:"too_large",422:"not_sheet",500:"failed",503:"busy"}
+/** The download name from Content-Disposition: filename* (UTF-8) before filename, never a path or a control character. */
+export function nativeExportFilename(disposition:string|null):string{
+ let name=""
+ const exact=/filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition??"")
+ if(exact){try{name=decodeURIComponent((exact[1]??"").trim())}catch{name=""}}
+ if(!name&&!exact){const plain=/filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;\s]+)/i.exec(disposition??"");name=plain?.[1]??plain?.[2]??""}
+ // eslint-disable-next-line no-control-regex
+ name=name.replace(/[\\/\u0000-\u001f\u007f]/g,"_").trim()
+ if(!name||/^\.+$/.test(name))return "Sheet.xlsx"
+ return /\.xlsx$/i.test(name)?name:name+".xlsx"
+}
 // Only network I/O and explicitly temporary HTTP failures can reconnect.
 // Invalid metadata, changed authority and callback failures remain terminal.
 export class NativeMetadataTransportError extends Error {}
+export const WORKBOOK_MEDIA_TYPES:Record<NativeFileFormat,string>={xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",xlsm:"application/vnd.ms-excel.sheet.macroEnabled.12"}
+const workbookResponse=(response:Response)=>{
+ const type=(response.headers.get("Content-Type")??"").split(";")[0]!.trim().toLowerCase()
+ return (Object.keys(WORKBOOK_MEDIA_TYPES) as NativeFileFormat[]).find(f=>WORKBOOK_MEDIA_TYPES[f].toLowerCase()===type)
+}
+const sha256=async(bytes:Uint8Array)=>"sha256:"+Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new Uint8Array(bytes))),b=>b.toString(16).padStart(2,"0")).join("")
+/** A workbook file response (document or version read): the body, checked against the hash, size,
+ * version and format the server named, with the X-Craft-Document metadata. Null if anything differs. */
+async function workbookFile(response:Response,expectedVersion?:string):Promise<{bytes:Uint8Array;meta:Record<string,unknown>;format:NativeFileFormat}|null>{
+ const format=workbookResponse(response)
+ let meta:unknown
+ try{meta=JSON.parse(response.headers.get("X-Craft-Document")??"")}catch{return null}
+ if(!format||!meta||typeof meta!=="object"||Array.isArray(meta))return null
+ const m=meta as Record<string,unknown>,version=response.headers.get("X-Craft-Version"),hash=response.headers.get("X-Craft-Content-Hash")
+ if(!validNativeVersion(m.version)||m.version==="0"||m.version!==version||expectedVersion!==undefined&&m.version!==expectedVersion||m.format!==format||typeof hash!=="string"||m.contentHash!==hash||!/^sha256:[a-f0-9]{64}$/.test(hash)||!validNativeVersion(m.size))return null
+ if(Number(m.size)<1||Number(m.size)>MAX_WORKBOOK_BYTES)return null
+ const bytes=new Uint8Array(await response.arrayBuffer())
+ if(bytes.byteLength!==Number(m.size)||bytes[0]!==0x50||bytes[1]!==0x4b||await sha256(bytes)!==hash)return null
+ return {bytes,meta:m,format}
+}
+/** X-Craft-Touched: the addresses as JSON, every character outside ASCII escaped, so a sheet name of any
+ * script fits a header; or unknown. */
+function touchedHeader(touched:string[]|"unknown"):string{
+ return touched==="unknown"?"unknown":JSON.stringify(touched).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"))
+}
+/** Plain-text file name for X-Craft-File-Name: percent-encoded UTF-8, no path. */
+// eslint-disable-next-line no-control-regex
+const workbookFileName=(name:string)=>encodeURIComponent(name.replace(/[\\/\u0000-\u001f\u007f]/g,"_").slice(0,200))
+/**
+ * "Open as a Sheet": the uploaded xlsx or xlsm becomes version 1 of the empty Page as it is (POST
+ * craft/initialize with the file as the body). The answer is the ordinary initialize answer plus the
+ * file's contentHash and format; check it with confirmNativeInitialized like any other.
+ * With chatId (X-Craft-Chat) the Sheet belongs to that chat from version 1 (chatRef:true in the
+ * answer); a chat that is not the caller's is 404 chat_not_found and nothing is created.
+ */
+export async function initializeNativeWorkbook(args:{workspaceId:string;pageId:string;file:Blob;fileName:string;chatId?:string;fetch?:typeof fetch;signal?:AbortSignal}):Promise<Response>{
+ const {workspaceId,pageId,file,fileName,chatId,signal}=args
+ if(!identifier(workspaceId)||!identifier(pageId)||!(file instanceof Blob)||!file.size||(chatId!==undefined&&!/^[A-Za-z0-9_-]{1,128}$/.test(chatId)))throw new Error("invalid_native_workbook")
+ if(file.size>MAX_WORKBOOK_BYTES)throw new Error("native_workbook_too_large")
+ const format:NativeFileFormat=/\.xlsm$/i.test(fileName)?"xlsm":"xlsx"
+ const send=args.fetch??((input,init)=>apiFetch(input,{...init,skipRefresh:true}))
+ return send(`/api/v1/pages/${encodeURIComponent("@"+pageId)}/craft/initialize?${new URLSearchParams({workspace_id:workspaceId})}`,{method:"POST",redirect:"error",cache:"no-store",signal,headers:{"Content-Type":WORKBOOK_MEDIA_TYPES[format],"X-Craft-File-Name":workbookFileName(fileName),...(chatId===undefined?{}:{"X-Craft-Chat":chatId})},body:file})
+}
+/** The server's refusal code (`{code}`), or "". */
+const refusalCode=async(response:Response)=>{try{const v:unknown=await response.clone().json();return v&&typeof v==="object"&&typeof (v as {code?:unknown}).code==="string"?(v as {code:string}).code:""}catch{return ""}}
 const identifier=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=256&&!value.includes("\0")
 const nativeBase64=(bytes:Uint8Array)=>{
  let binary="";for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(binary)
@@ -97,12 +171,46 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
  async function mutate(operation:"save"|"reconcile",request:NativeSaveRequest,signal:AbortSignal):Promise<unknown>{
   ready()
   if(!validNativeDraft(request)||request.baseVersion==="0"||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.sessionId!==sessionId||request.applicationId!==applicationId||!/^sha256:[a-f0-9]{64}$/.test(request.contentHash))throw new Error("invalid_native_snapshot_binding")
-  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,bytes:nativeBase64(request.bytes)})})
+  const headers:Record<string,string>={"Content-Type":"application/json","X-Craft-Session":token!}
+  let body:BodyInit
+  // Reconcile asks about an attempt by its hash; the server never reads its bytes.
+  if(operation==="reconcile")body=JSON.stringify({...request,bytes:undefined,format:undefined,rebase:undefined,touched:undefined})
+  else if(request.format!==undefined){
+   // A workbook Sheet: the file itself is the body, the binding is in headers.
+   if(!validWorkbookFormat(request.format))throw new Error("invalid_native_snapshot_binding")
+   Object.assign(headers,{"Content-Type":WORKBOOK_MEDIA_TYPES[request.format],"X-Craft-Generation":request.generation,"X-Craft-Base-Version":request.baseVersion,"X-Craft-Editor-Revision":request.editorRevision,"X-Craft-Content-Hash":request.contentHash,"X-Craft-Engine-Pin":request.enginePin,...(request.rebase==="keep-local"&&operation==="save"?{"X-Craft-Rebase":"keep-local"}:{}),...(request.attemptId?{"X-Craft-Attempt":request.attemptId}:{}),...(operation==="save"&&request.touched!==undefined?{"X-Craft-Touched":touchedHeader(request.touched)}:{})})
+   body=request.bytes as unknown as BodyInit
+  }
+  else if(request.bytes.byteLength*4/3<=GZIP_THRESHOLD)body=JSON.stringify({...request,bytes:nativeBase64(request.bytes),rebase:undefined,touched:undefined})
+  else{
+   // A large document: the JSON is assembled as Blob parts (no 40 MB string), compressed
+   // by the browser's own stream (about 15:1 for a spreadsheet) and declared with its
+   // inflated length, which the server enforces. A browser without CompressionStream
+   // sends the same Blob uncompressed.
+   const marker="\u0000BYTES\u0000",json=JSON.stringify({...request,bytes:marker,rebase:undefined}),at=json.indexOf(JSON.stringify(marker))
+   if(at<0)throw new Error("invalid_native_snapshot_binding")
+   const plain=new Blob([json.slice(0,at),'"',...base64Parts(request.bytes),'"',json.slice(at+JSON.stringify(marker).length)],{type:"application/json"})
+   const packed=await gzipBlob(plain)
+   if(packed&&packed.length<plain.size){body=packed as unknown as BodyInit;headers["Content-Encoding"]="gzip";headers["X-Craft-Uncompressed-Length"]=String(plain.size)}
+   else body=plain
+  }
+  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers,body})
   ready()
   // Only reconcile answers 410: the server retired that attempt; it never commits (#4899).
   if(operation==="reconcile"&&response.status===410)throw new NativeSaveError("absent")
-  if(response.status===409)throw new NativeSaveError("conflict")
-  if(response.status===413)throw new NativeSaveError("quota")
+  // Refused because the Sheet has a newer version: told apart, so the editor can replay it.
+  if(response.status===409)throw new NativeSaveError(operation==="save"&&await refusalCode(response)==="moved"?"moved":"conflict")
+  // The file itself was refused: not a workbook, encrypted, or another format.
+  if(response.status===415)throw new NativeSaveError("unsupported")
+  // The file would lose or change macros, signatures or customXml; nothing was stored.
+  if(response.status===422&&operation==="save"&&await refusalCode(response)==="fidelity_loss")throw new NativeSaveError("fidelity_loss")
+  if(response.status===413&&request.format!==undefined)throw new NativeSaveError(await refusalCode(response)==="quota"?"quota":"too_large")
+  if(response.status===413){
+   // The server says "quota" for a full version history; any other 413 (the body cap, a proxy in
+   // front of the server) means the document itself is too large to send, which is not a quota.
+   let detail="";try{const body:unknown=await response.clone().json();if(typeof body==="object"&&body!==null&&typeof (body as {detail?:unknown}).detail==="string")detail=(body as {detail:string}).detail;else if(typeof body==="object"&&body!==null&&typeof (body as {error?:unknown}).error==="string")detail=(body as {error:string}).error}catch{/* a proxy page */}
+   throw new NativeSaveError(/quota/i.test(detail)?"quota":"too_large")
+  }
   // A refused bearer or write is insufficient evidence to erase readable data.
   // Only the independently authenticated lifecycle's explicit read loss purges.
   if(response.status===401||response.status===403)throw new NativeSaveError("write_revoked")
@@ -125,6 +233,12 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     return {sessionId,applicationId}
    })()
    return opening
+  },
+  async undo(operationId,generation,signal){
+   ready()
+   if(typeof operationId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(operationId)||!validNativeVersion(generation))throw new Error('native_undo_invalid')
+   const response=await send(`${base}document/undo?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!,'X-Craft-Generation':generation},body:JSON.stringify({operation_id:operationId})})
+   ready();return response
   },
   async share(request,signal){
    ready()
@@ -291,6 +405,13 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    // The admission stays valid: 403 here means no private read, not read loss.
    if(response.status===403)throw new Error("native_private_read_refused")
    if(!response.ok)throw new Error("native_document_unavailable")
+   if(workbookResponse(response)){
+    const file=await workbookFile(response);ready()
+    if(!file)throw new Error("invalid_native_document")
+    const v=file.meta,q=v.quota as Record<string,unknown>|undefined
+    if(v.applicationId!==applicationId||applicationId!=="gridcraft"||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.fileName!=="string"||!v.fileName||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
+    return {version:v.version as string,bytes:file.bytes,applicationId:"gridcraft",enginePin:v.enginePin,...(engineBuildToken(v.engineBuild)?{engineBuild:v.engineBuild}:{}),editorBundle:v.editorBundle,editorURL:v.editorURL,format:file.format,fileName:v.fileName,contentHash:v.contentHash as string,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
+   }
    const value:unknown=await response.json();ready()
    if(!value||typeof value!=="object")throw new Error("invalid_native_document")
    const v=value as Record<string,unknown>,q=v.quota as Record<string,unknown>|undefined
@@ -340,9 +461,32 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    ready();if(!validNativeVersion(version)||version==='0')throw new Error('invalid_native_version')
    const response=await send(`${base}document/versions/${version}?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
    ready();if(!response.ok)throw new Error('native_version_unavailable')
+   if(workbookResponse(response)){
+    // A workbook version: its file as the body, the version's history fields in X-Craft-Document.
+    const file=await workbookFile(response,version);ready()
+    const parsed=file&&parseNativeVersionDocument({...file.meta,bytes:"UEs="},version)
+    if(!file||!parsed)throw new Error('invalid_native_version')
+    return {...parsed,bytes:file.bytes,format:file.format,contentHash:file.meta.contentHash as string,...(typeof file.meta.fileName==="string"?{fileName:file.meta.fileName}:{})}
+   }
    const document=parseNativeVersionDocument(await response.json(),version);ready()
    if(!document)throw new Error('invalid_native_version')
    return document
+  },
+  async exportXlsx(signal,version){
+   ready()
+   if(version!==undefined&&!EXPORT_VERSION.test(version))throw new NativeExportError("bad_version")
+   const q=version===undefined?query:`${query}&${new URLSearchParams({version})}`
+   const response=await send(`${base}document/export.xlsx?${q}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+   ready()
+   if(!response.ok){
+    const reason=EXPORT_STATUS[response.status]??"failed"
+    const retry=Number(response.headers.get("Retry-After"))
+    throw new NativeExportError(reason,reason==="busy"&&Number.isSafeInteger(retry)&&retry>0?retry:undefined)
+   }
+   const exported=response.headers.get("X-Craft-Version")??""
+   if(!EXPORT_VERSION.test(exported))throw new NativeExportError("failed")
+   const blob=await response.blob();ready()
+   return {blob,filename:nativeExportFilename(response.headers.get("Content-Disposition")),version:exported}
   },
   async restore(request,signal){
    ready()

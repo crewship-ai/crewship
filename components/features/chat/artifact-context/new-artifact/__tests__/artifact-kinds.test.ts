@@ -14,7 +14,7 @@ describe("artifact kind registry", () => {
       expect(k.label && k.plural && k.description && k.viewer).toBeTruthy()
       expect(k.icon).toBeTruthy()
     }
-    expect(artifactKind("sheet").uploadExtensions).toEqual([".xlsx", ".csv"])
+    expect(artifactKind("sheet").uploadExtensions).toEqual([".xlsx", ".xlsm", ".csv"])
     expect(artifactKind("word").uploadExtensions).toEqual([".docx"])
     expect(artifactKind("project").uploadExtensions).toEqual([])
     expect(artifactKind("project").make).toBe("agent")

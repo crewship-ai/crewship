@@ -1,5 +1,7 @@
 "use client"
 
+import { noteUnreleasedCreation } from "@/lib/mooring/creation-custody"
+import { confirmNativeInitialized } from "@/lib/craft-native-initialize"
 import { useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
@@ -53,7 +55,11 @@ export function useWordDocumentCreation(workspaceId: string) {
   const wordFormatAvailable = wordFormat === "native" ? availability.wordcraftNative === true : wordFormat === "wordcraft" ? Boolean(availability.wordcraftSDKPrefix) : wordFormat === "commands" ? availability.wordcraftCommands === true : availability.data === true
   const formatAvailable = selectedFormat === "native" ? availability.wordcraftNative === true : selectedFormat === "sheet" ? availability.gridcraftNative === true : selectedFormat === "commands" ? availability.wordcraftCommands === true : selectedFormat === "wordcraft" ? Boolean(availability.wordcraftSDKPrefix) : availability.data === true
   const client = useQueryClient()
-  const create = useMutation<CreatedDocument, Error, { name: string; slug: string; format?: DocumentFormat }>({ mutationFn: async input => {
+  const create = useMutation<CreatedDocument, Error, { name: string; slug: string; format?: DocumentFormat
+    /** A Sheet is initialized from a workbook instead of an empty one. Asked once the empty Page exists, it returns the step that
+     *  has the server initialize the Page; that answer is checked like any other. An error from that step marked `beforeWrite`
+     *  (the server refused the file itself) leaves the initialization unattempted, so a retry may follow. */
+    prepareImport?: (pageId: string) => Promise<() => Promise<Response>> }>({ mutationFn: async input => {
     // An explicit format (Sheet from New artifact) is checked against its own
     // profile; otherwise the Word-first selection applies.
     const requested = input.format ?? selectedFormat
@@ -86,23 +92,44 @@ export function useWordDocumentCreation(workspaceId: string) {
       const query = new URLSearchParams({ workspace_id: workspaceId })
       if (!original.nativeAdmission) {
         if (original.nativeAttempted) throw new Error("Native initialization could not be confirmed. Check the original Page before starting again.")
-        const bytes = application === "gridcraft"
-          ? (await import("@/lib/mooring/gridcraft-empty")).emptyGridCraftNativeDocument()
-          : (await import("@/lib/mooring/wordcraft-native-create")).createEmptyNativeWord()
-        let binary = ""; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768))
-        original.nativeAttempted = true
-        const initialized = await apiFetch(`${base}initialize?${query}`, { method: "POST", redirect: "error", skipRefresh: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ application_id: application, bytes: btoa(binary) }) })
+        let initialized: Response
+        if (application === "gridcraft" && input.prepareImport) {
+          const initializeFromImport = await input.prepareImport(pageId)
+          original.nativeAttempted = true
+          try { initialized = await initializeFromImport() }
+          catch (error) {
+            // Refused before anything was written (the file itself): the upload may be tried again.
+            if (error && typeof error === "object" && (error as { beforeWrite?: unknown }).beforeWrite === true) original.nativeAttempted = false
+            throw error
+          }
+        } else {
+          const bytes = application === "gridcraft"
+            ? (await import("@/lib/mooring/gridcraft-empty")).emptyGridCraftNativeDocument()
+            : (await import("@/lib/mooring/wordcraft-native-create")).createEmptyNativeWord()
+          let binary = ""; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768))
+          original.nativeAttempted = true
+          initialized = await apiFetch(`${base}initialize?${query}`, { method: "POST", redirect: "error", skipRefresh: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ application_id: application, bytes: btoa(binary) }) })
+        }
         const value = await initialized.json().catch(() => null)
         // Refused before anything was written: the administrator turned it off (#5381).
         const off = initialized.status === 503 && (value?.reason === "app_draining" || value?.reason === "app_disabled") ? nativeAppLabel(value?.application) ?? nativeAppLabel(application) : null
         if (off) { original.nativeAttempted = false; throw new Error(`An administrator turned ${off} off on this server, so the document was not created.`) }
-        if (!initialized.ok || value?.application_id !== application || value?.page_id !== pageId || value?.version !== "1" || typeof value?.session_token !== "string" || !/^[a-f0-9]{64}$/.test(value.session_token) || typeof value?.generation !== "string" || !/^[1-9][0-9]*$/.test(value.generation)) throw new Error("Native initialization could not be confirmed. Check the original Page before starting again.")
-        original.nativeAdmission = { token: value.session_token, generation: value.generation }
+        const confirmed = initialized.ok ? confirmNativeInitialized(value, application, pageId) : null
+        if (!confirmed) throw new Error("Native initialization could not be confirmed. Check the original Page before starting again.")
+        original.nativeAdmission = { token: confirmed.sessionToken, generation: confirmed.generation }
       }
       // Creation does not keep a live editing connection. Release only the
       // exact initialized custody; the mounted editor admits its own session.
-      let released = false
-      try { released = (await apiFetch(`${base}lease/release?${query}`, { method: "POST", redirect: "error", skipRefresh: true, headers: { "Content-Type": "application/json", "X-Craft-Session": original.nativeAdmission.token }, body: JSON.stringify({ generation: original.nativeAdmission.generation }) })).ok } catch { /* The release may have committed before its response was lost. */ }
+      // A lost answer is asked again: a person who only views the new Sheet must not hold
+      // its lease. An answer the server gave, even a refusal (already gone, expired), is final.
+      let released = false, answered = false
+      for (let attempt = 0; attempt < 3 && !answered; attempt++) {
+        if (attempt) await new Promise(resolve => setTimeout(resolve, attempt * 150))
+        try { const reply = await apiFetch(`${base}lease/release?${query}`, { method: "POST", redirect: "error", skipRefresh: true, headers: { "Content-Type": "application/json", "X-Craft-Session": original.nativeAdmission.token }, body: JSON.stringify({ generation: original.nativeAdmission.generation }) }); answered = true; released = reply.ok }
+        catch { /* The release may have committed before its response was lost. */ }
+      }
+      // Still not answered: the editor that opens the Sheet releases exactly this custody.
+      if (!answered) noteUnreleasedCreation(pageId, { token: original.nativeAdmission.token, generation: original.nativeAdmission.generation })
       if (!released) {
         // Initialization is already confirmed. A fresh authorized read may
         // open it safely; the editor starts read-only and never adopts this
@@ -139,7 +166,22 @@ export function useWordDocumentCreation(workspaceId: string) {
   }, onSuccess: async () => {
     await client.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
   } })
+  // The Page this creation made, while nothing was ever written to it: an
+  // initialization that was never confirmed leaves an empty Page, and only
+  // then may the person ask to delete it.
+  const emptyPageIntent = intent.current
+  const emptyPage = emptyPageIntent?.pageId && !emptyPageIntent.nativeAdmission ? { id: emptyPageIntent.pageId, slug: emptyPageIntent.slug } : null
+  const discardEmptyPage = async () => {
+    const original = intent.current
+    if (!original?.pageId || original.nativeAdmission) throw new Error("Only an empty Page just created here can be deleted from here.")
+    const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + original.pageId)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" })
+    if (!response.ok) throw new Error("The empty Page could not be deleted. Delete it from the library.")
+    intent.current = undefined
+    setFrozen(false)
+    await client.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
+  }
   return {
+    emptyPage, discardEmptyPage,
     allowed, availability, selectedFormat, wordFormat, wordFormatAvailable, setFormat, formatAvailable, frozen, create,
     /** A Page exists and only its initialization is being retried. */
     retrying: Boolean(intent.current?.pageId),

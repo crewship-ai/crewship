@@ -41,6 +41,7 @@ import type { KindFamily } from "./kinds"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
 import { useArtifactAccess } from "./use-artifact-access"
+import { UnfinishedImportsNotice } from "./unfinished-imports-notice"
 
 function KindLabel({ item }: { item: LibraryItem }) {
   return <KindBadge resolved={kindOf(item)} />
@@ -527,6 +528,8 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
     </div>
   }
 
+  // An empty Sheet an import from chat left behind is labelled above the list (empty items are otherwise hidden).
+  if (item === null && !loading && userId) content = <div className="grid content-start gap-3"><UnfinishedImportsNotice workspaceId={workspaceId} userId={userId} />{content}</div>
   return <div className="flex h-app-content min-h-0 flex-col bg-background">
     {subBar}
     <div className="@container relative flex min-h-0 flex-1 overflow-hidden">

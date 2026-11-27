@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { Buffer } from "node:buffer"
 import type { DocumentDraft } from "../document-queue"
-import { openNativeDraftJournal, validNativeDraft, type NativeDraft } from "./native-draft"
+import { draftFileAdapter, openNativeDraftJournal, validNativeDraft, type NativeDraft } from "./native-draft"
 
 const mock = vi.hoisted(() => ({ open: vi.fn(), purge: vi.fn(), removeRow: vi.fn(), retire: undefined as undefined | (() => Promise<void>) }))
 vi.mock("../document-queue", async importOriginal => ({
@@ -34,7 +34,8 @@ it("reuses the existing journal with bounded native opt-in and offers reload dra
   await first.close()
   const reloaded = await openNativeDraftJournal(scope)
   const recovered = await reloaded.recovery()
-  expect(mock.open).toHaveBeenCalledWith("h", "w", "p", { maxDraftBytes: 64 * 1024 * 1024, requireExclusive: true })
+  // Base64 of a 64 MiB workbook (about 85.4 MiB) plus the row fits; the protected store seals it within 128 MiB.
+  expect(mock.open).toHaveBeenCalledWith("h", "w", "p", { maxDraftBytes: 96 * 1024 * 1024, requireExclusive: true })
   expect(recovered).toHaveLength(1)
   expect(recovered[0].actions).toEqual(["compare", "copy"])
   expect(Buffer.from(recovered[0].draft.bytes).equals(Buffer.from(original.bytes))).toBe(true)
@@ -184,4 +185,52 @@ it("G4 B20: discardRecovered keeps a recovered row that changed since it was rea
   await second.discardRecovered(recovered)
   expect(rows.size).toBe(1)
   await second.close()
+})
+
+it("keeps the file of a refused save as a lossy draft that is only offered for download, with the parts it drops", async () => {
+  const pk = new Uint8Array([0x50, 0x4b, 7])
+  const lossy: NativeDraft = { ...draft(), applicationId: "gridcraft", format: "xlsx", bytes: pk, lossy: [{ code: "pivot_formats", count: 583 }] }
+  expect(validNativeDraft(lossy)).toBe(true)
+  // Only a workbook file is lossy, with 1 to 32 well-formed parts.
+  expect(validNativeDraft({ ...lossy, format: undefined })).toBe(false)
+  expect(validNativeDraft({ ...lossy, lossy: [] })).toBe(false)
+  expect(validNativeDraft({ ...lossy, lossy: [{ code: "Pivot!", count: 1 }] })).toBe(false)
+  expect(validNativeDraft({ ...lossy, lossy: [{ code: "charts", count: 0 }] })).toBe(false)
+  expect(validNativeDraft({ ...lossy, bytes: new Uint8Array(0) })).toBe(false)
+  mock.open.mockResolvedValue(storage())
+  const journal = await openNativeDraftJournal({ ...scope, applicationId: "gridcraft" })
+  await journal.persist(lossy)
+  await journal.close()
+  mock.open.mockResolvedValue(storage())
+  const reopened = await openNativeDraftJournal({ ...scope, applicationId: "gridcraft" })
+  const [recovered] = await reopened.recovery()
+  expect(recovered.actions).toEqual(["download"])
+  expect(recovered.draft.lossy).toEqual([{ code: "pivot_formats", count: 583 }])
+  expect(Array.from(recovered.draft.bytes)).toEqual([0x50, 0x4b, 7])
+  await reopened.close()
+})
+it("keeps a workbook file draft up to 64 MiB, only when it is a zip, and carries its format through the journal", async () => {
+  const pk = (n: number) => { const b = new Uint8Array(n); b[0] = 0x50; b[1] = 0x4b; return b }
+  const wb = (bytes: Uint8Array, format: "xlsx" | "xlsm" = "xlsm"): NativeDraft => ({ ...draft(), applicationId: "gridcraft", format, bytes })
+  expect(validNativeDraft(wb(pk(40 * 1024 * 1024)))).toBe(true)
+  expect(validNativeDraft(wb(pk(64 * 1024 * 1024 + 1)))).toBe(false)
+  expect(validNativeDraft(wb(new Uint8Array([0x7b, 0x7d])))).toBe(false)
+  expect(validNativeDraft({ ...wb(pk(4)), format: "xls" as never })).toBe(false)
+  // The file format, its limit and signature belong to the application's adapter; a format no adapter
+  // of that application names is not a draft.
+  expect(validNativeDraft({ ...wb(pk(4)), applicationId: "wordcraft" })).toBe(false)
+  expect(draftFileAdapter("gridcraft")?.formats).toEqual(["xlsx", "xlsm"])
+  expect(draftFileAdapter("wordcraft")).toBeUndefined()
+  // A native draft keeps its own 32 MiB bound.
+  expect(validNativeDraft({ ...draft(), bytes: pk(40 * 1024 * 1024) })).toBe(false)
+  mock.open.mockResolvedValue(storage())
+  const journal = await openNativeDraftJournal({ ...scope, applicationId: "gridcraft" })
+  await journal.persist(wb(pk(8), "xlsm"))
+  await journal.close()
+  mock.open.mockResolvedValue(storage())
+  const reopened = await openNativeDraftJournal({ ...scope, applicationId: "gridcraft" })
+  const [recovered] = await reopened.recovery()
+  expect(recovered?.draft.format).toBe("xlsm")
+  expect(Array.from(recovered?.draft.bytes ?? [])).toEqual(Array.from(pk(8)))
+  await reopened.close()
 })

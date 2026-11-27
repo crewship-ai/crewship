@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { OutputSheetOffer } from "../artifact-context/sheet/output-sheet-offer"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import { motion } from "motion/react"
 import { ArrowLeft, Download, Eye, FileCode2, FileSpreadsheet, FileText, Maximize2, Minimize2, Pause, Play, X } from "lucide-react"
@@ -42,7 +43,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
-function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelection }: { path: string; snapshot: ArtifactSnapshot; url: string; revision: number; onClose: () => void; onAskSelection?: (context: string) => void }) {
+function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelection, sheetOffer }: { sheetOffer?: ReactNode; path: string; snapshot: ArtifactSnapshot; url: string; revision: number; onClose: () => void; onAskSelection?: (context: string) => void }) {
   const text = useMemo(() => /\.(csv|tsv|xlsx)$/i.test(path) ? "" : new TextDecoder().decode(snapshot.bytes), [snapshot, path])
   if (BINARY.test(path)) {
     // Existing viewer validates signatures and renders PDFs with pdfjs.
@@ -59,7 +60,7 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelectio
     const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
     return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-white" srcDoc={csp + text} />
   }
-  if (/\.xlsx$/i.test(path)) return <XlsxPreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
+  if (/\.xlsx$/i.test(path)) return <XlsxPreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} offer={sheetOffer} />
   if (/\.(csv|tsv)$/i.test(path)) return <TablePreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
   return <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs">{text}</pre>
 }
@@ -200,7 +201,7 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
   >
     <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
       <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={() => guardDirty(() => setOpen(false))}><ArrowLeft className="size-4" /></Button>
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className={cn("size-4", /\.xls[xm]$/i.test(path) ? "text-sheet" : "text-primary")} /></span>
       <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
       <Button variant="outline" size="sm" aria-label={expanded ? "Show chat alongside" : "Expand artifact"} onClick={() => setFocus(!expanded)}>{expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}<span className="hidden lg:inline">{expanded ? "Chat" : "Expand"}</span></Button>
       {loaded && <Button variant="outline" size="sm" asChild><AuthenticatedDownload href={url} download={active?.title || "artifact"} aria-label="Download artifact"><Download className="size-3.5" /> Download</AuthenticatedDownload></Button>}
@@ -225,7 +226,7 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
       {loaded && UNSUPPORTED_WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Legacy and macro-enabled workbooks are download only. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
-      {loaded && !UNSUPPORTED_WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => guardDirty(() => setOpen(false))} />}
+      {loaded && !UNSUPPORTED_WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} sheetOffer={workspaceId && /\.xlsx$/i.test(path) ? <OutputSheetOffer workspaceId={workspaceId} agentId={agentId} path={path} /> : undefined} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => guardDirty(() => setOpen(false))} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>
   </motion.aside>

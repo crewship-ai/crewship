@@ -9,7 +9,8 @@
 // layer under the journal are faked. The fake server mirrors
 // internal/mooring/native_save_receipt.go: a save commits base+1 only while
 // head == base (else 409); reconcile returns the receipt only for exactly
-// those bytes at base+1, else ErrNativeUnconfirmed → 409.
+// those bytes at base+1, else ErrNativeUnconfirmed → 409. Reconcile carries no
+// bytes (b2e8b0bf6): it names the attempt by its content hash.
 import { Buffer } from "node:buffer"
 import { createHash, webcrypto } from "node:crypto"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
@@ -56,9 +57,10 @@ function server(initial: string) {
     if (!op) return json({}, 404)
     calls.push(op)
     const body = JSON.parse(String(init?.body)) as Record<string, string>
-    const bytes = new Uint8Array(Buffer.from(body.bytes, "base64")), base = Number(body.baseVersion)
+    const base = Number(body.baseVersion)
     const receipt = (version: number) => ({ ...body, bytes: undefined, attemptId: undefined, version: String(version), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: body.contentHash })
     if (op === "save") {
+      const bytes = new Uint8Array(Buffer.from(body.bytes, "base64"))
       if (await sha(bytes) !== body.contentHash) return json({ error: "invalid" }, 422)
       // Validation runs outside the publication transaction: a save can wait here.
       if (hold) { const paused = hold; hold = undefined; await paused }
@@ -68,6 +70,9 @@ function server(initial: string) {
       versions.set(++head, { text: new TextDecoder().decode(bytes), hash: body.contentHash, editorRevision: body.editorRevision })
       return json(receipt(head))
     }
+    // Reconcile asks about an attempt by its hash: the client sends no bytes and the server reads none
+    // (craft_native_documents.go, ReconcileAttempt). A body with bytes is a client regression.
+    if ("bytes" in body) return json({ error: "reconcile carries no document" }, 400)
     const landed = versions.get(base + 1)
     if (landed && landed.hash === body.contentHash && landed.editorRevision === body.editorRevision) return json(receipt(base + 1))
     // Under the same fence: record the attempt as retired, then say so (410).

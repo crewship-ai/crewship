@@ -175,3 +175,40 @@ export function composeMessageWithAttachments(
   const body = text.trim()
   return body ? `${body}\n\n${block}` : block
 }
+
+const ONE_LEAD = "I've attached a file to this message. The path is relative to your working directory:"
+const MANY_LEAD = /^I've attached (\d+) files to this message\. The paths are relative to your working directory:$/
+
+/**
+ * The person's own text and the files of a message composed by
+ * `composeMessageWithAttachments`, so a bubble can show the files as chips
+ *. Only the exact block this module writes, at the end, with
+ * the count it states and paths under attachments/, is taken apart;
+ * anything else comes back as it is.
+ */
+export function splitAttachmentBlock(content: string): { text: string; files: { path: string; name: string }[] } {
+  const unchanged = { text: content, files: [] }
+  const at = content.lastIndexOf("I've attached ")
+  if (at < 0 || (at > 0 && content.slice(at - 2, at) !== "\n\n")) return unchanged
+  const [lead, blank, ...lines] = content.slice(at).split("\n")
+  const count = lead === ONE_LEAD ? 1 : Number(MANY_LEAD.exec(lead ?? "")?.[1] ?? NaN)
+  if (blank !== "" || !Number.isSafeInteger(count) || count < 1 || lines.length !== count) return unchanged
+  const files: { path: string; name: string }[] = []
+  for (const line of lines) {
+    const path = line.startsWith("- ") ? line.slice(2) : ""
+    const name = path.split("/").at(-1) ?? ""
+    if (!path.startsWith("attachments/") || path.includes("..") || !name) return unchanged
+    files.push({ path, name })
+  }
+  if (count > 1 && lead === ONE_LEAD) return unchanged
+  return { text: content.slice(0, Math.max(0, at - 2)), files }
+}
+
+/** The message as composed without the named files (by file name); text without our block comes back as it is. */
+export function withoutAttachedFiles(content: string, names: string[]): string {
+  const parts = splitAttachmentBlock(content)
+  if (parts.files.length === 0) return content
+  const kept = parts.files.filter(file => !names.includes(file.name))
+  if (kept.length === parts.files.length) return content
+  return composeMessageWithAttachments(parts.text, kept.map(file => ({ name: file.name, status: "ready" as const, path: file.path })))
+}

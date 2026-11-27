@@ -44,6 +44,24 @@ async function preserveDraftsForIdentity(human: string | null) {
   return generation
 }
 
+/**
+ * The waits before a session end tries the draft sweep again. An editor still
+ * writing its last draft holds the store, and the sweep can run out of its time once; Keep this tab open follows
+ * only a sweep that keeps failing. Until one passes, the tab neither leaves nor shows anything to another identity.
+ */
+export const sessionEndDraftRetry = { delaysMs: [500, 1500, 3000] }
+
+async function preserveDraftsPatiently(human: string | null) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await preserveDraftsForIdentity(human) }
+    catch (error) {
+      const wait = sessionEndDraftRetry.delaysMs[attempt]
+      if (wait === undefined) throw error
+      await new Promise(resolve => setTimeout(resolve, wait))
+    }
+  }
+}
+
 const sessionSchema = z.object({
   user: z.object({
     id: z.string(),
@@ -328,7 +346,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       redirectingGen = gen
       cancelUnreachableProbe()
       purgeOtherE2Recovery(null)
-      try { await preserveDraftsForIdentity(null) }
+      try { await preserveDraftsPatiently(null) }
       catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginExpired(reason) } }); return }
       // Superseded by a newer refresh: this tab stays and, the generation
       // having moved, still follows a later sign-out or expiry (#4705).
@@ -365,7 +383,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // A failed draft step still has to learn who is signed in: chat recovery
       // must leave with the person, whatever happens to the drafts.
       let preserved = true
-      try { await preserveDraftsForIdentity(null) }
+      try { await preserveDraftsPatiently(null) }
       catch { preserved = false }
       if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed

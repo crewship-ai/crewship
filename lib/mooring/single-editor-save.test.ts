@@ -652,3 +652,59 @@ it("keeps the draft when the save before a release was never confirmed (#5089)",
   expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: true }))
   await r.controller.close()
 })
+
+it("lets a workbook Sheet wait up to 30 s before an autosave; other documents keep 5 s", () => {
+  const base = rig().options
+  expect(() => createSingleEditorSave({ ...base, idleMs: 10_000 })).toThrow("invalid_save_deadline")
+  const sheet = { ...base, applicationId: "gridcraft", format: "xlsx" as const }
+  expect(() => createSingleEditorSave({ ...sheet, idleMs: 10_000 })).not.toThrow()
+  expect(() => createSingleEditorSave({ ...sheet, idleMs: 30_001 })).toThrow("invalid_save_deadline")
+})
+
+it("saves a workbook Sheet's file as the editor gave it: no compaction, no engine validation, its format sent", async () => {
+  const r = rig()
+  const file = new Uint8Array(3 << 20).map((_, i) => i % 251); file[0] = 0x50; file[1] = 0x4b
+  const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: file, editorRevision: "doc-1:7", format: "xlsm" }) }
+  const controller = createSingleEditorSave({ ...r.options, applicationId: "gridcraft", format: "xlsx", engine, idleMs: 10_000 })
+  await controller.save()
+  const sent = r.transport.save.mock.calls[0][0]
+  expect(sent.format).toBe("xlsm")
+  expect(Array.from(sent.bytes.subarray(0, 8))).toEqual(Array.from(file.subarray(0, 8)))
+  expect(sent.bytes.byteLength).toBe(file.byteLength)
+  expect(r.journal.persist.mock.calls[0][0].format).toBe("xlsm")
+  await controller.close()
+})
+
+it("refuses a workbook file past 64 MiB as too large and sends nothing", async () => {
+  const r = rig()
+  const big = new Uint8Array(64 * 1024 * 1024 + 1); big[0] = 0x50; big[1] = 0x4b
+  const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: big, editorRevision: "doc-1:8" }) }
+  const controller = createSingleEditorSave({ ...r.options, applicationId: "gridcraft", format: "xlsx", engine })
+  await controller.save()
+  expect(r.transport.save).not.toHaveBeenCalled()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ reason: "document_too_large" }))
+  await controller.close()
+})
+
+it("never stores the editor's rewrite of an untouched workbook: a hand-over stays on the loaded version", async () => {
+  // The editor's file of an unedited workbook is not the stored file byte for byte; its revision, mounted at open, says it is untouched.
+  const r = rig()
+  const stored = new Uint8Array([0x50, 0x4b, 3, 4, 1]), rewritten = new Uint8Array([0x50, 0x4b, 3, 4, 2])
+  const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: rewritten, editorRevision: "doc-1:1", nativeState: "doc-1:1", format: "xlsx" }) }
+  const controller = createSingleEditorSave({ ...r.options, applicationId: "gridcraft", format: "xlsx", engine, loaded: { bytes: stored, mountedState: "doc-1:1" } })
+  await controller.flush()
+  expect(engine.snapshot).toHaveBeenCalled()
+  expect(r.transport.save).not.toHaveBeenCalled()
+  await controller.close()
+})
+
+it("stores an edited workbook on hand-over even when its revision marker is the editor's own", async () => {
+  const r = rig()
+  const stored = new Uint8Array([0x50, 0x4b, 3, 4, 1]), edited = new Uint8Array([0x50, 0x4b, 3, 4, 3])
+  const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: edited, editorRevision: "doc-1:2", nativeState: "doc-1:2", format: "xlsx" }) }
+  const controller = createSingleEditorSave({ ...r.options, applicationId: "gridcraft", format: "xlsx", engine, loaded: { bytes: stored, mountedState: "doc-1:1" } })
+  controller.edited("doc-1:2")
+  await controller.flush()
+  expect(r.transport.save).toHaveBeenCalledTimes(1)
+  await controller.close()
+})

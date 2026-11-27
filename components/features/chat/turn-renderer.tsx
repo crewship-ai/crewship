@@ -1,5 +1,8 @@
 "use client"
 
+import { splitAttachmentBlock } from "@/lib/attachment-message"
+import { MessageFiles } from "./messages/message-files"
+import { MessageSheets } from "./messages/message-sheets"
 import React from "react"
 import { motion } from "motion/react"
 import { ErrorBoundary } from "react-error-boundary"
@@ -134,6 +137,8 @@ interface TurnRendererProps {
   onFileClick: (s: string) => void
   isLastAssistant?: boolean
   onRegenerate?: () => void
+  /** Under a not-run note: runs the saved message the busy agent did not run, once more. */
+  onSendAgain?: () => void
   onEditUserMessage?: (turnId: string, newContent: string) => void
   /** Epoch ms cutoff. Turns whose timestamp is BEFORE this skip the
    *  arrival animation — they're either loaded from history or already
@@ -176,13 +181,14 @@ interface TurnRendererProps {
 const TURN_GUTTER_GRID =
   "group grid grid-cols-[32px_minmax(0,1fr)_32px] items-start gap-3"
 
-function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, workspaceId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
+function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onSendAgain, onEditUserMessage, animateAfter, agentId, chatId, workspaceId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
   const chatAgent = useChatAgent()
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
+    const shownUserText = splitAttachmentBlock(textContent)
     // Group-chat attribution: a teammate's message shows their name; the local
     // user's own turns (resolver returns null) render as today.
     const authorName = turn.authorUserId ? resolveAuthorName?.(turn.authorUserId) ?? null : null
@@ -241,14 +247,18 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
                     transcript already shows exactly what the agent got; it
                     only reads as such if the block's line breaks survive.
                     Every other multi-line paste was collapsing here too. */}
-                <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{textContent}</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{shownUserText.files.length ? shownUserText.text : textContent}</span>
               </div>
+              {/* The note naming the files is for the agent; the person sees a chip per file. */}
+              <MessageFiles files={shownUserText.files} />
             </MessageContent>
             <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 coarse:opacity-100 transition-opacity">
               {formatTimestamp(turn.timestamp)}
             </div>
           </Message>
         )}
+        {/* The Sheets the message went with, under the bubble on either path (editable or not). */}
+        <MessageSheets workspaceId={workspaceId} chatId={chatId} messageId={turn.originalMessageId} sentRefs={turn.metadata?.artifact_refs} />
         {/* A message action, below the bubble: quiet until hover, revealed by
             keyboard focus and always shown on touch. */}
         {workspaceId && chatId && turn.originalMessageId && turn.originalAuthorUserId && <RunInDocument workspaceId={workspaceId} chatId={chatId} messageId={turn.originalMessageId} authorId={turn.originalAuthorUserId} />}
@@ -463,6 +473,14 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
           </div>
         </MessageContent>
       </Message>
+      {onSendAgain && (
+        <div className="flex -mt-1 mb-2">
+          <button type="button" onClick={onSendAgain} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <RefreshCw className="h-3 w-3" aria-hidden />
+            <span>Send again</span>
+          </button>
+        </div>
+      )}
       </motion.div>
     )
   }
@@ -478,9 +496,24 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
   const assistantBody = (
     <>
       <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} chatId={chatId} workspaceId={workspaceId} />
-      {isLastAssistant && onRegenerate && !turn.isStreaming && (
+      {/* A failed run says so in one sentence above (TurnEndNote) and offers
+          Try again in plain sight. Otherwise Regenerate is an answer action:
+          quiet until hover, revealed by keyboard focus, always on touch. */}
+      {isLastAssistant && onRegenerate && !turn.isStreaming && (turn.turnState === "failed" ? (
         <div className="flex -mt-1 mb-2">
           <button
+            type="button"
+            onClick={onRegenerate}
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-label text-foreground hover:bg-muted/60 transition-colors coarse:min-h-[44px]"
+          >
+            <RefreshCw className="h-3 w-3" aria-hidden="true" />
+            <span>Try again</span>
+          </button>
+        </div>
+      ) : (
+        <div className="flex -mt-1 mb-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 coarse:opacity-100">
+          <button
+            type="button"
             onClick={onRegenerate}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             title="Regenerate response"
@@ -489,7 +522,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
             <span>Regenerate</span>
           </button>
         </div>
-      )}
+      ))}
     </>
   )
 

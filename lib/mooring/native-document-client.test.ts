@@ -2,7 +2,7 @@
 import { describe,it,expect,vi } from "vitest"
 import {createServer,type Server} from "node:http"
 import type {AddressInfo} from "node:net"
-import {createNativeDocumentClient,NativeMetadataTransportError} from "./native-document-client"
+import {createNativeDocumentClient,initializeNativeWorkbook,NativeExportError,NativeMetadataTransportError} from "./native-document-client"
 import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 const signal=()=>new AbortController().signal
@@ -21,6 +21,29 @@ describe("native document client",()=>{
   expect(String(calls[1].init?.body)).not.toContain("b".repeat(64))
   client.close();await expect(client.save(request,signal())).rejects.toThrow()
   expect(calls).toHaveLength(2)
+ })
+ it("sends a large snapshot gzip-compressed with its declared length, a small one as it is",async()=>{
+  const calls:Array<{init?:RequestInit}>=[]
+  const send=vi.fn(async(_input:RequestInfo|URL,init?:RequestInit)=>{calls.push({init});return new Response(JSON.stringify(calls.length===1?{session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}:{version:"2"}),{status:calls.length===1?201:200})})
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const big={...request,bytes:new Uint8Array(3<<20).map((_,i)=>0x41+(i%7))}
+  await client.save(big,signal())
+  const h=new Headers(calls[1].init?.headers);expect(h.get("Content-Encoding")).toBe("gzip")
+  const packed=calls[1].init?.body as unknown as Uint8Array;expect(packed).toBeInstanceOf(Uint8Array)
+  const raw=new Uint8Array(await new Response(new Blob([packed as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
+  expect(String(raw.length)).toBe(h.get("X-Craft-Uncompressed-Length"));expect(packed.length).toBeLessThan(raw.length/5)
+  expect(JSON.parse(new TextDecoder().decode(raw)).editorRevision).toBe(request.editorRevision)
+  await client.save(request,signal())
+  expect(new Headers(calls[2].init?.headers).get("Content-Encoding")).toBeNull();expect(typeof calls[2].init?.body).toBe("string")
+ })
+ it("tells a full version history (quota) from a body the server or a proxy refuses as too large",async()=>{
+  const cases:Array<[string,string,string]>=[["application/json",JSON.stringify({detail:"native history quota reached; existing versions retained"}),"quota"],["application/problem+json",JSON.stringify({title:"Request Entity Too Large",detail:"Request body too large"}),"too_large"],["text/html","<html>413 Request Entity Too Large</html>","too_large"]]
+  for(const [type,body,expected] of cases){
+   let n=0
+   const send=vi.fn(async()=>new Response(++n===1?JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}):body,{status:n===1?201:413,headers:{"Content-Type":n===1?"application/json":type}}))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+   try{await client.save(request,signal());expect.fail("413")}catch(error){expect(error).toBeInstanceOf(NativeSaveError);expect((error as NativeSaveError).reason).toBe(expected)}
+  }
  })
  it("reports a refused private read apart from an unavailable document",async()=>{
   const opened=()=>new Response(JSON.stringify({session_token:"a".repeat(64),session_id:"session",application_id:"wordcraft",page_id:"page"}),{status:201})
@@ -188,6 +211,17 @@ describe('native shared preview publication',()=>{
 })
 
 describe("native save attempt retirement (#4899)",()=>{
+ it("reconciles a large document without sending it",async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{}',{status:410}))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  const large={...request,bytes:new Uint8Array(20<<20),attemptId:"attempt-0002"}
+  await expect(client.reconcile(large,signal())).rejects.toMatchObject({reason:"absent"})
+  const init=send.mock.calls[1][1]
+  expect(typeof init.body).toBe("string")
+  expect(init.headers["Content-Encoding"]).toBeUndefined()
+  expect(String(init.body).length).toBeLessThan(4096)
+  expect(JSON.parse(String(init.body))).toMatchObject({attemptId:"attempt-0002",contentHash:request.contentHash})
+ })
  const admission=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))
  it("maps only a reconcile 410 to absent and sends the attempt id",async()=>{
   const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{}',{status:410})).mockResolvedValueOnce(new Response('{}',{status:410}))
@@ -195,6 +229,7 @@ describe("native save attempt retirement (#4899)",()=>{
   const attempt={...request,attemptId:"attempt-0001"}
   await expect(client.reconcile(attempt,signal())).rejects.toMatchObject({reason:"absent"})
   expect(JSON.parse(String(send.mock.calls[1][1].body)).attemptId).toBe("attempt-0001")
+  expect(JSON.parse(String(send.mock.calls[1][1].body))).not.toHaveProperty("bytes")
   // A save never reports absent; 410 there stays an unconfirmed outcome.
   const saving=client.save(attempt,signal());await expect(saving).rejects.toThrow("native_snapshot_unconfirmed");await expect(saving).rejects.not.toBeInstanceOf(NativeSaveError)
  })
@@ -222,3 +257,180 @@ describe('native lease actions while the application is turned off',()=>{
   expect(refused).not.toBeInstanceOf(NativeAppOffError);expect((refused as Error).message).toBe('native_lease_unconfirmed')
  })
 })
+
+describe('native Sheet xlsx export',()=>{
+ const opened=()=>new Response(JSON.stringify({session_token:'a'.repeat(64),session_id:'session',application_id:'gridcraft',page_id:'page'}),{status:201})
+ const xlsx=(headers:Record<string,string>)=>new Response(new Uint8Array([0x50,0x4b,3,4]),{status:200,headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',...headers}})
+ async function exporting(answer:()=>Response){
+  const calls:{url:string;init?:RequestInit}[]=[]
+  const send=vi.fn(async(url:RequestInfo|URL,init?:RequestInit)=>{calls.push({url:String(url),init});return String(url).includes('sessions')?opened():answer()})
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send as unknown as typeof fetch});await client.open(signal())
+  return {client,calls}
+ }
+ it('downloads the confirmed head with the closure admission, named and versioned by the server',async()=>{
+  const {client,calls}=await exporting(()=>xlsx({'Content-Disposition':`attachment; filename="Rozpo_et.xlsx"; filename*=UTF-8''Rozpo%C4%8Det%202026.xlsx`,'X-Craft-Version':'7'}))
+  const got=await client.exportXlsx(signal())
+  expect(got.filename).toBe('Rozpočet 2026.xlsx');expect(got.version).toBe('7');expect(got.blob.size).toBe(4)
+  const call=calls.at(-1)!
+  expect(call.url).toBe('/api/v1/pages/%40page/craft/document/export.xlsx?workspace_id=ws')
+  expect(call.init?.method).toBe('GET');expect(call.init?.cache).toBe('no-store');expect((call.init?.headers as Record<string,string>)['X-Craft-Session']).toBe('a'.repeat(64))
+  await client.exportXlsx(signal(),'3');expect(calls.at(-1)!.url).toBe('/api/v1/pages/%40page/craft/document/export.xlsx?workspace_id=ws&version=3')
+ })
+ it('keeps a file name that cannot leave the download folder, with a fallback',async()=>{
+  for(const [disposition,want] of [
+   [`attachment; filename="plan.xlsx"`,'plan.xlsx'],
+   [`attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd`,'.._.._etc_passwd.xlsx'],
+   [`attachment; filename="a\\b"`,'a_b.xlsx'],
+   [`attachment; filename*=UTF-8''%E0%A4%A`,'Sheet.xlsx'],
+   ['','Sheet.xlsx'],
+  ] as const){
+   const {client}=await exporting(()=>xlsx({...(disposition?{'Content-Disposition':disposition}:{}),'X-Craft-Version':'1'}))
+   expect((await client.exportXlsx(signal())).filename,disposition).toBe(want)
+  }
+ })
+ it('refuses a malformed version before asking and an answer without a version',async()=>{
+  const {client,calls}=await exporting(()=>xlsx({'Content-Disposition':'attachment; filename="a.xlsx"'}))
+  for(const bad of ['0','01','x','1234567890123456789'])await expect(client.exportXlsx(signal(),bad)).rejects.toMatchObject({reason:'bad_version'})
+  expect(calls.filter(c=>c.url.includes('export.xlsx'))).toHaveLength(0)
+  await expect(client.exportXlsx(signal())).rejects.toMatchObject({reason:'failed'})
+ })
+ it('names every refusal for the host, with Retry-After when the server is busy',async()=>{
+  for(const [status,reason] of [[400,'bad_version'],[401,'forbidden'],[403,'forbidden'],[404,'not_found'],[413,'too_large'],[422,'not_sheet'],[500,'failed'],[502,'failed'],[503,'busy']] as const){
+   const {client}=await exporting(()=>new Response(JSON.stringify({error:'x'}),{status,headers:status===503?{'Retry-After':'30'}:{}}))
+   const error=await client.exportXlsx(signal()).catch((e:unknown)=>e)
+   expect(error,String(status)).toBeInstanceOf(NativeExportError)
+   expect((error as NativeExportError).reason).toBe(reason)
+   expect((error as NativeExportError).retryAfterSeconds).toBe(status===503?30:undefined)
+  }
+ })
+})
+
+describe("workbook Sheet transport",()=>{
+ const XLSM="application/vnd.ms-excel.sheet.macroEnabled.12",XLSX="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+ const opened=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"gridcraft",page_id:"page"}),{status:201})
+ const file=new Uint8Array([0x50,0x4b,3,4,9,8,7,6,5])
+ const hash=async(b:Uint8Array)=>"sha256:"+Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new Uint8Array(b))),x=>x.toString(16).padStart(2,"0")).join("")
+ const meta=async(extra:Record<string,unknown>={})=>({version:"3",applicationId:"gridcraft",format:"xlsm",fileName:"Rozpočet.xlsm",size:String(file.length),contentHash:await hash(file),enginePin:"e".repeat(64),editorBundle:"c".repeat(64),editorURL:"/_editor/b/"+"c".repeat(64)+"/index.html",quota:{usedBytes:"10",limitBytes:"100",warning:false,retention:"keep",level:"none"},...extra})
+ const ascii=(v:unknown)=>JSON.stringify(v).replace(/[\u007f-￿]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"))
+ const binary=async(m:Record<string,unknown>,body=file,headers:Record<string,string>={})=>new Response(body as BodyInit,{status:200,headers:{"Content-Type":XLSM,"X-Craft-Version":String(m.version),"X-Craft-Content-Hash":String(m.contentHash),ETag:`"${m.contentHash}"`,"X-Craft-Document":ascii(m),...headers}})
+ it("reads the stored file as it is, with its format and name",async()=>{
+  const m=await meta()
+  const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():binary(m))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const got=await client.read(signal())
+  expect(Array.from(got.bytes)).toEqual(Array.from(file))
+  expect(got).toMatchObject({version:"3",format:"xlsm",fileName:"Rozpočet.xlsm",contentHash:m.contentHash,applicationId:"gridcraft"})
+ })
+ // The engine the server runs, as the installed package names it; a malformed one is not taken.
+ it("names the server's engine build when the server gives one, and nothing otherwise",async()=>{
+  for(const [engineBuild,want] of [["0.19.1+59f6b6c14a37 patch dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","0.19.1+59f6b6c14a37 patch dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],[undefined,undefined],["0.19.1 patch x",undefined]] as const){
+   const m=await meta(engineBuild===undefined?{}:{engineBuild})
+   const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():binary(m))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+   expect((await client.read(signal())).engineBuild,String(engineBuild)).toBe(want)
+  }
+ })
+ it("never opens a file whose bytes differ from the hash the server named",async()=>{
+  const m=await meta()
+  for(const r of [()=>binary(m,new Uint8Array([0x50,0x4b,0,0])),()=>binary({...m,version:"4"},file,{"X-Craft-Version":"3"}),()=>binary({...m,format:"xls"})]){
+   const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():r())
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+   await expect(client.read(signal())).rejects.toThrow("invalid_native_document")
+  }
+ })
+ // The cells the person changed go with the save in X-Craft-Touched, as ASCII JSON (a sheet name
+ // outside ASCII is escaped), or "unknown"; a save that does not know sends nothing, which the server takes as unknown.
+ it("sends the cells the person changed with the save, and nothing when it does not know",async()=>{
+  const seen:Array<string|null>=[]
+  const send=vi.fn(async(url:RequestInfo|URL,init?:RequestInit)=>{if(String(url).includes("sessions"))return opened();seen.push(new Headers(init?.headers).get("X-Craft-Touched"));return new Response(JSON.stringify({version:"4"}),{status:200})})
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const save:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"gridcraft",enginePin:"e".repeat(64),baseVersion:"3",generation:"2",sessionId:"public-session",editorRevision:"doc-1:7",contentHash:await hash(file),format:"xlsx",bytes:file}
+  await client.save({...save,touched:["'Rozpočet'!B2","'L'!A1:C9"]},signal())
+  await client.save({...save,touched:[]},signal())
+  await client.save({...save,touched:"unknown"},signal())
+  await client.save(save,signal())
+  expect(seen).toEqual(['["\'Rozpo\\u010det\'!B2","\'L\'!A1:C9"]',"[]","unknown",null])
+  expect(JSON.parse(seen[0]!)).toEqual(["'Rozpočet'!B2","'L'!A1:C9"])
+ })
+ it("saves the file as the raw body with the binding in headers, and names refusals by code",async()=>{
+  const calls:Array<{url:string;init?:RequestInit}>=[]
+  const answers=[new Response(JSON.stringify({version:"4"}),{status:200}),new Response(JSON.stringify({code:"quota",error:"x"}),{status:413}),new Response(JSON.stringify({code:"unpacked_too_large",error:"x"}),{status:413}),new Response(JSON.stringify({code:"encrypted",error:"x"}),{status:415}),new Response(JSON.stringify({code:"conflict",error:"x"}),{status:409})]
+  const send=vi.fn(async(url:RequestInfo|URL,init?:RequestInit)=>{if(String(url).includes("sessions"))return opened();calls.push({url:String(url),init});return answers.shift()!})
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const save:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"gridcraft",enginePin:"e".repeat(64),baseVersion:"3",generation:"2",sessionId:"public-session",editorRevision:"doc-1:7",contentHash:await hash(file),attemptId:"att-1",format:"xlsx",bytes:file}
+  await expect(client.save(save,signal())).resolves.toEqual({version:"4"})
+  const h=new Headers(calls[0].init?.headers)
+  expect(calls[0].url).toBe("/api/v1/pages/%40page/craft/document/save?workspace_id=ws")
+  expect(calls[0].init?.body).toBe(file)
+  expect(Object.fromEntries(["Content-Type","X-Craft-Session","X-Craft-Generation","X-Craft-Base-Version","X-Craft-Editor-Revision","X-Craft-Content-Hash","X-Craft-Engine-Pin","X-Craft-Attempt"].map(k=>[k,h.get(k)]))).toEqual({"Content-Type":XLSX,"X-Craft-Session":"b".repeat(64),"X-Craft-Generation":"2","X-Craft-Base-Version":"3","X-Craft-Editor-Revision":"doc-1:7","X-Craft-Content-Hash":save.contentHash,"X-Craft-Engine-Pin":"e".repeat(64),"X-Craft-Attempt":"att-1"})
+  for(const reason of ["quota","too_large","unsupported","conflict"]){
+   try{await client.save(save,signal());expect.fail(reason)}catch(error){expect(error).toBeInstanceOf(NativeSaveError);expect((error as NativeSaveError).reason).toBe(reason)}
+  }
+ })
+ // A save that would lose macros, signatures or customXml is refused (422 fidelity_loss) and nothing is stored.
+ it("tells a save refused for losing parts of the workbook from other refusals",async()=>{
+  const answers=[new Response(JSON.stringify({code:"fidelity_loss",parts:[{code:"vba",count:1}]}),{status:422}),new Response(JSON.stringify({code:"other"}),{status:422})]
+  const send=vi.fn(async(url:RequestInfo|URL)=>{if(String(url).includes("sessions"))return opened();return answers.shift()!})
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const save:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"gridcraft",enginePin:"e".repeat(64),baseVersion:"3",generation:"2",sessionId:"public-session",editorRevision:"doc-1:7",contentHash:await hash(file),attemptId:"att-1",format:"xlsm",bytes:file}
+  await expect(client.save(save,signal())).rejects.toMatchObject({reason:"fidelity_loss"})
+  await expect(client.save(save,signal()),"another 422 is not called a loss of parts").rejects.not.toMatchObject({reason:"fidelity_loss"})
+ })
+ // A save refused because the Sheet moved on is told apart; Keep mine says so in a header.
+ it("tells a save refused because the Sheet moved on from other conflicts, and marks a Keep mine save",async()=>{
+  const calls:Array<{url:string;init?:RequestInit}>=[]
+  const answers=[new Response(JSON.stringify({code:"moved",head:"5"}),{status:409}),new Response(JSON.stringify({code:"lease"}),{status:409}),new Response(JSON.stringify({version:"6"}),{status:200})]
+  const send=vi.fn(async(url:RequestInfo|URL,init?:RequestInit)=>{if(String(url).includes("sessions"))return opened();calls.push({url:String(url),init});return answers.shift()!})
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const save:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"gridcraft",enginePin:"e".repeat(64),baseVersion:"3",generation:"2",sessionId:"public-session",editorRevision:"doc-1:7",contentHash:await hash(file),attemptId:"att-1",format:"xlsx",bytes:file}
+  for(const reason of ["moved","conflict"]){
+   try{await client.save(save,signal());expect.fail(reason)}catch(error){expect((error as NativeSaveError).reason).toBe(reason)}
+  }
+  expect(new Headers(calls[0].init?.headers).get("X-Craft-Rebase")).toBeNull()
+  await client.save({...save,baseVersion:"5",rebase:"keep-local"},signal())
+  expect(new Headers(calls[2].init?.headers).get("X-Craft-Rebase")).toBe("keep-local")
+ })
+ it("reads a saved version's file and starts a Sheet from an uploaded workbook",async()=>{
+  const m=await meta({version:"1",currentVersion:"3",current:false,createdAt:"2026-11-26T10:00:00Z",author:{actorId:"user:u",kind:"human",displayName:"Owner"}})
+  const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():binary(m))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+  const v=await client.version("1",signal())
+  expect(v).toMatchObject({version:"1",currentVersion:"3",current:false,format:"xlsm",contentHash:m.contentHash});expect(Array.from(v.bytes)).toEqual(Array.from(file))
+  const init=vi.fn(async(_url:RequestInfo|URL,_init?:RequestInit)=>new Response("{}",{status:201}))
+  await initializeNativeWorkbook({workspaceId:"ws",pageId:"page",file:new Blob([file]),fileName:"Rozpočet 2026.xlsm",fetch:init as unknown as typeof fetch})
+  const [url,sent]=init.mock.calls[0]
+  expect(String(url)).toBe("/api/v1/pages/%40page/craft/initialize?workspace_id=ws")
+  const h=new Headers(sent?.headers)
+  expect(h.get("Content-Type")).toBe(XLSM);expect(h.get("X-Craft-File-Name")).toBe("Rozpo%C4%8Det%202026.xlsm");expect(sent?.body).toBeInstanceOf(Blob)
+  await expect(initializeNativeWorkbook({workspaceId:"ws",pageId:"page",file:new Blob([new Uint8Array(64*1024*1024+1)]),fileName:"big.xlsx",fetch:init as unknown as typeof fetch})).rejects.toThrow("native_workbook_too_large")
+  expect(init).toHaveBeenCalledTimes(1)
+  expect(h.has("X-Craft-Chat")).toBe(false)
+  await initializeNativeWorkbook({workspaceId:"ws",pageId:"page",file:new Blob([file]),fileName:"a.xlsx",chatId:"chat_1",fetch:init as unknown as typeof fetch})
+  expect(new Headers(init.mock.calls[1][1]?.headers).get("X-Craft-Chat")).toBe("chat_1")
+  await expect(initializeNativeWorkbook({workspaceId:"ws",pageId:"page",file:new Blob([file]),fileName:"a.xlsx",chatId:"bad id",fetch:init as unknown as typeof fetch})).rejects.toThrow("invalid_native_workbook")
+  expect(init).toHaveBeenCalledTimes(2)
+ })
+})
+
+// The undo endpoint needs the editor's session and its lease generation.
+describe('undo of an agent change',()=>{
+ const admission=()=>new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'s',application_id:'gridcraft',page_id:'page'}))
+ it('sends the operation under the session and the lease generation, and hands back the server answer',async()=>{
+  const answer=new Response(JSON.stringify({version:'12',skipped:0}),{status:201})
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(answer)
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  await expect(client.undo('run-1:req-2','7',signal())).resolves.toBe(answer)
+  expect(String(send.mock.calls[1][0])).toBe('/api/v1/pages/%40page/craft/document/undo?workspace_id=ws')
+  const init=send.mock.calls[1][1] as RequestInit
+  expect(init).toMatchObject({method:'POST',cache:'no-store',body:JSON.stringify({operation_id:'run-1:req-2'})})
+  expect(new Headers(init.headers).get('X-Craft-Session')).toBe('b'.repeat(64))
+  expect(new Headers(init.headers).get('X-Craft-Generation')).toBe('7')
+ })
+ it('sends nothing for a malformed operation or generation',async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission())
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  for(const [op,gen] of [['bad id','7'],['op','0x'],['','7']])await expect(client.undo(op,gen,signal())).rejects.toThrow('native_undo_invalid')
+  expect(send).toHaveBeenCalledTimes(1)
+ })
+})
+

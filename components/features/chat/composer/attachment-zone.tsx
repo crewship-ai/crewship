@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
+import { useSheetIntake } from "../artifact-context/sheet/sheet-intake"
 import {
   abortIfPending,
   clearAbort,
@@ -208,6 +209,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   const { workspaceId } = useWorkspace()
   const ensureChatSession = useContext(EnsureChatSessionContext)
   const { key: storeKey, ready } = useAttachmentScope(sessionId)
+  const sheetIntake = useSheetIntake()
 
   /** One file, start to finish. The chip already exists in the store and is
    *  patched IN PLACE — never removed and re-added, which would move it to the
@@ -303,11 +305,14 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   )
 
   const upload = useCallback(
-    async (files: File[], source?: AttachmentSource) => {
+    async (added: File[], source?: AttachmentSource) => {
       if (!workspaceId || !ready) {
         toast.error("Still signing in — try again in a moment")
         return
       }
+      // A workbook is also offered as a Sheet; one too large to attach is only offered.
+      const files = sheetIntake ? sheetIntake(added) : added
+      if (files.length === 0) return
       const epoch = currentScopeEpoch()
       // Optimistically add chips with status: uploading; flip to ready
       // (with the server-side path) on success or to error on fail.
@@ -350,7 +355,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         queued.map(({ att, file }) => queueFor(storeKey).enqueue(att.id, () => runUpload(att, file, workspaceId, epoch, source))),
       )
     },
-    [sessionId, storeKey, workspaceId, ready, addAttachments, runUpload],
+    [sessionId, storeKey, workspaceId, ready, addAttachments, runUpload, sheetIntake],
   )
 
   /** Re-send a chip whose upload was refused, keeping its id and its place in

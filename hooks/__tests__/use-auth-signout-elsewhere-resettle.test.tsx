@@ -5,7 +5,7 @@ import { act, render, waitFor } from "@testing-library/react"
 vi.mock("@/lib/artifact-drafts", () => ({ suspendOtherArtifactDrafts: vi.fn(async () => {}), finishArtifactDraftIdentity: vi.fn(), captureArtifactDrafts: vi.fn(async () => []), removeCapturedArtifactDrafts: vi.fn(async () => {}), captureLegacyLocalDrafts: vi.fn(() => []), removeCapturedLegacyLocalDrafts: vi.fn() }))
 const suspendDocuments = vi.hoisted(() => vi.fn(async (_human: string | null) => {}))
 vi.mock("@/lib/document-queue", () => ({ suspendOtherDocumentDrafts: suspendDocuments, captureDocumentDrafts: vi.fn(async () => []), removeCapturedDocumentDrafts: vi.fn(async () => {}) }))
-import { AuthProvider, useAuth, sessionRetryPolicy } from "@/hooks/use-auth"
+import { AuthProvider, useAuth, sessionEndDraftRetry, sessionRetryPolicy } from "@/hooks/use-auth"
 import { AUTH_CHANNEL, AUTH_EVENT } from "@/lib/api-fetch"
 import { SIGNED_OUT_URL } from "@/lib/signed-out"
 
@@ -16,6 +16,7 @@ const okJSON = (body: unknown) => ({ ok: true, status: 200, json: async () => bo
 const signedOut = () => ({ ok: false, status: 401, json: async () => ({}) }) as unknown as Response
 const user = (id: string) => okJSON({ user: { id, name: id, email: `${id}@b` }, expires: "2099-01-01" })
 const realPolicy = { ...sessionRetryPolicy }
+const realRetry = [...sessionEndDraftRetry.delaysMs]
 let mockFetch: ReturnType<typeof vi.fn>
 let auth!: ReturnType<typeof useAuth>
 
@@ -106,10 +107,12 @@ it("removes chat recovery after a real sign-out even when the drafts step fails"
     mockFetch.mockResolvedValueOnce(user("ana"))
     render(<AuthProvider><Probe /></AuthProvider>)
     await waitFor(() => expect(auth.session?.user.id).toBe("ana"))
-    suspendDocuments.mockRejectedValueOnce(new Error("idb"))
+    // The drafts step keeps failing: a single miss is tried again and passes (use-auth-session-end-draft-retry).
+    sessionEndDraftRetry.delaysMs = [1, 1, 1]
+    suspendDocuments.mockRejectedValue(new Error("idb"))
     mockFetch.mockResolvedValueOnce(signedOut())
     act(() => { channel().onmessage?.({ data: { type: "signout", human: "ana" } }) })
     await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
     expect(replace).not.toHaveBeenCalled()
-  } finally { sessionStorage.removeItem(key); replace.mockRestore() }
+  } finally { sessionStorage.removeItem(key); replace.mockRestore(); suspendDocuments.mockReset().mockResolvedValue(undefined); sessionEndDraftRetry.delaysMs = realRetry }
 })

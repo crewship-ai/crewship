@@ -136,7 +136,7 @@ function AccessView({ workspaceId, chatId, viewerId, pageId, chooseDocument, cho
   const unavailable = query.isError || expired
   if (pageId) return <section aria-label="Document edit provenance" className="shrink-0 border-b p-2 text-xs">
     {!artifacts ? <p role="status">{unavailable ? "Current provenance access could not be verified." : "Checking edit provenance…"}</p>
-      : artifacts.length === 0 ? <p>Origin: unknown. No authorized recorded agent edit is available.</p> : <EditRows artifacts={artifacts} pageView />}
+      : artifacts.length === 0 ? <p>No agent edits are recorded for this document.</p> : <EditRows artifacts={artifacts} pageView />}
     {artifacts && query.data?.truncated && <p>Only recent recorded edits are shown.</p>}
   </section>
   if (chooseDocument) {
@@ -152,24 +152,24 @@ function AccessView({ workspaceId, chatId, viewerId, pageId, chooseDocument, cho
   return <><section aria-label="Recorded document edits" className="mb-4 space-y-2 border-b pb-3">
     <h3 className="eyebrow">Documents edited in this chat</h3>
     {!artifacts ? <p role="status">{unavailable ? "Current edit access could not be verified." : "Checking recorded edits…"}</p>
-      : artifacts.length === 0 ? <p>No authorized recorded agent edits.</p> : <EditRows artifacts={artifacts} />}
+      : artifacts.length === 0 ? <p>No document edits by the agent are recorded in this chat. Changes to a Sheet show as cards in the conversation.</p> : <EditRows artifacts={artifacts} />}
     {artifacts && query.data?.truncated && <p>Only recent recorded edits are shown.</p>}
   </section><section aria-label="Agent document access" className="mb-4 space-y-2 border-b pb-3">
-    <h3 className="eyebrow">Agent document access</h3>
-    <p className="text-muted-foreground">Document grants and this chat’s active tasks are shown separately. Change access in the document’s Share menu.</p>
+    <h3 className="eyebrow">Documents the agent can open</h3>
+    <p className="text-muted-foreground">Change what the agent may open in the document's Share menu.</p>
     {!documents ? <p role="status" className="text-muted-foreground">{unavailable ? "Current access could not be verified." : "Checking current access…"}</p>
-      : documents.length === 0 ? <p className="text-muted-foreground">No document grants visible to you.</p>
+      : documents.length === 0 ? <p className="text-muted-foreground">The agent cannot open any document you can see.</p>
       : <ul className="space-y-2">{documents.map((doc) => <li key={doc.page_id} className="rounded-xl border border-border bg-card p-2.5">
         <a className="font-medium text-primary underline" href={chatItemHref(null, doc.page_id, `/pages/${encodeURIComponent("@" + doc.page_id)}`)}>{doc.title}</a>
-        <p>Document grant: {doc.document_grant === "write" ? "read and write" : "read only"}</p>
+        <p>Agent access: {doc.document_grant === "write" ? "read and write" : "read only"}</p>
         {!doc.policy_allows && <p className="text-muted-foreground">Agent access is blocked by workspace policy.</p>}
         {doc.task_status === "active" && doc.policy_allows && doc.tasks.some((task) => Date.parse(task.expires_at) > Date.now())
           ? doc.tasks.filter((task) => Date.parse(task.expires_at) > Date.now()).map((task) => <div key={task.run_id}>
-            <p>Current task: {task.can_write ? "read and write" : "read only"} · this document</p>
+            <p>Working on it now: {task.can_write ? "read and write" : "read only"}</p>
             <p className="break-all text-muted-foreground">Task {task.work_id} · valid until <time dateTime={task.expires_at}>{new Date(task.expires_at).toLocaleString()}</time></p>
           </div>)
-          : <p className="text-muted-foreground">{doc.task_status === "unavailable" ? "Current task permissions are unavailable." : "No verified active task in this chat."}</p>}
-        <p className="text-muted-foreground">Origin: unknown</p>
+          : <p className="text-muted-foreground">{doc.task_status === "unavailable" ? "Whether the agent is working on it now could not be checked." : "The agent is not working on it in this chat now."}</p>}
+        <p className="text-muted-foreground">Who created it: not recorded</p>
       </li>)}</ul>}
   </section></>
 }
