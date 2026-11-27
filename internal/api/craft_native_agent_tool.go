@@ -974,8 +974,9 @@ func craftResolvedWriteRange(address string, rangeRaw, valuesRaw json.RawMessage
 // for a Sheet kept as its workbook file.
 func craftNativeAgentWorkbookRecord(e *craftNativeAgentEntry, store *mooring.NativeStore, base int64, requestID string, ops, inverse json.RawMessage, record mooring.NativeRecord) mooring.NativeRecord {
 	agent := e.grant.AgentID
+	var chat, run string
 	if e.chat != nil {
-		agent = e.chat.authority.AgentID
+		agent, chat, run = e.chat.authority.AgentID, e.chat.authority.ChatID, e.chat.authority.RunID
 	}
 	pin, scope := store.EnginePin(), e.grant.Scope
 	operation := nativeAgentOperationID(e, requestID)
@@ -989,7 +990,7 @@ func craftNativeAgentWorkbookRecord(e *craftNativeAgentEntry, store *mooring.Nat
 			}
 		}
 		return recordCraftVersionOps(ctx, tx, craftVersionOps{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version, BaseVersion: base,
-			ActorKind: "agent", ActorID: agent, OperationID: operation, EnginePin: pin, Calculate: "calculated", Replayable: true, Ops: ops, Inverse: inverse})
+			ActorKind: "agent", ActorID: agent, ChatID: chat, RunID: run, OperationID: operation, EnginePin: pin, Calculate: "calculated", Replayable: true, Ops: ops, Inverse: inverse})
 	}
 }
 

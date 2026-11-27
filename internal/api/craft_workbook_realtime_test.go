@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strconv"
@@ -359,5 +360,112 @@ func TestSheetITRealtimePresenceAndChatDetachment(t *testing.T) {
 	}
 	if event, data := next(); event != "session_retired" || data["draft"] != "retain" {
 		t.Fatalf("detached stream: %s %v", event, data)
+	}
+}
+
+func TestSheetITRealtimeSaveRetriesCASAgainstBothAgentWrites(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Change the status cells", true)
+	call, admission := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	first, refused := s.toolCall(call, "craft_sheet_apply", sitApply(generation, "realtime-agent-first"))
+	if refused || s.head() != 2 {
+		t.Fatalf("first agent write: %s", first)
+	}
+	human := sitInitialL()
+	human["B2"], human["B7"] = "human B2", "human B7"
+	submitted := sitWorkbook(human, sitInitialOther())
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	stop := func() { releaseOnce.Do(func() { close(release) }) }
+	defer stop()
+	original := s.m.config.AgentApply
+	var mergeCalls int
+	s.m.config.AgentApply = func(ctx context.Context, p CraftNativeDocumentProfile, workbook []byte, commands json.RawMessage) ([]byte, error) {
+		if craftNativeUndo(ctx) {
+			mergeCalls++
+			if mergeCalls == 1 {
+				close(entered)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+		}
+		return original(ctx, p, workbook, commands)
+	}
+	saved := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		saved <- s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submitted, "realtime-racing-save", "", map[string]string{"X-Craft-Touched": `["'L'!B2","'L'!B7"]`})
+	}()
+	select {
+	case <-entered:
+	case w := <-saved:
+		t.Fatalf("save returned before reaching replay: %d %s", w.Code, w.Body)
+	case <-time.After(10 * time.Second):
+		t.Fatal("save did not reach replay")
+	}
+	second, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"generation": generation, "base_version": "2", "request_id": "realtime-agent-second",
+		"commands": sitCommands(sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "B7", "input": "agent B7"})),
+	})
+	if refused || s.head() != 3 {
+		t.Fatalf("second agent write: %s", second)
+	}
+	stop()
+	select {
+	case w := <-saved:
+		var data craftRealtimeMerged
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &data) != nil || mergeCalls != 2 ||
+			data.Receipt.BaseVersion != "3" || data.Receipt.Version != "4" ||
+			!reflect.DeepEqual(data.Overlap, []craftSheetRange{{"L", "B7"}}) ||
+			!reflect.DeepEqual(data.AgentRanges, []craftSheetRange{{"L", "B8"}, {"L", "B7"}}) {
+			t.Fatalf("CAS did not rebase against both changes: code=%d calls=%d receipt=%+v overlaps=%v ranges=%v",
+				w.Code, mergeCalls, data.Receipt, data.Overlap, data.AgentRanges)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("save did not finish after the CAS race")
+	}
+	head := s.headSheets(admission.SessionToken)["L"]
+	if head["B2"] != "human B2" || head["B7"] != "agent B7" || head["B8"] != "done" {
+		t.Fatalf("unexpected merged worksheet: %v", head)
+	}
+}
+
+func TestSheetITRealtimeRefusesUnknownEditsAndWriteAfterDetachment(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Change the status cells", true)
+	call, admission := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	if got, refused := s.toolCall(call, "craft_sheet_apply", sitApply(generation, "realtime-then-revoked")); refused {
+		t.Fatal(got)
+	}
+	human := sitInitialL()
+	human["B2"], human["B3"] = "human B2", "human B3"
+	submitted := sitWorkbook(human, sitInitialOther())
+	for i, touched := range []string{"", "unknown", `["'L'!B2"]`} {
+		headers := map[string]string{}
+		if touched != "" {
+			headers["X-Craft-Touched"] = touched
+		}
+		w := s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submitted, fmt.Sprintf("realtime-unproved-%d", i), "", headers)
+		if (w.Code != 409 && w.Code != 422) || s.head() != 2 {
+			t.Fatalf("unknown/incomplete edits changed head: %d %s", w.Code, w.Body)
+		}
+	}
+	original := s.m.config.AgentApply
+	var computed bool
+	s.m.config.AgentApply = func(ctx context.Context, p CraftNativeDocumentProfile, workbook []byte, commands json.RawMessage) ([]byte, error) {
+		merged, err := original(ctx, p, workbook, commands)
+		if err == nil && craftNativeUndo(ctx) {
+			computed = true
+			_, err = s.f.rig.db.ExecContext(ctx, `DELETE FROM artifact_message_refs WHERE chat_id=? AND page_id='sheet-own'`, s.f.a.ChatID)
+		}
+		return merged, err
+	}
+	w := s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submitted, "realtime-detached-save", "", map[string]string{"X-Craft-Touched": `["'L'!B2:B3"]`})
+	if !computed || w.Code != 403 || s.head() != 2 {
+		t.Fatalf("detachment did not fence computed save: computed=%v head=%d code=%d response=%s", computed, s.head(), w.Code, w.Body)
 	}
 }

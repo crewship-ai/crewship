@@ -17,3 +17,8 @@ CREATE TABLE craft_realtime_attempts (
  PRIMARY KEY(page_id,session_id,attempt_id)
 );
 CREATE INDEX craft_realtime_attempts_expiry ON craft_realtime_attempts(boot_id,deadline_ns);
+
+-- Native chat publications carry the original chat and, for an agent, run.
+-- Older workbook journals stay readable and do not prove a real-time merge.
+ALTER TABLE craft_version_ops ADD COLUMN chat_id TEXT;
+ALTER TABLE craft_version_ops ADD COLUMN run_id TEXT;

@@ -199,6 +199,7 @@ type craftVersionOps struct {
 	WorkspaceID, PageID                                   string
 	Version, BaseVersion                                  int64
 	ActorKind, ActorID, ActorName, OperationID, EnginePin string
+	ChatID, RunID                                         string
 	Calculate                                             string
 	Replayable                                            bool
 	Ops, Inverse                                          json.RawMessage
@@ -229,8 +230,8 @@ func recordCraftVersionOps(ctx context.Context, tx *sql.Tx, o craftVersionOps) e
 	if o.Digest != "" {
 		digest = o.Digest
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO craft_version_ops(workspace_id,page_id,version,base_version,actor_kind,actor_id,actor_name,operation_id,engine_pin,calculate,replayable,ops,inverse,digest,created_at)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, o.WorkspaceID, o.PageID, o.Version, o.BaseVersion, o.ActorKind, o.ActorID, o.ActorName, o.OperationID, o.EnginePin, o.Calculate, o.Replayable, string(ops), string(inverse), digest, tsformat.Format(time.Now().UTC()))
+	_, err := tx.ExecContext(ctx, `INSERT INTO craft_version_ops(workspace_id,page_id,version,base_version,actor_kind,actor_id,actor_name,operation_id,engine_pin,calculate,replayable,ops,inverse,digest,created_at,chat_id,run_id)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, o.WorkspaceID, o.PageID, o.Version, o.BaseVersion, o.ActorKind, o.ActorID, o.ActorName, o.OperationID, o.EnginePin, o.Calculate, o.Replayable, string(ops), string(inverse), digest, tsformat.Format(time.Now().UTC()), o.ChatID, o.RunID)
 	return err
 }
 

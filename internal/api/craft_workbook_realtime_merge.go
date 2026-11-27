@@ -131,7 +131,7 @@ type craftRealtimeChanges struct {
 // write, or change by another human cannot establish the authority to rebase.
 func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, user, agent, chat, pin string, base, head int64) (craftRealtimeChanges, error) {
 	out := craftRealtimeChanges{agentRanges: []craftSheetRange{}}
-	rows, err := db.QueryContext(ctx, `SELECT version,base_version,actor_kind,actor_id,engine_pin,operation_id,replayable,ops
+	rows, err := db.QueryContext(ctx, `SELECT version,base_version,actor_kind,actor_id,engine_pin,COALESCE(chat_id,''),COALESCE(run_id,''),replayable,ops
 		FROM craft_version_ops WHERE workspace_id=? AND page_id=? AND version>? AND version<=? ORDER BY version LIMIT 129`, scope.WorkspaceID, scope.ArtifactID, base, head)
 	if err != nil {
 		return out, err
@@ -140,19 +140,19 @@ func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.Edi
 	next := base
 	for rows.Next() {
 		var version, from int64
-		var kind, actor, engine, id, ops string
+		var kind, actor, engine, rowChat, run, ops string
 		var replayable bool
-		if err := rows.Scan(&version, &from, &kind, &actor, &engine, &id, &replayable, &ops); err != nil {
+		if err := rows.Scan(&version, &from, &kind, &actor, &engine, &rowChat, &run, &replayable, &ops); err != nil {
 			return out, err
 		}
-		if from != next || version != from+1 || engine != pin || head-base > 128 {
+		if from != next || version != from+1 || engine != pin || rowChat != chat || head-base > 128 {
 			return out, errCraftRealtimeUnproved
 		}
 		next = version
 		edits := &out.agent
-		if kind == "human" && actor == user && strings.HasPrefix(id, craftRealtimeOperationPrefix(chat)) {
+		if kind == "human" && actor == user && run == "" {
 			edits = &out.human
-		} else if kind != "agent" || actor != agent || !replayable {
+		} else if kind != "agent" || actor != agent || run == "" || !replayable {
 			return out, errCraftRealtimeUnproved
 		}
 		if kind == "human" && ops == "[]" {

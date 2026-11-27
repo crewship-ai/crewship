@@ -134,7 +134,7 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 			}
 			return recordCraftVersionOps(ctx, tx, craftVersionOps{
 				WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version, BaseVersion: base,
-				ActorKind: "human", ActorID: entry.source.UserID, OperationID: craftRealtimeOperationPrefix(entry.chatID) + strconv.FormatInt(r.Version, 10),
+				ActorKind: "human", ActorID: entry.source.UserID, ChatID: entry.chatID, OperationID: "realtime:" + strconv.FormatInt(r.Version, 10),
 				EnginePin: s.EnginePin(), Calculate: "saved", Ops: ops,
 			})
 		}
@@ -157,10 +157,6 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 		return a.response(receipt, candidate, meta), nil
 	}
 	return nil, errCraftRealtimeUnproved
-}
-
-func craftRealtimeOperationPrefix(chat string) string {
-	return "realtime:" + chat + ":"
 }
 
 func (d *craftNativeDocumentsHTTP) mergeRealtimeWorkbook(ctx context.Context, s *mooring.NativeStore, a craftRealtimeAttempt, base int64, head, submitted []byte, changed []craftRealtimeCell) ([]byte, json.RawMessage, []craftSheetRange, []craftSheetRange, error) {

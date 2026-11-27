@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"time"
@@ -28,7 +29,9 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&body); err != nil || body.ChatID != "" && !craftChatID.MatchString(body.ChatID) {
+	var trailing any
+	if err = decoder.Decode(&body); err != nil || decoder.Decode(&trailing) != io.EOF ||
+		body.ChatID != "" && !craftChatID.MatchString(body.ChatID) {
 		replyError(w, 400, "invalid native session request")
 		return
 	}
