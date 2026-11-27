@@ -9297,9 +9297,24 @@ index a2222226..9dd4cd7c 100644
          if !sh.show_formulas && sh.cell(*c).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_some() {
              let s = 6.0 * z.max(0.7);
 diff --git a/crates/ui-egui/src/grid/show.rs b/crates/ui-egui/src/grid/show.rs
-index e1c5227a..5a6acde7 100644
+index e1c5227a..aa72b552 100644
 --- a/crates/ui-egui/src/grid/show.rs
 +++ b/crates/ui-egui/src/grid/show.rs
+@@ -8,12 +8,12 @@ use super::quadrant::{QuadrantPaint, mirror_painted, paint_quadrant};
+ use super::selection::{SelectionPaintInput, paint_selection};
+ use super::tables::{TableHeading, paint_filter_button, table_headings};
+ use super::{
+-    Align2, Arc, CfCache, Color32, DISPLAY_SCALE, Drag, MAX_COLS, MAX_ROWS, Painter, PaneQuad, RangeRef, Rect, Sense, Sheet, SheetApp, Stroke,
++    Align2, Arc, CellRef, CfCache, Color32, DISPLAY_SCALE, Drag, MAX_COLS, MAX_ROWS, Painter, PaneQuad, RangeRef, Rect, Sense, Sheet, SheetApp, Stroke,
+     StrokeKind, Tokens, WHEEL_ZOOM_IDLE, WheelZoom, Workbook, col_to_letters, heading_font_size, json, pos2, theme, vec2, wheel_zoom_step,
+     zoom_glide_step,
+ };
+ #[cfg(test)]
+-use super::{CellRef, Pos2};
++use super::Pos2;
+ 
+ /// The line positions and outlines of sheet `si`: the ones built for it before while it is the
+ /// same sheet, else built now and kept (see `GridState::lines`).
 @@ -716,8 +716,51 @@ pub(crate) struct OverlayInput<'a> {
      selection: &'a gridcraft_engine::Selection,
  }
