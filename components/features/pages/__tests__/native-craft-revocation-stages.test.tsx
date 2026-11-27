@@ -14,7 +14,10 @@ type Route='sessions'|'reauthorize'|'lease'|'document'|'save'|'events'|'action'|
 const m=vi.hoisted(()=>({server:undefined as unknown as (input:string,init:RequestInit)=>Promise<Response>,port:vi.fn(),journal:vi.fn(),capture:vi.fn(),purge:vi.fn()}))
 vi.mock('@/lib/api-fetch',()=>({apiFetch:(input:string,init:RequestInit)=>m.server(input,init),tryRefresh:async()=>'ok',AUTH_EVENT:'unit-native-auth-retired'}))
 vi.mock('@/lib/server-base',async()=>({...await vi.importActual('@/lib/server-base'),getAuthMode:()=>'bearer'}))
-vi.mock('@/lib/mooring/native-editor-port',()=>({createNativeEditorPort:m.port}))
+vi.mock('@/lib/mooring/native-editor-port',async()=>({
+ ...await vi.importActual<typeof import('@/lib/mooring/native-editor-port')>('@/lib/mooring/native-editor-port'),
+ createNativeEditorPort:m.port,
+}))
 vi.mock('@/lib/mooring/native-draft',async()=>({...await vi.importActual('@/lib/mooring/native-draft'),openNativeDraftJournal:m.journal}))
 vi.mock('@/lib/artifact-drafts',async()=>({...await vi.importActual('@/lib/artifact-drafts'),captureLocalDraftPage:m.capture,purgeLocalDraftPage:m.purge}))
 vi.mock('../native-craft-agent-start',()=>({NativeCraftAgentStart:()=>null}))
