@@ -65,17 +65,17 @@ it("takes a host snapshot as the editor's saved file and acknowledges it with th
   expect(request.type).toBe("gridcraft:save-request")
   r.receive(saved(request.requestId))
   const taken = await snapshot
-  expect(taken).toEqual({ bytes: new Uint8Array([1, 2, 3]), editorRevision: "doc:3", documentId: "doc", nativeState: "doc:3", format: "xlsm" })
+  expect(taken).toEqual({ bytes: new Uint8Array([1, 2, 3]), editorRevision: "doc:3", documentId: "doc", nativeState: "doc:3", captureId: request.requestId, format: "xlsm" })
   await expect(r.adapter.validate({ applicationId: "gridcraft", enginePin: "pinned-engine", sessionId: "s", generation: "9", baseVersion: "1", editorRevision: "doc:3", bytes: taken.bytes }, signal())).resolves.toBeUndefined()
-  expect(await r.adapter.ack(await receipt(r, "doc:3", taken.bytes))).toBe(true)
+  expect(await r.adapter.ack(await receipt(r, "doc:3", taken.bytes), taken.captureId)).toBe(true)
   expect(latest(r)).toEqual({ type: "gridcraft:save-ack", requestId: request.requestId, document: "doc", revision: "3", version: "2" })
 })
 it("never acknowledges a receipt whose hash is not the file the editor gave", async () => {
   const r = rig(); await bootstrap(r)
-  const snapshot = r.adapter.snapshot(signal()); r.receive(saved(latest(r).requestId)); await snapshot
-  expect(await r.adapter.ack(await receipt(r, "doc:3", new Uint8Array([9])))).toBe(false)
+  const snapshot = r.adapter.snapshot(signal()); r.receive(saved(latest(r).requestId)); const taken = await snapshot
+  expect(await r.adapter.ack(await receipt(r, "doc:3", new Uint8Array([9])), taken.captureId)).toBe(false)
   const other = await receipt(r, "doc:3", new Uint8Array([1, 2, 3])); other.workspaceId = "elsewhere"
-  expect(await r.adapter.ack(other)).toBe(false)
+  expect(await r.adapter.ack(other, taken.captureId)).toBe(false)
 })
 it("hands an editor-started save to the coordinator and gives it that same file", async () => {
   const r = rig(); await bootstrap(r)
@@ -93,15 +93,19 @@ it("fails an editor-started save the host could not store with a contract code",
   expect(r.adapter.saveFailed("editor-8", "Saving was not confirmed.")).toBe(true)
   expect(latest(r)).toEqual({ type: "gridcraft:save-failed", requestId: "editor-8", code: "failed", error: "" })
 })
-it("settles a second file of an already saved revision before acknowledging", async () => {
+it("acknowledges each capture of the same revision with its own receipt", async () => {
   const r = rig(); await bootstrap(r)
   const a = r.adapter.snapshot(signal()); const first = latest(r)
   const b = r.adapter.snapshot(signal()); const second = latest(r)
   r.receive(saved(first.requestId)); r.receive(saved(second.requestId))
-  const [taken] = await Promise.all([a, b])
-  expect(await r.adapter.ack(await receipt(r, "doc:3", taken.bytes))).toBe(true)
-  const types = r.port.postMessage.mock.calls.slice(-2).map(([m]) => m as Record<string, unknown>)
-  expect(types).toEqual([{ type: "gridcraft:save-failed", requestId: first.requestId, code: "conflict", error: "" }, { type: "gridcraft:save-ack", requestId: second.requestId, document: "doc", revision: "3", version: "2" }])
+  const [taken, repeated] = await Promise.all([a, b])
+  const committed = await receipt(r, "doc:3", taken.bytes)
+  expect(await r.adapter.ack(committed)).toBe(false)
+  expect(await r.adapter.ack(committed, taken.captureId)).toBe(true)
+  expect(latest(r)).toEqual({ type: "gridcraft:save-ack", requestId: first.requestId, document: "doc", revision: "3", version: "2" })
+  const unchanged = { ...committed, baseVersion: "2", unchanged: true as const }
+  expect(await r.adapter.ack(unchanged, repeated.captureId)).toBe(true)
+  expect(latest(r)).toEqual({ type: "gridcraft:save-ack", requestId: second.requestId, document: "doc", revision: "3", version: "2" })
 })
 it("names the editor's revision as its native state, so an untouched workbook is never saved as a rewritten file", async () => {
   // The editor's file of an unedited workbook is not the stored file byte for byte; the coordinator
@@ -153,7 +157,7 @@ it("asks the editor once per revision after it refused for fidelity, and tells t
   expect(saveRequests(r)).toBe(2)
   r.receive(saved(request.requestId, "4"))
   const taken = await second
-  expect(await r.adapter.ack(await receipt(r as unknown as Rig, "doc:4", taken.bytes))).toBe(true)
+  expect(await r.adapter.ack(await receipt(r as unknown as Rig, "doc:4", taken.bytes), taken.captureId)).toBe(true)
   expect(r.onSaveRefused).toHaveBeenLastCalledWith(null)
 })
 it("hands the host the file a fidelity refusal carries, with the revision it is of", async () => {

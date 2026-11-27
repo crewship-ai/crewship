@@ -679,7 +679,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     // A reconciliation or local receipt retirement can still owe this native
     // request its acknowledgement. The editor needs the original ticket.
     keepsTicket(requestId: string): boolean {
-      return unconfirmed?.requestId === requestId || owedReceipt !== undefined && owedReceipt?.requestId === requestId
+      return unconfirmed?.requestId === requestId || owedReceipt?.requestId === requestId
     },
     /** Hold transmission while a replay moves both the editor and the save base. */
     beginReplay(): (() => void) | undefined {

@@ -283,7 +283,7 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       const file = unanswered.get(requestId)
       if (!file || !u64(version) || closed) return false
       // A newer revision is already the saved baseline: an older file is a conflict, never a baseline.
-      if (lastAcked !== undefined && BigInt(file.revision) <= lastAcked) return false
+      if (lastAcked !== undefined && BigInt(file.revision) < lastAcked) return false
       if (!post({ type: "gridcraft:save-ack", requestId, document: file.document, revision: file.revision, version })) return false
       unanswered.delete(requestId); lastAcked = BigInt(file.revision); return true
     },
