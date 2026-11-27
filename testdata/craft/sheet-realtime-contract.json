@@ -13,7 +13,14 @@
     "can_edit": true,
     "can_write": true,
     "generation": "1",
-    "holder": null
+    "holder": null,
+    "can_stop_agent": false,
+    "mine": false,
+    "expires_at": null,
+    "can_share": false,
+    "acquired_at": null,
+    "handoff_requested_kind": null,
+    "handoff_requested_by": []
   },
   "merged": {
     "kind": "merged",

@@ -29,7 +29,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	// attemptId identifies one save attempt so a reconcile can retire it (#4899).
 	attempt := func() map[string]any {
 		p := properties()
-		p["attemptId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed)."}
+		p["attemptId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "Client nonce of one save attempt. Required for real-time chat workbook saves and reconciliation. An exact committed attempt returns its original receipt even if the head advanced. A proved absent attempt is retired and answered with 410; a late save of it is refused with 409."}
 		return p
 	}
 	snapshot := obj(attempt(), append(append([]string{}, required...), "editorRevision", "contentHash", "bytes")...)
@@ -60,6 +60,23 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	nonnegative := func() map[string]any { return map[string]any{"type": "integer", "format": "int64", "minimum": 0} }
 	enum := func(values ...string) map[string]any { return map[string]any{"type": "string", "enum": values} }
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
+	rangeName := ref("NativeCraftSheetRange")
+	schemas["NativeCraftSheetRange"] = obj(map[string]any{"sheet": str(), "a1": str()}, "sheet", "a1")
+	schemas["NativeCraftSheetPresence"] = obj(map[string]any{
+		"op_id": str(), "run_id": str(),
+		"agent": obj(map[string]any{"id": str(), "name": str()}, "id", "name"),
+		"phase": enum("started", "updated", "ended"), "ranges": array(rangeName), "ttl_ms": nonnegative(),
+	}, "op_id", "run_id", "agent", "phase", "ranges", "ttl_ms")
+	schemas["NativeCraftSheetPresenceSnapshot"] = obj(map[string]any{"operations": array(ref("NativeCraftSheetPresence"))}, "operations")
+	schemas["NativeCraftMergedSheetSave"] = obj(map[string]any{
+		"kind": enum("merged"),
+		"submitted": obj(map[string]any{
+			"attempt_id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$"}, "base_version": version(false), "editor_revision": receipt["editorRevision"],
+			"content_hash": receipt["contentHash"],
+		}, "attempt_id", "base_version", "editor_revision", "content_hash"),
+		"receipt": ref("NativeCraftSnapshotReceipt"), "head_content_hash": receipt["contentHash"],
+		"bytes": bytes(), "overlap": array(rangeName), "agent_ranges": array(rangeName),
+	}, "kind", "submitted", "receipt", "head_content_hash", "bytes", "overlap", "agent_ranges")
 	jobID := map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
 	schemas["NativeCraftWorkbookImportUpload"] = map[string]any{"type": "string", "format": "binary", "description": "Raw .xlsx workbook, up to 64 MiB."}
 	schemas["NativeCraftWorkbookImportAccepted"] = obj(map[string]any{"id": jobID, "state": enum("converting")}, "id", "state")
@@ -133,6 +150,8 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	add("POST", "/save", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	saveKey := "POST /api/v1/pages/{slug}/craft/document/save"
 	save := routes[saveKey]
+	concurrentSave := map[string]any{"oneOf": []any{ref("NativeCraftSnapshotReceipt"), ref("NativeCraftMergedSheetSave")}}
+	save.Response = concurrentSave
 	save.Parameters = append(save.Parameters,
 		map[string]any{"name": "X-Craft-Touched", "in": "header", "schema": map[string]any{"type": "string"}, "description": "Workbook Sheet only. ASCII JSON list of at most 2000 sheet-qualified ranges, up to 64 KiB, or unknown."},
 		map[string]any{"name": "X-Craft-Rebase", "in": "header", "schema": map[string]any{"type": "string", "enum": []string{"keep-local"}}, "description": "Workbook Sheet only. Audits an explicit choice to keep the local snapshot. The base still must equal the head."},
@@ -141,13 +160,17 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	routes[saveKey] = save
 	add("POST", "/import", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/reconcile", "NativeCraftReconcileRequest", "NativeCraftSnapshotReceipt")
+	reconcileKey := "POST /api/v1/pages/{slug}/craft/document/reconcile"
+	reconcileRoute := routes[reconcileKey]
+	reconcileRoute.Response = concurrentSave
+	routes[reconcileKey] = reconcileRoute
 	add("POST", "/restore", "NativeCraftRestoreRequest", "NativeCraftRestoreReceipt")
 	schemas["NativeCraftUndoRequest"] = obj(map[string]any{"operation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 300, "description": "The operation_id of the agent change, as its apply result and the operations listing name it."}}, "operation_id")
 	schemas["NativeCraftUndoReceipt"] = obj(map[string]any{"signature_invalidated": map[string]any{"type": "boolean", "description": "The workbook's XML package signature was kept byte for byte but no longer matches the changed workbook; absent when it has none."}, "version": version(false), "restored": map[string]any{"type": "integer", "minimum": 0, "description": "Cells that got their value from before the agent's change back."}, "skipped": map[string]any{"type": "integer", "minimum": 0, "description": "Cells kept because they were touched since the agent's change."}}, "version", "restored", "skipped")
 	add("POST", "/undo", "NativeCraftUndoRequest", "NativeCraftUndoReceipt")
 	undo := routes["POST /api/v1/pages/{slug}/craft/document/undo"]
 	undo.SuccessStatuses = []string{"200", "201"}
-	undo.Parameters = append(undo.Parameters, map[string]any{"name": "X-Craft-Generation", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[1-9][0-9]{0,18}$"}, "description": "The edit lease generation the caller holds."})
+	undo.Parameters = append(undo.Parameters, map[string]any{"name": "X-Craft-Generation", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[1-9][0-9]{0,18}$"}, "description": "The edit lease generation the caller holds, or the generation of a writable real-time chat Sheet admission."})
 	routes["POST /api/v1/pages/{slug}/craft/document/undo"] = undo
 	author := obj(map[string]any{"actorId": map[string]any{"type": "string", "description": "Recorded actor, `user:<id>`, `agent:<id>` or a system actor."}, "kind": map[string]any{"type": "string", "enum": []string{"human", "agent", "system"}}, "displayName": str()}, "actorId", "kind", "displayName")
 	schemas["NativeCraftVersionAuthor"] = author

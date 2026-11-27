@@ -1,0 +1,228 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/mooring"
+)
+
+type realtimeTestEdit struct {
+	Sheet  string
+	Range  string
+	Values [][]string
+}
+
+func applyRealtimeTestEdits(t *testing.T, sheets map[string]sitCells, edits []realtimeTestEdit) {
+	t.Helper()
+	for _, e := range edits {
+		area, ok := nativeAgentEngineRange(json.RawMessage(strconv.Quote(e.Range)))
+		if !ok || len(e.Values) != area.height() || sheets[e.Sheet] == nil {
+			t.Fatalf("invalid edit in realtime fixture: %+v", e)
+		}
+		for y, row := range e.Values {
+			if len(row) != area.width() {
+				t.Fatalf("invalid edit width in realtime fixture: %+v", e)
+			}
+			for x, value := range row {
+				sheets[e.Sheet][craftUndoA1(area.col1+x, area.row1+y)] = value
+			}
+		}
+	}
+}
+
+func (s *sitScenario) realtimeAdmission() craftNativeSessionResponse {
+	s.t.Helper()
+	req := `{"chat_id":` + strconv.Quote(s.f.a.ChatID) + `}`
+	w := s.humanRequest(http.MethodPost, req, "", nil, s.m.human.sessions)
+	var admission craftNativeSessionResponse
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &admission) != nil ||
+		!admission.RealtimeSheet || !admission.CanWrite || admission.Generation != "1" || admission.SessionToken == "" {
+		s.t.Fatalf("realtime admission: %d %s", w.Code, w.Body)
+	}
+	w = s.humanRequest(http.MethodGet, "", admission.SessionToken, nil, s.m.human.lease)
+	var view craftNativeLeaseResponse
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.Holder != nil ||
+		!view.RealtimeSheet || !view.CanEdit || !view.CanWrite || view.Generation == nil || *view.Generation != admission.Generation {
+		s.t.Fatalf("realtime lease view: %d %s", w.Code, w.Body)
+	}
+	return admission
+}
+
+func (s *sitScenario) realtimeReconcile(admission craftNativeSessionResponse, base, attempt string, snapshot []byte) (int, []byte) {
+	s.t.Helper()
+	body, err := json.Marshal(craftNativeSnapshotBody{
+		WorkspaceID: s.f.a.WorkspaceID, PageID: "sheet-own", ApplicationID: "gridcraft",
+		EnginePin: mooring.NewNativeStore(nil, s.store).EnginePin(), SessionID: admission.SessionID, Generation: admission.Generation,
+		BaseVersion: base, EditorRevision: "sit-doc:" + base, ContentHash: craftContentHash(snapshot), AttemptID: attempt,
+	})
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	w := s.humanRequest(http.MethodPost, string(body), admission.SessionToken, nil, s.m.documents.reconcileSnapshot)
+	return w.Code, w.Body.Bytes()
+}
+
+func TestSheetITRealtimeOrdersAndExactReconcile(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/craft/sheet-realtime-scenarios.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Initial    map[string]sitCells
+		Concurrent struct {
+			Orders       [][]string
+			Human, Agent []realtimeTestEdit
+			Persisted    map[string]sitCells
+		}
+		After struct {
+			LaterHuman [][]realtimeTestEdit           `json:"later_human"`
+			Undo       map[string]map[string]sitCells `json:"undo_persisted_by_commit_order"`
+		} `json:"after_visible_agent_write"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil || len(fixture.Concurrent.Orders) != 2 {
+		t.Fatalf("realtime scenarios fixture: %+v, %v", fixture, err)
+	}
+	for _, order := range fixture.Concurrent.Orders {
+		t.Run(order[0]+"_first", func(t *testing.T) {
+			initial := sitWorkbook(fixture.Initial["L"], fixture.Initial["Other"])
+			s := newSheetITScenario(t, initial)
+			s.send("Update the status cells", true)
+			call := s.agent()
+			agentGeneration := s.acquire(call)
+			admission := s.realtimeAdmission()
+			persisted := s.headSheets(admission.SessionToken)
+			applyRealtimeTestEdits(t, persisted, fixture.Concurrent.Human)
+			submission := sitWorkbook(persisted["L"], persisted["Other"])
+			var first []byte
+			var operation string
+			for _, actor := range order {
+				switch actor {
+				case "human":
+					w := s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submission, "realtime-original", "", map[string]string{"X-Craft-Touched": `["'L'!B2:B4","'Other'!B3"]`})
+					if w.Code != 200 {
+						t.Fatalf("concurrent human save: %d %s", w.Code, w.Body)
+					}
+					first = w.Body.Bytes()
+				case "agent":
+					commands := make([]map[string]any, 0, len(fixture.Concurrent.Agent))
+					for _, edit := range fixture.Concurrent.Agent {
+						commands = append(commands, sitCmd("range.setValues", map[string]any{"sheet": edit.Sheet, "range": edit.Range, "values": edit.Values}))
+					}
+					applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": agentGeneration, "base_version": "1", "request_id": "realtime-agent", "commands": sitCommands(commands...)})
+					var result struct {
+						Undoable  bool
+						Operation string `json:"operation_id"`
+					}
+					if refused || json.Unmarshal([]byte(applied), &result) != nil || !result.Undoable || result.Operation == "" {
+						t.Fatalf("concurrent agent apply: %s", applied)
+					}
+					operation = result.Operation
+				default:
+					t.Fatalf("bad actor in fixture %q", actor)
+				}
+			}
+			if got := s.headSheets(admission.SessionToken); s.head() != 3 || !reflect.DeepEqual(got, fixture.Concurrent.Persisted) {
+				t.Fatalf("persisted head v%d: %v, want %v", s.head(), got, fixture.Concurrent.Persisted)
+			}
+			if order[0] == "agent" {
+				var merged craftRealtimeMerged
+				if err := json.Unmarshal(first, &merged); err != nil || merged.Kind != "merged" ||
+					merged.Submitted.BaseVersion != "1" || merged.Submitted.AttemptID != "realtime-original" ||
+					merged.Submitted.ContentHash != craftContentHash(submission) || merged.Receipt.BaseVersion != "2" ||
+					merged.Receipt.Version != "3" || merged.Receipt.CandidateHash != craftContentHash(merged.Bytes) ||
+					!bytes.Equal(merged.Bytes, s.stored(3)) || !reflect.DeepEqual(merged.AgentRanges, []craftSheetRange{{"L", "B3:B5"}}) ||
+					!reflect.DeepEqual(merged.Overlap, []craftSheetRange{{"L", "B3"}, {"L", "B4"}}) {
+					t.Fatalf("invalid merge response: %+v (%v)", merged.Receipt, err)
+				}
+			}
+			for i, edits := range fixture.After.LaterHuman {
+				cells := s.headSheets(admission.SessionToken)
+				applyRealtimeTestEdits(t, cells, edits)
+				base := strconv.FormatInt(s.head(), 10)
+				body := sitWorkbook(cells["L"], cells["Other"])
+				ranges := make([]string, 0, len(edits))
+				for _, edit := range edits {
+					ranges = append(ranges, "'"+edit.Sheet+"'!"+edit.Range)
+				}
+				touched, _ := json.Marshal(ranges)
+				w := s.humanSaveWith(admission.SessionToken, admission.Generation, base, body, fmt.Sprintf("realtime-later-%d", i), "", map[string]string{"X-Craft-Touched": string(touched)})
+				if w.Code != 200 {
+					t.Fatalf("later human save: %d %s", w.Code, w.Body)
+				}
+			}
+			if status, raw := s.realtimeReconcile(admission, "1", "realtime-original", submission); status != 200 || !bytes.Equal(raw, first) {
+				t.Fatalf("reconcile lost reply after later head: %d, original receipt preserved=%v", status, bytes.Equal(raw, first))
+			}
+			w := s.undo(admission.SessionToken, admission.Generation, operation)
+			if w.Code != 201 || !strings.Contains(w.Body.String(), `"skipped":1`) {
+				t.Fatalf("realtime undo: %d %s", w.Code, w.Body)
+			}
+			if got, want := s.headSheets(admission.SessionToken), fixture.After.Undo[order[0]+"_first"]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("after Undo = %v, want %v", got, want)
+			}
+			if repeat := s.undo(admission.SessionToken, admission.Generation, operation); repeat.Code != 200 || repeat.Body.String() != w.Body.String() {
+				t.Fatalf("realtime repeated undo: %d %s", repeat.Code, repeat.Body)
+			}
+		})
+	}
+}
+
+func TestSheetITRealtimeWireFixture(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/craft/sheet-realtime-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	parse := func(key string, dst any) {
+		t.Helper()
+		decoder := json.NewDecoder(bytes.NewReader(fixtures[key]))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(dst); err != nil {
+			t.Fatalf("fixture %s: %v", key, err)
+		}
+	}
+	var session craftNativeSessionResponse
+	var lease craftNativeLeaseResponse
+	parse("session", &session)
+	parse("lease", &lease)
+	if !session.RealtimeSheet || !lease.RealtimeSheet || lease.Generation == nil || session.Generation != *lease.Generation || !lease.CanWrite || lease.Holder != nil {
+		t.Fatal("realtime session and authority proof differ")
+	}
+	for _, key := range []string{"merged", "merged_unchanged"} {
+		var merged craftRealtimeMerged
+		parse(key, &merged)
+		version, _ := craftNativeVersion(merged.Receipt.Version)
+		base, _ := craftNativeVersion(merged.Receipt.BaseVersion)
+		format, err := mooring.DetectWorkbook(merged.Bytes)
+		hash := craftContentHash(merged.Bytes)
+		if err != nil || format != "xlsx" || merged.Kind != "merged" ||
+			merged.Receipt.Unchanged != (key == "merged_unchanged") || merged.Receipt.Unchanged != (version == base) ||
+			!mooring.ValidNativeAttemptID(merged.Submitted.AttemptID) || merged.Submitted.ContentHash == hash ||
+			merged.HeadContentHash != hash || merged.Receipt.ContentHash != hash || merged.Receipt.CandidateHash != hash ||
+			merged.Receipt.SessionID != session.SessionID || merged.Receipt.Generation != session.Generation ||
+			merged.Receipt.EditorRevision != merged.Submitted.EditorRevision || len(merged.AgentRanges) == 0 || len(merged.Overlap) == 0 {
+			t.Fatalf("invalid %s fixture receipt: %+v", key, merged.Receipt)
+		}
+	}
+	var snapshot craftSheetPresenceSnapshot
+	var start, end craftSheetPresenceEvent
+	parse("presence_snapshot", &snapshot)
+	parse("presence_started", &start)
+	parse("presence_ended", &end)
+	if len(snapshot.Operations) != 1 || !reflect.DeepEqual(snapshot.Operations[0], start) ||
+		start.OpID != end.OpID || start.RunID != end.RunID || start.Phase != "started" || start.TTL != craftSheetPresenceTTL.Milliseconds() ||
+		end.Phase != "ended" || end.TTL != 0 || len(end.Ranges) != 0 {
+		t.Fatalf("invalid presence fixture: %+v %+v", start, end)
+	}
+}
