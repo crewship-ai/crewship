@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bot, ChevronDown, Hash, MessagesSquare, MessageSquare, Plus, Users } from "lucide-react"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspaceConversations, conversationRequest, type WorkspaceConversation } from "@/hooks/use-workspace-conversations"
 import { Button } from "@/components/ui/button"
@@ -61,15 +62,18 @@ function WorkspaceChatProvider({ workspaceId, userId, children }: { workspaceId:
     return () => window.removeEventListener("popstate", read)
   }, [])
   function select(id: string | null) {
-    setSelectedId(id)
-    setSelectionVersion((value) => value + 1)
-    const url = new URL(window.location.href)
-    url.pathname = "/chat"
-    for (const key of ["agent", "session", "prompt", "kind"]) url.searchParams.delete(key)
-    if (id) url.searchParams.set("conversation", id)
-    else url.searchParams.delete("conversation")
-    if (`${window.location.pathname}${window.location.search}` !== `${url.pathname}${url.search}`) window.history.pushState(null, "", url)
-    else window.history.replaceState(null, "", url)
+    const open = () => {
+      setSelectedId(id)
+      setSelectionVersion((value) => value + 1)
+      const url = new URL(window.location.href)
+      url.pathname = "/chat"
+      for (const key of ["agent", "session", "prompt", "kind"]) url.searchParams.delete(key)
+      if (id) url.searchParams.set("conversation", id)
+      else url.searchParams.delete("conversation")
+      if (`${window.location.pathname}${window.location.search}` !== `${url.pathname}${url.search}`) window.history.pushState(null, "", url)
+      else window.history.replaceState(null, "", url)
+    }
+    if (id !== null && id === selectedId || navigationAllowed(open)) open()
   }
   function opened(conversation: WorkspaceConversation) {
     queryClient.setQueryData(["workspace-conversations", workspaceId, userId, conversation.id, "detail"], conversation)

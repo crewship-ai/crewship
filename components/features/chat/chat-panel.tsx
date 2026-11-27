@@ -1387,8 +1387,11 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       ?? document.querySelector<HTMLTextAreaElement>('form textarea[placeholder^="Message "], form textarea[placeholder="Send a message..."]')
     field?.focus()
   }), [])
-  const sheetSession = Boolean(workspaceId && sessionId && currentUserId) && verifiedChatReadScope && !isMobile
-  const sheetTarget = sheetSession && sheet?.scope === artifactScope ? sheet : null
+  const verifiedSheetSession = Boolean(workspaceId && sessionId && currentUserId) && verifiedChatReadScope
+  const sheetSession = verifiedSheetSession && !isMobile
+  // The parent changes the compact layout only after the open Sheet finishes
+  // capturing, even if the phone media query has already changed.
+  const sheetTarget = verifiedSheetSession && mobilePanel === undefined && sheet?.scope === artifactScope ? sheet : null
   // A phone opens no Sheet beside the chat: a Sheet of this conversation is picked for the next message instead.
   const phoneSheetSession = Boolean(workspaceId && sessionId && currentUserId) && verifiedChatReadScope && isMobile
   const [phonePick, setPhonePick] = useState<{ pageId: string; scope: string } | null>(null)

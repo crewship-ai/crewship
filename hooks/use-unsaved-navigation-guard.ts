@@ -23,12 +23,27 @@ function splitQuestion(message: string): { title: string; description?: string }
  * falls back to the browser's confirm(). Reload and closing the tab keep the
  * browser's own prompt — a page cannot replace that one.
  */
-export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
+export function useUnsavedNavigationGuard(enabled: boolean, message: string, prepareLeave?: () => Promise<boolean>) {
   // A traversal repeated after Leave must not be asked about again.
   const passNextTraversal = useRef(false)
+  const preparing = useRef(false)
+  const prepared = useRef(false)
 
   const ask = useCallback(
     (retry: () => void): boolean => {
+      if (prepareLeave) {
+        if (prepared.current) return true
+        if (preparing.current) return false
+        preparing.current = true
+        void prepareLeave().then(ready => {
+          preparing.current = false
+          if (ready) {
+            prepared.current = true
+            try { retry() } finally { prepared.current = false }
+          }
+        }, () => { preparing.current = false })
+        return false
+      }
       if (!confirmHostMounted()) return window.confirm(message)
       const { title, description } = splitQuestion(message)
       void askConfirm({
@@ -42,7 +57,7 @@ export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
       })
       return false
     },
-    [message],
+    [message, prepareLeave],
   )
   useNavigationGuard(ask, enabled)
 
@@ -76,11 +91,11 @@ export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
         else window.history.back()
       })
     }
-    window.addEventListener("beforeunload", beforeUnload)
+    if (!prepareLeave) window.addEventListener("beforeunload", beforeUnload)
     const unregister = registerHistoryNavigationGuard(onPop)
     return () => {
       window.removeEventListener("beforeunload", beforeUnload)
       unregister()
     }
-  }, [enabled, ask])
+  }, [enabled, ask, prepareLeave])
 }
