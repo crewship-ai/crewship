@@ -16964,6 +16964,14 @@
             "pattern": "^sha256:[a-f0-9]{64}$",
             "type": "string"
           },
+          "head_ranges": {
+            "description": "Proved net cell changes from the authorized head that are outside the effective agent ranges. Excludes the submitting attempt and inputs restored to their base.",
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftSheetRange"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
           "kind": {
             "enum": [
               "merged"
@@ -17020,7 +17028,8 @@
           "head_content_hash",
           "bytes",
           "overlap",
-          "agent_ranges"
+          "agent_ranges",
+          "head_ranges"
         ],
         "type": "object"
       },
