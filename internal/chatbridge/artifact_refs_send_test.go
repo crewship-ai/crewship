@@ -21,13 +21,13 @@ func (f *fakeArtifactRefRecorder) ArtifactRefsEnabled(context.Context, string) (
 	return f.enabled, nil
 }
 
-func (f *fakeArtifactRefRecorder) CheckArtifactRefs(ctx context.Context, _ *chataudience.Receipt, _ []string) error {
+func (f *fakeArtifactRefRecorder) CheckArtifactRefVersions(ctx context.Context, _ *chataudience.Receipt, _ []string, _ map[string]int64) error {
 	f.checks++
 	f.storedAtCheck = f.countStored(ctx)
 	return nil
 }
 
-func (f *fakeArtifactRefRecorder) RecordArtifactRefs(ctx context.Context, _ *chataudience.Receipt, _ string, _ []string) error {
+func (f *fakeArtifactRefRecorder) RecordArtifactRefVersions(ctx context.Context, _ *chataudience.Receipt, _ string, _ []string, _ map[string]int64) error {
 	f.records++
 	f.storedAtRecord = f.countStored(ctx)
 	return nil

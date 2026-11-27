@@ -677,7 +677,7 @@ func (h *MemoryMutationHandler) replyMutateError(w http.ResponseWriter, r *http.
 		return
 	}
 	switch {
-	case errors.Is(err, errMemoryRunNotCurrent):
+	case errors.Is(err, errMemoryRunNotCurrent), errors.Is(err, errMemoryArtifactRun):
 		replyError(w, http.StatusForbidden, err.Error())
 		return
 	case errors.Is(err, memory.ErrProfileUnmet),
@@ -783,6 +783,13 @@ func (h *MemoryMutationHandler) authorizeRun(wsID, agentID, runID string, genera
 			return fmt.Errorf("%w: request declared generation %d but the live term is %d",
 				errMemoryRunNotCurrent, generation, itemGeneration)
 		}
+		scoped, err := artifactScopedRun(ctx, h.db, runID)
+		if err != nil {
+			return fmt.Errorf("verify run artifact scope: %w", err)
+		}
+		if scoped {
+			return errMemoryArtifactRun
+		}
 		return nil
 	}
 }
@@ -815,3 +822,8 @@ func memoryRunStateIsLive(state string) bool {
 	}
 	return false
 }
+
+// errMemoryArtifactRun refuses a memory write from a run a human message bound
+// to artifacts (artifact_run_scope): what the agent read there must not become
+// agent or crew memory that another person's chat later reads.
+var errMemoryArtifactRun = errors.New("memory mutation refused: this run works on attached artifacts and learns nothing from them")

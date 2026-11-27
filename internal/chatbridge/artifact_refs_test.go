@@ -16,7 +16,8 @@ func TestRequestedArtifactRefs(t *testing.T) {
 		{"absent", map[string]any{}, nil, false, false},
 		{"text is not a reference", map[string]any{"text": "see artifact ref-own"}, nil, false, false},
 		{"two chips", map[string]any{"artifact_refs": []any{chip("a1"), chip("b2")}}, []string{"a1", "b2"}, true, false},
-		{"empty list", map[string]any{"artifact_refs": []any{}}, nil, false, true},
+		// An explicit empty list is the person's choice of no Sheet, not an error.
+		{"empty list", map[string]any{"artifact_refs": []any{}}, nil, false, false},
 		{"not a list", map[string]any{"artifact_refs": "a1"}, nil, false, true},
 		{"slug instead of id", map[string]any{"artifact_refs": []any{map[string]any{"slug": "a1"}}}, nil, false, true},
 		{"extra field", map[string]any{"artifact_refs": []any{map[string]any{"page_id": "a1", "role": "write"}}}, nil, false, true},

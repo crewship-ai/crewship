@@ -426,3 +426,45 @@ func TestVersionRestoreBelowFreeDiskReserveIsStorageRefusal(t *testing.T) {
 		t.Fatalf("free-disk sentinel is not the aggregate storage refusal: %v", err)
 	}
 }
+
+// One person cannot hold the workspace's upload slots: their third concurrent upload waits, while
+// another member of the same workspace still uploads.
+func TestStorageReservationsAreLimitedPerPerson(t *testing.T) {
+	s, k, a, db := versionFixture(t, VersionOptions{})
+	if _, err := db.Exec(`INSERT INTO users(id,email) VALUES('other','other@example.test')`); err != nil {
+		t.Fatal(err)
+	}
+	other := func(context.Context, *sql.Tx) (string, error) { return "user:other", nil }
+	var held []*StorageUpload
+	defer func() {
+		for _, u := range held {
+			u.Close()
+		}
+	}()
+	for i := 0; i < maxActorStorageUploads; i++ {
+		u, err := s.ReserveUpload(t.Context(), k, 1000, a)
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+		held = append(held, u)
+	}
+	if _, err := s.ReserveUpload(t.Context(), k, 1000, a); !errors.Is(err, ErrStorageBusy) {
+		t.Fatalf("a third upload of the same person: %v", err)
+	}
+	u, err := s.ReserveUpload(t.Context(), k, 1000, other)
+	if err != nil {
+		t.Fatalf("another person is blocked: %v", err)
+	}
+	held = append(held, u)
+	// "user:owner" and "owner" are the same person
+	same := func(context.Context, *sql.Tx) (string, error) { return "user:owner", nil }
+	if _, err := s.ReserveUpload(t.Context(), k, 1000, same); !errors.Is(err, ErrStorageBusy) {
+		t.Fatalf("the same person under the user: prefix: %v", err)
+	}
+	held[0].Close()
+	held = held[1:]
+	if u, err = s.ReserveUpload(t.Context(), k, 1000, a); err != nil {
+		t.Fatalf("after one finished: %v", err)
+	}
+	held = append(held, u)
+}

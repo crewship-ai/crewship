@@ -42,8 +42,38 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	schemas["NativeCraftShareRequest"] = obj(map[string]any{"workspaceId": str(), "pageId": str(), "applicationId": str(), "enginePin": str(), "sessionId": str(), "generation": generation(false), "baseVersion": generation(false), "targetVersion": generation(false)}, "workspaceId", "pageId", "applicationId", "enginePin", "sessionId", "generation", "baseVersion", "targetVersion")
 	schemas["NativeCraftShareRequest"].(map[string]any)["additionalProperties"] = false
 	schemas["NativeCraftShareReceipt"] = obj(map[string]any{"version": generation(false), "durability": map[string]any{"type": "string", "enum": []string{"node"}}, "issuedBy": map[string]any{"type": "string", "enum": []string{"crewship"}}, "phase": map[string]any{"type": "string", "enum": []string{"shared"}}}, "version", "durability", "issuedBy", "phase")
+	schemas["NativeCraftAgentAccess"] = obj(map[string]any{
+		"allowed":         boolean(),
+		"reason":          map[string]any{"type": "string", "enum": []string{"feature_off", "agent_policy", "not_attached", "holder_human", "engine_failed"}, "description": "Why the agent may not change this Sheet: the reason the agent itself would be told. Absent when allowed."},
+		"message":         map[string]any{"type": "string", "description": "The reason as a sentence."},
+		"detail":          map[string]any{"type": "string", "description": "A finer code for the caller, who may read the Sheet: workspace_flag_off, chat_not_private, not_a_sheet, not_owner, not_in_personal_space, no_write_access, agent_unavailable, agents_app_disabled, or an application status reason. New codes may be added."},
+		"holder":          obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "mine": map[string]any{"type": "boolean", "description": "The caller's own editor holds it."}}, "kind", "mine"),
+		"max_sheets":      map[string]any{"type": "integer", "description": "How many Sheets one message may attach for the agent to change; with more it may change none."},
+		"default_allowed": map[string]any{"type": "boolean", "description": "Start the consent switch on: allowed, and the Sheet came into this very chat (uploaded or attached here). It permits nothing; consent is still the sent message."},
+		"head_version":    map[string]any{"type": "string", "pattern": "^[1-9][0-9]{0,17}$", "description": "The Sheet's latest confirmed revision, the one an agent would start from, allowed or not. Only for a caller who may read it (not Read or Comment grantees); absent before the first revision."},
+		"saved_at":        map[string]any{"type": "string", "description": "When that revision was saved (ISO 8601 UTC)."},
+		"saved_by_name":   map[string]any{"type": "string", "description": "Who saved it, named as in the version history."},
+	}, "allowed", "max_sheets", "default_allowed")
+	schemas["ChatArtifactReference"] = obj(map[string]any{
+		"message_id":  str(),
+		"page_id":     str(),
+		"slug":        str(),
+		"name":        str(),
+		"application": map[string]any{"type": "string", "description": "The native Craft application of the page (gridcraft for a Sheet); absent for other pages."},
+		"created_at":  str(),
+		"source":      map[string]any{"type": "string", "enum": []string{"message", "upload"}, "description": "message: a message of the chat attached the page (message_id names it). upload: a Sheet opened from a file in this chat (initialize with X-Craft-Chat) that no message has attached yet; message_id is empty."},
+	}, "message_id", "page_id", "slug", "name", "created_at", "source")
+	schemas["ChatArtifactReferencePage"] = obj(map[string]any{
+		"refs":        map[string]any{"type": "array", "items": ref("ChatArtifactReference")},
+		"next_cursor": map[string]any{"type": "string", "description": "Present when more references may follow; pass it back as cursor."},
+	}, "refs")
 	prefix := "/api/v1/pages/{slug}/craft"
 	routes := map[string]DomainSchema{}
+	routes["GET /api/v1/chats/{chatId}/artifact-refs"] = DomainSchema{Response: ref("ChatArtifactReferencePage"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "503"}, NoRequest: true, Parameters: []map[string]any{
+		{"name": "chatId", "in": "path", "required": true, "schema": str()},
+		{"name": "cursor", "in": "query", "schema": str()},
+		{"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 100}},
+	}}
 	add := func(method, path, req, res, status string, admission bool) {
 		d := DomainSchema{Response: ref(res), SuccessStatuses: []string{status}}
 		if req != "" {
@@ -58,6 +88,10 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		routes[method+" "+prefix+path] = d
 	}
 	add("GET", "/availability", "", "NativeCraftAvailability", "200", false)
+	add("GET", "/agent-access", "", "NativeCraftAgentAccess", "200", false)
+	access := routes["GET "+prefix+"/agent-access"]
+	access.Parameters = []map[string]any{{"name": "chat_id", "in": "query", "required": true, "schema": map[string]any{"type": "string"}, "description": "The caller's own private chat the Sheet would be attached in."}}
+	routes["GET "+prefix+"/agent-access"] = access
 	add("GET", "/preview", "", "NativeCraftPreview", "200", false)
 	add("POST", "/document/share", "NativeCraftShareRequest", "NativeCraftShareReceipt", "200", true)
 	add("POST", "/sessions", "NativeCraftEmptyRequest", "NativeCraftSession", "201", false)

@@ -35,8 +35,10 @@ var craftNativeWriteRoutes = map[string]craftLeaseClass{
 	"POST /api/v1/pages/{slug}/craft/document/import":               craftFencedContent,
 	"POST /api/v1/pages/{slug}/craft/document/restore":              craftFencedContent,
 	"POST /api/v1/pages/{slug}/craft/document/share":                craftFencedContent,
+	"POST /api/v1/pages/{slug}/craft/document/undo":                 craftFencedContent, // workbook Sheets only; TestUndoRefusesAStaleOrMissingLease
 	"POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/accept": craftFencedContent,
 	"POST /api/v1/internal/craft-native/task":                       craftFencedContent, // agent apply; see the agent test
+	"POST /api/v1/internal/craft-native/chat-run":                   craftFencedContent, // chat run apply; TestChatRunSheetApplyWithoutAValidLeaseWritesNothing
 	"POST /api/v1/pages/{slug}/craft/lease/renew":                   craftFencedCustody,
 	"POST /api/v1/pages/{slug}/craft/lease/release":                 craftFencedCustody,
 	"POST /api/v1/pages/{slug}/craft/lease/handoff":                 craftFencedCustody,
@@ -45,6 +47,8 @@ var craftNativeWriteRoutes = map[string]craftLeaseClass{
 	"POST /api/v1/pages/{slug}/craft/lease/request-handoff":         craftNoDocumentWrite,
 	"POST /api/v1/pages/{slug}/craft/document/reconcile":            craftNoDocumentWrite, // read-only proof of an earlier commit
 	"POST /api/v1/pages/{slug}/craft/initialize":                    craftNoDocumentWrite, // only on an empty Page; refused once native
+	"POST /api/v1/pages/{slug}/craft/import":                        craftNoDocumentWrite, // converts into server memory, writes no version; empty owned Page only
+	"POST /api/v1/pages/{slug}/craft/import/{id}/initialize":        craftNoDocumentWrite, // initialize of the converted document: empty Page only, refused once native
 	"POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/reject": craftNoDocumentWrite,
 	"POST /api/v1/pages/{slug}/craft/sessions":                      craftNoDocumentWrite,
 	"POST /api/v1/pages/{slug}/craft/sessions/reauthorize":          craftNoDocumentWrite,
@@ -139,7 +143,7 @@ func TestCraftNativeFencedWriteRoutesRefuseStaleOrMissingLease(t *testing.T) {
 	}
 	// Every fenced route of the classification table (the agent route has its own test).
 	for route, class := range craftNativeWriteRoutes {
-		if class == craftNoDocumentWrite || route == "POST /api/v1/internal/craft-native/task" {
+		if class == craftNoDocumentWrite || route == "POST /api/v1/internal/craft-native/task" || route == "POST /api/v1/internal/craft-native/chat-run" || route == "POST /api/v1/pages/{slug}/craft/document/undo" {
 			continue
 		}
 		if _, ok := routes[route]; !ok {

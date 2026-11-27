@@ -251,6 +251,12 @@ func nativeProposalRevision(id string) string { return "native-proposal:" + id }
 // transaction. If the document content moved on, the proposal becomes stale and the
 // document is untouched.
 func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string) (NativeProposal, NativeSaveReceipt, error) {
+	return s.AcceptProposalRecorded(ctx, l, id, nil)
+}
+
+// AcceptProposalRecorded is AcceptProposal with a record of the accepted
+// version on its saving transaction; record gets the proposal being accepted.
+func (s *NativeStore) AcceptProposalRecorded(ctx context.Context, l EditLease, id string, record func(NativeProposal) NativeRecord) (NativeProposal, NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeProposal{}, NativeSaveReceipt{}, err
 	}
@@ -301,8 +307,11 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 		if err != nil {
 			return NativeProposal{}, NativeSaveReceipt{}, err
 		}
-		request := nativeManifest(base, b)
+		request := s.manifest(base, b)
 		request.Message = message
+		if record != nil {
+			request.Record = record(p).of(b)
+		}
 		decided := false
 		receipt, err = s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, func(ctx context.Context, tx *sql.Tx) (string, error) {
 			actor, err := write(ctx, tx)

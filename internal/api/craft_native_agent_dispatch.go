@@ -5,11 +5,17 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
+
+// errCraftNativeDatabaseNotDurable is the writer's refusal on a connection that
+// is not synchronous FULL. The agent is told only that it was refused (it wraps
+// errCraftNativeAgentDenied); the operator's log names the cause.
+var errCraftNativeDatabaseNotDurable = fmt.Errorf("%w: database not durable", errCraftNativeAgentDenied)
 
 func (m *craftNativeAgentManager) writer(ctx context.Context) (*sql.Tx, error) {
 	tx, err := m.human.pages.db.BeginTx(ctx, nil)
@@ -23,7 +29,7 @@ func (m *craftNativeAgentManager) writer(ctx context.Context) (*sql.Tx, error) {
 	var synchronous int
 	if err = tx.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous); err != nil || synchronous < 2 {
 		tx.Rollback()
-		return nil, errCraftNativeAgentDenied
+		return nil, errCraftNativeDatabaseNotDurable
 	}
 	return tx, nil
 }

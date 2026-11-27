@@ -21,8 +21,18 @@ type NativeAuthorize func(context.Context, *sql.Tx, EditLeaseScope, string) (Edi
 type NativeStoreConfig struct {
 	Enabled                                                 bool
 	Application, EngineRevision, EngineSHA256, EditorBundle string
-	Leases                                                  *EditLeaseStore
-	Authorize                                               NativeAuthorize
+	// Format is "" for a native JSON document, or NativeFormatWorkbook: each version is the
+	// xlsx/xlsm file itself (native_workbook.go). Validate then checks the archive.
+	Format string
+	// CompatEditorBundles are earlier editor bundles of THIS engine (same revision
+	// and module digest) whose documents this editor opens unchanged: the
+	// document format and the engine did not change, only the editor did. A
+	// stored document keeps the pin it was written with; it is never rewritten.
+	// New documents are written with the first compatible pin, so a server that
+	// still runs the earlier editor opens them too.
+	CompatEditorBundles []string
+	Leases              *EditLeaseStore
+	Authorize           NativeAuthorize
 	// Validate must invoke the exact pinned application engine, outside the SQL
 	// writer. It must reject lossy import/repair warnings, not silently normalize.
 	Validate                 func(context.Context, []byte) error
@@ -57,7 +67,7 @@ func NewNativeStore(db *sql.DB, c NativeStoreConfig) *NativeStore {
 	if c.MaxHistoryBytes <= 0 {
 		c.MaxHistoryBytes = DefaultNativeHistoryBytes
 	}
-	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes, MaxWorkspaceHistoryBytes: c.MaxWorkspaceHistoryBytes})}
+	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes, MaxWorkspaceHistoryBytes: c.MaxWorkspaceHistoryBytes, MaxVersionBytes: maxVersionBytes(c)})}
 }
 func nativeHex(value string, n int) bool {
 	if len(value) != n {
@@ -75,7 +85,7 @@ func (s *NativeStore) ready() error {
 		return ErrNativeDisabled
 	}
 	c := s.config
-	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
+	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) || !compatBundlesValid(c) || c.Format != "" && (c.Format != NativeFormatWorkbook || c.Application != "gridcraft") {
 		return ErrInvalid
 	}
 	return nil
@@ -88,10 +98,31 @@ func (s *NativeStore) profile(ctx context.Context, tx *sql.Tx, k EditLeaseScope)
 	if err := tx.QueryRowContext(ctx, `SELECT application_id,engine_revision,engine_sha256,editor_bundle FROM craft_native_documents WHERE page_id=? AND workspace_id=?`, k.ArtifactID, k.WorkspaceID).Scan(&app, &revision, &hash, &bundle); err != nil {
 		return err
 	}
-	if app != s.config.Application || revision != s.config.EngineRevision || hash != s.config.EngineSHA256 || bundle != s.config.EditorBundle {
+	if app != s.config.Application || revision != s.config.EngineRevision || hash != s.config.EngineSHA256 || !s.editorBundleAccepted(bundle) {
 		return ErrNativeProfile
 	}
 	return nil
+}
+
+// editorBundleAccepted: the current editor, or an earlier one declared compatible.
+func (s *NativeStore) editorBundleAccepted(bundle string) bool {
+	if bundle == s.config.EditorBundle {
+		return true
+	}
+	for _, compatible := range s.config.CompatEditorBundles {
+		if bundle == compatible {
+			return true
+		}
+	}
+	return false
+}
+
+// newDocumentEditorPin is the editor pin written into a new document.
+func (s *NativeStore) newDocumentEditorPin() string {
+	if len(s.config.CompatEditorBundles) > 0 {
+		return s.config.CompatEditorBundles[0]
+	}
+	return s.config.EditorBundle
 }
 func (s *NativeStore) authority(k EditLeaseScope, l *EditLease, intent string) artifacts.VersionAuthorize {
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
@@ -133,19 +164,42 @@ func (s *NativeStore) holderAuthority(l EditLease, intent string) artifacts.Vers
 	}
 }
 func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error) {
-	if len(raw) == 0 || len(raw) > 32<<20 {
-		return nil, ErrInvalid
-	}
-	b := append([]byte(nil), raw...)
-	trimmed := bytes.TrimSpace(b)
-	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b) {
-		return nil, ErrInvalid
+	var b []byte
+	if s.workbookStore() {
+		var err error
+		if b, err = s.workbookCandidate(raw); err != nil {
+			return nil, err
+		}
+	} else {
+		if len(raw) == 0 || len(raw) > 32<<20 {
+			return nil, ErrInvalid
+		}
+		b = append([]byte(nil), raw...)
+		trimmed := bytes.TrimSpace(b)
+		if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b) {
+			return nil, ErrInvalid
+		}
 	}
 	if err := s.config.Validate(ctx, append([]byte(nil), b...)); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNativeValidation, err)
 	}
 	return b, nil
 }
+
+// NativeRecord writes what goes with a new native version on its saving
+// transaction (an audit row): r is the version, native the document it holds.
+// Its error rolls the version back.
+type NativeRecord func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt, native []byte) error
+
+func (record NativeRecord) of(native []byte) func(context.Context, *sql.Tx, artifacts.VersionReceipt) error {
+	if record == nil {
+		return nil
+	}
+	return func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt) error {
+		return record(ctx, tx, r, native)
+	}
+}
+
 func nativeManifest(base int64, b []byte) artifacts.VersionRequest {
 	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: b, MediaType: "application/json"}}}
 }
@@ -154,6 +208,12 @@ func nativeManifest(base int64, b []byte) artifacts.VersionRequest {
 // empty personal Page. The host's initialize intent checks competing custody.
 // Profile, first lease and first manifest commit or roll back together.
 func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLeasePrincipal, raw []byte) (EditLease, artifacts.VersionReceipt, error) {
+	return s.InitializeRecorded(ctx, k, p, raw, nil)
+}
+
+// InitializeRecorded is Initialize with a record of the first version, on the
+// transaction that attaches the profile and writes that version.
+func (s *NativeStore) InitializeRecorded(ctx context.Context, k EditLeaseScope, p EditLeasePrincipal, raw []byte, record NativeRecord) (EditLease, artifacts.VersionReceipt, error) {
 	if err := s.ready(); err != nil {
 		return EditLease{}, artifacts.VersionReceipt{}, err
 	}
@@ -184,7 +244,7 @@ func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLe
 		if err != nil {
 			return "", err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES(?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, s.config.Application, s.config.EngineRevision, s.config.EngineSHA256, s.config.EditorBundle)
+		_, err = tx.ExecContext(ctx, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES(?,?,?,?,?,?)`, k.ArtifactID, k.WorkspaceID, s.config.Application, s.config.EngineRevision, s.config.EngineSHA256, s.newDocumentEditorPin())
 		if err != nil {
 			return "", err
 		}
@@ -195,7 +255,9 @@ func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLe
 		initialized = true
 		return actor, nil
 	}
-	r, err := s.versions.Apply(ctx, nativeVersionKey(k), nativeManifest(0, b), a)
+	request := s.manifest(0, b)
+	request.Record = record.of(b)
+	r, err := s.versions.Apply(ctx, nativeVersionKey(k), request, a)
 	if err != nil {
 		return EditLease{}, artifacts.VersionReceipt{}, err
 	}
@@ -213,7 +275,7 @@ func (s *NativeStore) Save(ctx context.Context, l EditLease, base int64, raw []b
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), nativeManifest(base, b), a)
+	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), s.manifest(base, b), a)
 }
 func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
 	if err := s.ready(); err != nil {
@@ -243,6 +305,12 @@ func (s *NativeStore) ReadVersion(ctx context.Context, k EditLeaseScope, version
 	return s.versions.ReadVersionWithHead(ctx, nativeVersionKey(k), version, s.authority(k, nil, "read"))
 }
 func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int64) (artifacts.VersionReceipt, error) {
+	return s.RestoreRecorded(ctx, l, base, target, nil)
+}
+
+// RestoreRecorded is Restore with a record of the appended version (native is
+// the restored document).
+func (s *NativeStore) RestoreRecorded(ctx context.Context, l EditLease, base, target int64, record NativeRecord) (artifacts.VersionReceipt, error) {
 	if err := s.ready(); err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
@@ -251,17 +319,14 @@ func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	if m.EntryPoint != "document.json" || len(m.Files) != 1 {
-		return artifacts.VersionReceipt{}, ErrNativeProfile
-	}
-	file, ok := m.Files["document.json"]
-	if !ok || file.MediaType != "application/json" {
-		return artifacts.VersionReceipt{}, ErrNativeProfile
+	file, err := s.DocumentFile(m)
+	if err != nil {
+		return artifacts.VersionReceipt{}, err
 	}
 	if _, err = s.candidate(ctx, file.Content); err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	return s.versions.Restore(ctx, nativeVersionKey(l.Scope), base, target, a)
+	return s.versions.RestoreRecorded(ctx, nativeVersionKey(l.Scope), base, target, a, record.of(file.Content))
 }
 
 // ReadShared returns only the current shared pin. The host's preview authority
@@ -312,4 +377,15 @@ func (s *NativeStore) ReserveUpload(ctx context.Context, k EditLeaseScope, bytes
 		return nil, err
 	}
 	return s.versions.ReserveUpload(ctx, nativeVersionKey(k), bytes, s.authority(k, nil, "write"))
+}
+
+func compatBundlesValid(c NativeStoreConfig) bool {
+	seen := map[string]bool{c.EditorBundle: true}
+	for _, b := range c.CompatEditorBundles {
+		if !nativeHex(b, 64) || seen[b] {
+			return false
+		}
+		seen[b] = true
+	}
+	return true
 }

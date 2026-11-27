@@ -556,6 +556,22 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: queued human authority changed")
 	}
 	msgOpt.HumanAuthority = info.HumanAuthority
+	// "Send again" of a message saved as not run (agent busy elsewhere): the saved turn runs, with
+	// only its Sheet references from the client, which are checked again below.
+	resendOf, resend, err := b.resendNotRun(ctx, info, userID, chatID, msgOpt.Metadata)
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "This message can no longer be sent again.", Metadata: map[string]any{"reason": "resend_unavailable"}})
+		return err
+	}
+	if resend {
+		content = resendOf.Content
+		kept := map[string]any{}
+		if refs, ok := msgOpt.Metadata[ArtifactRefsMetadataKey]; ok {
+			kept[ArtifactRefsMetadataKey] = refs
+		}
+		msgOpt.Metadata = kept
+		msgOpt.OriginalTriggerMessageID, msgOpt.UserMessagePersisted = resendOf.ID, true
+	}
 	askEnvelope, err := validateAskSubmission(info, chatID, content, msgOpt.Metadata)
 	if err != nil {
 		return err
@@ -581,20 +597,27 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			artifactRefs, hasArtifactRefs, refsErr = requestedArtifactRefs(msgOpt.Metadata)
 		}
 	}
+	// An attached workbook alone never binds a Sheet: a Sheet goes
+	// only by the person's explicit artifact_refs.
 	// A page_context turn, or an origin run (its admission carries no
 	// trigger message), would never bind them: refuse instead of dropping.
 	if refsErr == nil && hasArtifactRefs && (hasPage || runauthority.OriginIDFromContext(ctx) != "") {
 		refsErr = ErrArtifactRefUnavailable
 	}
+	artifactRefVersions := requestedArtifactRefVersions(msgOpt.Metadata)
 	if refsErr == nil && hasArtifactRefs {
-		refsErr = b.artifactRefRecorder.CheckArtifactRefs(ctx, info.HumanAuthority, artifactRefs)
+		refsErr = b.artifactRefRecorder.CheckArtifactRefVersions(ctx, info.HumanAuthority, artifactRefs, artifactRefVersions)
+	}
+	if errors.Is(refsErr, ErrArtifactConsentStale) {
+		streamFn(ws.ChatEvent{Type: "error", Content: ArtifactConsentStaleText, Metadata: map[string]any{"reason": "consent_stale"}})
+		return ErrArtifactConsentStale
 	}
 	if refsErr != nil {
 		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
 		return ErrArtifactRefUnavailable
 	}
 	triggerMessageID := generateMsgID()
-	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
+	if (msgOpt.HumanResume || resend) && msgOpt.OriginalTriggerMessageID != "" {
 		triggerMessageID = msgOpt.OriginalTriggerMessageID
 	}
 	documentCreation, err := documentCreationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, content, hasPage, triggerMessageID)
@@ -621,6 +644,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	artifactProject, err := artifactProjectForSend(b.cfg.ArtifactProjectsEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation != nil || documentIteration != nil)
 	if err != nil {
 		return err
+	}
+	if artifactProjectConflicts(artifactProject, hasArtifactRefs, content) {
+		streamFn(ws.ChatEvent{Type: "error", Content: ErrConflictingIntent.Error(), Metadata: map[string]any{"reason": "conflicting_intent"}})
+		return ErrConflictingIntent
 	}
 	if artifactProject != nil && b.artifactProjectIntentRecorder == nil {
 		return errors.New("artifact project admission unavailable")
@@ -670,18 +697,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// before any container provisioning side-effect runs. The operator
 	// must POST /api/v1/agents/{id}/approve-hire to flip the row to
 	// IDLE, after which the next message proceeds normally.
-	if info.AgentStatus == AgentStatusPendingReview {
-		msg := "Agent hire is awaiting operator approval — once approved on the inbox, send your message again."
-		streamFn(ws.ChatEvent{
-			Type:    "error",
-			Content: msg,
-			Metadata: map[string]any{
-				"reason":   "pending_review",
-				"agent_id": info.AgentID,
-			},
-		})
-		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
-	}
+	// (checked below, once the message can be kept as not run)
 
 	// What the client attached TO this message rather than inside it. Today
 	// that is the ask-form submission envelope: which form was answered, at
@@ -756,7 +772,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			return err
 		}
 		if hasArtifactRefs {
-			if err := b.artifactRefRecorder.RecordArtifactRefs(ctx, info.HumanAuthority, triggerMessageID, artifactRefs); err != nil {
+			if err := b.artifactRefRecorder.RecordArtifactRefVersions(ctx, info.HumanAuthority, triggerMessageID, artifactRefs, artifactRefVersions); err != nil {
+				if errors.Is(err, ErrArtifactConsentStale) {
+					return ErrArtifactConsentStale
+				}
 				return ErrArtifactRefUnavailable
 			}
 		}
@@ -794,6 +813,61 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Content:  content,
 			Metadata: metadata,
 		})
+	}
+
+	// keepNotRun keeps the person's message of a private chat whose run is refused:
+	// saved, marked not run with its reason, and named in the answer, so a reload
+	// shows it and "Send again" replays it. Group chats, a deferred resume, and sends whose purpose
+	// is checked again on run (Ask, Page, document and project intents) keep the refusal that
+	// saves nothing; their client puts the message back into the composer. The answer's metadata
+	// (nil when not kept) goes on the refusal's error event.
+	keepable := info.Visibility != "group" && (!msgOpt.HumanResume || resend) && !instructionOnly &&
+		askEnvelope == nil && pageContext == nil && documentCreation == nil && documentIteration == nil && artifactProject == nil
+	userTurnSaved := msgOpt.UserMessagePersisted
+	keepNotRun := func(refusal error, code, reason string) (error, map[string]any) {
+		if !keepable {
+			return refusal, nil
+		}
+		if !userTurnSaved {
+			if err := persistUserMsg(); err != nil {
+				b.logger.Error("failed to save the refused user message", "error", err, "chat_id", chatID, "code", code)
+				return refusal, nil
+			}
+			broadcastUserMsg()
+			if err := b.resolver.IncrementMessageCount(ctx, chatID, 1); err != nil {
+				b.logger.Warn("increment message count (not run)", "chat_id", chatID, "error", err)
+			}
+			userTurnSaved = true
+		}
+		b.RecordNotRun(ctx, chatID, triggerMessageID, reason)
+		return &ws.MessageNotRun{MessageID: triggerMessageID, Code: code, Err: refusal},
+			map[string]any{"message_id": triggerMessageID, "status": "not_run", "not_run_reason": code}
+	}
+	withNotRun := func(meta map[string]any, kept map[string]any) map[string]any {
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		// The event's own keys stay (crew_provisioning keeps status "failed"); not_run_reason
+		// marks the kept message.
+		for k, v := range kept {
+			if _, taken := meta[k]; !taken {
+				meta[k] = v
+			}
+		}
+		return meta
+	}
+
+	// PR-D F5 (see above): a hire still awaiting approval does not run; in a private chat the
+	// message is kept as not run.
+	if info.AgentStatus == AgentStatusPendingReview {
+		msg := "Agent hire is awaiting operator approval — once approved on the inbox, send your message again."
+		refusal, kept := keepNotRun(fmt.Errorf("agent %s pending review: hire not approved", info.AgentID), "pending_review", notRunPendingReviewReason)
+		streamFn(ws.ChatEvent{
+			Type:     "error",
+			Content:  msg,
+			Metadata: withNotRun(map[string]any{"reason": "pending_review", "agent_id": info.AgentID}, kept),
+		})
+		return refusal
 	}
 
 	// Group-chat turn-taking gate — evaluated BEFORE any container/provisioning
@@ -899,8 +973,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			// Fall back to the original "run the CLI" hint so the user has
 			// something to act on.
 			msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s`.", info.CrewSlug, info.CrewSlug)
-			streamFn(ws.ChatEvent{Type: "error", Content: msg})
-			return fmt.Errorf("%s", msg)
+			refusal, kept := keepNotRun(fmt.Errorf("%s", msg), "runtime_unavailable", notRunRuntimeReason)
+			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: withNotRun(nil, kept)})
+			return refusal
 		}
 
 		// Emit a structured event the chat surface renders as a build card.
@@ -936,7 +1011,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 
 		var evtContent string
+		var enqRefusal error
 		if enqErr != nil {
+			var kept map[string]any
+			enqRefusal, kept = keepNotRun(fmt.Errorf("auto-provision enqueue failed for crew %q: %w", info.CrewSlug, enqErr), "provision_failed", notRunProvisionReason)
+			evtMeta = withNotRun(evtMeta, kept)
 			evtMeta["error"] = enqErr.Error()
 			evtContent = fmt.Sprintf("Could not start build for %s: %s", info.CrewSlug, enqErr.Error())
 		} else {
@@ -963,7 +1042,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// api.ErrRateLimited / ErrProvisionerUnavailable still works
 		// because the API wraps with %w.
 		if enqErr != nil {
-			return fmt.Errorf("auto-provision enqueue failed for crew %q: %w", info.CrewSlug, enqErr)
+			return enqRefusal
 		}
 		_ = alreadyJob
 
@@ -1036,7 +1115,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// only remaining race is a DIFFERENT user hitting the same chat.
 	if !b.tryMarkRunStart(chatID) {
 		b.logger.Info("rejecting send: agent already running for chat", "chat_id", chatID, "user_id", userID)
-		return fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy)
+		refusal, _ := keepNotRun(fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy), "agent_busy_chat", notRunBusyChatReason)
+		return refusal
 	}
 	defer b.markRunEnd(chatID)
 
@@ -1054,7 +1134,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if !b.agentRunLock.TryStart(info.AgentID) {
 		b.logger.Info("rejecting send: agent already running (cross-surface)",
 			"chat_id", chatID, "agent_id", info.AgentID, "user_id", userID)
-		return fmt.Errorf("agent %s: %w: %w", info.AgentID, ErrAgentBusyElsewhere, ws.ErrAgentBusy)
+		refusal, _ := keepNotRun(fmt.Errorf("agent %s: %w: %w", info.AgentID, ErrAgentBusyElsewhere, ws.ErrAgentBusy), "agent_busy", notRunAgentBusyReason)
+		return refusal
 	}
 	// The pump runs AFTER End releases the lock (not before — a pump while
 	// still holding the claim would just see this agent as busy and requeue
@@ -1074,7 +1155,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared — unless the deferral above already saved and
 	// acknowledged this exact turn before the build ran (#5559).
-	alreadySaved := msgOpt.HumanResume && msgOpt.UserMessagePersisted && msgOpt.OriginalTriggerMessageID == triggerMessageID
+	alreadySaved := (msgOpt.HumanResume || resend) && msgOpt.UserMessagePersisted && msgOpt.OriginalTriggerMessageID == triggerMessageID
 	// A turn saved at deferral was already counted then (below); the run's
 	// own bookkeeping adds only what it writes itself (#5571).
 	countTurn := func(c context.Context, delta int) error {
@@ -1089,6 +1170,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var persistErr error
 	if !alreadySaved {
 		persistErr = persistUserMsg()
+		userTurnSaved = persistErr == nil
 	}
 	if err := persistErr; err != nil {
 		var accepted *conversation.DocumentCreationAlreadyAccepted
@@ -1271,8 +1353,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		if err != nil {
 			if !upgrading && errors.Is(err, crewstart.ErrSidecarStart) {
-				streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
-				return fmt.Errorf("ensure crew services: %w", err)
+				refusal, kept := keepNotRun(fmt.Errorf("ensure crew services: %w", err), "runtime_unavailable", notRunRuntimeReason)
+				streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error(), Metadata: withNotRun(nil, kept)})
+				return refusal
 			}
 			// Classify the cause into a closed set so the user gets an
 			// actionable message + machine-readable code instead of the opaque
@@ -1297,8 +1380,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					inv.InvalidateImageCache()
 				}
 			}
-			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: map[string]any{"code": code}})
-			return fmt.Errorf("ensure team runtime: %w", err)
+			refusal, kept := keepNotRun(fmt.Errorf("ensure team runtime: %w", err), "runtime_unavailable", notRunRuntimeReason)
+			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: withNotRun(map[string]any{"code": code}, kept)})
+			return refusal
 		}
 		if upgrading {
 			upgradeEvent(devcontainer.ProvisionEvent{Phase: devcontainer.ProvisionPhase, Step: devcontainer.ProvStepRuntimeUpgrade, Status: devcontainer.ProvStatusCompleted})
@@ -1314,8 +1398,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "status", Content: "Container ready"})
 		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", truncateID(containerID, 12))
 	} else if containerID == "" {
-		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured"})
-		return fmt.Errorf("no container provider and no container ID")
+		refusal, kept := keepNotRun(fmt.Errorf("no container provider and no container ID"), "runtime_unavailable", notRunRuntimeReason)
+		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured", Metadata: withNotRun(nil, kept)})
+		return refusal
 	}
 
 	var toolSummaries []string
@@ -1345,6 +1430,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// orchestrator-level publication exists for the paths that have no such
 	// caller: scheduler, webhook, routine step, agent-start IPC.
 	req.SuppressSessionStream = true
+	req = withoutMemoryForArtifacts(req, hasArtifactRefs)
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
 	// On subsequent messages the container is warm — no progress noise.
@@ -1437,6 +1523,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// env / FIFO / exit files from RunID. Set from the id this path already
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
 	// concurrent routine/webhook run of the same agent no longer share them.
+	if hasArtifactRefs {
+		req.UserMessage = attachedSheetRunPrompt(req.UserMessage, artifactRefs)
+	}
 	if documentCreation != nil {
 		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
 	}

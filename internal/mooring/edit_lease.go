@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 )
@@ -13,6 +14,9 @@ var (
 	ErrEditLeaseBusy     = errors.New("document already has an editor")
 	ErrEditLeaseStale    = errors.New("stale edit lease")
 	ErrEditLeaseDenied   = errors.New("edit lease access denied")
+	// ErrEditLeaseExpired is a stale lease that expired and was then taken by another editor
+	// (or is asked for by a person): its holder has to acquire the document again.
+	ErrEditLeaseExpired = fmt.Errorf("%w: expired and taken since", ErrEditLeaseStale)
 )
 
 type EditLeaseScope struct{ WorkspaceID, ArtifactID string }
@@ -26,6 +30,10 @@ type EditLease struct {
 	Generation int64
 	// ExpiresAt is presentation only. The server uses its persisted boot clock.
 	ExpiresAt time.Time
+	// CoWrite, when set, makes this a co-write grant: Holder writes beside the live lease
+	// of CoWrite at Generation, which it never changes. Every check then requires that lease to be
+	// held still by CoWrite at Generation, or no live lease at all.
+	CoWrite EditLeasePrincipal
 }
 type EditLeaseAccess struct {
 	Scope     EditLeaseScope
@@ -150,6 +158,9 @@ func (s *EditLeaseStore) check(ctx context.Context, tx *sql.Tx, l EditLease, int
 	if err := s.authorize(ctx, tx, l.Scope, l.Holder, intent); err != nil {
 		return "", 0, err
 	}
+	if l.CoWrite != (EditLeasePrincipal{}) {
+		return s.checkCoWrite(ctx, tx, l)
+	}
 	stored, storedBoot, expires, err := editLeaseRow(ctx, tx, l.Scope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", 0, ErrEditLeaseStale
@@ -236,8 +247,22 @@ func (s *EditLeaseStore) Acquire(ctx context.Context, scope EditLeaseScope, p Ed
 // Renew is called by a live authenticated editor connection, independently of
 // typing or tab visibility. A disconnected or revoked session cannot renew.
 func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLease, err error) {
+	if l.CoWrite != (EditLeasePrincipal{}) {
+		// A co-write grant never renews the person's lease: it is checked again, nothing else.
+		err = s.transaction(ctx, func(tx *sql.Tx) error {
+			_, _, e := s.check(ctx, tx, l, "renew")
+			return e
+		})
+		if err != nil {
+			return EditLease{}, err
+		}
+		return l, nil
+	}
 	err = s.transaction(ctx, func(tx *sql.Tx) error {
 		_, now, e := s.check(ctx, tx, l, "renew")
+		if errors.Is(e, ErrEditLeaseStale) {
+			now, e = s.revive(ctx, tx, l)
+		}
 		if e != nil {
 			return e
 		}
@@ -255,7 +280,47 @@ func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLea
 	}
 	return
 }
+
+// revive lets Renew take back a lease that only expired: the row still names the same holder and
+// generation from this server boot, and no person asked for the document meanwhile. Nothing else
+// can have written since, because every write needs the live lease of its generation; a version
+// written by the holder itself is checked by the version compare of the next write. A lease taken
+// by another editor since answers ErrEditLeaseExpired, anything else stays ErrEditLeaseStale.
+func (s *EditLeaseStore) revive(ctx context.Context, tx *sql.Tx, l EditLease) (int64, error) {
+	stored, storedBoot, _, err := editLeaseRow(ctx, tx, l.Scope)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrEditLeaseStale
+	}
+	if err != nil {
+		return 0, err
+	}
+	boot, now, err := s.clock()
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case l.Generation < 1:
+		return 0, ErrEditLeaseStale
+	case stored.Generation > l.Generation:
+		return 0, ErrEditLeaseExpired
+	case stored.Generation != l.Generation || stored.Holder != l.Holder || storedBoot != boot:
+		return 0, ErrEditLeaseStale
+	}
+	var waiting int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mooring_edit_lease_requests WHERE page_id=?`, l.Scope.ArtifactID).Scan(&waiting); err != nil {
+		return 0, err
+	}
+	if waiting > 0 {
+		return 0, ErrEditLeaseExpired
+	}
+	return now, nil
+}
+
 func (s *EditLeaseStore) Release(ctx context.Context, l EditLease) error {
+	if l.CoWrite != (EditLeasePrincipal{}) {
+		// Releasing a co-write grant leaves the person's lease as it is.
+		return s.transaction(ctx, func(tx *sql.Tx) error { return s.authorize(ctx, tx, l.Scope, l.Holder, "release") })
+	}
 	return s.transaction(ctx, func(tx *sql.Tx) error {
 		if _, _, e := s.check(ctx, tx, l, "release"); e != nil {
 			return e
@@ -425,4 +490,59 @@ func (s *EditLeaseStore) Revoke(ctx context.Context, tx *sql.Tx, scope EditLease
 		return err
 	}
 	return s.authorize(ctx, tx, scope, by, "revoke")
+}
+
+// CoWrite grants p a co-write beside the live lease of the person actor:
+// the agent whose run that person's own message consented writes while their editor holds the
+// Sheet. The person's lease is not changed; the grant names its holder and generation. Another
+// holder is ErrEditLeaseBusy; no live lease is ErrEditLeaseStale (acquire normally then).
+func (s *EditLeaseStore) CoWrite(ctx context.Context, scope EditLeaseScope, p EditLeasePrincipal, person string) (result EditLease, err error) {
+	if person == "" || p.ActorID == person {
+		return EditLease{}, ErrInvalid
+	}
+	err = s.transaction(ctx, func(tx *sql.Tx) error {
+		if e := s.authorize(ctx, tx, scope, p, "acquire"); e != nil {
+			return e
+		}
+		stored, storedBoot, expires, e := editLeaseRow(ctx, tx, scope)
+		if errors.Is(e, sql.ErrNoRows) {
+			return ErrEditLeaseStale
+		}
+		if e != nil {
+			return e
+		}
+		boot, now, e := s.clock()
+		if e != nil {
+			return e
+		}
+		if !editLeaseLive(stored, storedBoot, expires, boot, now) {
+			return ErrEditLeaseStale
+		}
+		if stored.Holder.ActorID != person {
+			return ErrEditLeaseBusy
+		}
+		result = presentEditLease(EditLease{Scope: scope, Holder: p, Generation: stored.Generation, CoWrite: stored.Holder}, expires, now)
+		return nil
+	})
+	if err != nil {
+		return EditLease{}, err
+	}
+	return result, nil
+}
+
+// checkCoWrite: the person's lease is held still by the grant's person at the grant's generation,
+// or nobody holds a live lease. Anyone else is ErrEditLeaseBusy and nothing is written.
+func (s *EditLeaseStore) checkCoWrite(ctx context.Context, tx *sql.Tx, l EditLease) (string, int64, error) {
+	stored, storedBoot, expires, err := editLeaseRow(ctx, tx, l.Scope)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", 0, err
+	}
+	boot, now, clockErr := s.clock()
+	if clockErr != nil {
+		return "", 0, clockErr
+	}
+	if err == nil && editLeaseLive(stored, storedBoot, expires, boot, now) && (stored.Holder != l.CoWrite || stored.Generation != l.Generation) {
+		return "", 0, ErrEditLeaseBusy
+	}
+	return boot, now, nil
 }
