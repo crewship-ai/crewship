@@ -44,7 +44,7 @@ export interface NativeEditorPort {
   snapshot(signal: AbortSignal, manualRequestId?: string): Promise<NativeEditorSnapshot>
   validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
   adoptMerged?(save: MergedSheetSave, captureId: string, signal: AbortSignal): Promise<SheetMergedAdopted>
-  setPresence?(actors: SheetPresence[], reducedMotion: boolean): void
+  setPresence?(actors: SheetPresence[], reducedMotion: boolean, truncated?: boolean): void
   ack(receipt: NativeSaveReceipt, captureId?: string): Promise<boolean>
   saveFailed(requestId: string, error: string): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>

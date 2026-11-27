@@ -234,3 +234,25 @@ it("keeps a workbook file draft up to 64 MiB, only when it is a zip, and carries
   expect(Array.from(recovered?.draft.bytes ?? [])).toEqual(Array.from(pk(8)))
   await reopened.close()
 })
+
+it("keeps a protected conflict archive across saves and reload, and retires it on read loss", async () => {
+  const sheet = { ...scope, applicationId: "gridcraft" }
+  const store = storage()
+  mock.open.mockResolvedValue(store)
+  const original: NativeDraft = { ...draft(), applicationId: "gridcraft", format: "xlsx", bytes: Uint8Array.of(80, 75, 3, 4, 91) }
+  const first = await openNativeDraftJournal(sheet)
+  await first.persist(original)
+  const overlap = [{ sheet: "Data", a1: "B2" }]
+  await first.archiveConflict!(original, overlap)
+  await first.confirm(original)
+  const later = { ...original, editorRevision: "doc:2", bytes: Uint8Array.of(80, 75, 3, 4, 94) }
+  await first.persist(later)
+  await first.confirm(later)
+  await first.close()
+  const opened = await openNativeDraftJournal(sheet)
+  const recovered = await opened.recovery()
+  expect(recovered).toHaveLength(1)
+  expect(recovered[0]).toMatchObject({ draft: original, overlap, actions: ["compare", "copy"] })
+  await opened.revokeRead()
+  expect(rows.size).toBe(0)
+})

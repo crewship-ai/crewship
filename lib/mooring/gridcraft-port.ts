@@ -1,4 +1,4 @@
-import { SHEET_REALTIME_CAPABILITIES, type MergedSheetSave, type SheetPresence, type SheetRealtimeCapability } from "./sheet-realtime"
+import { SHEET_PRESENCE_TRUNCATED_CAPABILITY, SHEET_SUPPORTED_CAPABILITIES, type MergedSheetSave, type SheetPresence, type SheetRealtimeCapability } from "./sheet-realtime"
 import type { SheetMergedAdopted } from "./native-editor-port"
 // GridCraft editor ↔ host, mooring protocol 2: the workbook
 // file (.xlsx or .xlsm) is the source of truth. The host opens the stored file as it is
@@ -56,7 +56,7 @@ export interface GridcraftPort {
   saveFailed(requestId: string, code: GridcraftSaveFailure): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
   adoptMerged(save: MergedSheetSave, captureId: string, signal: AbortSignal): Promise<SheetMergedAdopted>
-  setPresence(actors: SheetPresence[], reducedMotion: boolean): void
+  setPresence(actors: SheetPresence[], reducedMotion: boolean, truncated?: boolean): void
   execute(commands: NativeExecuteCommand[], options: NativeExecuteOptions, signal: AbortSignal): Promise<NativeExecuteResult>
   readonly document: string | undefined
   close(): void
@@ -165,8 +165,8 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
         const build = "build" in raw ? raw.build as string : undefined
         if ("capabilities" in raw) {
           const flags = raw.capabilities
-          if (!Array.isArray(flags) || flags.length > SHEET_REALTIME_CAPABILITIES.length
-            || new Set(flags).size !== flags.length || !flags.every(flag => SHEET_REALTIME_CAPABILITIES.includes(flag))) break
+          if (!Array.isArray(flags) || flags.length > SHEET_SUPPORTED_CAPABILITIES.length
+            || new Set(flags).size !== flags.length || !flags.every(flag => SHEET_SUPPORTED_CAPABILITIES.includes(flag))) break
           capabilities = flags as SheetRealtimeCapability[]
         }
         ready = true
@@ -339,8 +339,11 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
         version: save.receipt.version, contentHash: save.contentHash, bytes, agentRanges: save.agentRanges,
       }, signal, timeoutMs, [bytes]) as SheetMergedAdopted
     },
-    setPresence(actors, reducedMotion) {
-      if (bound && capabilities.includes("presence-v1")) post({ type: "gridcraft:presence", document: bound, actors, reducedMotion })
+    setPresence(actors, reducedMotion, truncated) {
+      if (!bound || !capabilities.includes("presence-v1")) return
+      const message = { type: "gridcraft:presence", document: bound, actors: actors.slice(0, 32), reducedMotion,
+        ...((truncated || actors.length > 32) && capabilities.includes(SHEET_PRESENCE_TRUNCATED_CAPABILITY) ? { truncated: true } : {}) }
+      post(message)
     },
     async execute(commands, executeOptions, signal) {
       if (bound === undefined) throw new Error("native_open_required")

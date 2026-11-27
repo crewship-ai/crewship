@@ -1,8 +1,10 @@
+import type {NativeDraft} from '@/lib/mooring/native-draft'
+import type {NativeSaveRequest} from '@/lib/mooring/single-editor-save'
 import type {NativeDocumentClient} from '@/lib/mooring/native-document-client'
 // A Sheet whose stored document is the workbook file itself (mooring protocol 2): the host
 // opens the file as it is, says when values are Excel's, asks before the first edit what
 // saving here would change, and offers the original file (version 1) for download.
-import {webcrypto} from 'node:crypto'
+import {createHash,webcrypto} from 'node:crypto'
 import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import type {GridcraftNativePortOptions} from '@/lib/mooring/gridcraft-native-port'
@@ -77,6 +79,7 @@ beforeEach(()=>{
    const m=raw as Record<string,unknown>;sent.push(m)
    setTimeout(()=>{
     if(m.type==='gridcraft:set-access')wire.onmessage?.({data:{type:'gridcraft:access',requestId:m.requestId,readOnly:m.readOnly}})
+    else if(m.type==='gridcraft:adopt-merged')wire.onmessage?.({data:{type:'gridcraft:merged-adopted',requestId:m.requestId,captureId:m.captureId,document:'doc',revision:'4',savedRevision:'saved-4',version:m.version,dirty:false}})
     else if(m.type==='gridcraft:execute'&&executed)wire.onmessage?.({data:{type:'gridcraft:executed',requestId:m.requestId,...executed}})
     else if(m.type==='gridcraft:save-request'&&refuse)wire.onmessage?.({data:{type:'gridcraft:save',requestId:m.requestId,code:'fidelity_loss',error:"would drop charts in 'Q3'",parts:refuse,...(refuseFile?{bytes:new Uint8Array([0x50,0x4b,9,9]).buffer}:{})}})
     else if(m.type==='gridcraft:save-request')wire.onmessage?.({data:{type:'gridcraft:save',requestId:m.requestId,document:'doc',revision,name:'Plan.xlsx',format:'xlsx',bytes:new Uint8Array([0x50,0x4b,3,4,Number(revision)]).buffer}})
@@ -145,6 +148,31 @@ describe('a Sheet stored as its workbook file',()=>{
   expect(sent.some(message=>message.type==='gridcraft:set-access'&&message.readOnly===false)).toBe(writable)
   expect(client.leaseAction).not.toHaveBeenCalled()
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+ })
+ it('shows the archived overlap after a proactive merge and offers the original bytes',async()=>{
+  realtimeCapabilities=true
+  const ranges=[{sheet:'Data',a1:'B2:B258'}]
+  const archiveConflict=vi.fn(async(draft:NativeDraft)=>({draft,overlap:ranges,actions:['compare','copy']}))
+  mock.journal.mockResolvedValueOnce({persist:vi.fn(),confirm:vi.fn(),archiveConflict,discardRecovered:vi.fn(),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn(),revokeRead:vi.fn()})
+  await mount('xlsx',undefined,'chat-1','1')
+  const canonical=Buffer.from([80,75,3,4,99])
+  const hash='sha256:'+createHash('sha256').update(canonical).digest('hex')
+  client.save.mockImplementation(async(request:NativeSaveRequest)=>{
+   const {bytes: _bytes,attemptId,...scope}=request
+   return {kind:'merged',submitted:{attempt_id:attemptId,base_version:'3',editor_revision:request.editorRevision,content_hash:request.contentHash},
+    receipt:{...scope,baseVersion:'4',version:'4',unchanged:true,contentHash:hash,candidateHash:hash,durability:'node',phase:'committed',issuedBy:'crewship'},
+    head_content_hash:hash,bytes:canonical.toString('base64'),overlap:ranges,agent_ranges:ranges}
+  })
+  revision='2'
+  act(()=>wires[0].onmessage?.({data:{type:'gridcraft:changed',document:'doc',revision,dirty:true}}))
+  act(()=>publishAgentVersion({pageId:'diagnostic-page',version:'4'}))
+  await settle(1500)
+  expect(client.save).toHaveBeenCalledOnce()
+  expect(archiveConflict).toHaveBeenCalledWith(expect.objectContaining({bytes:Uint8Array.of(80,75,3,4,2)}),ranges)
+  expect(sent.some(message=>message.type==='gridcraft:adopt-merged')).toBe(true)
+  expect(sent.some(message=>message.type==='gridcraft:execute')).toBe(false)
+  expect(screen.getByText('Agent edited Data!B2:B258. Your copy is saved in this browser.')).toBeVisible()
+  expect(screen.getByRole('button',{name:'Download my copy'})).toBeEnabled()
  })
  it('asks before the first edit what saving here would change, and takes over only when the person says so',async()=>{
   opened.warnings=[{code:'vba_preserved',count:1},{code:'unsupported_function_held',count:12}];await mount('xlsm')

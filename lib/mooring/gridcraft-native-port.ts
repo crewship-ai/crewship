@@ -121,7 +121,7 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       dirty = result.dirty
       return result
     },
-    setPresence: (actors, reducedMotion) => inner.setPresence(actors, reducedMotion),
+    setPresence: (actors, reducedMotion, truncated) => inner.setPresence(actors, reducedMotion, truncated),
     async ack(receipt, captureId) {
       if (!receipt || typeof receipt !== "object") return acknowledgementFailed("receipt")
       const saved = { ...receipt }

@@ -1,7 +1,7 @@
 // GridCraft editor ↔ host, mooring protocol 2: the workbook file is the source of truth.
 import { afterEach, expect, it, vi } from "vitest"
 import { createGridcraftPort, GridcraftSaveRefused, type GridcraftPortOptions } from "./gridcraft-port"
-import { SHEET_REALTIME_CAPABILITIES, type SheetRealtimeCapability } from "./sheet-realtime"
+import { SHEET_PRESENCE_TRUNCATED_CAPABILITY, SHEET_REALTIME_CAPABILITIES, type SheetRealtimeCapability } from "./sheet-realtime"
 import type { NativeStructuredPort } from "./native-editor-port"
 
 afterEach(() => { vi.useRealTimers() })
@@ -337,7 +337,7 @@ it("updates a merged capture only through a correlated adoption and replays agen
         generation: "1", sessionId: "session", editorRevision: "doc-1:4", baseVersion: "2", version: "3",
         contentHash, candidateHash: contentHash, durability: "node" as const, issuedBy: "crewship" as const, phase: "committed" as const,
       },
-      contentHash, bytes: new Uint8Array(workbook()), agentRanges: [{ sheet: "L", a1: "B3:B5" }],
+      contentHash, bytes: new Uint8Array(workbook()), agentRanges: [{ sheet: "L", a1: "B3:B5" }], overlap: [],
     }
     const adoption = r.adapter.adoptMerged(merged, capture.requestId, signal())
     expect(latest(r)).toMatchObject({ type: "gridcraft:adopt-merged", document: "doc-1", captureId: capture.requestId, captureRevision: "4", version: "3", agentRanges: merged.agentRanges })
@@ -348,5 +348,16 @@ it("updates a merged capture only through a correlated adoption and replays agen
     expect(latest(r)).toMatchObject({ type: "gridcraft:execute", keep: "agent", baseRevision: "saved-5" })
     r.receive({ type: "gridcraft:executed", requestId: latest(r).requestId, document: "doc-1", revision: "8", savedRevision: "saved-7", applied: 1, dirty: false, conflicts: [{ sheet: "L", cell: "B3" }] })
     await expect(replay).resolves.toMatchObject({ savedRevision: "doc-1:saved-7", dirty: false, conflicts: [{ sheet: "L", cell: "B3" }] })
+  } finally { r.adapter.close() }
+})
+
+it.each([false, true])("only sends presence truncation to a compatible iframe (%s)", async useTruncated => {
+  const r = rig()
+  try {
+    await open(r, "xlsx", useTruncated ? [...SHEET_REALTIME_CAPABILITIES, SHEET_PRESENCE_TRUNCATED_CAPABILITY] : SHEET_REALTIME_CAPABILITIES)
+    const actors = [{ actorId: "agent", label: "Morgan", activityId: "op", ttlMs: 1000, ranges: [{ sheet: "L", a1: "B2" }] }]
+    r.adapter.setPresence(actors, true, true)
+    expect(latest(r)).toEqual({ type: "gridcraft:presence", document: "doc-1", actors, reducedMotion: true,
+      ...(useTruncated ? { truncated: true } : {}) })
   } finally { r.adapter.close() }
 })

@@ -1,4 +1,5 @@
 import { openProtectedDocumentDrafts as openDocumentDrafts } from "../protected-document-drafts"
+import { sheetRanges, SHEET_MERGE_RANGE_LIMIT, type SheetRange } from "./sheet-realtime"
 import { GRIDCRAFT_DRAFT_FILE, GRIDCRAFT_MAX_FILE_BYTES } from "./gridcraft-draft-file"
 import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter, removeDocumentDraftRow } from "../document-queue"
 
@@ -17,12 +18,13 @@ export interface NativeDraft {
   lossy?: Array<{ code: string; count: number }>
 }
 export type NativeFileFormat = "xlsx" | "xlsm"
-export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] | readonly ["download"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
+export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] | readonly ["download"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string }; overlap?: SheetRange[] }
 export interface NativeDraftJournal {
   /** `final`: the capture of a retiring editor. It may repeat what is stored. */
   persist(draft: NativeDraft, final?: boolean): Promise<void>
   confirm: (draft: NativeDraft) => Promise<void>
   recovery(): Promise<NativeRecovery[]>
+  archiveConflict?(draft: NativeDraft, overlap: SheetRange[]): Promise<NativeRecovery>
   /** Removes the exact stored row a recovery was read from (an earlier mount's
    * draft). `confirm` only retires this mount's own row. */
   discardRecovered(recovery: NativeRecovery): Promise<void>
@@ -74,20 +76,22 @@ function validLossy(d: NativeDraft): boolean {
   return d.format !== undefined && d.bytes.byteLength > 0 && Array.isArray(parts) && parts.length >= 1 && parts.length <= MAX_LOSSY_PARTS
     && parts.every(p => p !== null && typeof p === "object" && Object.keys(p).length === 2 && typeof p.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(p.code) && Number.isSafeInteger(p.count) && p.count > 0)
 }
-function encode(draft: NativeDraft): string {
+function encode(draft: NativeDraft, overlap?: SheetRange[]): string {
   if (!validNativeDraft(draft)) throw fail()
   let binary = ""
   for (let i = 0; i < draft.bytes.length; i += 32768) binary += String.fromCharCode(...draft.bytes.subarray(i, i + 32768))
-  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, ...(draft.format ? { format: draft.format } : {}), ...(draft.lossy ? { lossy: draft.lossy.map(p => ({ code: p.code, count: p.count })) } : {}), nativeBase64: btoa(binary) })
+  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, ...(draft.format ? { format: draft.format } : {}), ...(draft.lossy ? { lossy: draft.lossy.map(p => ({ code: p.code, count: p.count })) } : {}), ...(overlap ? { overlap } : {}), nativeBase64: btoa(binary) })
 }
-function decode(snapshot: string): NativeDraft | null {
+function decode(snapshot: string): Pick<NativeRecovery, "draft" | "overlap"> | null {
   try {
     if (snapshot.length > MAX_ENCODED_BYTES) return null
     const value = JSON.parse(snapshot)
     if (value?.kind !== "native-whole-document-v1" || typeof value.nativeBase64 !== "string") return null
     const binary = atob(value.nativeBase64)
     const draft: NativeDraft = { applicationId: value.applicationId, enginePin: value.enginePin, sessionId: value.sessionId, baseVersion: value.baseVersion, generation: value.generation, editorRevision: value.editorRevision, ...(value.format !== undefined ? { format: value.format } : {}), ...(value.lossy !== undefined ? { lossy: value.lossy } : {}), bytes: Uint8Array.from(binary, c => c.charCodeAt(0)) }
-    return validNativeDraft(draft) ? draft : null
+    const overlap = value.overlap === undefined ? undefined : sheetRanges(value.overlap, SHEET_MERGE_RANGE_LIMIT)
+    if (!validNativeDraft(draft) || (value.overlap !== undefined && (!overlap?.length || draft.applicationId !== "gridcraft" || !draft.format))) return null
+    return { draft, ...(overlap ? { overlap } : {}) }
   } catch { return null }
 }
 
@@ -99,6 +103,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
   const id = `native:${crypto.randomUUID()}`
   let active = true, closed = false, closing = false, revoking = false
   let current: string | undefined
+  const archives = new Set<string>()
   let store: Awaited<ReturnType<typeof openDocumentDrafts>> | undefined
   let opening: Promise<Awaited<ReturnType<typeof openDocumentDrafts>>> | undefined
   let tail = Promise.resolve()
@@ -119,7 +124,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
     closing = true
     return retire().then(closeStore)
   }
-  unregister = registerDocumentDraftWriter(scope.human, close, { storage: true, hasDraft: () => current !== undefined })
+  unregister = registerDocumentDraftWriter(scope.human, close, { storage: true, hasDraft: () => current !== undefined || archives.size > 0 })
   try {
     if (!active) throw fail()
     opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES, requireExclusive: true, signal: options?.signal })
@@ -147,13 +152,24 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       const snapshot = encode(draft)
       return enqueue(async () => { if (current === snapshot) { await journal.remove(id); current = undefined } })
     },
+    archiveConflict(draft, ranges) {
+      const overlap = sheetRanges(ranges, SHEET_MERGE_RANGE_LIMIT)
+      if (!active || draft.applicationId !== scope.applicationId || draft.applicationId !== "gridcraft" || !draft.format || !overlap?.length) return Promise.reject(fail())
+      const archiveId = `native:conflict:${crypto.randomUUID()}`
+      const snapshot = encode(draft, overlap)
+      return enqueue(async () => {
+        await journal.put({ id: archiveId, schema: 1, epoch: "native-v1", update: "", attempted: true, snapshot })
+        archives.add(archiveId)
+        return { draft, overlap, actions: ["compare", "copy"], source: { id: archiveId, snapshot } }
+      })
+    },
     discardRecovered(recovery) {
       const source = recovery.source
       if (!source || source.id === id) return Promise.resolve()
       return enqueue(async () => {
         if (!journal.exclusive) return
         const row = (await journal.load()).find(candidate => candidate.id === source.id)
-        if (row && row.snapshot === source.snapshot) await journal.remove(row.id)
+        if (row && row.snapshot === source.snapshot) { await journal.remove(row.id); archives.delete(row.id) }
       })
     },
     recovery() {
@@ -162,8 +178,8 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
         const recovered: NativeRecovery[] = []
         for (const row of await journal.load()) {
           if (row.id === id || row.schema !== 1 || row.epoch !== "native-v1") continue
-          const draft = decode(row.snapshot)
-          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: draft.lossy ? ["download"] : ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
+          const decoded = decode(row.snapshot)
+          if (decoded?.draft.applicationId === scope.applicationId) recovered.push({ ...decoded, actions: decoded.draft.lossy ? ["download"] : ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
         }
         return recovered
       })
@@ -176,7 +192,10 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
     close,
     eraseOwnRow() {
       // Writes already queued finish first; a retired handle accepts no more.
-      return retire().then(() => removeDocumentDraftRow(scope.human, scope.workspace, scope.page, { schema: 1, epoch: "native-v1", id })).then(() => { current = undefined }).finally(closeStore)
+      return retire().then(async () => {
+        await Promise.all([id, ...archives].map(rowId => removeDocumentDraftRow(scope.human, scope.workspace, scope.page, { schema: 1, epoch: "native-v1", id: rowId })))
+        current = undefined; archives.clear()
+      }).finally(closeStore)
     },
     revokeRead() {
       if (purged) return purged

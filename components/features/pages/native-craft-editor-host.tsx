@@ -1,6 +1,6 @@
 "use client"
 
-import { readSheetPresence, readSheetRealtimeAuthority, SHEET_REALTIME_CAPABILITIES, type SheetPresence, type SheetRealtimeCapability } from "@/lib/mooring/sheet-realtime"
+import { readSheetPresence, readSheetRealtimeAuthority, SHEET_PRESENCE_OPERATION_LIMIT, SHEET_REALTIME_CAPABILITIES, type SheetPresence, type SheetRealtimeCapability } from "@/lib/mooring/sheet-realtime"
 import {agentVersionHref} from '@/lib/mooring/version-href'
 import * as React from "react"
 import {createPortal,flushSync} from "react-dom"
@@ -181,7 +181,7 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
  const serverHash=await digest(server),kept:NativeRecovery[]=[]
  for(const row of rows){
-  if(await digest(row.draft.bytes)===serverHash){try{await journal.discardRecovered(row);continue}catch{/* Kept for comparison. */}}
+  if(!row.overlap&&await digest(row.draft.bytes)===serverHash){try{await journal.discardRecovered(row);continue}catch{/* Kept for comparison. */}}
   kept.push(row)
  }
  return kept
@@ -253,7 +253,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{if(!view.holder||view.mine)setTakeNotice(notice=>notice==='held'?undefined:notice)},[view.holder,view.mine])
  const statusSink=React.useRef(onStatus);statusSink.current=onStatus
  const openProposals=proposals.filter(proposal=>proposal.state==='open').length
- const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='merge_adoption'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
+ const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='merge_adoption'||saveTrace.reason==='too_many_ranges'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
  React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:!realtimeSheet&&view.mine,openProposals,recoveredDrafts:recoveries.length,version:savedVersion??openedVersion,...(conflictShown?{conflict:true}:{})})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,openedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,realtimeSheet,openProposals,recoveries.length,conflictShown])
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -265,7 +265,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   // Replaced only by a fresh read admission after the server retires write (#4348).
   let client=createNativeDocumentClient({workspaceId,pageId,...(realtimeChatId?{chatId:realtimeChatId}:{})})
   let realtimeGeneration:string|undefined
-  const presence=new Map<string,{actor:SheetPresence;expires:number}>()
+  const presence=new Map<string,{actor:SheetPresence;expires:number;truncated?:boolean}>()
   let presenceTimer:ReturnType<typeof setTimeout>|undefined
   const motion=typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):undefined
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
@@ -314,13 +314,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   function paintPresence(){
    clearTimeout(presenceTimer)
    const now=Date.now(),actors:SheetPresence[]=[]
-   let next=Infinity
+   let next=Infinity,truncated=false
    for(const [id,item] of presence){
     if(item.expires<=now){presence.delete(id);continue}
+    truncated ||= item.truncated===true
     next=Math.min(next,item.expires);actors.push({...item.actor,ttlMs:item.expires-now})
    }
    const r=current
-   if(r?.ready&&live(r))r.port.setPresence?.(actors,motion?.matches??false)
+   if(r?.ready&&live(r))r.port.setPresence?.(actors,motion?.matches??false,truncated)
    const label=actors.find(actor=>!actor.ranges.length||!r?.capabilities?.includes('presence-v1'))?.label
    if(!dead)setPresenceLabel(label)
    if(next!==Infinity)presenceTimer=setTimeout(paintPresence,Math.max(1,next-now))
@@ -330,15 +331,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    else {
     const snapshot=event==='sheet_agent_presence_snapshot'
     const rows=snapshot?value.operations:[value]
-    if(!Array.isArray(rows)||rows.length>32)return
+    if(!Array.isArray(rows)||rows.length>SHEET_PRESENCE_OPERATION_LIMIT)return
     const parsed=rows.map(readSheetPresence)
     if(parsed.some(row=>!row))return
     if(snapshot)presence.clear()
     for(const row of parsed){
      if(!row)continue
-     const {phase,presence:actor}=row
+     const {phase,presence:actor,truncated}=row
      if(phase==='ended'||actor.ttlMs===0)presence.delete(actor.activityId)
-     else if(presence.size<32||presence.has(actor.activityId))presence.set(actor.activityId,{actor,expires:Date.now()+actor.ttlMs})
+     else if(presence.size<SHEET_PRESENCE_OPERATION_LIMIT||presence.has(actor.activityId))presence.set(actor.activityId,{actor,truncated,expires:Date.now()+actor.ttlMs})
     }
    }
    paintPresence()
@@ -400,34 +401,29 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    },
    notice:text=>{if(!dead)setAgentNotice(text)},
    // Concurrent editing: the versions saved since this editor's base are replayed over its state, the person's cells kept.
-   rebase:async(_event,signal)=>{
+   rebase:async(event,signal)=>{
     const r=current
     // Not a writable Sheet here: today's path (unsaved work waits, a reader opens the version).
     if(dead||!r||!r.writable||r.blocked||!r.coordinator||sessionApplication!=='gridcraft')return{kind:'reload',reason:'operations_404'}
     const coordinator=r.coordinator
+    if(realtimeSheet){
+     if(event&&await coordinator.catchUp(event.version))return{kind:'current'}
+     return{kind:'reload',reason:'realtime_merge_unconfirmed'}
+    }
     const release=coordinator.beginReplay()
     if(!release)return{kind:'reload',reason:'save_unsettled'}
-    try{return await rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',...(realtimeSheet?{keep:'agent' as const}:{}),signal,
-     operations:async(from,s)=>{if(realtimeSheet)return client.operations?.(from,s)??{status:404,body:null};let res:Response;try{res=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/document/operations?${new URLSearchParams({workspace_id:workspaceId,from})}`,{signal:s,cache:'no-store',redirect:'error'})}catch(error){if(s.aborted)throw error;return{status:0,body:null}}return{status:res.status,body:await res.json().catch(()=>null)}},
+    try{return await rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',signal,
+     operations:async(from,s)=>{let res:Response;try{res=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/document/operations?${new URLSearchParams({workspace_id:workspaceId,from})}`,{signal:s,cache:'no-store',redirect:'error'})}catch(error){if(s.aborted)throw error;return{status:0,body:null}}return{status:res.status,body:await res.json().catch(()=>null)}},
      // The saved version a replay over unsaved work reports is the base of the next one.
      execute:(commands,options,s)=>r.port.execute(commands,options,s).then(result=>{if(result.savedRevision&&live(r))r.savedRevision=result.savedRevision;return result}),
-     rebaseBase:(version,hash,result)=>{
-      if(!live(r))return false
-      const checkpoint=realtimeSheet&&result?.dirty===false?result.revision:undefined
-      if(!coordinator.rebaseBase(version,hash,checkpoint?{cleanCheckpoint:checkpoint}:{}))return false
-      if(realtimeSheet){
-       r.version=version;setOpenedVersion(version)
-       if(checkpoint){r.ackedVersion=version;display(r)}
-      }
-      return true
-     }})}
+     rebaseBase:(version,hash)=>live(r)&&coordinator.rebaseBase(version,hash)})}
     finally{release()}
    },
    retryMoved:()=>{const r=current;if(r&&live(r))r.coordinator?.retryMoved()},
    rebased:(_event,outcome)=>{
+    if(realtimeSheet)return
     // Keep mine moves this editor's save base to the head, as it is, while the same editor is open.
     const r=current;keepMine.current=r&&r.coordinator?(version,hash)=>live(r)&&r.coordinator!.rebaseBase(version,hash,{keepLocal:true}):undefined
-    if(realtimeSheet){if(!dead&&outcome.kind==='layout')setRealtimeDetail('Review changes before saving.');return}
     if(!dead)setRebaseNote(outcome.kind==='current'||outcome.kind==='reload'||outcome.kind==='rebased'&&outcome.conflicts.length===0?undefined:outcome)},
    working:on=>{if(!dead)setAgentWorking(on)},
    baseRevision:()=>current?.savedRevision??current?.revision,
@@ -1170,6 +1166,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      r.receiptAck=adoptedClean;r.receiptVersion=save.receipt.version
      r.lastAck=adoptedClean;r.lastAckVersion=save.receipt.version
      return {nativeState:adopted.dirty?adopted.savedRevision:adopted.revision,dirty:adopted.dirty}
+    },
+    onConflict(recovery){
+     if(!live(r))return
+     keptRecoveries=true
+     setRecoveries(rows=>[...rows,recovery])
     }}:{}),
     onTransportSettled(){agentQueue.settled()},
     onRetiredTicket(requestId){if(live(r))r.port.saveFailed(requestId,'The server did not save this change.')},
@@ -1518,8 +1519,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {saveTrace?.reason==='document_too_large'&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>This workbook is larger than the 32 MiB a Sheet can save, so it is NOT saved on the server.</b> Your changes stay in this editor. Do not close the tab; remove data or split the workbook, or download it as a file.</p></div>}
   {/* One sentence and two actions; the detail folded, so the grid keeps its room. */}
   {conflictShown&&<div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-sm">
-   <p className="min-w-0 flex-1 basis-56">{realtimeSheet?'Review changes':'Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.'}</p>
-   <div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" onClick={()=>setReopened(n=>n+1)}>Load the latest version</Button><Button size="sm" variant="outline" onClick={()=>downloadDraft.current()}>Download my changes</Button></div>
+   <p className="min-w-0 flex-1 basis-56">{saveTrace?.reason==='too_many_ranges'?'This change covers too many ranges. Try a smaller area.':realtimeSheet?'Review changes':'Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.'}</p>
+   <div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" onClick={()=>{if(saveTrace?.reason==='too_many_ranges')void prepareLeave.current().then(ok=>{if(ok)setReopened(n=>n+1)});else setReopened(n=>n+1)}}>Load the latest version</Button><Button size="sm" variant="outline" onClick={()=>downloadDraft.current()}>Download my changes</Button></div>
    <details className="basis-full text-xs text-muted-foreground"><summary className="cursor-pointer">What happens</summary>Your changes stay in this editor and in this browser. Load the latest version to see what changed; your changes are offered beside it to compare or keep as a copy. Saving again here would be refused, because the server already holds a newer version.</details>
   </div>}
   {fidelityLoss&&!connectionRetired&&<div role="alert" data-craft-banner="fidelity-loss" className="space-y-1 border-y px-3 py-2"><p><b>Saving here would drop parts of this workbook ({fidelityPartsText(fidelityLoss)}). Your changes stay in the editor.</b> {fidelityKept?'Nothing was saved on the server. This browser keeps a copy of the file without those parts, to download only.':'Nothing was saved, on the server or in this browser: leaving or reloading this page loses them.'}</p><p className="text-sm text-muted-foreground">The stored version and the original file (version 1) keep every part. Saving is tried again after your next change.</p></div>}
@@ -1538,7 +1539,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    {proposal.state==='open'&&view.can_edit===true&&<Button variant="outline" disabled={busy} onClick={()=>decide.current(proposal.id,'reject')}>Reject</Button>}
    {proposal.state==='open'&&ownsEditor&&<Button disabled={busy} onClick={()=>decide.current(proposal.id,'accept')}>Accept</Button>}
   </div>)}
-   {shownRecoveries.map((recovery,index)=>recovery.draft.lossy?<div key={index} role="group" aria-label="Unsaved changes, incomplete file" className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Unsaved changes on version {recovery.draft.baseVersion}, not saved: this copy lacks {fidelityPartsText(recovery.draft.lossy)}.<small className="block text-muted-foreground">The stored version keeps every part.</small></span><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Download incomplete copy</Button></div>:<div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
+   {shownRecoveries.map((recovery,index)=>recovery.overlap?<div key={recovery.source?.id??index} role="status" className="flex flex-wrap items-center gap-2 px-2 py-1.5">
+    <span className="min-w-0 flex-1">Agent edited {recovery.overlap.slice(0,3).map(range=>`${range.sheet}!${range.a1}`).join(', ')}{recovery.overlap.length>3?` and ${recovery.overlap.length-3} more`:''}. Your copy is saved in this browser.</span>
+    <Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Download my copy</Button>
+   </div>:recovery.draft.lossy?<div key={index} role="group" aria-label="Unsaved changes, incomplete file" className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Unsaved changes on version {recovery.draft.baseVersion}, not saved: this copy lacks {fidelityPartsText(recovery.draft.lossy)}.<small className="block text-muted-foreground">The stored version keeps every part.</small></span><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Download incomplete copy</Button></div>:<div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
   </div>}
   {readVerified&&!offerWithdrawn&&comparison&&<div className="grid gap-2 p-3 md:grid-cols-2"><p className="md:col-span-2">Server version {comparison.version} and {comparison.draftLabel?.toLowerCase()??'local draft'}: {comparison.equal?(comparison.files?'identical files':'identical data'):(comparison.files?'different files':'different data')}.{comparison.files?' Download the draft to open it next to the server version.':' The native data is read-only.'}</p>{comparison.files?<><span className="break-all text-xs">Server SHA256 {comparison.serverHash}</span><span className="break-all text-xs">{comparison.draftLabel??'Local draft'} SHA256 {comparison.draftHash}</span></>:<><label>Server version<textarea aria-label="Server version" readOnly value={comparison.server} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.serverHash}</span></label><label>{comparison.draftLabel??'Local draft'}<textarea aria-label={comparison.draftLabel??'Local draft'} readOnly value={comparison.draft} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.draftHash}</span></label></>}<Button variant="outline" onClick={()=>setComparison(undefined)}>Close comparison</Button></div>}
   {accessCheck&&<p className="px-3 py-2 text-sm text-muted-foreground">Checking access…</p>}

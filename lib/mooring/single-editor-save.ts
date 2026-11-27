@@ -1,6 +1,6 @@
 import { readMergedSheetSave, sheetRecord, type MergedSheetSave } from "./sheet-realtime"
 import { compactNativeJson } from "./native-compact"
-import { MAX_NATIVE_BYTES, MAX_WORKBOOK_BYTES, type NativeDraft, type NativeDraftJournal, type NativeFileFormat, validNativeDraft, validNativeVersion, validWorkbookFormat } from "./native-draft"
+import { MAX_NATIVE_BYTES, MAX_WORKBOOK_BYTES, type NativeDraft, type NativeRecovery, type NativeDraftJournal, type NativeFileFormat, validNativeDraft, validNativeVersion, validWorkbookFormat } from "./native-draft"
 
 /** `attemptId` is a fresh nonce per transmitted save; reconcile sends the same
  * one so the server can retire an attempt that did not commit (#4899). */
@@ -18,7 +18,7 @@ export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes" | "at
 /** `unsupported`: the server refused the file itself (not a workbook, encrypted, another format). */
 /** moved: refused because the Sheet has a newer version (409 code "moved"); answered by a rebase.
  *  fidelity_loss: the file would lose or change macros, signatures or customXml (422); nothing was stored. */
-export type NativeSaveFailure = "conflict" | "moved" | "fidelity_loss" | "quota" | "too_large" | "write_revoked" | "read_revoked" | "absent" | "unsupported"
+export type NativeSaveFailure = "conflict" | "moved" | "fidelity_loss" | "quota" | "too_large" | "write_revoked" | "read_revoked" | "absent" | "unsupported" | "too_many_ranges"
 /** Documents above this are exported rarely: 3 s of quiet before an autosave. */
 const LARGE_DOCUMENT_BYTES = 8 << 20
 const LARGE_DOCUMENT_IDLE_MS = 3000
@@ -69,6 +69,7 @@ export interface SingleEditorSaveOptions {
   }
   onState(state: NativeSaveState): void
   adoptMerged?(save: MergedSheetSave, captureId: string): Promise<{ nativeState: string; dirty: boolean }>
+  onConflict?(recovery: NativeRecovery): void
   onReceipt?(receipt: NativeSaveReceipt, captureId?: string): void | Promise<unknown>
   onTransportSettled?(): void
   onRetiredTicket?(requestId: string): void
@@ -204,6 +205,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // saved checkpoint and preserve commands entered after that export.
       const epoch = edits
       try {
+        if (merged.overlap.length > 0) {
+          const archive = options.journal.archiveConflict
+          if (!archive) throw new Error("native_conflict_storage_unavailable")
+          const recovery = await journalStep(() => archive(attempt.draft, merged.overlap))
+          if (!active || !writable) return
+          try { options.onConflict?.(recovery) } catch { /* The protected copy already exists. */ }
+        }
         const adopted = await options.adoptMerged(merged, attempt.captureId)
         if (!active || !writable) return
         baseVersion = merged.receipt.version
@@ -276,8 +284,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // deadline it counts as failed storage. The step itself keeps running in the
   // journal's own queue: a late persist is not claimed as durable here, and a
   // late confirm only ever retires this mount's row for exactly that draft.
-  function journalStep(step: () => Promise<void>): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+  function journalStep<T>(step: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       const deadline = setTimeout(() => reject(new Error("journal_timeout")), timeoutMs)
       Promise.resolve().then(step).then(resolve, reject).finally(() => clearTimeout(deadline))
     })
@@ -332,7 +340,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     try {
       const result = await bounded(signal => reconcile ? options.transport.reconcile!(attempt.draft, signal) : options.transport.save(attempt.draft, signal), operation.abort)
       if (!active || !writable || pending !== operation) return
-      await settle(result, attempt, !reconcile)
+      await settle(result, attempt, !reconcile || Boolean(options.adoptMerged && attempt.draft.attemptId))
     } catch (error) {
       // Read loss wins over the session, write and operation fences: a write
       // retirement that met this reply must not keep the draft as a capture.
@@ -397,7 +405,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     draftWrites = writing.catch(() => {})
     return writing
   }
-  function save(requestId?: string, autosaveToken?: number, hostFlush = false, localOnly = false): Promise<void> {
+  function save(requestId?: string, autosaveToken?: number, hostFlush = false, localOnly = false, catchUpTo?: string): Promise<void> {
     if (readRevoked) return Promise.reject(new NativeSaveError("read_revoked"))
     if (held) return Promise.reject(new Error("native_save_held"))
     const manual = requestId !== undefined || hostFlush
@@ -414,7 +422,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // A newer idle request supersedes queued autosaves, but never an active
       // snapshot or an explicit manual ticket. Capture locally even while the
       // transport is pending/uncertain; those fences apply only to sending.
-      if (!active || heldInput() || autosaveToken !== undefined && autosaveToken !== nextAutosave) return
+      if (!active || heldInput() || catchUpTo !== undefined && BigInt(baseVersion) >= BigInt(catchUpTo) || autosaveToken !== undefined && autosaveToken !== nextAutosave) return
       const epoch = edits
       dirty = true
       let stage = "engine"
@@ -522,7 +530,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const sameState = baseline && (baseline.seeded
         ? !explicit || baseline.mountedState === undefined || baseline.mountedState === attempt.nativeState
         : baseline.nativeState === attempt.nativeState)
-      if (baseline && unchanged && sameState && baseline.version === baseVersion) {
+      if (catchUpTo === undefined && baseline && unchanged && sameState && baseline.version === baseVersion) {
         const confirmation: NativeSaveReceipt | undefined = explicit ? { ...unsent(attempt.draft), baseVersion: baseline.version, version: baseline.version, durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: attempt.draft.contentHash, unchanged: true } : undefined
         try { await confirmRow(attempt.draft) } catch {
           // The bytes are committed; only their row stayed. Retry once by
@@ -646,7 +654,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // A merged reply cannot retire a revoked editor's draft. Its saved checkpoint
       // was never adopted, and the canonical bytes may differ from the local capture.
       const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
-      if (!active || unconfirmed !== attempt || !validReceipt(receipt, attempt)) return
+      if (!active || unconfirmed !== attempt || !validReceipt(receipt, attempt, Boolean(options.adoptMerged && attempt.draft.attemptId))) return
       unconfirmed = undefined
       await confirmRow(attempt.draft)
       const capture = latest?.draft
@@ -698,7 +706,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (!active) return
       if (held) firstHeldRevision ??= revision
       lastRevision = revision
-      edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule()
+      edits++; dirty = true
+      if (writable && blocked === "too_many_ranges") emit("draft", blocked)
+      else emit(writable ? "dirty" : "read-only")
+      schedule()
     },
     // A hidden tab takes no keys, so this copy is clean. It is no barrier: a tab can
     // freeze before it finishes, and retirement still asks what reached the journal.
@@ -719,6 +730,16 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       else scheduleIfNeeded()
     },
     save: (requestId?: string) => save(requestId),
+    /** Bring a displayed chat Sheet up to an agent version through the same
+     * protected capture and authenticated merge as an ordinary stale save. */
+    async catchUp(version: string): Promise<boolean> {
+      if (!options.adoptMerged || !validNativeVersion(version)) return false
+      if (BigInt(baseVersion) >= BigInt(version)) return true
+      if (!active || !writable || pending || unconfirmed || held || blocked && blocked !== "moved") return false
+      if (blocked === "moved") blocked = undefined
+      await save(undefined, ++nextAutosave, false, false, version)
+      return active && writable && BigInt(baseVersion) >= BigInt(version)
+    },
     // A reconciliation or local receipt retirement can still owe this native
     // request its acknowledgement. The editor needs the original ticket.
     keepsTicket(requestId: string): boolean {
@@ -761,7 +782,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     },
     /** The version the next save goes on top of (the person's unsaved work is on it). */
     currentBase(): string { return baseVersion },
-    rebaseBase(version: string, contentHash: string, rebaseOptions: { keepLocal?: boolean; cleanCheckpoint?: string } = {}): boolean {
+    rebaseBase(version: string, contentHash: string, rebaseOptions: { keepLocal?: boolean } = {}): boolean {
       // A save the server refused because the Sheet moved on (409) is exactly what a rebase answers.
       if (!active || !writable || blocked && blocked !== "moved" || unconfirmed || pending || held || !validNativeVersion(version) || !/^sha256:[a-f0-9]{64}$/.test(contentHash)) return false
       if (BigInt(version) <= BigInt(baseVersion)) return false
@@ -770,16 +791,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       rebases++
       baseVersion = version
       baselineStale = false
-      const previous = latest
-      const checkpoint = rebaseOptions.cleanCheckpoint
-      confirmed = { nativeState: checkpoint, contentHash, version, seeded: checkpoint === undefined }
+      confirmed = { nativeState: undefined, contentHash, version, seeded: true }
       latest = undefined
-      if (checkpoint !== undefined) {
-        dirty = false
-        if (previous) void confirmRow(previous.draft).catch(() => {})
-        emit("saved")
-        return true
-      }
       edits++
       dirty = true
       void save(undefined, ++nextAutosave).catch(() => {})

@@ -2,8 +2,14 @@ import type { NativeSaveReceipt, NativeSaveRequest } from "./single-editor-save"
 
 import { validNativeVersion } from "./native-draft"
 
+export const SHEET_MERGE_RANGE_LIMIT = 256
+export const SHEET_PRESENCE_RANGE_LIMIT = 32
+export const SHEET_PRESENCE_OPERATION_LIMIT = 128
+
 export const SHEET_REALTIME_CAPABILITIES = ["merge-capture-v1", "agent-wins-v1", "presence-v1"] as const
-export type SheetRealtimeCapability = typeof SHEET_REALTIME_CAPABILITIES[number]
+export const SHEET_PRESENCE_TRUNCATED_CAPABILITY = "agent-capture-fence-v1"
+export const SHEET_SUPPORTED_CAPABILITIES = [...SHEET_REALTIME_CAPABILITIES, SHEET_PRESENCE_TRUNCATED_CAPABILITY] as const
+export type SheetRealtimeCapability = typeof SHEET_SUPPORTED_CAPABILITIES[number]
 export type SheetRange = { sheet: string; a1: string }
 export type SheetPresence = { actorId: string; label: string; activityId: string; ranges: SheetRange[]; ttlMs: number }
 
@@ -30,17 +36,18 @@ export function sheetRanges(value: unknown, limit = 256): SheetRange[] | undefin
   return ranges
 }
 
-export function readSheetPresence(value: unknown): { phase: "started" | "updated" | "ended"; presence: SheetPresence } | undefined {
+export function readSheetPresence(value: unknown): { phase: "started" | "updated" | "ended"; presence: SheetPresence; truncated?: boolean } | undefined {
   if (!sheetRecord(value) || !identifier(value.op_id) || !identifier(value.run_id) || !sheetRecord(value.agent)
     || !identifier(value.agent.id) || !label(value.agent.name, 128)) return
-  const { phase, ttl_ms: ttl } = value
+  const { phase, ttl_ms: ttl, truncated } = value
+  if (truncated !== undefined && typeof truncated !== "boolean") return
   if (phase !== "started" && phase !== "updated" && phase !== "ended") return
-  const ranges = sheetRanges(value.ranges, 32)
+  const ranges = sheetRanges(value.ranges, SHEET_PRESENCE_RANGE_LIMIT)
   if (!ranges || typeof ttl !== "number" || !Number.isInteger(ttl) || ttl < 0 || ttl > 120_000) return
-  return { phase, presence: { actorId: value.agent.id, label: value.agent.name, activityId: value.op_id, ranges, ttlMs: ttl } }
+  return { phase, ...(truncated === true ? { truncated } : {}), presence: { actorId: value.agent.id, label: value.agent.name, activityId: value.op_id, ranges, ttlMs: ttl } }
 }
 
-export type MergedSheetSave = { receipt: NativeSaveReceipt; contentHash: string; bytes: Uint8Array; agentRanges: SheetRange[] }
+export type MergedSheetSave = { receipt: NativeSaveReceipt; contentHash: string; bytes: Uint8Array; agentRanges: SheetRange[]; overlap: SheetRange[] }
 
 export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveRequest): Promise<MergedSheetSave | undefined> {
   if (submitted.applicationId !== "gridcraft" || !sheetRecord(raw) || raw.kind !== "merged" || !sheetRecord(raw.submitted) || !sheetRecord(raw.receipt)) return
@@ -56,8 +63,9 @@ export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveReq
     || receipt.workspaceId !== submitted.workspaceId || receipt.pageId !== submitted.pageId || receipt.applicationId !== submitted.applicationId
     || receipt.enginePin !== submitted.enginePin || receipt.sessionId !== submitted.sessionId || receipt.generation !== submitted.generation
     || receipt.editorRevision !== submitted.editorRevision || receipt.issuedBy !== "crewship" || receipt.durability !== "node" || receipt.phase !== "committed") return
-  const agentRanges = sheetRanges(raw.agent_ranges)
-  if (!agentRanges || !sheetRanges(raw.overlap) || typeof raw.bytes !== "string" || raw.bytes.length > Math.ceil(MAX_WORKBOOK_BYTES / 3) * 4) return
+  const agentRanges = sheetRanges(raw.agent_ranges, SHEET_MERGE_RANGE_LIMIT)
+  const overlap = sheetRanges(raw.overlap, SHEET_MERGE_RANGE_LIMIT)
+  if (!agentRanges || !overlap || typeof raw.bytes !== "string" || raw.bytes.length > Math.ceil(MAX_WORKBOOK_BYTES / 3) * 4) return
   try {
     const decoded = atob(raw.bytes)
     if (!decoded.length || decoded.length > MAX_WORKBOOK_BYTES) return
@@ -65,6 +73,6 @@ export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveReq
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
     const actual = "sha256:" + Array.from(digest, b => b.toString(16).padStart(2, "0")).join("")
     if (actual !== contentHash) return
-    return { receipt: receipt as unknown as NativeSaveReceipt, contentHash, bytes, agentRanges }
+    return { receipt: receipt as unknown as NativeSaveReceipt, contentHash, bytes, agentRanges, overlap }
   } catch { return }
 }

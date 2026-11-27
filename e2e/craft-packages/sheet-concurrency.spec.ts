@@ -230,7 +230,7 @@ async function watchEditor(page: Page) {
     window.sheetTestFiles = []
     const channel = window.MessageChannel, outgoing = MessagePort.prototype.postMessage
     const remember = (message: EditorEvent & { bytes?: ArrayBuffer | Uint8Array }) => {
-      if (/^gridcraft:(ready|execute|executed|opened|changed|save-ack)$/.test(message?.type)) window.sheetTestEvents.push(message)
+      if (/^gridcraft:(ready|execute|executed|opened|changed|save-ack|adopt-merged|merged-adopted)$/.test(message?.type)) window.sheetTestEvents.push(message)
       if (message?.type === "gridcraft:save" && message.bytes) {
         const bytes = message.bytes instanceof Uint8Array ? message.bytes : new Uint8Array(message.bytes)
         window.sheetTestFiles.push({ document: message.document, revision: message.revision, bytes: Array.from(bytes) })
@@ -266,8 +266,8 @@ async function watchEditor(page: Page) {
 const cellSet = (cell: string, input: string) => ({ command: "cell.set", params: { cell, input } })
 
 for (const race of ["saved revision", "same cell", "other cell", "other sheet"] as const) {
-  test(`Sheet live replay preserves the ${race}`, async ({ browser }) => {
-    const context = await browser.newContext({ baseURL: origin, storageState: await loginStorageState(origin, account), viewport: native.VIEWPORT })
+  test(`Sheet adopts canonical bytes for ${race}`, async ({ browser }) => {
+    const context = await browser.newContext({ baseURL: origin, storageState: await loginStorageState(origin, account), viewport: native.VIEWPORT, acceptDownloads: true })
     try {
       const { name, craft, ref, chat, url } = await fixture(context.request)
       const { pin } = await readWorkbook(context.request, craft)
@@ -300,9 +300,9 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       const headers = { "X-Craft-Session": session! }
       const { version: savedVersion } = await saved.json() as { version: string }
       const base = Number(savedVersion)
-      const agentOps = new Map<string, ReturnType<typeof cellSet>>()
-      // Commit the simulated agent's change over the real head using the test editor's admission.
-      // Only the actor and replay commands are simulated. A subsequent browser save sees the real CAS version.
+      const agentFootprints = new Map<number, { sheet: string; a1: string }>()
+      // Seed real versions while stubbing the agent role and the merge response in this browser test.
+      // Go integration tests exercise the server's authorization and merge rules with an actual agent grant.
       const send = async (version: number, command: ReturnType<typeof cellSet>) => {
         const head = await readWorkbook(context.request, craft)
         expect(head.version).toBe(String(version - 1))
@@ -316,7 +316,7 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         })
         expect(commit.status(), await commit.text()).toBe(200)
         expect(await commit.json()).toMatchObject({ version: String(version), candidateHash: hash })
-        agentOps.set(String(version), command)
+        agentFootprints.set(version, { sheet, a1: address })
         const id = `sheet-change-${version}`
         const emit = (type: string, content: string, metadata: Record<string, unknown> = {}) =>
           socket!.send(JSON.stringify({ type: "chat_event", channel: `session:${chat}`, payload: { type, content, metadata } }))
@@ -325,22 +325,44 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         emit("done", "")
       }
       await expect.poll(() => Boolean(socket), { message: "real chat WebSocket connected" }).toBe(true)
-      const executes = () => page.evaluate(() => window.sheetTestEvents.filter(event => event.type === "gridcraft:executed"))
+      const adoptions = () => page.evaluate(() => window.sheetTestEvents.filter(event => event.type === "gridcraft:merged-adopted"))
       const operation = cellSet(race === "other sheet" ? "'Other'!B2" : race === "other cell" ? "'Data'!C2" : "'Data'!B2", "agent")
-      await page.route("**/craft/document/operations?**", async route => {
-        const response = await route.fetch({ headers: { ...route.request().headers(), ...headers } })
-        if (!response.ok()) return route.fulfill({ response })
-        const log = await response.json() as { versions: Array<{ version: string; replayable: boolean }> }
-        const versions = log.versions.map(entry => {
-          const command = agentOps.get(entry.version)
-          return command ? { ...entry, engine_pin: pin, actor_kind: "agent", replayable: true, ops: [command] } : entry
-        })
-        return route.fulfill({ response, json: { ...log, replayable: versions.every(entry => entry.replayable), versions } })
+      await page.route("**/craft/document/save?**", async route => {
+        const request = route.request().postDataJSON() as typeof binding & {
+          attemptId: string; baseVersion: string; editorRevision: string; contentHash: string; bytes: string
+        }
+        const head = await readWorkbook(context.request, craft)
+        if (head.version === request.baseVersion) return route.continue()
+        const agentRanges = [...agentFootprints].filter(([version]) => version > Number(request.baseVersion)).map(([, range]) => range)
+        const captured = await workbookCell(page, Buffer.from(request.bytes, "base64"), "Data", "B2")
+        const human = captured.value === "human"
+        const overlap = human ? agentRanges.filter(range => range.sheet === "Data" && range.a1 === "B2") : []
+        let canonical = head.bytes, version = head.version
+        if (human && overlap.length === 0) {
+          const preserved = await workbookCell(page, canonical, "Data", "B2", "human")
+          if (!preserved.bytes) throw Error("The fixture could not preserve the independent edit")
+          canonical = preserved.bytes
+          const hash = "sha256:" + createHash("sha256").update(canonical).digest("hex")
+          const reply = await context.request.post(craft("document/save"), {
+            headers, data: { ...request, baseVersion: head.version, attemptId: randomUUID(), bytes: canonical.toString("base64"), contentHash: hash },
+          })
+          expect(reply.status(), await reply.text()).toBe(200)
+          version = (await reply.json() as { version: string }).version
+        }
+        const hash = "sha256:" + createHash("sha256").update(canonical).digest("hex")
+        const { attemptId, bytes: _bytes, touched: _touched, ...scope } = request
+        await route.fulfill({ json: {
+          kind: "merged",
+          submitted: { attempt_id: attemptId, base_version: request.baseVersion, editor_revision: request.editorRevision, content_hash: request.contentHash },
+          receipt: { ...scope, baseVersion: head.version, version, ...(version === head.version ? { unchanged: true } : {}),
+            contentHash: hash, candidateHash: hash, durability: "node", issuedBy: "crewship", phase: "committed" },
+          head_content_hash: hash, bytes: canonical.toString("base64"), overlap, agent_ranges: agentRanges,
+        } })
       })
 
       if (race === "saved revision") {
         await send(base + 1, cellSet("'Data'!A2", "first agent change"))
-        await expect.poll(async () => (await executes()).length, { message: "the first version was replayed by GridCraft" }).toBe(1)
+        await expect.poll(async () => (await adoptions()).length).toBe(1)
         await editCell(page, frame, "human", "B2")
         await send(base + 2, operation)
       } else {
@@ -350,39 +372,21 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         await editCell(page, frame, "human", "B2")
         await page.evaluate(() => window.sheetTestReleasePaint())
       }
-      const conflicts = race === "saved revision" || race === "same cell" ? [{ sheet: "Data", cell: "B2" }] : []
-      await expect.poll(async () => (await executes()).at(-1), { message: "GridCraft replays over the saved baseline with agent precedence only on overlapping cells" })
-        .toMatchObject({ savedRevision: expect.any(String), conflicts, dirty: conflicts.length === 0 })
-      if (conflicts.length > 0) {
-        const head = await readWorkbook(context.request, craft)
-        expect(head.version).toBe(String(base + (race === "saved revision" ? 2 : 1)))
-        expect((await workbookCell(page, head.bytes, "Data", "B2")).value).toBe("agent")
-      }
-      if (race === "other sheet") {
-        const readSnapshot = () => page.evaluate(() => window.sheetTestFiles.at(-1))
-        const cells = async (bytes: number[]) => ({
-          human: (await workbookCell(page, Buffer.from(bytes), "Data", "B2")).value,
-          agent: (await workbookCell(page, Buffer.from(bytes), "Other", "B2")).value ?? "",
-        })
-        await expect.poll(async () => {
-          const snapshot = await readSnapshot()
-          return snapshot && cells(snapshot.bytes)
-        }).toEqual({ human: "human", agent: "agent" })
-        await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", String(base + 2), { timeout: 15_000 })
-        const beforeUndo = await readSnapshot()
-        if (!beforeUndo?.document || !beforeUndo.revision) throw new Error("The merged export did not identify its editor revision")
-        const undoFrom = { document: beforeUndo.document, revision: beforeUndo.revision }
-        await expect.poll(() => frame.evaluate(() => document.hasFocus())).toBe(true)
-        await page.keyboard.press("Control+z")
-        await expect.poll(() => page.evaluate(({ document, revision }) => window.sheetTestEvents.some(event =>
-          event.type === "gridcraft:changed" && event.document === document && event.revision !== undefined && BigInt(event.revision) > BigInt(revision)
-        ), undoFrom), { message: "GridCraft handles Undo in a newer editor revision" }).toBe(true)
-        await page.keyboard.press("Control+s")
-        await expect.poll(async () => {
-          const afterUndo = await readSnapshot()
-          if (!afterUndo?.revision || afterUndo.document !== undoFrom.document || BigInt(afterUndo.revision) <= BigInt(undoFrom.revision)) return null
-          return cells(afterUndo.bytes)
-        }, { message: "the post-Undo export clears Other!B2 and preserves Data!B2" }).toEqual({ human: "human", agent: "" })
+      const overlaps = race === "saved revision" || race === "same cell"
+      const finalVersion = String(base + (race === "same cell" ? 1 : 2))
+      await expect.poll(async () => (await adoptions()).at(-1)).toMatchObject({ version: finalVersion, dirty: false })
+      const head = await readWorkbook(context.request, craft)
+      expect(head.version).toBe(finalVersion)
+      expect((await workbookCell(page, head.bytes, "Data", "B2")).value).toBe(overlaps ? "agent" : "human")
+      const [, sheet, address] = /^'([^']+)'!([A-Z]+\d+)$/.exec(operation.params.cell)!
+      expect((await workbookCell(page, head.bytes, sheet, address)).value).toBe("agent")
+      if (overlaps) {
+        await expect(panel.getByText("Agent edited Data!B2. Your copy is saved in this browser.")).toBeVisible()
+        const download = page.waitForEvent("download")
+        await panel.getByRole("button", { name: "Download my copy" }).click()
+        const stream = await (await download).createReadStream()
+        const copy = Buffer.concat(await stream.toArray())
+        expect((await workbookCell(page, copy, "Data", "B2")).value).toBe("human")
       }
     } finally {
       await context.close()

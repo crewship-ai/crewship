@@ -44,7 +44,6 @@ export type NativeDocumentEvent = "lease" | "session_retired" | "sheet_agent_pre
 export interface NativeDocumentClient {
  open(signal: AbortSignal): Promise<NativeDocumentAdmission>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
- operations?(from:string,signal:AbortSignal):Promise<{status:number;body:unknown}>
  originalWorkbook?(signal:AbortSignal):Promise<Uint8Array>
  events(signal:AbortSignal,onEvent:(event:NativeDocumentEvent,value:Record<string,unknown>)=>void):Promise<void>
  reauthorize(signal:AbortSignal):Promise<boolean>
@@ -181,7 +180,13 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   // The file itself was refused: not a workbook, encrypted, or another format.
   if(response.status===415)throw new NativeSaveError("unsupported")
   // The file would lose or change macros, signatures or customXml; nothing was stored.
-  if(response.status===422&&operation==="save"&&await refusalCode(response)==="fidelity_loss")throw new NativeSaveError("fidelity_loss")
+  if(response.status===422&&operation==="save"){
+   const problem:unknown=await response.clone().json().catch(()=>null);ready()
+   if(problem&&typeof problem==="object"){
+    if("reason" in problem&&problem.reason==="too_many_ranges")throw new NativeSaveError("too_many_ranges")
+    if("code" in problem&&problem.code==="fidelity_loss")throw new NativeSaveError("fidelity_loss")
+   }
+  }
   if(response.status===413){
    // The server says "quota" for a full version history; any other 413 (the body cap, a proxy in
    // front of the server) means the document itself is too large to send, which is not a quota.
@@ -212,14 +217,6 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     return {sessionId,applicationId,...(realtime?{realtime:{canWrite:v.can_write===true&&Boolean(generation),generation}}:{})}
    })()
    return opening
-  },
-  async operations(from,signal){
-   ready()
-   if(!validNativeVersion(from)||from==="0")throw new Error("native_operations_invalid")
-   const response=await send(`${base}document/operations?${query}&from=${from}`,{signal,cache:"no-store",headers:{"X-Craft-Session":token!}})
-   ready()
-   const body:unknown=await response.json().catch(()=>null);ready()
-   return {status:response.status,body}
   },
   async undo(operationId,generation,signal){
    ready()
