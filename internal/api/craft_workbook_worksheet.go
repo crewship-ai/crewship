@@ -22,6 +22,7 @@ var errCraftWorksheetXML = errors.New("cannot prove the worksheet's structure an
 type craftWorkbookEdits struct {
 	cells             map[string][]nativeAgentEngineArea
 	allowScalarValues bool // a human save may lack a precise list of edited values
+	observe           func(string, int, int, [32]byte) error
 }
 
 func (e *craftWorkbookEdits) add(address string) bool {
@@ -167,7 +168,12 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 				lastCol = col
 				cellBounds := nativeAgentEngineArea{col1: col, row1: row, col2: col, row2: row}
 				state.cells = craftWorksheetEnclose(state.cells, cellBounds)
-				cell, keep, err := craftWorksheetCell(d, el, edits.includes(sheet, col, row), edits.allowScalarValues)
+				addressed := edits.includes(sheet, col, row)
+				var observe func([32]byte) error
+				if addressed && edits.observe != nil {
+					observe = func(input [32]byte) error { return edits.observe(sheet, col, row, input) }
+				}
+				cell, keep, err := craftWorksheetCell(d, el, addressed, edits.allowScalarValues, observe)
 				if err != nil {
 					return craftWorksheetState{}, err
 				}
@@ -212,7 +218,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 // A simple cell has a known scalar type, optional style, a plain formula or
 // value, and no unknown attributes or child elements. An edit can replace its
 // content, while its style and address stay in the projection.
-func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool) ([32]byte, bool, error) {
+func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool, observe func([32]byte) error) ([32]byte, bool, error) {
 	cellType := craftWorkbookAttr(el, "t")
 	simple := true
 	switch cellType {
@@ -268,6 +274,26 @@ func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowSca
 	}
 	simple = simple && (!formula.present || formula.plain && formula.nonempty) &&
 		(!value.present || value.plain) && (!inline.present || inline.plain && !formula.present && !value.present)
+	if simple && observe != nil {
+		var input [32]byte
+		switch {
+		case formula.present:
+			input = formula.digest
+		case inline.present:
+			input = inline.digest
+		case value.nonempty:
+			h := craftWorksheetHash{sha256.New()}
+			if cellType == "n" {
+				cellType = ""
+			}
+			h.field(cellType)
+			_, _ = h.Write(value.digest[:])
+			input = h.sum()
+		}
+		if err := observe(input); err != nil {
+			return [32]byte{}, false, err
+		}
+	}
 	if simple && (addressed || allowScalar && !formula.present) {
 		style := craftWorkbookAttr(el, "s")
 		if style == "" || style == "0" {

@@ -116,6 +116,10 @@ func (m *craftNativeHTTP) eventsOnTick(w http.ResponseWriter, r *http.Request, t
 		defer ticker.Stop()
 		ticks = ticker.C
 	}
+	if entry.chatID != "" {
+		m.streamSheetPresence(r, entry, ticks, send, retire)
+		return
+	}
 	for {
 		// Repeat original-source, scope and current Page read authority immediately
 		// before each metadata delivery. No document bytes flow through this stream.
@@ -161,6 +165,60 @@ func (m *craftNativeHTTP) eventsOnTick(w http.ResponseWriter, r *http.Request, t
 		case <-r.Context().Done():
 			return
 		case <-ticks:
+		}
+	}
+}
+
+// streamSheetPresence runs only for admissions with verified private read of
+// the page and its chat. It uses the heartbeat to repeat both reader and run
+// authorization and to refresh the expiry displayed in a connected editor.
+func (m *craftNativeHTTP) streamSheetPresence(r *http.Request, entry *craftNativeSession, ticks <-chan time.Time, send func(string, any) bool, retire func()) {
+	scope := craftSheetPresenceScope{page: entry.scope, chat: entry.chatID}
+	var previous map[string]craftSheetPresenceEvent
+	for {
+		pending, wake := m.sheetPresence.observe(scope)
+		operations := make([]craftSheetPresenceEvent, 0, len(pending))
+		current := make(map[string]craftSheetPresenceEvent, len(pending))
+		for _, op := range pending {
+			if m.agents.toolAuthority(op.ctx, op.entry) == nil {
+				event := op.event
+				operations = append(operations, event)
+				current[event.OpID] = event
+			}
+		}
+		if _, err := m.bound(r); err != nil {
+			retire()
+			return
+		}
+		if previous == nil {
+			if !send("sheet_agent_presence_snapshot", craftSheetPresenceSnapshot{Operations: operations}) {
+				return
+			}
+		} else {
+			for _, event := range operations {
+				if _, known := previous[event.OpID]; known {
+					event.Phase = "updated"
+				}
+				if !send("sheet_agent_presence", event) {
+					return
+				}
+			}
+			for id, event := range previous {
+				if _, active := current[id]; active {
+					continue
+				}
+				event.Phase, event.Ranges, event.TTL = "ended", []craftSheetRange{}, 0
+				if !send("sheet_agent_presence", event) {
+					return
+				}
+			}
+		}
+		previous = current
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticks:
+		case <-wake:
 		}
 	}
 }

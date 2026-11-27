@@ -383,6 +383,9 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 			return
 		}
 		result := map[string]any{"application": e.grant.Application, "version": strconv.FormatInt(state.LatestVersion, 10), "engine_pin": store.EnginePin()}
+		if store.Workbook() {
+			defer m.sheetPresence(bound.Context(), e, craftSheetPresenceReadRanges(input.Query))()
+		}
 		if len(input.Query) > 0 {
 			native, err := nativeAgentDocumentBytes(state)
 			if err != nil {
@@ -595,6 +598,7 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	record := craftNativeAgentSheetRecord(e)
 	undoable := store.Workbook()
 	if undoable {
+		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(input.Commands))()
 		ops, replayable := craftNativeAgentResolvedOps(input.Commands)
 		inverse, complete := craftUndoCapture(active, m.config.AgentInspect, profile, native, ops)
 		if !replayable || !complete || !craftVersionOpsFit(ops, inverse) || record == nil {

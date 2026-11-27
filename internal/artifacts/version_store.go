@@ -59,6 +59,9 @@ type VersionRequest struct {
 	// version or not at all. A request that writes no version (a conflict, an
 	// ApplyChanged repeat, a refusal) never calls it.
 	Record func(ctx context.Context, tx *sql.Tx, r VersionReceipt) error `json:"-"`
+	// RecordUnchanged records an operation's receipt in the same transaction
+	// when ApplyChanged confirms that its files are already the current head.
+	RecordUnchanged func(ctx context.Context, tx *sql.Tx, r VersionReceipt) error `json:"-"`
 }
 type VersionReceipt struct {
 	Version int64  `json:"version"`
@@ -359,6 +362,9 @@ func (s *VersionStore) ApplyChanged(ctx context.Context, k VersionKey, r Version
 		}
 		if same {
 			out, unchanged = VersionReceipt{r.BaseVersion, actor}, true
+			if r.RecordUnchanged != nil {
+				return r.RecordUnchanged(ctx, tx, out)
+			}
 			return nil
 		}
 		out, e = s.publish(ctx, tx, k, r, actor, 0)

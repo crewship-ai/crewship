@@ -52,6 +52,9 @@ func (m *craftNativeHTTP) renewAdmission(r *http.Request) (bool, error) {
 	next := *entry
 	next.source = fresh
 	next.deadline = start + remaining
+	if entry.chatID != "" {
+		next.deadline = min(next.deadline, entry.realtimeDeadline)
+	}
 	if next.deadline <= entry.deadline {
 		return false, nil
 	}
