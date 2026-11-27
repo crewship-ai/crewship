@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { expect, test, type APIRequestContext, type Frame, type Page, type WebSocketRoute } from "@playwright/test"
 import { strToU8, unzipSync, strFromU8, zipSync } from "fflate"
 import { loginStorageState } from "../acceptance/prd/auth"
@@ -29,6 +29,59 @@ function workbook(): Buffer {
 
 const hasValue = (bytes: Buffer, value: string) =>
   Object.entries(unzipSync(bytes)).some(([path, file]) => path.endsWith(".xml") && strFromU8(file).includes(value))
+
+async function workbookCell(page: Page, bytes: Buffer, sheet: string, address: string, input?: string) {
+  const files = unzipSync(bytes)
+  const result = await page.evaluate(({ parts, sheet, address, input }) => {
+    const parse = (xml: string) => new DOMParser().parseFromString(xml, "application/xml")
+    const tags = (node: Document | Element, name: string) => Array.from(node.getElementsByTagNameNS("*", name))
+    const workbook = parse(parts["xl/workbook.xml"])
+    const namedSheet = tags(workbook, "sheet").find(node => node.getAttribute("name") === sheet)
+    const id = namedSheet?.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id")
+    const rels = parse(parts["xl/_rels/workbook.xml.rels"])
+    const target = tags(rels, "Relationship").find(node => node.getAttribute("Id") === id)?.getAttribute("Target")
+    if (!target) throw new Error("No workbook relationship for " + sheet)
+    const path = new URL(target, "https://workbook.invalid/xl/workbook.xml").pathname.slice(1)
+    if (!parts[path]) throw new Error("Missing worksheet part " + path)
+    const worksheet = parse(parts[path])
+    let cell = tags(worksheet, "c").find(node => node.getAttribute("r") === address)
+    if (input !== undefined) {
+      const create = (name: string) => worksheet.createElementNS(worksheet.documentElement.namespaceURI, name)
+      if (!cell) {
+        const rowNumber = Number(address.match(/\d+$/)![0])
+        const data = tags(worksheet, "sheetData")[0]
+        let row = tags(data, "row").find(node => Number(node.getAttribute("r")) === rowNumber)
+        if (!row) {
+          row = create("row")
+          row.setAttribute("r", String(rowNumber))
+          data.insertBefore(row, tags(data, "row").find(node => Number(node.getAttribute("r")) > rowNumber) ?? null)
+        }
+        cell = create("c")
+        cell.setAttribute("r", address)
+        // The fixture uses single-letter columns.
+        row.insertBefore(cell, tags(row, "c").find(node => node.getAttribute("r")! > address) ?? null)
+      }
+      cell.setAttribute("t", "inlineStr")
+      const inline = create("is"), text = create("t")
+      text.textContent = input
+      inline.append(text)
+      cell.replaceChildren(inline)
+      return { path, xml: new XMLSerializer().serializeToString(worksheet) }
+    }
+    const value = cell && tags(cell, "v")[0]?.textContent
+    const text = (node?: Element) => node && tags(node, "t").map(tag => tag.textContent).join("")
+    if (cell?.getAttribute("t") === "s" && value != null) {
+      const strings = parse(parts["xl/sharedStrings.xml"])
+      return { value: text(tags(strings, "si")[Number(value)]) }
+    }
+    return { value: cell?.getAttribute("t") === "inlineStr" ? text(cell) : value ?? undefined }
+  }, { parts: Object.fromEntries(Object.entries(files).filter(([path]) => path.endsWith(".xml") || path.endsWith(".rels")).map(([path, content]) => [path, strFromU8(content)])), sheet, address, input })
+  if ("xml" in result && result.xml !== undefined) {
+    files[result.path] = strToU8(result.xml)
+    return { bytes: Buffer.from(zipSync(files)) }
+  }
+  return { value: result.value }
+}
 
 async function createWorkbook(api: APIRequestContext, chatId: string) {
   const slug = `sheet-concurrency-${randomUUID()}`
@@ -152,6 +205,7 @@ async function editCell(page: Page, frame: Frame, value: string, cell: "A3" | "B
 
 interface EditorEvent {
   type: string
+  document?: string
   revision?: string
   savedRevision?: string
   baseRevision?: string
@@ -165,7 +219,7 @@ interface EditorEvent {
 declare global {
   interface Window {
     sheetTestEvents: EditorEvent[]
-    sheetTestFiles: number[][]
+    sheetTestFiles: Array<{ document?: string; revision?: string; bytes: number[] }>
     sheetTestHoldPaint: boolean
     sheetTestReleasePaint(): void
   }
@@ -181,7 +235,7 @@ async function watchEditor(page: Page) {
       if (/^gridcraft:(ready|execute|executed|opened|changed|save-ack)$/.test(message?.type)) window.sheetTestEvents.push(message)
       if (message?.type === "gridcraft:save" && message.bytes) {
         const bytes = message.bytes instanceof Uint8Array ? message.bytes : new Uint8Array(message.bytes)
-        window.sheetTestFiles.push(Array.from(bytes))
+        window.sheetTestFiles.push({ document: message.document, revision: message.revision, bytes: Array.from(bytes) })
       }
     }
     window.MessageChannel = class extends channel {
@@ -211,7 +265,6 @@ async function watchEditor(page: Page) {
 }
 
 const cellSet = (cell: string, input: string) => ({ command: "cell.set", params: { cell, input } })
-const hash = "sha256:" + "1".repeat(64)
 
 for (const race of ["saved revision", "same cell", "other cell", "other sheet"] as const) {
   test(`Sheet live replay preserves the ${race}`, async ({ browser }) => {
@@ -238,12 +291,33 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       const panel = page.getByTestId("sheet-side-panel")
       const frame = await acquire(page)
       await editCell(page, frame, "human seed", "A3")
+      const firstSave = page.waitForResponse(response => response.url().includes("/craft/document/save?") && response.status() === 200)
       await page.keyboard.press("Control+s")
       await expect(panel.getByTestId("sheet-panel-state")).toHaveText(/^Saved · version \d+$/, { timeout: 15_000 })
-      const base = Number((await panel.getByTestId("sheet-panel-state").innerText()).match(/\d+$/)![0])
-      let simulatedHead = base
-      const send = (version: number, command: ReturnType<typeof cellSet>) => {
-        simulatedHead = version
+      const saved = await firstSave
+      const binding = saved.request().postDataJSON() as Record<string, unknown>
+      const session = await saved.request().headerValue("X-Craft-Session")
+      expect(session).toBeTruthy()
+      const headers = { "X-Craft-Session": session! }
+      const { version: savedVersion } = await saved.json() as { version: string }
+      const base = Number(savedVersion)
+      const agentOps = new Map<string, ReturnType<typeof cellSet>>()
+      // Commit the simulated agent's change over the real head using the test editor's lease.
+      // Only the actor and replay commands are simulated. A subsequent browser save sees the real CAS version.
+      const send = async (version: number, command: ReturnType<typeof cellSet>) => {
+        const head = await readWorkbook(context.request, craft)
+        expect(head.version).toBe(String(version - 1))
+        const [, sheet, address] = /^'([^']+)'!([A-Z]+\d+)$/.exec(command.params.cell)!
+        const { bytes } = await workbookCell(page, head.bytes, sheet, address, command.params.input)
+        expect(bytes).toBeDefined()
+        const hash = "sha256:" + createHash("sha256").update(bytes!).digest("hex")
+        const commit = await context.request.post(craft("document/save"), {
+          headers,
+          data: { ...binding, baseVersion: head.version, editorRevision: "fixture:" + randomUUID(), attemptId: randomUUID(), bytes: bytes!.toString("base64"), contentHash: hash },
+        })
+        expect(commit.status(), await commit.text()).toBe(200)
+        expect(await commit.json()).toMatchObject({ version: String(version), candidateHash: hash })
+        agentOps.set(String(version), command)
         const id = `sheet-change-${version}`
         const emit = (type: string, content: string, metadata: Record<string, unknown> = {}) =>
           socket!.send(JSON.stringify({ type: "chat_event", channel: `session:${chat}`, payload: { type, content, metadata } }))
@@ -254,21 +328,25 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       await expect.poll(() => Boolean(socket), { message: "real chat WebSocket connected" }).toBe(true)
       const executes = () => page.evaluate(() => window.sheetTestEvents.filter(event => event.type === "gridcraft:executed"))
       const operation = cellSet(race === "other sheet" ? "'Other'!B2" : race === "other cell" ? "'Data'!C2" : "'Data'!B2", "agent")
-      await page.route("**/craft/document/operations?**", route => {
-        const from = new URL(route.request().url()).searchParams.get("from")!
-        const head = String(simulatedHead)
-        if (from === head) return route.fulfill({ json: { from, head, replayable: true, versions: [] } })
-        return route.fulfill({ json: { from, head, head_content_hash: hash, replayable: true, versions: [{ version: head, base_version: from, engine_pin: pin, actor_kind: "agent", replayable: true, ops: [operation] }] } })
+      await page.route("**/craft/document/operations?**", async route => {
+        const response = await route.fetch({ headers: { ...route.request().headers(), ...headers } })
+        if (!response.ok()) return route.fulfill({ response })
+        const log = await response.json() as { versions: Array<{ version: string; replayable: boolean }> }
+        const versions = log.versions.map(entry => {
+          const command = agentOps.get(entry.version)
+          return command ? { ...entry, engine_pin: pin, actor_kind: "agent", replayable: true, ops: [command] } : entry
+        })
+        return route.fulfill({ response, json: { ...log, replayable: versions.every(entry => entry.replayable), versions } })
       })
 
       if (race === "saved revision") {
-        send(base + 1, cellSet("'Data'!A2", "first agent change"))
+        await send(base + 1, cellSet("'Data'!A2", "first agent change"))
         await expect.poll(async () => (await executes()).length, { message: "the first version was replayed by GridCraft" }).toBe(1)
         await editCell(page, frame, "human", "B2")
-        send(base + 2, operation)
+        await send(base + 2, operation)
       } else {
         await page.evaluate(() => { window.sheetTestHoldPaint = true })
-        send(base + 1, operation)
+        await send(base + 1, operation)
         await expect(page.getByTestId("agent-working")).toBeVisible()
         await editCell(page, frame, "human", "B2")
         await page.evaluate(() => window.sheetTestReleasePaint())
@@ -277,16 +355,30 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       await expect.poll(async () => (await executes()).at(-1), { message: "GridCraft replays over the saved baseline and preserves the user's cells" })
         .toMatchObject({ savedRevision: expect.any(String), conflicts })
       if (race === "other sheet") {
-        const readSnapshot = () => page.evaluate(() => ({ count: window.sheetTestFiles.length, bytes: window.sheetTestFiles.at(-1) ?? [] }))
-        const contains = (bytes: number[]) => ({ human: hasValue(Buffer.from(bytes), "human</t>"), agent: hasValue(Buffer.from(bytes), "agent</t>") })
-        await expect.poll(async () => contains((await readSnapshot()).bytes)).toEqual({ human: true, agent: true })
-        const { count } = await readSnapshot()
-        await page.keyboard.press("Control+z")
-        await page.keyboard.press("Control+s")
+        const readSnapshot = () => page.evaluate(() => window.sheetTestFiles.at(-1))
+        const cells = async (bytes: number[]) => ({
+          human: (await workbookCell(page, Buffer.from(bytes), "Data", "B2")).value,
+          agent: (await workbookCell(page, Buffer.from(bytes), "Other", "B2")).value ?? "",
+        })
         await expect.poll(async () => {
           const snapshot = await readSnapshot()
-          return snapshot.count > count ? contains(snapshot.bytes) : null
-        }, { message: "GridCraft Undo removes the replayed edit and keeps the person's cell in the exported workbook" }).toEqual({ human: true, agent: false })
+          return snapshot && cells(snapshot.bytes)
+        }).toEqual({ human: "human", agent: "agent" })
+        await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Saved · version ${base + 2}`, { timeout: 15_000 })
+        const beforeUndo = await readSnapshot()
+        if (!beforeUndo?.document || !beforeUndo.revision) throw new Error("The merged export did not identify its editor revision")
+        const undoFrom = { document: beforeUndo.document, revision: beforeUndo.revision }
+        await expect.poll(() => frame.evaluate(() => document.hasFocus())).toBe(true)
+        await page.keyboard.press("Control+z")
+        await expect.poll(() => page.evaluate(({ document, revision }) => window.sheetTestEvents.some(event =>
+          event.type === "gridcraft:changed" && event.document === document && event.revision !== undefined && BigInt(event.revision) > BigInt(revision)
+        ), undoFrom), { message: "GridCraft handles Undo in a newer editor revision" }).toBe(true)
+        await page.keyboard.press("Control+s")
+        await expect.poll(async () => {
+          const afterUndo = await readSnapshot()
+          if (!afterUndo?.revision || afterUndo.document !== undoFrom.document || BigInt(afterUndo.revision) <= BigInt(undoFrom.revision)) return null
+          return cells(afterUndo.bytes)
+        }, { message: "the post-Undo export clears Other!B2 and preserves Data!B2" }).toEqual({ human: "human", agent: "" })
       }
     } finally {
       await context.close()
