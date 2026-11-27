@@ -50,9 +50,33 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 		replyError(w, 422, "xlsx export is available for Sheets")
 		return
 	}
+	// Send a file only after both read and export audits succeed.
+	sendExport := func(data []byte, ext, mediaType string) {
+		if !d.auditRead(w, r, entry) {
+			return
+		}
+		capture, _ := r.Context().Value(craftNativeReadCaptureKey{}).(*craftNativeReadCapture)
+		source, err := craftNativeHuman(r.Context())
+		if err != nil || capture == nil || capture.record == nil {
+			craftNativeDocumentError(w, errCraftNativeAccess)
+			return
+		}
+		if err = recordCraftSheetExported(r.Context(), d, entry, source.UserID, version, data); err != nil {
+			replyError(w, 500, "the export could not be audited")
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Type", mediaType)
+		h.Set("Content-Disposition", craftExportDisposition(capture.record.Name, ext))
+		h.Set("Content-Length", strconv.Itoa(len(data)))
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Craft-Version", strconv.FormatInt(version, 10))
+		w.WriteHeader(200)
+		_, _ = w.Write(data)
+	}
 	if file.Format == "xlsx" || file.Format == "xlsm" {
 		// A workbook Sheet's version is the file itself: hand it out as stored.
-		d.sendExport(w, r, entry, version, file.Content, file.Format, file.MediaType)
+		sendExport(file.Content, file.Format, file.MediaType)
 		return
 	}
 	native := file.Content
@@ -84,32 +108,7 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 		replyError(w, 500, "the workbook could not be exported")
 		return
 	}
-	d.sendExport(w, r, entry, version, data, "xlsx", mooring.WorkbookMediaTypeXLSX)
-}
-
-// sendExport audits and sends an exported workbook. Nothing leaves without both audits.
-func (d *craftNativeDocumentsHTTP) sendExport(w http.ResponseWriter, r *http.Request, entry *craftNativeSession, version int64, data []byte, ext, mediaType string) {
-	if !d.auditRead(w, r, entry) {
-		return
-	}
-	capture, _ := r.Context().Value(craftNativeReadCaptureKey{}).(*craftNativeReadCapture)
-	source, err := craftNativeHuman(r.Context())
-	if err != nil || capture == nil || capture.record == nil {
-		craftNativeDocumentError(w, errCraftNativeAccess)
-		return
-	}
-	if err = recordCraftSheetExported(r.Context(), d, entry, source.UserID, version, data); err != nil {
-		replyError(w, 500, "the export could not be audited")
-		return
-	}
-	h := w.Header()
-	h.Set("Content-Type", mediaType)
-	h.Set("Content-Disposition", craftExportDisposition(capture.record.Name, ext))
-	h.Set("Content-Length", strconv.Itoa(len(data)))
-	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("X-Craft-Version", strconv.FormatInt(version, 10))
-	w.WriteHeader(200)
-	_, _ = w.Write(data)
+	sendExport(data, "xlsx", mooring.WorkbookMediaTypeXLSX)
 }
 
 // exportSource reads the native bytes the export converts: the head, or ?version=N with the

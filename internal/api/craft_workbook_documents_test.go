@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -176,6 +177,45 @@ func TestWorkbookSheetSavesTheEditorsFile(t *testing.T) {
 	other := craftTestWorkbook(t, "xlsm", "other")
 	if stale := rig.save(other, "1", workbookHash(other)); stale.Code != 409 || !strings.Contains(stale.Body.String(), `"code":"moved"`) {
 		t.Fatalf("stale base %d %s", stale.Code, stale.Body)
+	}
+}
+
+func TestWorkbookGzipJSONSaveRecordsTouchedRanges(t *testing.T) {
+	rig := workbookDocumentsFixture(t)
+	edited := craftTestWorkbook(t, "xlsm", "edited")
+	raw := workbookSnapshotReader(craftNativeSnapshotBody{
+		WorkspaceID: rig.ws, PageID: "native-page", ApplicationID: "gridcraft",
+		EnginePin: rig.pin, SessionID: rig.session, Generation: "1", BaseVersion: "1",
+		EditorRevision: "doc-1:7", ContentHash: workbookHash(edited), Bytes: edited,
+	})
+	var wire bytes.Buffer
+	gz := gzip.NewWriter(&wire)
+	if _, err := raw.WriteTo(gz); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/pages/native-page/craft/document/save", &wire).WithContext(rig.ctx)
+	r.SetPathValue("slug", "native-page")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Encoding", "gzip")
+	r.Header.Set(craftNativeUncompressedHeader, strconv.FormatInt(raw.Size(), 10))
+	r.Header.Set("X-Craft-Session", rig.token)
+	r.Header.Set("X-Craft-Touched", "unknown")
+	r.Header.Set("X-Craft-Rebase", "keep-local")
+	w := httptest.NewRecorder()
+	rig.d.saveSnapshot(w, r)
+	if w.Code != 200 {
+		t.Fatalf("save %d %s", w.Code, w.Body)
+	}
+	doc := workbookRead(t, rig.read(nil))
+	if doc.Version != "2" || !bytes.Equal(doc.Bytes, edited) {
+		t.Fatalf("expected the saved workbook as version 2, got version %s", doc.Version)
+	}
+	var touched string
+	if err := rig.db.QueryRow(`SELECT json_extract(ops,'$[0].params.range') FROM craft_version_ops WHERE workspace_id=? AND page_id='native-page' AND version=2`, rig.ws).Scan(&touched); err != nil || touched != "*" {
+		t.Fatalf("expected all touched cells on version 2, got %q: %v", touched, err)
 	}
 }
 
