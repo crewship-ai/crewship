@@ -35,7 +35,7 @@ it("tells the host once that the editor has calculated the whole workbook", asyn
 })
 const signal = () => new AbortController().signal
 const latest = (r: Rig) => r.port.postMessage.mock.calls.at(-1)![0] as Record<string, unknown>
-const hex = async (bytes: Uint8Array) => `sha256:${Array.from(new Uint8Array(await webcrypto.subtle.digest("SHA-256", bytes)), b => b.toString(16).padStart(2, "0")).join("")}`
+const hex = async (bytes: Uint8Array) => `sha256:${Array.from(new Uint8Array(await webcrypto.subtle.digest("SHA-256", new Uint8Array(bytes))), b => b.toString(16).padStart(2, "0")).join("")}`
 async function bootstrap(r: Rig) {
   const boot = r.adapter.bootstrap(file, signal(), 30_000)
   r.receive({ type: "gridcraft:opened", requestId: latest(r).requestId, document: "doc", revision: "2", format: "xlsm", calculated: false, warnings: [{ code: "vba_preserved", count: 1 }] })
@@ -66,7 +66,7 @@ it("takes a host snapshot as the editor's saved file and acknowledges it with th
   r.receive(saved(request.requestId))
   const taken = await snapshot
   expect(taken).toEqual({ bytes: new Uint8Array([1, 2, 3]), editorRevision: "doc:3", documentId: "doc", nativeState: "doc:3", format: "xlsm" })
-  await expect(r.adapter.validate({ applicationId: "gridcraft", enginePin: "pinned-engine", workspaceId: "w", pageId: "p", sessionId: "s", generation: "9", baseVersion: "1", editorRevision: "doc:3", bytes: taken.bytes }, signal())).resolves.toBeUndefined()
+  await expect(r.adapter.validate({ applicationId: "gridcraft", enginePin: "pinned-engine", sessionId: "s", generation: "9", baseVersion: "1", editorRevision: "doc:3", bytes: taken.bytes }, signal())).resolves.toBeUndefined()
   expect(await r.adapter.ack(await receipt(r, "doc:3", taken.bytes))).toBe(true)
   expect(latest(r)).toEqual({ type: "gridcraft:save-ack", requestId: request.requestId, document: "doc", revision: "3", version: "2" })
 })

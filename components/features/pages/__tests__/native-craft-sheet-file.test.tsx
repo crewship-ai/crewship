@@ -1,3 +1,4 @@
+import type {NativeDocumentClient} from '@/lib/mooring/native-document-client'
 // A Sheet whose stored document is the workbook file itself (mooring protocol 2): the host
 // opens the file as it is, says when values are Excel's, asks before the first edit what
 // saving here would change, and offers the original file (version 1) for download.
@@ -32,7 +33,7 @@ function makeClient(format:'xlsx'|'xlsm'){
  return {
   open:vi.fn().mockResolvedValue({sessionId:'diagnostic-session',applicationId:'gridcraft'}),
   read:vi.fn().mockResolvedValue({version:'3',bytes:workbook,applicationId:'gridcraft',...(serverBuild?{engineBuild:serverBuild}:{}),format,fileName:`Plan.${format}`,size:String(workbook.length),contentHash:'sha256:'+'0'.repeat(64),enginePin:'a'.repeat(64),editorBundle:'b'.repeat(64),editorURL:`https://editor.example/b/${'b'.repeat(64)}/index.html`,quota:{usedBytes:'1',limitBytes:'9999',warning:false,retention:'keep-all'}}),
-  lease:vi.fn().mockResolvedValue(vacant),leaseAction:vi.fn(async()=>vacant),
+  lease:vi.fn().mockResolvedValue(vacant),leaseAction:vi.fn<NativeDocumentClient['leaseAction']>(async()=>vacant),
   events:vi.fn(()=>new Promise<void>(()=>{})),reauthorize:vi.fn().mockResolvedValue(true),proposals:vi.fn().mockResolvedValue([]),close:vi.fn(),save:vi.fn(),
   exportXlsx:vi.fn(async(_signal:AbortSignal,version?:string)=>({blob:new Blob(['PK']),filename:`Plan.${format}`,version:version??'3'})),
  }

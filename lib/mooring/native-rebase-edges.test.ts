@@ -55,7 +55,7 @@ describe("concurrent-editing replay: the edges", () => {
     const ops = [{ command: "formulas.calculateNow" }, set("'Q1 ''26'!$B$2"), { command: "range.setValues", params: { range: "Data!A1:C3", values: [[1]] } }]
     const d = deps(answer([version(6, { ops })]))
     await expect(rebaseOverLocal(d)).resolves.toMatchObject({ kind: "rebased", version: "6" })
-    expect(d.execute.mock.calls[0][0]).toEqual([{ command: "formulas.calculateNow" }, ...ops.slice(1)])
+    expect(vi.mocked(d.execute).mock.calls[0][0]).toEqual([{ command: "formulas.calculateNow" }, ...ops.slice(1)])
   })
 
   it("does not replay an address longer than 300 characters", async () => {
@@ -128,7 +128,7 @@ describe("concurrent-editing replay: the edges", () => {
     const outcome = await rebaseOverLocal(d)
     expect(outcome).toMatchObject({ kind: "rebased", operationIds: [] })
     expect(outcome).not.toHaveProperty("actorName")
-    expect(d.execute.mock.calls[0][1]).toEqual({ keep: "human", label: "Morgan: change", baseRevision: "doc:4" })
+    expect(vi.mocked(d.execute).mock.calls[0][1]).toEqual({ keep: "human", label: "Morgan: change", baseRevision: "doc:4" })
   })
 
   it("accepts a log that names its head only as `to`", async () => {

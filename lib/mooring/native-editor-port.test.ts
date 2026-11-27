@@ -27,7 +27,7 @@ it("transfers a private port only for the exact isolated editor and bundle", () 
 const signal = () => new AbortController().signal
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
 const bytes = new Uint8Array([1, 2, 255])
-function reply(r: ReturnType<typeof rig>, request: Record<string, unknown>, document = "bound", revision?: string, payload = bytes) {
+function reply(r: ReturnType<typeof rig>, request: Record<string, unknown>, document = "bound", revision?: string, payload: unknown = bytes) {
   r.receive({ type: r.options.applicationId === "wordcraft" ? "wordcraft:snapshot-result" : "gridcraft:native-exported", requestId: request.requestId, document, revision: revision ?? (r.options.applicationId === "wordcraft" ? "opaque:9007199254740993:7" : "18446744073709551615"), bytes: payload })
 }
 function latest(r: ReturnType<typeof rig>) { return r.port.postMessage.mock.calls.at(-1)![0] as Record<string, unknown> }
@@ -103,7 +103,7 @@ it("rejects native payloads above 32MiB", async () => {
 })
 it("keeps a malformed native payload a protocol error", async () => {
   const r = rig(); await bootstrap(r); const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
-  reply(r, latest(r), "bound", undefined, "not bytes" as unknown as Uint8Array)
+  reply(r, latest(r), "bound", undefined, "not bytes")
   await expect(snapshot).rejects.toThrow("native_port_protocol")
   expect(r.port.close).toHaveBeenCalled()
 })

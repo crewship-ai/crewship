@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { SHEET_EDIT_DEFAULT, useSheetMessage } from "../use-sheet-message"
 
-const setup = (over: Partial<Parameters<typeof useSheetMessage>[0]> = {}) =>
-  renderHook(props => useSheetMessage(props), { initialProps: { scope: "u:ws:chat", pageId: "pg_1" as string | null, blocked: null as string | null, version: "3" as string | undefined, ownSave: undefined as string | undefined, defaultAllowed: false as boolean, ...over } })
+type SheetMessageProps = Parameters<typeof useSheetMessage>[0]
+const setup = (over: Partial<SheetMessageProps> = {}) =>
+  renderHook((props: SheetMessageProps) => useSheetMessage(props), { initialProps: { scope: "u:ws:chat", pageId: "pg_1", blocked: null, version: "3", ...over } })
 
 describe("the choice to let the agent change a Sheet", () => {
   beforeEach(() => sessionStorage.clear())

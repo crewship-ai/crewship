@@ -17,8 +17,7 @@ import { SheetPanelProvider, type SheetPanelValue } from "../sheet-panel-context
 const done = { state: "done" as const, pageId: "pg_1", slug: "plan" }
 const sheetPage = { id: "pg_1", slug: "plan", name: "Quarterly plan", artifactKind: "sheet" }
 const wrap = (value: SheetPanelValue | null, node: ReactNode) => <SheetPanelProvider value={value}>{node}</SheetPanelProvider>
-const panel = (): SheetPanelValue & { open: ReturnType<typeof vi.fn>; noteChanged: ReturnType<typeof vi.fn> } =>
-  ({ open: vi.fn(), noteChanged: vi.fn(), activePageId: null })
+const panel = () => ({ open: vi.fn<SheetPanelValue["open"]>(), noteChanged: vi.fn<SheetPanelValue["noteChanged"]>(), activePageId: null } satisfies SheetPanelValue)
 
 describe("SheetChatCard", () => {
   beforeEach(() => { cleanup(); usePage.mockReset() })

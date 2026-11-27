@@ -7,7 +7,7 @@ beforeEach(() => vi.stubGlobal("crypto", webcrypto))
 afterEach(() => vi.unstubAllGlobals())
 
 const receipt = (r: NativeSaveRequest) => ({ ...r, version: String(BigInt(r.baseVersion) + 1n), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: r.contentHash })
-const sha = async (b: Uint8Array) => `sha256:${Buffer.from(await webcrypto.subtle.digest("SHA-256", b)).toString("hex")}`
+const sha = async (b: Uint8Array) => `sha256:${Buffer.from(await webcrypto.subtle.digest("SHA-256", new Uint8Array(b))).toString("hex")}`
 function fixture(content: () => Uint8Array) {
   let captures = 0
   const requests: NativeSaveRequest[] = [], states: NativeSaveState[] = []

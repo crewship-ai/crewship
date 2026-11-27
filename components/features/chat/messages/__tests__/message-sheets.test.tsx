@@ -39,7 +39,7 @@ function userTurn(partial: Partial<ChatTurn>): ChatTurn {
 
 function renderTurn(turn: ChatTurn) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><TurnRenderer turn={turn} workspaceId="ws" chatId="chat-1" onCopy={() => {}} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><TurnRenderer turn={turn} workspaceId="ws" chatId="chat-1" onCopy={async () => true} /></QueryClientProvider>)
 }
 
 // A message sent with a Sheet showed the Sheet in the composer, and nothing in the sent bubble.

@@ -35,7 +35,7 @@ it("saves the compact form of an indented export, hashed once on those bytes", a
     expect(sent.bytes.byteLength).toBeLessThan(exported.byteLength / 2)
     expect(new TextDecoder().decode(sent.bytes)).not.toMatch(/[\n]/)
     expect(JSON.parse(new TextDecoder().decode(sent.bytes))).toEqual(JSON.parse(new TextDecoder().decode(exported)))
-    const digest = Buffer.from(await webcrypto.subtle.digest("SHA-256", sent.bytes)).toString("hex")
+    const digest = Buffer.from(await webcrypto.subtle.digest("SHA-256", new Uint8Array(sent.bytes))).toString("hex")
     expect(sent.contentHash).toBe(`sha256:${digest}`)
   } finally { await r.controller.close() }
 }, 30_000)

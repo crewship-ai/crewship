@@ -4,7 +4,8 @@
 // against a scripted server, so no stage can be taken for another.
 import {webcrypto} from 'node:crypto'
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react'
-import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
+import {afterEach,beforeEach,describe,expect,it,vi,type Mock} from 'vitest'
+import type {NativeDraftJournal} from '@/lib/mooring/native-draft'
 import type {NativeEditorPortOptions} from '@/lib/mooring/native-editor-port'
 import {NATIVE_ADMISSION_DEADLINE_MS,NATIVE_DETECTION_BOUND_MS,NATIVE_REAUTHORIZE_DEADLINE_MS,NATIVE_REAUTHORIZE_INTERVAL_MS} from '@/lib/mooring/native-revocation-bounds'
 import {suspendOtherDocumentDrafts} from '@/lib/document-queue'
@@ -95,7 +96,7 @@ function scriptedServer(){
  }
  return s
 }
-let server:ReturnType<typeof scriptedServer>,options:NativeEditorPortOptions[],journal:{persist:ReturnType<typeof vi.fn>,confirm:ReturnType<typeof vi.fn>,recovery:ReturnType<typeof vi.fn>,discardRecovered:ReturnType<typeof vi.fn>,onRetire:ReturnType<typeof vi.fn>,close:ReturnType<typeof vi.fn>,revokeRead:ReturnType<typeof vi.fn>,eraseOwnRow:ReturnType<typeof vi.fn>}
+let server:ReturnType<typeof scriptedServer>,options:NativeEditorPortOptions[],journal:{persist:Mock<NativeDraftJournal['persist']>,confirm:ReturnType<typeof vi.fn>,recovery:ReturnType<typeof vi.fn>,discardRecovered:ReturnType<typeof vi.fn>,onRetire:ReturnType<typeof vi.fn>,close:ReturnType<typeof vi.fn>,revokeRead:ReturnType<typeof vi.fn>,eraseOwnRow:ReturnType<typeof vi.fn>}
 const recovered={draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy'] as const}
 const frame=()=>document.querySelector('iframe') as HTMLIFrameElement|null
 // The host conceals a frame by opacity first (#5060, #5073); visibility follows only after
@@ -144,7 +145,7 @@ beforeEach(()=>{
  vi.useFakeTimers({shouldAdvanceTime:false})
  vi.stubGlobal('crypto',webcrypto)
  server=scriptedServer();options=[]
- journal={persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([recovered]),discardRecovered:vi.fn().mockResolvedValue(undefined),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined),eraseOwnRow:vi.fn().mockResolvedValue(undefined)}
+ journal={persist:vi.fn<NativeDraftJournal['persist']>().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([recovered]),discardRecovered:vi.fn().mockResolvedValue(undefined),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined),eraseOwnRow:vi.fn().mockResolvedValue(undefined)}
  m.journal.mockResolvedValue(journal);m.capture.mockResolvedValue({local:[],artifacts:[],documents:[{key:['row']}]});m.purge.mockResolvedValue(undefined)
  m.port.mockImplementation((o:NativeEditorPortOptions)=>{options.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:encoder.encode('{"body":[1]}'),editorRevision:'initial',documentId:'doc'}),snapshot:vi.fn().mockResolvedValue({bytes:encoder.encode('{"body":[1]}'),editorRevision:'initial',documentId:'doc'}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}})
 })
@@ -733,7 +734,7 @@ describe('the end of the session over unsaved work',()=>{
   act(()=>options.at(-1)!.onChanged('typed','doc'))
   let refused=0
   const kept=journal.persist.getMockImplementation()
-  journal.persist.mockImplementation(async(...args:unknown[])=>{if(args[1]===true&&refused++===0)throw new Error('storage_busy');return kept?.(...args)})
+  journal.persist.mockImplementation(async(...args)=>{if(args[1]===true&&refused++===0)throw new Error('storage_busy');return kept?.(...args)})
   let outcome:'kept'|'refused'|undefined
   await act(async()=>{await suspendOtherDocumentDrafts(null).then(()=>{outcome='kept'},()=>{outcome='refused'})})
   await advance(2_000)
@@ -746,7 +747,7 @@ describe('the end of the session over unsaved work',()=>{
  it('still refuses when not even the local capture can be confirmed, so nothing is lost silently',async()=>{
   await opened()
   act(()=>options.at(-1)!.onChanged('typed','doc'))
-  journal.persist.mockImplementation(async(...args:unknown[])=>{if(args[1]===true)throw new Error('storage_gone')})
+  journal.persist.mockImplementation(async(...args)=>{if(args[1]===true)throw new Error('storage_gone')})
   let outcome:'kept'|'refused'|undefined
   await act(async()=>{await suspendOtherDocumentDrafts(null).then(()=>{outcome='kept'},()=>{outcome='refused'})})
   await advance(2_000)

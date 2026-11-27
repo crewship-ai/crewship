@@ -3,14 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, Ban, Check, Circle, CircleDot, CircleSlash, Copy, Hand, X } from "lucide-react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import {
   ACTIVITY_STATE_LABEL,
   currentStepLabel,
@@ -98,41 +91,39 @@ export function TurnActivity({ tools, turn, order, onCopy }: TurnActivityProps) 
 
   return (
     <div data-testid="turn-activity" className="flex min-w-0">
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogTrigger asChild>
-          <button
-            type="button"
-            data-activity-tone={tone}
-            className="-ml-1.5 inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-label text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:min-h-[44px]"
-          >
-            {/* No mark of its own while the agent works: the face in the gutter
-                is the turn's one working indicator (see ThinkingAvatar). */}
-            {streaming && tone === "running" ? null : tone === "attention" ? (
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" role="img" aria-label={summary.detail || summary.title} />
-            ) : tone === "ok" ? (
-              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            ) : (
-              <CircleDot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            )}
-            {sentence !== undefined ? (
-              <span className="min-w-0 truncate">
-                <span data-testid="activity-sentence" className="font-medium text-foreground">{sentence}</span>
-                <span aria-hidden="true"> · </span>
-                <span data-testid="activity-elapsed" className="tabular-nums">{elapsed}</span>
-              </span>
-            ) : (
-              <span className="min-w-0 truncate">{line}</span>
-            )}
-          </button>
-        </DialogTrigger>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Steps</DialogTitle>
-            <DialogDescription>{line}</DialogDescription>
-          </DialogHeader>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        data-activity-tone={tone}
+        className="-ml-1.5 inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-label text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:min-h-[44px]"
+      >
+        {/* No mark of its own while the agent works: the face in the gutter
+            is the turn's one working indicator (see ThinkingAvatar). */}
+        {streaming && tone === "running" ? null : tone === "attention" ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" role="img" aria-label={summary.detail || summary.title} />
+        ) : tone === "ok" ? (
+          <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <CircleDot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        )}
+        {sentence !== undefined ? (
+          <span className="min-w-0 truncate">
+            <span data-testid="activity-sentence" className="font-medium text-foreground">{sentence}</span>
+            <span aria-hidden="true"> · </span>
+            <span data-testid="activity-elapsed" className="tabular-nums">{elapsed}</span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate">{line}</span>
+        )}
+      </button>
+      <CreateSurface open={open} onOpenChange={setOpen} size="md" restoreOpenerFocus>
+        <CreateSurfaceHeader title="Steps" description={line} onClose={() => setOpen(false)} />
+        <CreateSurfaceBody>
           <StepList tools={tools} streaming={streaming} recovered={recovered} onCopy={onCopy} />
-        </DialogContent>
-      </Dialog>
+        </CreateSurfaceBody>
+      </CreateSurface>
     </div>
   )
 }

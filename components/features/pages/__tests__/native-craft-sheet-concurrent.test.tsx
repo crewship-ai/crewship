@@ -1,3 +1,4 @@
+import type {NativeDocumentClient} from '@/lib/mooring/native-document-client'
 // Concurrent editing in a Sheet stored as its workbook file: the harness of native-craft-sheet-file.test.tsx.
 import {webcrypto} from 'node:crypto'
 import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react'
@@ -28,7 +29,7 @@ function makeClient(format:'xlsx'|'xlsm'){
  return {
   open:vi.fn().mockResolvedValue({sessionId:'diagnostic-session',applicationId:'gridcraft'}),
   read:vi.fn().mockResolvedValue({version:'3',bytes:workbook,applicationId:'gridcraft',...(serverBuild?{engineBuild:serverBuild}:{}),format,fileName:`Plan.${format}`,size:String(workbook.length),contentHash:'sha256:'+'0'.repeat(64),enginePin:'a'.repeat(64),editorBundle:'b'.repeat(64),editorURL:`https://editor.example/b/${'b'.repeat(64)}/index.html`,quota:{usedBytes:'1',limitBytes:'9999',warning:false,retention:'keep-all'}}),
-  lease:vi.fn().mockResolvedValue(vacant),leaseAction:vi.fn(async()=>vacant),
+  lease:vi.fn().mockResolvedValue(vacant),leaseAction:vi.fn<NativeDocumentClient['leaseAction']>(async()=>vacant),
   events:vi.fn(()=>new Promise<void>(()=>{})),reauthorize:vi.fn().mockResolvedValue(true),proposals:vi.fn().mockResolvedValue([]),close:vi.fn(),save:vi.fn(),
   exportXlsx:vi.fn(async(_signal:AbortSignal,version?:string)=>({blob:new Blob(['PK']),filename:`Plan.${format}`,version:version??'3'})),
  }
