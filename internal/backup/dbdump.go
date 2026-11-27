@@ -467,6 +467,9 @@ func tableHasColumn(ctx context.Context, tx *sql.Tx, table, col string) (bool, e
 // are followed up with custom queries below.
 func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	switch table {
+	case "craft_version_ops", "craft_version_undos", "craft_version_signature_breaks":
+		// Workbook metadata follows its retained version, including workspace scope.
+		return "workspace_id = ? AND EXISTS (SELECT 1 FROM artifact_versions v WHERE v.workspace_id = " + table + ".workspace_id AND v.page_id = " + table + ".page_id AND v.version = " + table + ".version)", []any{workspaceID}, true
 	case "artifact_project_comment_replies":
 		return "comment_id IN (SELECT id FROM artifact_project_comments WHERE workspace_id=?)", []any{workspaceID}, true
 	case "workspaces":

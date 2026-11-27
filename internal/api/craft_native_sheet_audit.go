@@ -67,7 +67,7 @@ func recordCraftSheetSaved(ctx context.Context, tx *sql.Tx, s craftSheetSaved) e
 		if s.AgentID == "" || s.RequestID == "" || s.RunID != "" {
 			return errors.New("sheet audit: incomplete record")
 		}
-	case craftSheetSavedByEditor, craftSheetSavedByKeepLocal, craftSheetSavedByUndo, craftSheetSavedByRestore, craftSheetSavedByImport, craftSheetSavedByInitialize, craftSheetSavedByMigration:
+	case craftSheetSavedByEditor, craftSheetSavedByKeepLocal, craftSheetSavedByUndo, craftSheetSavedByRestore, craftSheetSavedByImport, craftSheetSavedByInitialize:
 		if s.AgentID != "" || s.RunID != "" || s.RequestID != "" {
 			return errors.New("sheet audit: incomplete record")
 		}
