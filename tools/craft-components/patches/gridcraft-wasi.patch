@@ -5431,7 +5431,7 @@ index 4cd2a22b..52e46b16 100644
          d.calc.recalc_all(&mut wb);
      } else if !changed.is_empty() {
 diff --git a/crates/engine/src/cmd/file.rs b/crates/engine/src/cmd/file.rs
-index 1887b06a..79dfdd7c 100644
+index 1887b06a..9dd7f8b3 100644
 --- a/crates/engine/src/cmd/file.rs
 +++ b/crates/engine/src/cmd/file.rs
 @@ -8,10 +8,10 @@ use crate::{DocState, EngineError};
@@ -5636,9 +5636,9 @@ index 1887b06a..79dfdd7c 100644
 +                .unwrap();
 +            session
 +        };
-+        let save = |session: &mut Session| {
++        let save = |session: &mut Session, phase: &str| {
 +            let saved = session.execute("file.saveBytes", json!({"format":"xlsx","fidelity":true})).unwrap();
-+            assert_eq!(saved["parts"], json!([]), "{saved}");
++            assert_eq!(saved["parts"], json!([]), "{phase}: {saved}");
 +            crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap()
 +        };
 +        let at = CellRef::new(0, 0);
@@ -5647,19 +5647,19 @@ index 1887b06a..79dfdd7c 100644
 +        let mut session = open(&source);
 +        assert_eq!(results(&session), Value::from(6.0));
 +        session.execute("cell.set", json!({"sheet":"Sheet1","cell":"A1","input":"4"})).unwrap();
-+        let changed = save(&mut session);
++        let changed = save(&mut session, "agent edit and cross-sheet recalculation");
 +        assert_eq!(results(&open(&changed)), Value::from(12.0));
 +        let mut human = open(&changed);
 +        human.execute("cell.set", json!({"sheet":"Results","cell":"C2","input":"person"})).unwrap();
-+        let latest = save(&mut human);
++        let latest = save(&mut human, "human edit expands the original sheet dimension");
 +        let mut undo = open(&latest);
 +        undo.execute("cell.set", json!({"sheet":"Sheet1","cell":"A1","input":"2"})).unwrap();
-+        let restored = save(&mut undo);
++        let restored = save(&mut undo, "agent edit undone over the person's package");
 +        let reopened = open(&restored);
 +        assert_eq!(results(&reopened), Value::from(6.0));
 +        let result_sheet = reopened.doc().unwrap().wb.sheets.iter().find(|sh| sh.name == "Results").unwrap();
 +        assert_eq!(result_sheet.value(CellRef::new(1, 2)), Value::from("person"));
-+        assert_eq!(save(&mut undo), restored, "an unchanged second save returns the precise latest package");
++        assert_eq!(save(&mut undo, "second save without changes"), restored, "an unchanged second save returns the precise latest package");
 +    }
 +}
 diff --git a/crates/engine/src/cmd/inspect.rs b/crates/engine/src/cmd/inspect.rs
@@ -10083,10 +10083,10 @@ index 561dce41..6dbdc66f 100644
      }
 diff --git a/crates/xlsx/src/package_edit.rs b/crates/xlsx/src/package_edit.rs
 new file mode 100644
-index 00000000..41439264
+index 00000000..7d9c9239
 --- /dev/null
 +++ b/crates/xlsx/src/package_edit.rs
-@@ -0,0 +1,621 @@
+@@ -0,0 +1,650 @@
 +//! Write cell edits into the exact OPC package from which they were made.
 +//! Nothing outside the edited cells is serialized from GridCraft's model.
 +
@@ -10314,8 +10314,11 @@ index 00000000..41439264
 +        elements(&data[body.clone()], |el| {
 +            match el.start.name().as_ref() {
 +                b"dimension" => {
++                    if dimension.is_some() || el.start.attributes().count() != 1 || el.body.is_some() {
++                        return Err(WORKSHEET);
++                    }
 +                    let range = attr(&el.start, b"ref")?.ok_or(WORKSHEET)?;
-+                    dimension = Some(RangeRef::parse(&range).ok_or(WORKSHEET)?);
++                    dimension = Some((RangeRef::parse(&range).ok_or(WORKSHEET)?, absolute(body.start, el.whole)));
 +                }
 +                b"sheetData" => {
 +                    if sheet_data.is_some() || empty_data.is_some() || attr(&el.start, b"xmlns")?.is_some() {
@@ -10334,9 +10337,28 @@ index 00000000..41439264
 +            Ok(())
 +        })
 +    })?;
-+    if dimension.is_some_and(|range| edits.keys().any(|at| !range.contains(*at))) {
-+        return Err(WORKSHEET);
-+    }
++    let data_start = empty_data.as_ref().or(sheet_data.as_ref()).ok_or(WORKSHEET)?.start;
++    let dimension = if let Some((original, span)) = dimension {
++        if span.end > data_start {
++            return Err(WORKSHEET);
++        }
++        let mut expanded = original;
++        for (at, (old, _)) in &edits {
++            if original.contains(*at) {
++                continue;
++            }
++            if old.is_some() || !at.is_valid() {
++                return Err(WORKSHEET);
++            }
++            expanded = RangeRef::new(
++                CellRef::new(expanded.start.row.min(at.row), expanded.start.col.min(at.col)),
++                CellRef::new(expanded.end.row.max(at.row), expanded.end.col.max(at.col)),
++            );
++        }
++        (expanded != original).then(|| (span, format!("<dimension ref=\"{}\"/>", expanded.a1())))
++    } else {
++        None
++    };
 +    let mut output = Vec::with_capacity(data.len());
 +    if let Some(empty) = empty_data {
 +        output.extend_from_slice(&data[..empty.start]);
@@ -10347,7 +10369,7 @@ index 00000000..41439264
 +        }
 +        output.extend_from_slice(b"</sheetData>");
 +        output.extend_from_slice(&data[empty.end..]);
-+        return Ok(output);
++        return Ok(rewrite_dimension(output, dimension));
 +    }
 +    let sheet_data = sheet_data.ok_or(WORKSHEET)?;
 +    let mut written = 0;
@@ -10388,7 +10410,14 @@ index 00000000..41439264
 +        return Err(WORKSHEET);
 +    }
 +    output.extend_from_slice(&data[sheet_data.end..]);
-+    Ok(output)
++    Ok(rewrite_dimension(output, dimension))
++}
++
++fn rewrite_dimension(mut sheet: Vec<u8>, dimension: Option<(Range<usize>, String)>) -> Vec<u8> {
++    if let Some((span, element)) = dimension {
++        sheet.splice(span, element.bytes());
++    }
++    sheet
 +}
 +
 +fn write_new_rows(out: &mut Vec<u8>, edits: &mut Edits<'_>, before_row: u32) -> Result<()> {
