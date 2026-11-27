@@ -133,7 +133,7 @@ index 83c45d0f..8e353d65 100644
 +[dev-dependencies]
 +zip = { workspace = true }
 diff --git a/apps/gridcraft-cli/src/main.rs b/apps/gridcraft-cli/src/main.rs
-index d0497572..6b94891f 100644
+index d0497572..5ec0dd0f 100644
 --- a/apps/gridcraft-cli/src/main.rs
 +++ b/apps/gridcraft-cli/src/main.rs
 @@ -2,11 +2,11 @@
@@ -342,15 +342,31 @@ index d0497572..6b94891f 100644
      a.no_extra(0)?;
      let backend: Box<dyn Backend> = match a.opt("connect") {
          Some(c) => {
-@@ -571,6 +655,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
+@@ -571,7 +655,22 @@ fn mcp(args: &[String]) -> Result<(), String> {
          }
          None => {
              let session = match (a.opt("in"), a.opt("sample")) {
-+                (Some(p), _) if a.has("saved-values") => open_saved(p)?,
-                 (Some(p), _) => open(p)?,
+-                (Some(p), _) => open(p)?,
++                (Some(p), _) => {
++                    let mut s = Session::new();
++                    let workbook = std::path::Path::new(p)
++                        .extension()
++                        .and_then(std::ffi::OsStr::to_str)
++                        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm"));
++                    exec(
++                        &mut s,
++                        "file.open",
++                        json!({
++                            "path": p, "calculate": !workbook && !a.has("saved-values"),
++                            "autoFit": !workbook, "preservePackage": workbook,
++                        }),
++                    )?;
++                    s
++                }
                  (None, Some(name)) => {
                      let mut s = Session::new();
-@@ -608,11 +693,33 @@ fn send(args: &[String]) -> Result<(), String> {
+                     exec(&mut s, "file.new", json!({"sample": name}))?;
+@@ -608,11 +707,33 @@ fn send(args: &[String]) -> Result<(), String> {
      Ok(())
  }
  
@@ -3409,10 +3425,10 @@ index 00000000..1aa6a001
 +}
 diff --git a/apps/gridcraft-web/src/port_session.rs b/apps/gridcraft-web/src/port_session.rs
 new file mode 100644
-index 00000000..272f4dec
+index 00000000..30838304
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_session.rs
-@@ -0,0 +1,938 @@
+@@ -0,0 +1,1005 @@
 +//! The editor's side of mooring protocol 2 on the private port, apart from JavaScript: what
 +//! each host message does to the app and what the editor answers. `port_host` only moves these
 +//! messages across the `MessagePort`.
@@ -3424,10 +3440,9 @@ index 00000000..272f4dec
 +use std::collections::VecDeque;
 +use std::sync::Arc;
 +
++#[cfg(test)]
 +use gridcraft_engine::model::Workbook;
 +use gridcraft_ui_egui::SheetApp;
-+
-+use gridcraft_engine::fidelity::{self, Parts};
 +
 +use crate::port_protocol::{self, Inbound, MAX_ERROR_CHARS, MAX_OPEN_BYTES, Saves};
 +
@@ -3500,13 +3515,9 @@ index 00000000..272f4dec
 +    document: u64,
 +    name: String,
 +    format: &'static str,
-+    /// The opened package's parts and the model's as opened: what every save must keep, less
-+    /// what the user removed since.
-+    opened_parts: Parts,
-+    model_at_open: Parts,
-+    /// The revision a save last refused as `fidelity_loss`, what it would have lost and the
-+    /// lossy file: a host's save of that same revision gets the same answer without encoding it
-+    /// again.
++    /// Failed reconstruction of a host publication requires a fresh open.
++    needs_reload: bool,
++    /// A host retry of the same refused revision gets the same answer.
 +    refused: Option<Refused>,
 +    /// Every value is the editor's own: the workbook opened calculated, or every formula was
 +    /// evaluated since. Once true, it stays true.
@@ -3518,12 +3529,17 @@ index 00000000..272f4dec
 +    saved_revision: String,
 +}
 +
++struct HeldSave {
++    from: Arc<[u8]>,
++    package: gridcraft_engine::WorkbookPackage,
++}
++
 +#[derive(Default)]
 +pub struct PortSession {
 +    pub access: crate::host_access::AccessState,
 +    pub held: crate::held_input::HeldInput,
 +    revisions: crate::draft_state::Revisions,
-+    saves: Saves<Arc<Workbook>>,
++    saves: Saves<HeldSave>,
 +    queue: VecDeque<Queued>,
 +    /// An open was taken on this port (one per port).
 +    opening: bool,
@@ -3535,7 +3551,8 @@ index 00000000..272f4dec
 +
 +impl PortSession {
 +    pub fn ready(&self) -> Out {
-+        let mut fields = vec![("version", s(env!("CARGO_PKG_VERSION"))), ("accessProtocol", Value::Num(1.0)), ("readOnly", Value::Bool(self.access.read_only()))];
++        let mut fields =
++            vec![("version", s(env!("CARGO_PKG_VERSION"))), ("accessProtocol", Value::Num(1.0)), ("readOnly", Value::Bool(self.access.read_only()))];
 +        if let Some(build) = build_identity(option_env!("CRAFT_SOURCE_COMMIT"), option_env!("CRAFT_PATCH_SHA256")) {
 +            fields.push(("build", s(&build)));
 +        }
@@ -3615,16 +3632,22 @@ index 00000000..272f4dec
 +        let mut out = Vec::new();
 +        while let Some(request) = self.queue.pop_front() {
 +            match request {
-+                Queued::Open { request_id, name, bytes, calculate, auto_fit } => out.push(self.open(app, &request_id, &name, &bytes, calculate, auto_fit)),
++                Queued::Open { request_id, name, bytes, calculate, auto_fit } => {
++                    out.push(self.open(app, &request_id, &name, &bytes, calculate, auto_fit))
++                }
 +                Queued::Save { request_id, announce } => out.extend(self.save(app, &request_id, announce)),
 +                Queued::Ack { request_id, document, revision } => {
-+                    if let Some(workbook) = self.saves.acknowledge(&request_id, &document, &revision)
++                    if let Some(save) = self.saves.acknowledge(&request_id, &document, &revision)
 +                        && let Some(doc) = app.session.active_mut()
 +                        && doc.uid.to_string() == document
++                        && let Some(bound) = self.bound.as_mut()
 +                    {
-+                        doc.saved = workbook;
-+                        if let Some(bound) = self.bound.as_mut() {
++                        if doc.package_base.as_ref().is_some_and(|base| Arc::ptr_eq(&base.bytes, &save.from)) {
++                            doc.saved = save.package.model.clone();
++                            doc.package_base = Some(save.package);
 +                            bound.saved_revision = revision;
++                        } else {
++                            bound.needs_reload = true;
 +                        }
 +                    }
 +                }
@@ -3692,7 +3715,8 @@ index 00000000..272f4dec
 +        if doc.wb.vba_project.is_some() {
 +            warnings.push(("vba_preserved", 1));
 +        }
-+        let held = doc.wb.sheets.iter().flat_map(|sheet| sheet.cells.iter()).filter(|(_, c)| c.formula.as_ref().is_some_and(|f| f.document_value)).count();
++        let held =
++            doc.wb.sheets.iter().flat_map(|sheet| sheet.cells.iter()).filter(|(_, c)| c.formula.as_ref().is_some_and(|f| f.document_value)).count();
 +        if held > 0 {
 +            warnings.push(("unsupported_function_held", held as u64));
 +        }
@@ -3704,19 +3728,16 @@ index 00000000..272f4dec
 +            }
 +        }
 +        let document = doc.uid;
-+        let opened_parts = match fidelity::package_parts(bytes) {
-+            Ok(parts) => parts,
-+            Err(error) => return Out::error("opened", request_id, "open_corrupt", &error),
-+        };
-+        let model_at_open = fidelity::model_parts(&doc.wb);
++        if doc.package_base.is_none() {
++            return Out::error("opened", request_id, "open_corrupt", "The original workbook package is unavailable.");
++        }
 +        let recalcs_at_open = doc.calc.full_recalcs;
 +        self.revisions.observe(app);
 +        self.bound = Some(Bound {
 +            document,
 +            name: name.to_string(),
 +            format,
-+            opened_parts,
-+            model_at_open,
++            needs_reload: false,
 +            refused: None,
 +            calculated: calculate,
 +            recalcs_at_open,
@@ -3739,6 +3760,9 @@ index 00000000..272f4dec
 +        let Some(bound) = self.bound.as_ref().filter(|b| app.session.active().is_some_and(|doc| doc.uid == b.document)) else {
 +            return vec![Out::error("save", request_id, "not_open", "No hosted workbook is open.")];
 +        };
++        if bound.needs_reload {
++            return vec![Out::error("save", request_id, "stale_base", "Reopen the committed workbook before saving.")];
++        }
 +        if self.saves.len() >= port_protocol::MAX_PENDING_SAVES {
 +            return vec![Out::error("save", request_id, "busy", "Too many saves await the host.")];
 +        }
@@ -3749,14 +3773,11 @@ index 00000000..272f4dec
 +            && let Some(refused) = &bound.refused
 +            && refused.revision == self.revisions.revision()
 +        {
-+            return vec![fidelity_loss(request_id, refused.parts.clone(), refused.bytes.to_vec())];
++            return vec![fidelity_loss(request_id, refused.parts.clone())];
 +        }
 +        let (name, format) = (bound.name.clone(), bound.format);
-+        let encoded = app.native_snapshot_bytes_as(format).and_then(|r| {
-+            r.get("base64").and_then(serde_json::Value::as_str).and_then(gridcraft_engine::io::base64_decode).ok_or_else(|| "The engine did not encode the workbook.".to_string())
-+        });
-+        let bytes = match encoded {
-+            Ok(bytes) => bytes,
++        let encoded = match app.native_snapshot_bytes_as(format) {
++            Ok(result) => result,
 +            Err(error) => return vec![Out::error("save", request_id, "save_failed", &error)],
 +        };
 +        // A pending draft may have advanced the workbook while it was encoded.
@@ -3768,29 +3789,40 @@ index 00000000..272f4dec
 +        if announce {
 +            out.push(Out::new("save-request", vec![("requestId", s(request_id)), ("document", s(&document)), ("revision", s(&revision))]));
 +        }
-+        // The file must keep what was opened, apart from what the user removed.
-+        let lost = match fidelity::package_parts(&bytes) {
-+            Ok(saved) => self.bound.as_ref().map_or_else(Vec::new, |b| fidelity::losses(&b.opened_parts, &b.model_at_open, &fidelity::model_parts(&doc.wb), &saved)),
-+            Err(error) => {
-+                out.push(Out::error("save", request_id, "save_failed", &error));
-+                return out;
-+            }
-+        };
-+        if !lost.is_empty() {
-+            log::warn!("save {request_id} refused: it would lose {lost:?}");
++        if let Some(code) = encoded.get("parts").and_then(|parts| parts.get(0)).and_then(|part| part.get("code")).and_then(|code| code.as_str()) {
++            let code = match code {
++                "xml_signatures" => "xml_signatures",
++                "vba_signature" => "vba_signature",
++                "worksheet" => "worksheet",
++                "package" => "package",
++                _ => "package_edit",
++            };
++            let lost = vec![(code, 1)];
 +            if let Some(b) = self.bound.as_mut() {
-+                b.refused = Some(Refused { revision, parts: lost.clone(), bytes: Arc::new(bytes.clone()) });
++                b.refused = Some(Refused { revision, parts: lost.clone() });
 +            }
-+            out.push(fidelity_loss(request_id, lost, bytes));
++            out.push(fidelity_loss(request_id, lost));
 +            return out;
 +        }
++        let Some(bytes) = encoded.get("base64").and_then(|value| value.as_str()).and_then(gridcraft_engine::io::base64_decode) else {
++            out.push(Out::error("save", request_id, "save_failed", "The engine did not encode the workbook."));
++            return out;
++        };
++        let Some(base) = doc.package_base.as_ref() else {
++            out.push(Out::error("save", request_id, "stale_base", "The original workbook package is unavailable."));
++            return out;
++        };
 +        // The cells changed since the saved version, for the server's record of what the person
 +        // touched (undo of an agent's change spares them); "unknown" when they can't be named.
 +        let touched = match crate::native_execute::touched(&doc.wb, &doc.saved) {
 +            Some(cells) => Value::Addresses(cells),
 +            None => s("unknown"),
 +        };
-+        if let Err(code) = self.saves.begin(request_id, &document, &revision, doc.wb.clone()) {
++        let save = HeldSave {
++            from: base.bytes.clone(),
++            package: gridcraft_engine::WorkbookPackage { bytes: Arc::from(bytes.as_slice()), model: doc.wb.clone() },
++        };
++        if let Err(code) = self.saves.begin(request_id, &document, &revision, save) {
 +            out.push(Out::error("save", request_id, code, "The save could not be recorded."));
 +            return out;
 +        }
@@ -3816,6 +3848,9 @@ index 00000000..272f4dec
 +        if base.is_some_and(|base| base != self.revisions.revision()) {
 +            return Out::error("executed", request_id, "stale_base", "The document changed since the host last saw it.");
 +        }
++        if saved && app.session.active().is_some_and(|doc| doc.is_dirty()) {
++            return Out::error("executed", request_id, "stale_base", "Replay the published edit over the saved workbook.");
++        }
 +        // Keys typed before the unlock are still going in: the same as an open draft.
 +        if self.held.replaying() {
 +            return Out::error("executed", request_id, "busy", "A cell or text box is being edited.");
@@ -3825,6 +3860,7 @@ index 00000000..272f4dec
 +                self.revisions.observe(app);
 +                if saved && let Some(bound) = self.bound.as_mut() {
 +                    bound.saved_revision = self.revisions.revision();
++                    bound.advance_publication(app);
 +                }
 +                Out::new(
 +                    "executed",
@@ -3864,14 +3900,20 @@ index 00000000..272f4dec
 +        let clean = app.session.active().is_some_and(|doc| !doc.is_dirty());
 +        match crate::native_execute::execute_keeping_human(app, commands, self.access.read_only(), label, saved && !clean) {
 +            Ok(done) => {
-+                if saved && clean && let Some(doc) = app.session.active_mut() {
++                if saved
++                    && clean
++                    && let Some(doc) = app.session.active_mut()
++                {
 +                    doc.saved = doc.wb.clone();
 +                }
 +                self.revisions.observe(app);
-+                if (saved && clean || done.rebased) && let Some(bound) = self.bound.as_mut() {
++                if (saved && clean || done.rebased)
++                    && let Some(bound) = self.bound.as_mut()
++                {
 +                    // A new name for the new saved version (the host's), never one of the
 +                    // person's: the next replay must build on exactly this one.
 +                    bound.saved_revision = if done.rebased { format!("saved-{}", self.revisions.revision()) } else { self.revisions.revision() };
++                    bound.advance_publication(app);
 +                }
 +                let saved_revision = self.bound.as_ref().map(|b| b.saved_revision.clone()).unwrap_or_default();
 +                let mut fields = vec![
@@ -3895,26 +3937,38 @@ index 00000000..272f4dec
 +    }
 +}
 +
++impl Bound {
++    // Reconstruct only the publication from the previous package. The person's
++    // current model is never used for this step when there are unsaved edits.
++    fn advance_publication(&mut self, app: &mut SheetApp) {
++        let Some(doc) = app.session.active_mut() else {
++            self.needs_reload = true;
++            return;
++        };
++        let Some(base) = &doc.package_base else {
++            self.needs_reload = true;
++            return;
++        };
++        match gridcraft_engine::package_edit::write_package_cells(&base.bytes, &base.model, &doc.saved, self.format) {
++            Ok(bytes) => doc.package_base = Some(gridcraft_engine::WorkbookPackage { bytes: bytes.into(), model: doc.saved.clone() }),
++            Err(_) => self.needs_reload = true,
++        }
++    }
++}
++
 +/// A revision whose save was refused as `fidelity_loss`.
 +struct Refused {
 +    revision: String,
 +    /// What it would have lost.
 +    parts: Vec<(&'static str, u64)>,
-+    /// The lossy file.
-+    bytes: Arc<Vec<u8>>,
 +}
 +
-+/// `save {requestId, code: "fidelity_loss", error, parts, bytes}`: the save is refused because
-+/// the file would lose these parts; the document stays dirty and in the editor. `bytes` is that
-+/// lossy file (a zip in the opened file's format), for the host's local draft only: offered for
-+/// download, never sent to the server.
-+fn fidelity_loss(request_id: &str, parts: Vec<(&'static str, u64)>, bytes: Vec<u8>) -> Out {
-+    let mut out = Out::error("save", request_id, "fidelity_loss", "The saved workbook would lose parts of the opened file.");
++/// The document stays dirty when a save cannot preserve its original package.
++fn fidelity_loss(request_id: &str, parts: Vec<(&'static str, u64)>) -> Out {
++    let signed = parts.iter().any(|(code, _)| matches!(*code, "xml_signatures" | "vba_signature"));
++    let reason = if signed { "This signed workbook cannot be changed." } else { "The workbook package cannot preserve this change." };
++    let mut out = Out::error("save", request_id, "fidelity_loss", reason);
 +    out.fields.push(("parts", Value::Warnings(parts)));
-+    // Optional: none for an empty file or one over the size a host accepts.
-+    if !bytes.is_empty() && bytes.len() as u64 <= MAX_OPEN_BYTES as u64 {
-+        out.fields.push(("bytes", Value::Bytes(bytes)));
-+    }
 +    out
 +}
 +
@@ -4028,7 +4082,7 @@ index 00000000..272f4dec
 +    }
 +
 +    #[test]
-+    fn a_save_that_would_lose_pivot_fields_is_refused_as_fidelity_loss() {
++    fn a_pivot_edit_without_package_support_is_refused_as_fidelity_loss() {
 +        let mut app = app();
 +        let mut port = PortSession::default();
 +        let opened = open(&mut port, &mut app, "Plan.xlsx", stale_pivot_xlsx(), false);
@@ -4050,8 +4104,8 @@ index 00000000..272f4dec
 +
 +        let refused = save_now(&mut port, &mut app, "s1");
 +        assert_eq!(refused.get("code"), Some(&s("fidelity_loss")), "{refused:?}");
-+        assert_eq!(refused.get("parts"), Some(&Value::Warnings(vec![("pivot_fields", 1)])));
-+        assert!(matches!(refused.get("bytes"), Some(Value::Bytes(b)) if !b.is_empty()), "the lossy file, for the host's local draft");
++        assert_eq!(refused.get("parts"), Some(&Value::Warnings(vec![("package_edit", 1)])));
++        assert!(refused.get("bytes").is_none());
 +        assert_eq!(port.saves.len(), 0, "a refused save holds no slot");
 +        // The host's retry of the same revision gets the same answer and file; so does the
 +        // user's Save, which tries again.
@@ -4065,7 +4119,7 @@ index 00000000..272f4dec
 +    }
 +
 +    #[test]
-+    fn removing_a_pivot_is_the_users_change_and_saves() {
++    fn removing_a_pivot_requires_package_support() {
 +        let mut app = app();
 +        let mut port = PortSession::default();
 +        open(&mut port, &mut app, "Plan.xlsx", stale_pivot_xlsx(), false);
@@ -4074,8 +4128,8 @@ index 00000000..272f4dec
 +        Arc::make_mut(&mut wb.sheets[0]).pivots.clear();
 +        doc.wb = Arc::new(wb);
 +        let saved = save_now(&mut port, &mut app, "s1");
-+        assert_eq!(saved.get("code"), None, "{saved:?}");
-+        assert!(matches!(saved.get("bytes"), Some(Value::Bytes(b)) if !b.is_empty()));
++        assert_eq!(saved.get("code"), Some(&s("fidelity_loss")), "{saved:?}");
++        assert!(saved.get("bytes").is_none());
 +    }
 +
 +    #[test]
@@ -4091,9 +4145,10 @@ index 00000000..272f4dec
 +        assert!(!crate::draft_state::dirty(&app));
 +        assert!(app.is_read_only(), "opening never unlocks the editor");
 +        // A second open on the same port is refused without touching the document.
-+        let again = port.receive(Inbound::Open { request_id: "open-2".into(), name: "Other.xlsx".into(), bytes: 1, calculate: true, auto_fit: true }, || {
-+            panic!("refused opens are never copied")
-+        });
++        let again = port
++            .receive(Inbound::Open { request_id: "open-2".into(), name: "Other.xlsx".into(), bytes: 1, calculate: true, auto_fit: true }, || {
++                panic!("refused opens are never copied")
++            });
 +        assert_eq!(again[0].get("code"), Some(&s("open_failed")));
 +    }
 +
@@ -4108,12 +4163,14 @@ index 00000000..272f4dec
 +    #[test]
 +    fn refused_opens_answer_with_a_code_and_copy_nothing() {
 +        let mut port = PortSession::default();
-+        let big = port.receive(Inbound::Open { request_id: "o".into(), name: "a.xlsx".into(), bytes: MAX_OPEN_BYTES + 1, calculate: false, auto_fit: false }, || {
-+            panic!("an oversized workbook is never copied")
-+        });
++        let big = port.receive(
++            Inbound::Open { request_id: "o".into(), name: "a.xlsx".into(), bytes: MAX_OPEN_BYTES + 1, calculate: false, auto_fit: false },
++            || panic!("an oversized workbook is never copied"),
++        );
 +        assert_eq!(big[0].kind, "opened");
 +        assert_eq!(big[0].get("code"), Some(&s("open_too_large")));
-+        let csv = port.receive(Inbound::Open { request_id: "o".into(), name: "a.csv".into(), bytes: 3, calculate: false, auto_fit: false }, || panic!());
++        let csv =
++            port.receive(Inbound::Open { request_id: "o".into(), name: "a.csv".into(), bytes: 3, calculate: false, auto_fit: false }, || panic!());
 +        assert_eq!(csv[0].get("code"), Some(&s("open_unsupported")));
 +        let mut app = app();
 +        let corrupt = open(&mut port, &mut app, "a.xlsx", b"not a zip".to_vec(), false);
@@ -4162,7 +4219,8 @@ index 00000000..272f4dec
 +        let out = port.sync(&mut app);
 +        let request = out.iter().find(|o| o.kind == "save-request").unwrap();
 +        let save = out.iter().find(|o| o.kind == "save").unwrap();
-+        let (id, document, revision) = (str_of(save, "requestId").to_string(), str_of(save, "document").to_string(), str_of(save, "revision").to_string());
++        let (id, document, revision) =
++            (str_of(save, "requestId").to_string(), str_of(save, "document").to_string(), str_of(save, "revision").to_string());
 +        assert_eq!(str_of(request, "requestId"), id);
 +        assert_eq!(str_of(request, "revision"), revision);
 +        assert!(crate::draft_state::dirty(&app), "sending is not saving");
@@ -4171,7 +4229,10 @@ index 00000000..272f4dec
 +        port.receive(Inbound::SaveAck { request_id: id.clone(), document: document.clone(), revision: "999".into(), version: "2".into() }, Vec::new);
 +        port.sync(&mut app);
 +        let doc = app.session.active().unwrap();
-+        assert!(doc.saved.sheets[0].cells.get(gridcraft_engine::core::CellRef::parse("C1").unwrap()).is_none(), "a mismatched revision changes nothing");
++        assert!(
++            doc.saved.sheets[0].cells.get(gridcraft_engine::core::CellRef::parse("C1").unwrap()).is_none(),
++            "a mismatched revision changes nothing"
++        );
 +        port.receive(Inbound::SaveAck { request_id: id, document, revision, version: "2".into() }, Vec::new);
 +        port.sync(&mut app);
 +        let doc = app.session.active().unwrap();
@@ -4245,7 +4306,16 @@ index 00000000..272f4dec
 +        let opened = open(&mut port, &mut app, "Plan.xlsx", stale_xlsx(), false);
 +        let base = str_of(&opened, "revision").to_string();
 +        let commands = r#"[{"command":"cell.set","params":{"cell":"D1","input":"7"}}]"#.to_string();
-+        port.receive(Inbound::Execute { request_id: "x1".into(), commands: commands.clone(), saved: false, base_revision: Some("12345".into()), keep_human: None }, Vec::new);
++        port.receive(
++            Inbound::Execute {
++                request_id: "x1".into(),
++                commands: commands.clone(),
++                saved: false,
++                base_revision: Some("12345".into()),
++                keep_human: None,
++            },
++            Vec::new,
++        );
 +        let out = port.sync(&mut app);
 +        assert_eq!(out.iter().find(|o| o.kind == "executed").unwrap().get("code"), Some(&s("stale_base")));
 +        port.receive(Inbound::Execute { request_id: "x2".into(), commands, saved: false, base_revision: Some(base), keep_human: None }, Vec::new);
@@ -4268,7 +4338,13 @@ index 00000000..272f4dec
 +        app.set_read_only(true);
 +        port.sync(&mut app);
 +        let commands = r#"[{"command":"cell.set","params":{"cell":"'Sheet1'!C1","input":"agent"}},{"command":"cell.set","params":{"cell":"'Sheet1'!D1","input":"7"}}]"#.to_string();
-+        let keep = |id: &str, base: &str| Inbound::Execute { request_id: id.into(), commands: commands.clone(), saved: true, base_revision: Some(base.into()), keep_human: Some("Agent: fill".into()) };
++        let keep = |id: &str, base: &str| Inbound::Execute {
++            request_id: id.into(),
++            commands: commands.clone(),
++            saved: true,
++            base_revision: Some(base.into()),
++            keep_human: Some("Agent: fill".into()),
++        };
 +        port.receive(keep("k1", "12345"), Vec::new);
 +        let out = port.sync(&mut app);
 +        assert_eq!(out.iter().find(|o| o.kind == "executed").unwrap().get("code"), Some(&s("stale_base")));
@@ -4277,7 +4353,8 @@ index 00000000..272f4dec
 +        let done = out.iter().find(|o| o.kind == "executed").unwrap();
 +        assert_eq!(done.get("applied"), Some(&Value::Num(2.0)), "{done:?}");
 +        let Some(Value::Conflicts(found)) = done.get("conflicts") else { panic!("{done:?}") };
-+        let found: Vec<(&str, &str, &str, &str)> = found.iter().map(|c| (c.sheet.as_str(), c.cell.as_str(), c.agent.as_str(), c.kept.as_str())).collect();
++        let found: Vec<(&str, &str, &str, &str)> =
++            found.iter().map(|c| (c.sheet.as_str(), c.cell.as_str(), c.agent.as_str(), c.kept.as_str())).collect();
 +        assert_eq!(found, vec![("Sheet1", "C1", "agent", "mine")]);
 +        assert!(done.get("conflictsTruncated").is_none());
 +        let cell = |wb: &gridcraft_engine::model::Workbook, at: &str| {
@@ -4294,7 +4371,13 @@ index 00000000..272f4dec
 +
 +        // The host's next version builds on that one; the first base is now stale.
 +        let more = r#"[{"command":"cell.set","params":{"cell":"'Sheet1'!E1","input":"8"}}]"#.to_string();
-+        let again = |id: &str, base: &str| Inbound::Execute { request_id: id.into(), commands: more.clone(), saved: true, base_revision: Some(base.into()), keep_human: Some("Agent: more".into()) };
++        let again = |id: &str, base: &str| Inbound::Execute {
++            request_id: id.into(),
++            commands: more.clone(),
++            saved: true,
++            base_revision: Some(base.into()),
++            keep_human: Some("Agent: more".into()),
++        };
 +        port.receive(again("k3", &saved), Vec::new);
 +        let out = port.sync(&mut app);
 +        assert_eq!(out.iter().find(|o| o.kind == "executed").unwrap().get("code"), Some(&s("stale_base")));
@@ -5348,7 +5431,7 @@ index 4cd2a22b..52e46b16 100644
          d.calc.recalc_all(&mut wb);
      } else if !changed.is_empty() {
 diff --git a/crates/engine/src/cmd/file.rs b/crates/engine/src/cmd/file.rs
-index 1887b06a..ffdefa89 100644
+index 1887b06a..9dd7f8b3 100644
 --- a/crates/engine/src/cmd/file.rs
 +++ b/crates/engine/src/cmd/file.rs
 @@ -8,10 +8,10 @@ use crate::{DocState, EngineError};
@@ -5399,7 +5482,7 @@ index 1887b06a..ffdefa89 100644
      // A password to modify: the right one or a read-only open, or the workbook doesn't open.
      let mut read_only = false;
      if let Some(hash) = wb.write_reservation.as_ref().and_then(|r| r.password.as_ref()) {
-@@ -93,20 +106,54 @@ fn open(s: &mut Session, p: &Json) -> Result<Json> {
+@@ -93,20 +106,61 @@ fn open(s: &mut Session, p: &Json) -> Result<Json> {
      // an unprotected copy.
      let path = str_param(p, "path").filter(|_| !imported && !encrypted && !read_only).map(str::to_string);
      // Replace an untouched blank Book1 like Excel does.
@@ -5410,6 +5493,12 @@ index 1887b06a..ffdefa89 100644
      {
          s.close_document(0);
      }
++    let package_base =
++        if bool_param(p, "preservePackage") == Some(true) && !encrypted && gridcraft_xlsx::sniff(&bytes) == gridcraft_xlsx::Format::Xlsx {
++            Some(crate::WorkbookPackage { bytes: std::sync::Arc::from(bytes.as_slice()), model: std::sync::Arc::new(wb.clone()) })
++        } else {
++            None
++        };
      // Someone else may have made the file: its active content asks before it runs.
 -    let mut doc = DocState::new(wb, path, title, crate::Trust::FromFile);
 +    // calculate: false opens the workbook as its file saved it: the dependency graph is built,
@@ -5419,6 +5508,7 @@ index 1887b06a..ffdefa89 100644
 +    } else {
 +        DocState::new(wb, path, title, crate::Trust::FromFile)
 +    };
++    doc.package_base = package_base;
      if read_only {
          doc.read_only_source = str_param(p, "path").map(str::to_string);
      }
@@ -5457,7 +5547,7 @@ index 1887b06a..ffdefa89 100644
      // The decrypted-workbook notice is for the info bar, not a message box.
      let shown: Vec<&str> = warnings.iter().map(String::as_str).filter(|w| *w != crate::io::DECRYPTED_NOTICE).collect();
      if !shown.is_empty() {
-@@ -131,6 +178,9 @@ fn same_file(a: &str, b: &str) -> bool {
+@@ -131,6 +185,9 @@ fn same_file(a: &str, b: &str) -> bool {
  }
  
  fn save(s: &mut Session, p: &Json) -> Result<Json> {
@@ -5467,7 +5557,7 @@ index 1887b06a..ffdefa89 100644
      let path = match str_param(p, "path").map(str::to_string).or_else(|| s.active().and_then(|d| d.path.clone())) {
          Some(p) => p,
          None => {
-@@ -214,7 +264,27 @@ fn save_bytes(s: &mut Session, p: &Json) -> Result<Json> {
+@@ -214,7 +271,45 @@ fn save_bytes(s: &mut Session, p: &Json) -> Result<Json> {
      let d = s.doc()?;
      let name = format!("{}.{fmt}", std::path::Path::new(&d.display_title()).file_stem().and_then(|x| x.to_str()).unwrap_or("Book"));
      // The file name goes into a PivotChart's link to its PivotTable.
@@ -5475,12 +5565,30 @@ index 1887b06a..ffdefa89 100644
 +    if fidelity && !matches!(fmt, "xlsx" | "xlsm") {
 +        return Err(bad("file.saveBytes", "fidelity checks only xlsx and xlsm files"));
 +    }
++    if matches!(fmt, "xlsx" | "xlsm")
++        && let Some(base) = &d.package_base
++    {
++        let bytes = match crate::package_edit::write_package_cells(&base.bytes, &base.model, &d.wb, fmt) {
++            Ok(bytes) => bytes,
++            Err(err) => return Ok(json!({"name": name, "format": fmt, "parts": [{"code": err.code, "count": 1}]})),
++        };
++        let encoded = json!({"name": name, "format": fmt, "base64": crate::io::base64_encode(&bytes), "bytes": bytes.len(), "parts": []});
++        if fidelity {
++            // The server either retains this session by the returned package's
++            // digest or discards it. The browser advances only on host acknowledgement.
++            let model = d.wb.clone();
++            s.doc_mut()?.package_base = Some(crate::WorkbookPackage { bytes: bytes.into(), model });
++        }
++        return Ok(encoded);
++    }
      let bytes = crate::io::save_bytes(&d.wb, &name)?;
 +    if fidelity {
 +        use crate::fidelity;
 +        let now = fidelity::model_parts(&d.wb);
 +        let lost = match d.fidelity_baseline.as_deref() {
-+            Some((opened, at_open)) => fidelity::losses(opened, at_open, &now, &fidelity::package_parts(&bytes).map_err(|e| bad("file.saveBytes", &e))?),
++            Some((opened, at_open)) => {
++                fidelity::losses(opened, at_open, &now, &fidelity::package_parts(&bytes).map_err(|e| bad("file.saveBytes", &e))?)
++            }
 +            None => fidelity::losses(&now, &now, &now, &fidelity::read_parts(&bytes).map_err(|e| bad("file.saveBytes", &e))?),
 +        };
 +        let parts: Vec<Json> = lost.iter().map(|(code, count)| json!({"code": code, "count": count})).collect();
@@ -5495,6 +5603,65 @@ index 1887b06a..ffdefa89 100644
      if fmt == "xlsx" && !distinct_count_fields(&d.wb).is_empty() {
          s.ui_requests.push(crate::UiRequest::Message(DISTINCT_COUNT_NOTICE.into()));
      }
+@@ -327,3 +422,58 @@ fn close_window(s: &mut Session, p: &Json) -> Result<Json> {
+     s.close_window(id);
+     Ok(json!({"closed": true, "document": true}))
+ }
++
++#[cfg(test)]
++#[allow(clippy::unwrap_used)]
++mod package_tests {
++    use super::*;
++    use gridcraft_core::{CellRef, Value};
++
++    #[test]
++    fn managed_package_save_recalculates_across_sheets_and_advances_the_base() {
++        let mut author = Session::new();
++        author.new_workbook();
++        author.execute("cell.set", json!({"sheet":"Sheet1","cell":"A1","input":"2"})).unwrap();
++        author.execute("home.insertSheet", json!({"name":"Results"})).unwrap();
++        author.execute("cell.set", json!({"sheet":"Results","cell":"A1","input":"=Sheet1!A1*3"})).unwrap();
++        let source = crate::io::save_bytes(&author.doc().unwrap().wb, "Synthetic.xlsx").unwrap();
++
++        let open = |bytes: &[u8]| {
++            let mut session = Session::new();
++            session
++                .execute(
++                    "file.open",
++                    json!({
++                        "name":"Synthetic.xlsx","base64":crate::io::base64_encode(bytes),
++                        "preservePackage":true,"calculate":false,"autoFit":false,
++                    }),
++                )
++                .unwrap();
++            session
++        };
++        let save = |session: &mut Session, phase: &str| {
++            let saved = session.execute("file.saveBytes", json!({"format":"xlsx","fidelity":true})).unwrap();
++            assert_eq!(saved["parts"], json!([]), "{phase}: {saved}");
++            crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap()
++        };
++        let at = CellRef::new(0, 0);
++        let results = |s: &Session| s.doc().unwrap().wb.sheets.iter().find(|sh| sh.name == "Results").unwrap().value(at);
++
++        let mut session = open(&source);
++        assert_eq!(results(&session), Value::from(6.0));
++        session.execute("cell.set", json!({"sheet":"Sheet1","cell":"A1","input":"4"})).unwrap();
++        let changed = save(&mut session, "agent edit and cross-sheet recalculation");
++        assert_eq!(results(&open(&changed)), Value::from(12.0));
++        let mut human = open(&changed);
++        human.execute("cell.set", json!({"sheet":"Results","cell":"C2","input":"person"})).unwrap();
++        let latest = save(&mut human, "human edit expands the original sheet dimension");
++        let mut undo = open(&latest);
++        undo.execute("cell.set", json!({"sheet":"Sheet1","cell":"A1","input":"2"})).unwrap();
++        let restored = save(&mut undo, "agent edit undone over the person's package");
++        let reopened = open(&restored);
++        assert_eq!(results(&reopened), Value::from(6.0));
++        let result_sheet = reopened.doc().unwrap().wb.sheets.iter().find(|sh| sh.name == "Results").unwrap();
++        assert_eq!(result_sheet.value(CellRef::new(1, 2)), Value::from("person"));
++        assert_eq!(save(&mut undo, "second save without changes"), restored, "an unchanged second save returns the precise latest package");
++    }
++}
 diff --git a/crates/engine/src/cmd/inspect.rs b/crates/engine/src/cmd/inspect.rs
 index d6646743..2d255e2a 100644
 --- a/crates/engine/src/cmd/inspect.rs
@@ -5731,37 +5898,60 @@ index 31c18366..6db093dd 100644
      script_sandbox_check(path)?;
      Err(EngineError::Other(format!("{path}: no file system in the browser")))
 diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
-index 52a0c648..1b2f7492 100644
+index 52a0c648..76912d58 100644
 --- a/crates/engine/src/lib.rs
 +++ b/crates/engine/src/lib.rs
-@@ -6,6 +6,7 @@
- #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
- #![forbid(unsafe_code)]
- 
+@@ -26,6 +26,7 @@ pub mod record;
+ pub mod sample;
+ pub mod selection;
+ pub mod tables;
 +pub mod timings;
- pub mod catalog;
- pub mod cf;
- pub mod chart_data;
-@@ -42,6 +43,8 @@ pub use gridcraft_core as core;
- pub use gridcraft_formula as formula;
+ pub mod windows;
+ 
+ use std::sync::Arc;
+@@ -43,6 +44,8 @@ pub use gridcraft_formula as formula;
  pub use gridcraft_math as math;
  pub use gridcraft_model as model;
-+/// Save fidelity: the parts a written workbook package would lose.
-+pub use gridcraft_xlsx::fidelity;
  pub use gridcraft_numfmt as numfmt;
++/// Save fidelity: the parts a written workbook package would lose.
++pub use gridcraft_xlsx::{fidelity, package_edit};
  pub use selection::Selection;
  pub use windows::{Target, TargetGuard, WindowState, WindowView};
-@@ -231,6 +234,9 @@ pub struct DocState {
+ 
+@@ -185,6 +188,19 @@ pub enum Mode {
+     Point,
+ }
+ 
++/// Committed package bytes and the model that originated from them.
++#[derive(Clone)]
++pub struct WorkbookPackage {
++    pub bytes: Arc<[u8]>,
++    pub model: Arc<Workbook>,
++}
++
++impl std::fmt::Debug for WorkbookPackage {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("WorkbookPackage").field("byte_len", &self.bytes.len()).finish_non_exhaustive()
++    }
++}
++
+ #[derive(Clone, Debug)]
+ pub struct DocState {
+     pub wb: Arc<Workbook>,
+@@ -231,6 +247,12 @@ pub struct DocState {
      /// The Distinct Count PivotTable value fields (sheet, pivot, value) an .xlsx save has already
      /// told the user about (#3336), so only a field not yet disclosed raises the notice again.
      pub distinct_disclosed: Vec<(usize, usize, usize)>,
 +    /// For a workbook opened from an xlsx/xlsm package: the package's parts and the model's as
 +    /// opened, what `file.saveBytes {fidelity: true}` checks a save against.
 +    pub fidelity_baseline: Option<Arc<(fidelity::Parts, fidelity::Parts)>>,
++    /// A managed workbook's source. Kept out of Undo snapshots so Undo changes
++    /// cells on the current publication base.
++    pub package_base: Option<WorkbookPackage>,
  }
  
  static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-@@ -331,21 +337,30 @@ impl DocState {
+@@ -331,21 +353,30 @@ impl DocState {
      /// made in this session.
      pub fn new(mut wb: Workbook, path: Option<String>, title: String, trust: Trust) -> DocState {
          let _ = gridcraft_model::PIVOT_INDEXER.set(pivot::index_cells);
@@ -5793,15 +5983,16 @@ index 52a0c648..1b2f7492 100644
          let scripts_trusted = !cmd::extra::has_scripts(&wb);
          let wb = Arc::new(wb);
          let mut sel = Selection::at(wb.active().map(|s| s.view_active).unwrap_or_default());
-@@ -374,6 +389,7 @@ impl DocState {
+@@ -374,6 +405,8 @@ impl DocState {
              edits: None,
              go_to_recent: vec![],
              distinct_disclosed: vec![],
 +            fidelity_baseline: None,
++            package_base: None,
          }
      }
      pub fn is_dirty(&self) -> bool {
-@@ -503,6 +519,10 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
+@@ -503,6 +536,10 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
  
  #[derive(Default)]
  pub struct Session {
@@ -5812,7 +6003,7 @@ index 52a0c648..1b2f7492 100644
      docs: Vec<DocState>,
      /// Index in `docs` of the active window's workbook.
      active: usize,
-@@ -581,6 +601,42 @@ impl Session {
+@@ -581,6 +618,42 @@ impl Session {
      pub fn new() -> Session {
          Session::default()
      }
@@ -5846,7 +6037,7 @@ index 52a0c648..1b2f7492 100644
 +        // Trusted bootstrap creates the clean imported document whose identity the
 +        // host then binds. User imports, unlike bootstrap, edit that same identity.
 +        let managed = std::mem::replace(&mut self.managed_document, false);
-+        let params = serde_json::json!({"name": name, "base64": io::base64_encode(bytes), "calculate": calculate, "autoFit": auto_fit});
++        let params = serde_json::json!({"name": name, "base64": io::base64_encode(bytes), "calculate": calculate, "autoFit": auto_fit, "preservePackage": true});
 +        let result = self.execute_command("file.open", params, true);
 +        self.managed_document = managed;
 +        result
@@ -5855,7 +6046,7 @@ index 52a0c648..1b2f7492 100644
      pub fn documents(&self) -> &[DocState] {
          &self.docs
      }
-@@ -716,8 +772,13 @@ impl Session {
+@@ -716,8 +789,13 @@ impl Session {
      /// unless an undo group is open on the document (the group then makes the step).
      /// Panics inside commands are caught and reported; the workbook is restored.
      pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
@@ -5870,7 +6061,7 @@ index 52a0c648..1b2f7492 100644
              return Err(EngineError::Disabled(id.to_string(), why));
          }
          // A debugger whose undo group something else ended locks nothing any more (`macro.debug`
-@@ -725,7 +786,8 @@ impl Session {
+@@ -725,7 +803,8 @@ impl Session {
          if id != "macro.debug" {
              macros::debug::drop_if_ended(self);
          }
@@ -5880,7 +6071,7 @@ index 52a0c648..1b2f7492 100644
          // While a macro is being debugged its undo group is open, and its workbook is locked:
          // between steps only the debugger, queries and commands that look around run there
          // (`macros::debug::LOOKS_AROUND`). Anything else waits, undoable or not (saving, view
-@@ -871,7 +933,7 @@ impl Session {
+@@ -871,7 +950,7 @@ impl Session {
          let epoch_changed = self.group_epoch != group_epoch;
          let in_group_now = before.as_ref().is_some_and(|(uid, ..)| self.in_group(*uid));
          let was_open = start.is_some_and(|(was_open, _)| was_open);
@@ -9852,10 +10043,10 @@ index 00000000..c8e7f941
 +    }
 +}
 diff --git a/crates/xlsx/src/lib.rs b/crates/xlsx/src/lib.rs
-index 29071cff..223095d8 100644
+index 29071cff..fd9086d1 100644
 --- a/crates/xlsx/src/lib.rs
 +++ b/crates/xlsx/src/lib.rs
-@@ -20,6 +20,7 @@ mod csv;
+@@ -20,10 +20,12 @@ mod csv;
  mod drawing;
  mod extlist;
  mod feature_bags;
@@ -9863,6 +10054,11 @@ index 29071cff..223095d8 100644
  mod fmla;
  mod ods;
  mod omml;
+ mod package;
++pub mod package_edit;
+ mod passthrough;
+ mod pivot;
+ mod python_part;
 diff --git a/crates/xlsx/src/package.rs b/crates/xlsx/src/package.rs
 index 561dce41..6dbdc66f 100644
 --- a/crates/xlsx/src/package.rs
@@ -9885,6 +10081,662 @@ index 561dce41..6dbdc66f 100644
              })
              .collect())
      }
+diff --git a/crates/xlsx/src/package_edit.rs b/crates/xlsx/src/package_edit.rs
+new file mode 100644
+index 00000000..7d9c9239
+--- /dev/null
++++ b/crates/xlsx/src/package_edit.rs
+@@ -0,0 +1,650 @@
++//! Write cell edits into the exact OPC package from which they were made.
++//! Nothing outside the edited cells is serialized from GridCraft's model.
++
++use std::collections::{BTreeMap, HashSet};
++use std::io::{Cursor, Write};
++use std::ops::Range;
++
++use gridcraft_core::{CellRef, RangeRef, Value};
++use gridcraft_model::{Cell, StyleId, Workbook};
++use quick_xml::Reader;
++use quick_xml::events::{BytesStart, Event};
++use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
++
++use crate::package::{Package, normalize};
++use crate::write::NS_MAIN;
++use crate::xml::{encode_xstring, esc, esc_attr, num};
++
++#[derive(Debug)]
++pub struct EditRefusal {
++    pub code: &'static str,
++}
++
++type Result<T> = std::result::Result<T, EditRefusal>;
++
++const UNSUPPORTED: EditRefusal = EditRefusal { code: "package_edit" };
++const PACKAGE: EditRefusal = EditRefusal { code: "package" };
++const WORKSHEET: EditRefusal = EditRefusal { code: "worksheet" };
++
++/// Preserve the source package, including its original names, relationships and
++/// indices. Only support changes that can be proved to be ordinary cell edits.
++pub fn write_package_cells(source: &[u8], before: &Workbook, after: &Workbook, format: &str) -> Result<Vec<u8>> {
++    let mut package = Package::open(source).map_err(|_| PACKAGE)?;
++    let types = package.read_limited("[Content_Types].xml", 1 << 20).map_err(|_| PACKAGE)?.ok_or(PACKAGE)?;
++    let types = std::str::from_utf8(&types).map_err(|_| PACKAGE)?.to_ascii_lowercase();
++    let macro_enabled = types.contains("application/vnd.ms-excel.sheet.macroenabled.main+xml");
++    if !(macro_enabled && format == "xlsm"
++        || !macro_enabled && format == "xlsx" && types.contains("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"))
++    {
++        return Err(UNSUPPORTED);
++    }
++    let mut zip = ZipArchive::new(Cursor::new(source)).map_err(|_| PACKAGE)?;
++    let names = zip.file_names().collect::<std::result::Result<Vec<_>, _>>().map_err(|_| PACKAGE)?;
++    if types.contains("digital-signature") || names.iter().any(|name| name.to_ascii_lowercase().starts_with("_xmlsignatures/")) {
++        return Err(EditRefusal { code: "xml_signatures" });
++    }
++    if types.contains("vbaprojectsignature")
++        || !before.vba_signatures.is_empty()
++        || names.iter().any(|name| name.to_ascii_lowercase().starts_with("xl/vbaprojectsignature"))
++    {
++        return Err(EditRefusal { code: "vba_signature" });
++    }
++
++    let mut workbook = after.clone();
++    workbook.sheets.clone_from(&before.sheets);
++    workbook.active_sheet = before.active_sheet.clone();
++    if &workbook != before || !before.structure.same(after.structure) || before.sheets.len() != after.sheets.len() {
++        return Err(UNSUPPORTED);
++    }
++
++    let has_calc_chain = names.iter().any(|name| name.eq_ignore_ascii_case("xl/calcChain.xml"));
++    let sheets = sheet_parts(&mut package)?;
++    let mut replacements = BTreeMap::new();
++    for (old, new) in before.sheets.iter().zip(&after.sheets) {
++        if std::sync::Arc::ptr_eq(old, new) {
++            continue;
++        }
++        let mut shape = (**new).clone();
++        shape.cells = old.cells.clone();
++        // The caret and scroll position belong to the editor session.
++        shape.view_active = old.view_active;
++        shape.view_top_left = old.view_top_left;
++        if &shape != old.as_ref() {
++            return Err(UNSUPPORTED);
++        }
++        let mut edits = BTreeMap::new();
++        for (at, cell) in new.cells.iter() {
++            let prior = old.cells.get(at);
++            if prior.is_none_or(|prior| !same_cell(prior, cell)) {
++                edits.insert(at, (prior, Some(cell)));
++            }
++        }
++        for (at, cell) in old.cells.iter() {
++            if new.cells.get(at).is_none() {
++                edits.insert(at, (Some(cell), None));
++            }
++        }
++        if edits.is_empty() {
++            continue;
++        }
++        if has_calc_chain
++            && edits.values().any(|(old, new)| !same_formula(old.and_then(|c| c.formula.as_deref()), new.and_then(|c| c.formula.as_deref())))
++        {
++            return Err(UNSUPPORTED);
++        }
++        let part = sheets.get(&(old.file_id, old.name.clone())).ok_or(WORKSHEET)?;
++        let data = package.read(part).map_err(|_| PACKAGE)?.ok_or(WORKSHEET)?;
++        let updated = edit_sheet(&data, edits)?;
++        if replacements.insert(normalize(part), updated).is_some() {
++            return Err(WORKSHEET);
++        }
++    }
++    if replacements.is_empty() {
++        return Ok(source.to_vec());
++    }
++
++    let mut out = ZipWriter::new(Cursor::new(Vec::new()));
++    let mut seen = HashSet::new();
++    for i in 0..zip.len() {
++        let file = zip.by_index(i).map_err(|_| PACKAGE)?;
++        let name = file.name().map_err(|_| PACKAGE)?.into_owned();
++        if !seen.insert(normalize(name.trim_end_matches('/')).to_ascii_lowercase())
++            || name.starts_with('/')
++            || name.contains('\\')
++            || name.split('/').any(|segment| matches!(segment, "." | ".."))
++        {
++            return Err(PACKAGE);
++        }
++        if let Some(data) = replacements.remove(&normalize(&name)) {
++            let options = SimpleFileOptions::default().compression_method(file.compression());
++            out.start_file(name, options).map_err(|_| PACKAGE)?;
++            out.write_all(&data).map_err(|_| PACKAGE)?;
++        } else {
++            out.raw_copy_file(file).map_err(|_| PACKAGE)?;
++        }
++    }
++    if !replacements.is_empty() {
++        return Err(WORKSHEET);
++    }
++    Ok(out.finish().map_err(|_| PACKAGE)?.into_inner())
++}
++
++fn same_formula(a: Option<&gridcraft_model::Formula>, b: Option<&gridcraft_model::Formula>) -> bool {
++    match (a, b) {
++        (Some(a), Some(b)) => a.text == b.text && a.array == b.array && a.dynamic == b.dynamic,
++        (None, None) => true,
++        _ => false,
++    }
++}
++
++fn same_cell(a: &Cell, b: &Cell) -> bool {
++    a.style == b.style && a.value == b.value && a.py == b.py && same_formula(a.formula.as_deref(), b.formula.as_deref())
++}
++
++fn sheet_parts(package: &mut Package<'_>) -> Result<BTreeMap<(u32, String), String>> {
++    let root = package.rels("").map_err(|_| PACKAGE)?;
++    if root.iter().any(|r| r.kind == "origin" && r.ty.contains("digital-signature")) {
++        return Err(EditRefusal { code: "xml_signatures" });
++    }
++    let workbook = root.iter().find(|r| r.kind == "officeDocument" && !r.external).ok_or(PACKAGE)?;
++    let xml = package.read_xml(&workbook.target).map_err(|_| PACKAGE)?.ok_or(PACKAGE)?;
++    let rels = package.rels(&workbook.target).map_err(|_| PACKAGE)?;
++    for r in rels.iter().filter(|r| r.kind == "vbaProject" && !r.external) {
++        if package.rels(&r.target).map_err(|_| PACKAGE)?.iter().any(|r| r.kind.starts_with("vbaProjectSignature")) {
++            return Err(EditRefusal { code: "vba_signature" });
++        }
++    }
++    let mut sheets = BTreeMap::new();
++    let mut parts = HashSet::new();
++    for sheet in xml.child("sheets").ok_or(PACKAGE)?.kids("sheet") {
++        let id = sheet.attr("sheetId").and_then(|s| s.parse::<u32>().ok()).ok_or(PACKAGE)?;
++        let name = sheet.attr("name").ok_or(PACKAGE)?;
++        let rid = sheet.attr("id").ok_or(PACKAGE)?;
++        let mut matches = rels.iter().filter(|r| r.id == rid && !r.external);
++        let rel = matches.next().ok_or(PACKAGE)?;
++        if matches.next().is_some() {
++            return Err(PACKAGE);
++        }
++        if rel.kind == "worksheet" && (!parts.insert(rel.target.clone()) || sheets.insert((id, name.to_string()), rel.target.clone()).is_some()) {
++            return Err(PACKAGE);
++        }
++    }
++    Ok(sheets)
++}
++
++struct Element<'a> {
++    start: BytesStart<'a>,
++    whole: Range<usize>,
++    body: Option<Range<usize>>,
++}
++
++/// Walk direct children only, handing out ranges into the unchanged input.
++fn elements(data: &[u8], mut visit: impl FnMut(Element<'_>) -> Result<()>) -> Result<()> {
++    let mut reader = Reader::from_reader(data);
++    loop {
++        let start_at = reader.buffer_position() as usize;
++        match reader.read_event().map_err(|_| WORKSHEET)? {
++            Event::Start(start) => {
++                let body = reader.read_to_end(start.name()).map_err(|_| WORKSHEET)?;
++                visit(Element { start, whole: start_at..reader.buffer_position() as usize, body: Some(body.start as usize..body.end as usize) })?;
++            }
++            Event::Empty(start) => visit(Element { start, whole: start_at..reader.buffer_position() as usize, body: None })?,
++            Event::Eof => return Ok(()),
++            Event::DocType(_) | Event::End(_) => return Err(WORKSHEET),
++            _ => {}
++        }
++    }
++}
++
++fn attr(el: &BytesStart<'_>, key: &[u8]) -> Result<Option<String>> {
++    for a in el.attributes() {
++        let a = a.map_err(|_| WORKSHEET)?;
++        if a.key.as_ref() == key {
++            // Spreadsheet coordinates, cell types, styles and xmlns do not use entities.
++            return std::str::from_utf8(a.value.as_ref()).map(|value| Some(value.to_string())).map_err(|_| WORKSHEET);
++        }
++    }
++    Ok(None)
++}
++
++type Edits<'a> = BTreeMap<CellRef, (Option<&'a Cell>, Option<&'a Cell>)>;
++
++fn edit_sheet(data: &[u8], mut edits: Edits<'_>) -> Result<Vec<u8>> {
++    let mut sheet_data = None;
++    let mut empty_data = None;
++    let mut dimension = None;
++    elements(data, |root| {
++        if sheet_data.is_some()
++            || empty_data.is_some()
++            || root.start.name().as_ref() != b"worksheet"
++            || attr(&root.start, b"xmlns")?.as_deref() != Some(NS_MAIN)
++        {
++            return Err(WORKSHEET);
++        }
++        let body = root.body.ok_or(WORKSHEET)?;
++        elements(&data[body.clone()], |el| {
++            match el.start.name().as_ref() {
++                b"dimension" => {
++                    if dimension.is_some() || el.start.attributes().count() != 1 || el.body.is_some() {
++                        return Err(WORKSHEET);
++                    }
++                    let range = attr(&el.start, b"ref")?.ok_or(WORKSHEET)?;
++                    dimension = Some((RangeRef::parse(&range).ok_or(WORKSHEET)?, absolute(body.start, el.whole)));
++                }
++                b"sheetData" => {
++                    if sheet_data.is_some() || empty_data.is_some() || attr(&el.start, b"xmlns")?.is_some() {
++                        return Err(WORKSHEET);
++                    }
++                    if let Some(span) = el.body {
++                        sheet_data = Some(absolute(body.start, span));
++                    } else if el.start.attributes().next().is_none() {
++                        empty_data = Some(absolute(body.start, el.whole));
++                    } else {
++                        return Err(WORKSHEET);
++                    }
++                }
++                _ => {}
++            }
++            Ok(())
++        })
++    })?;
++    let data_start = empty_data.as_ref().or(sheet_data.as_ref()).ok_or(WORKSHEET)?.start;
++    let dimension = if let Some((original, span)) = dimension {
++        if span.end > data_start {
++            return Err(WORKSHEET);
++        }
++        let mut expanded = original;
++        for (at, (old, _)) in &edits {
++            if original.contains(*at) {
++                continue;
++            }
++            if old.is_some() || !at.is_valid() {
++                return Err(WORKSHEET);
++            }
++            expanded = RangeRef::new(
++                CellRef::new(expanded.start.row.min(at.row), expanded.start.col.min(at.col)),
++                CellRef::new(expanded.end.row.max(at.row), expanded.end.col.max(at.col)),
++            );
++        }
++        (expanded != original).then(|| (span, format!("<dimension ref=\"{}\"/>", expanded.a1())))
++    } else {
++        None
++    };
++    let mut output = Vec::with_capacity(data.len());
++    if let Some(empty) = empty_data {
++        output.extend_from_slice(&data[..empty.start]);
++        output.extend_from_slice(b"<sheetData>");
++        write_new_rows(&mut output, &mut edits, gridcraft_core::MAX_ROWS)?;
++        if !edits.is_empty() {
++            return Err(WORKSHEET);
++        }
++        output.extend_from_slice(b"</sheetData>");
++        output.extend_from_slice(&data[empty.end..]);
++        return Ok(rewrite_dimension(output, dimension));
++    }
++    let sheet_data = sheet_data.ok_or(WORKSHEET)?;
++    let mut written = 0;
++    let part = &data[sheet_data.clone()];
++    let mut last_row = 0;
++    elements(part, |row| {
++        if row.start.name().as_ref() != b"row" || attr(&row.start, b"xmlns")?.is_some() {
++            return Err(WORKSHEET);
++        }
++        let row_index = attr(&row.start, b"r")?
++            .and_then(|r| r.parse::<u32>().ok())
++            .filter(|r| *r > last_row && *r <= gridcraft_core::MAX_ROWS)
++            .ok_or(WORKSHEET)?;
++        last_row = row_index;
++        let at = sheet_data.start + row.whole.start;
++        output.extend_from_slice(&data[written..at]);
++        write_new_rows(&mut output, &mut edits, row_index - 1)?;
++        written = at;
++        if edits.first_key_value().is_none_or(|(at, _)| at.row >= row_index) {
++            return Ok(());
++        }
++        let next_row = edits.split_off(&CellRef::new(row_index, 0));
++        let row_edits = std::mem::replace(&mut edits, next_row);
++        if row_edits.is_empty() {
++            return Ok(());
++        }
++        let body = row.body.ok_or(WORKSHEET)?;
++        let patched = edit_row(&part[body.clone()], row_index - 1, row_edits)?;
++        let body = absolute(sheet_data.start, body);
++        output.extend_from_slice(&data[written..body.start]);
++        output.extend_from_slice(&patched);
++        written = body.end;
++        Ok(())
++    })?;
++    output.extend_from_slice(&data[written..sheet_data.end]);
++    write_new_rows(&mut output, &mut edits, gridcraft_core::MAX_ROWS)?;
++    if !edits.is_empty() {
++        return Err(WORKSHEET);
++    }
++    output.extend_from_slice(&data[sheet_data.end..]);
++    Ok(rewrite_dimension(output, dimension))
++}
++
++fn rewrite_dimension(mut sheet: Vec<u8>, dimension: Option<(Range<usize>, String)>) -> Vec<u8> {
++    if let Some((span, element)) = dimension {
++        sheet.splice(span, element.bytes());
++    }
++    sheet
++}
++
++fn write_new_rows(out: &mut Vec<u8>, edits: &mut Edits<'_>, before_row: u32) -> Result<()> {
++    while let Some((at, _)) = edits.first_key_value().filter(|(at, _)| at.row < before_row) {
++        let row = at.row;
++        out.extend_from_slice(format!("<row r=\"{}\">", row + 1).as_bytes());
++        while edits.first_key_value().is_some_and(|(at, _)| at.row == row) {
++            let (at, (old, new)) = edits.pop_first().ok_or(WORKSHEET)?;
++            out.extend_from_slice(&cell_xml(at, old, new, None, &[])?);
++        }
++        out.extend_from_slice(b"</row>");
++    }
++    Ok(())
++}
++
++fn absolute(base: usize, range: Range<usize>) -> Range<usize> {
++    base + range.start..base + range.end
++}
++
++fn edit_row(data: &[u8], row: u32, mut edits: Edits<'_>) -> Result<Vec<u8>> {
++    let mut output = Vec::with_capacity(data.len());
++    let mut written = 0;
++    let mut last = None;
++    elements(data, |cell| {
++        if cell.start.name().as_ref() != b"c" || attr(&cell.start, b"xmlns")?.is_some() {
++            return Err(WORKSHEET);
++        }
++        let at = attr(&cell.start, b"r")?.as_deref().and_then(CellRef::parse).filter(|at| at.row == row).ok_or(WORKSHEET)?;
++        if last.is_some_and(|last| at <= last) {
++            return Err(WORKSHEET);
++        }
++        last = Some(at);
++        output.extend_from_slice(&data[written..cell.whole.start]);
++        while edits.first_key_value().is_some_and(|(next, _)| *next < at) {
++            let (next, (old, new)) = edits.pop_first().ok_or(WORKSHEET)?;
++            output.extend_from_slice(&cell_xml(next, old, new, None, data)?);
++        }
++        written = cell.whole.end;
++        if let Some((old, new)) = edits.remove(&at) {
++            output.extend_from_slice(&cell_xml(at, old, new, Some(cell), data)?);
++        } else {
++            output.extend_from_slice(&data[cell.whole]);
++        }
++        Ok(())
++    })?;
++    for (at, (old, new)) in edits {
++        output.extend_from_slice(&cell_xml(at, old, new, None, data)?);
++    }
++    output.extend_from_slice(&data[written..]);
++    Ok(output)
++}
++
++fn cell_xml(at: CellRef, old: Option<&Cell>, new: Option<&Cell>, source: Option<Element<'_>>, row: &[u8]) -> Result<Vec<u8>> {
++    let style = |cell: Option<&Cell>| cell.map_or(StyleId::DEFAULT, |cell| cell.style);
++    if style(old) != style(new) || old.is_some_and(|c| c.py.is_some()) || new.is_some_and(|c| c.py.is_some()) {
++        return Err(UNSUPPORTED);
++    }
++    if source.is_none() && old.is_some() {
++        return Err(WORKSHEET);
++    }
++    let mut style_attr = String::new();
++    let mut old_type = String::new();
++    let mut original_formula = None;
++    if let Some(source) = source {
++        for attr in source.start.attributes() {
++            let attr = attr.map_err(|_| WORKSHEET)?;
++            if !matches!(attr.key.as_ref(), b"r" | b"s" | b"t") {
++                return Err(UNSUPPORTED);
++            }
++        }
++        style_attr = attr(&source.start, b"s")?.unwrap_or_default();
++        old_type = attr(&source.start, b"t")?.unwrap_or_default();
++        if !matches!(old_type.as_str(), "" | "n" | "s" | "inlineStr" | "str" | "b" | "e" | "d")
++            || !style_attr.is_empty() && (!style_attr.bytes().all(|b| b.is_ascii_digit()) || style_attr.parse::<u32>().is_err())
++        {
++            return Err(UNSUPPORTED);
++        }
++        if let Some(body) = source.body {
++            let cell = &row[body];
++            let mut seen = HashSet::new();
++            let mut end = 0;
++            elements(cell, |el| {
++                if !cell[end..el.whole.start].iter().all(u8::is_ascii_whitespace) {
++                    return Err(UNSUPPORTED);
++                }
++                end = el.whole.end;
++                let tag = el.start.name();
++                if !matches!(tag.as_ref(), b"f" | b"v" | b"is") || el.start.attributes().next().is_some() {
++                    return Err(UNSUPPORTED);
++                }
++                if !seen.insert(tag.as_ref().to_vec()) {
++                    return Err(WORKSHEET);
++                }
++                if tag.as_ref() == b"f" {
++                    original_formula = Some(&cell[el.whole.clone()]);
++                }
++                if tag.as_ref() != b"is" && el.body.as_ref().is_some_and(|span| cell[span.clone()].contains(&b'<')) {
++                    return Err(UNSUPPORTED);
++                }
++                if tag.as_ref() == b"is" {
++                    let inner = &cell[el.body.ok_or(WORKSHEET)?];
++                    let mut text_end = 0;
++                    elements(inner, |text| {
++                        if text_end != 0
++                            || text.start.name().as_ref() != b"t"
++                            || !inner[..text.whole.start].iter().all(u8::is_ascii_whitespace)
++                            || text.body.is_some_and(|span| inner[span].contains(&b'<'))
++                            || text.start.attributes().any(|a| a.map_or(true, |a| a.key.as_ref() != b"xml:space"))
++                        {
++                            return Err(UNSUPPORTED);
++                        }
++                        text_end = text.whole.end;
++                        Ok(())
++                    })?;
++                    if text_end == 0 || !inner[text_end..].iter().all(u8::is_ascii_whitespace) {
++                        return Err(UNSUPPORTED);
++                    }
++                }
++                Ok(())
++            })?;
++            if !cell[end..].iter().all(u8::is_ascii_whitespace) {
++                return Err(UNSUPPORTED);
++            }
++        }
++    }
++    let old_formula = old.and_then(|c| c.formula.as_deref());
++    let new_formula = new.and_then(|c| c.formula.as_deref());
++    if old_formula.is_some_and(|f| f.array.is_some() || f.dynamic || f.document_value)
++        || new_formula.is_some_and(|f| f.array.is_some() || f.dynamic || f.document_value || f.expr.is_none())
++        || old_formula.is_some() != original_formula.is_some()
++    {
++        return Err(UNSUPPORTED);
++    }
++    let value = new.map_or(&Value::Empty, |cell| &cell.value);
++    let (ty, value_xml) = match value {
++        Value::Empty if new_formula.is_none() => ("", String::new()),
++        Value::Number(n) if n.is_finite() => ("n", format!("<v>{}</v>", num(*n))),
++        Value::Text(s) if new_formula.is_some() => ("str", format!("<v>{}</v>", esc(&encode_xstring(s)))),
++        Value::Text(s) => ("inlineStr", format!("<is><t xml:space=\"preserve\">{}</t></is>", esc(&encode_xstring(s)))),
++        Value::Bool(b) => ("b", format!("<v>{}</v>", u8::from(*b))),
++        Value::Error(e) => ("e", format!("<v>{}</v>", esc(&e.to_string()))),
++        _ => return Err(UNSUPPORTED),
++    };
++    let unchanged_formula = old_formula.is_some() && same_formula(old_formula, new_formula);
++    if unchanged_formula && (ty != if old_type.is_empty() { "n" } else { &old_type } || ty == "e" || value_xml == "<v></v>") {
++        return Err(UNSUPPORTED);
++    }
++    let style_attr = if style_attr.is_empty() { String::new() } else { format!(" s=\"{}\"", esc_attr(&style_attr)) };
++    let ty = if ty.is_empty() || ty == "n" && old_type.is_empty() { String::new() } else { format!(" t=\"{ty}\"") };
++    let mut output = format!("<c r=\"{at}\"{style_attr}{ty}>").into_bytes();
++    if unchanged_formula {
++        output.extend_from_slice(original_formula.ok_or(WORKSHEET)?);
++    } else if let Some(formula) = new_formula {
++        output.extend_from_slice(format!("<f>{}</f>", esc(&crate::fmla::to_file(formula))).as_bytes());
++    }
++    output.extend_from_slice(value_xml.as_bytes());
++    output.extend_from_slice(b"</c>");
++    Ok(output)
++}
++
++#[cfg(test)]
++#[allow(clippy::unwrap_used)]
++mod tests {
++    use super::*;
++    use std::io::Read;
++
++    fn package(macro_enabled: bool, signed: bool) -> Vec<u8> {
++        const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
++        let book_type = if macro_enabled {
++            "application/vnd.ms-excel.sheet.macroEnabled.main+xml"
++        } else {
++            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
++        };
++        let mut parts = vec![
++            (
++                "[Content_Types].xml",
++                format!(
++                    r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="{book_type}"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/customProperty1.bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.customProperty"/></Types>"#
++                ),
++            ),
++            (
++                "_rels/.rels",
++                format!(
++                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#
++                ),
++            ),
++            (
++                "xl/workbook.xml",
++                format!(
++                    r#"<workbook xmlns="{NS_MAIN}" xmlns:r="{REL}"><sheets><sheet name="Data" sheetId="17" r:id="original-data"/><sheet name="Calc" sheetId="28" r:id="original-calc"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Data!$A$1:$C$1</definedName></definedNames></workbook>"#
++                ),
++            ),
++            (
++                "xl/_rels/workbook.xml.rels",
++                format!(
++                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="original-data" Type="{REL}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="original-calc" Type="{REL}/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="{REL}/styles" Target="styles.xml"/><Relationship Id="rId4" Type="{REL}/sharedStrings" Target="sharedStrings.xml"/>{}</Relationships>"#,
++                    if macro_enabled {
++                        r#"<Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>"#
++                    } else {
++                        ""
++                    }
++                ),
++            ),
++            (
++                "xl/worksheets/sheet1.xml",
++                format!(
++                    r#"<worksheet xmlns="{NS_MAIN}" xmlns:r="{REL}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><v>2</v></c></row></sheetData><autoFilter ref="A1:C1"/><customProperties><customPr name="Synthetic" r:id="cp-original"/></customProperties></worksheet>"#
++                ),
++            ),
++            (
++                "xl/worksheets/sheet2.xml",
++                format!(r#"<worksheet xmlns="{NS_MAIN}"><sheetData><row r="1"><c r="B1"><f>Data!C1*3</f><v>6</v></c></row></sheetData></worksheet>"#),
++            ),
++            (
++                "xl/worksheets/_rels/sheet1.xml.rels",
++                format!(
++                    r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="cp-original" Type="{REL}/customProperty" Target="../customProperty1.bin"/></Relationships>"#
++                ),
++            ),
++            ("xl/sharedStrings.xml", format!(r#"<sst xmlns="{NS_MAIN}"><si><t>shared</t></si></sst>"#)),
++            (
++                "xl/styles.xml",
++                format!(
++                    r#"<styleSheet xmlns="{NS_MAIN}"><dxfs count="1"><dxf><font><b/></font></dxf></dxfs><tableStyles count="1" defaultTableStyle="SyntheticTable"><tableStyle name="SyntheticTable" table="1" count="1"><tableStyleElement type="headerRow" dxfId="0"/></tableStyle></tableStyles></styleSheet>"#
++                ),
++            ),
++            ("xl/customProperty1.bin", "opaque\0sheet data".into()),
++        ];
++        if macro_enabled {
++            parts[0].1 = parts[0]
++                .1
++                .replace("</Types>", r#"<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>"#);
++            parts.push(("xl/vbaProject.bin", "synthetic\0unsigned VBA".into()));
++        }
++        if signed {
++            parts.push(("_xmlsignatures/sig1.xml", "<Signature/>".into()));
++        }
++        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
++        for (name, content) in parts {
++            zip.start_file(name, SimpleFileOptions::default()).unwrap();
++            zip.write_all(content.as_bytes()).unwrap();
++        }
++        zip.finish().unwrap().into_inner()
++    }
++
++    fn entries(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
++        let mut zip = ZipArchive::new(Cursor::new(bytes)).unwrap();
++        (0..zip.len())
++            .map(|i| {
++                let mut entry = zip.by_index(i).unwrap();
++                let name = entry.name().unwrap().into_owned();
++                let mut data = Vec::new();
++                entry.read_to_end(&mut data).unwrap();
++                (name, data)
++            })
++            .collect()
++    }
++
++    #[test]
++    fn package_edits_preserve_references_and_prefer_the_current_version() {
++        for (macro_enabled, format) in [(false, "xlsx"), (true, "xlsm")] {
++            let original = package(macro_enabled, false);
++            let (base, _) = crate::read_xlsx(&original).unwrap();
++            let mut agent = base.clone();
++            let a = CellRef::new(0, 0);
++            let b = CellRef::new(0, 1);
++            let c = CellRef::new(0, 2);
++            agent.sheet_mut(0).unwrap().set_value(a, Value::from("agent"));
++            agent.sheet_mut(0).unwrap().set_value(c, Value::from(4.0));
++            let mut formula = agent.sheet(1).unwrap().cells.get(b).unwrap().clone();
++            formula.value = Value::from(12.0);
++            agent.sheet_mut(1).unwrap().set_cell(b, formula);
++            let version2 = write_package_cells(&original, &base, &agent, format).unwrap();
++            let (saved2, _) = crate::read_xlsx(&version2).unwrap();
++            let mut human = saved2.clone();
++            human.sheet_mut(0).unwrap().set_value(b, Value::from("person"));
++            let version3 = write_package_cells(&version2, &saved2, &human, format).unwrap();
++            let (saved3, _) = crate::read_xlsx(&version3).unwrap();
++            let mut undo = saved3.clone();
++            undo.sheet_mut(0).unwrap().set_value(a, Value::from("shared"));
++            undo.sheet_mut(0).unwrap().set_value(c, Value::from(2.0));
++            let mut formula = undo.sheet(1).unwrap().cells.get(b).unwrap().clone();
++            formula.value = Value::from(6.0);
++            undo.sheet_mut(1).unwrap().set_cell(b, formula);
++            let version4 = write_package_cells(&version3, &saved3, &undo, format).unwrap();
++            let (reopened, _) = crate::read_xlsx(&version4).unwrap();
++            let original_parts = entries(&original);
++            for version in [&version2, &version3, &version4] {
++                let parts = entries(version);
++                assert_eq!(parts.len(), original_parts.len());
++                for (name, data) in &original_parts {
++                    if !name.starts_with("xl/worksheets/sheet") {
++                        assert_eq!(&parts[name], data, "{name}");
++                    }
++                }
++                let sheet = std::str::from_utf8(&parts["xl/worksheets/sheet1.xml"]).unwrap();
++                assert!(sheet.contains(r#"<customPr name="Synthetic" r:id="cp-original"/>"#));
++            }
++            assert_eq!(saved2.sheet(0).unwrap().value(b), Value::from("shared"));
++            assert_eq!(saved2.sheet(1).unwrap().value(b), Value::from(12.0));
++            assert_eq!(reopened.sheet(0).unwrap().value(a), Value::from("shared"));
++            assert_eq!(reopened.sheet(0).unwrap().value(b), Value::from("person"));
++            assert_eq!(reopened.sheet(1).unwrap().value(b), Value::from(6.0));
++            assert_eq!(reopened.sheet(1).unwrap().cells.get(b).unwrap().formula.as_ref().unwrap().text, "Data!C1*3");
++        }
++    }
++
++    #[test]
++    fn package_edits_refuse_signatures_and_unsupported_operations() {
++        let signed = package(true, true);
++        let (base, _) = crate::read_xlsx(&signed).unwrap();
++        assert_eq!(write_package_cells(&signed, &base, &base, "xlsm").unwrap_err().code, "xml_signatures");
++        let original = package(false, false);
++        let (base, _) = crate::read_xlsx(&original).unwrap();
++        let mut edited = base.clone();
++        edited.sheet_mut(0).unwrap().name = "Renamed".into();
++        assert_eq!(write_package_cells(&original, &base, &edited, "xlsx").unwrap_err().code, "package_edit");
++    }
++}
 diff --git a/crates/xlsx/src/pivot.rs b/crates/xlsx/src/pivot.rs
 index c16252ef..a965ce30 100644
 --- a/crates/xlsx/src/pivot.rs
