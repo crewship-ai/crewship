@@ -1,3 +1,15 @@
+diff --git a/apps/wordcraft-cli/src/main.rs b/apps/wordcraft-cli/src/main.rs
+index 505fed7ce39dbfb3e4e7b1f59d1a31c7f5970b0e..7f0cacfae9da1ff15278ee7349966538926926e5 100644
+--- a/apps/wordcraft-cli/src/main.rs
++++ b/apps/wordcraft-cli/src/main.rs
+@@ -1044,6 +1044,7 @@ fn main() -> ExitCode {
+     }
+     // Language packs installed in the suite's font store are used; `proof.installPack` installs
+     // only while the person has turned downloading on in the app.
++    #[cfg(not(target_arch = "wasm32"))]
+     wordcraft_engine::packs::use_font_store(false);
+     if let Some(source) = wordcraft_engine::packs::index_override() {
+         eprintln!("wordcraft-cli: Language packs come from a test source: {source}");
 diff --git a/apps/wordcraft-web/Cargo.toml b/apps/wordcraft-web/Cargo.toml
 index 78cbf5aa4ed96a71bf7c8a5b587290d039c46ebf..41532f3a6eddcbeee33f6f754427e2d8ba58fce9 100644
 --- a/apps/wordcraft-web/Cargo.toml

@@ -12,7 +12,7 @@
       "repository": "https://github.com/storytold/wordcraft.git",
       "commit": "72ca96a27c795d6289775f6c12954c2cdbd62908",
       "patch": "patches/wordcraft-wasi.patch",
-      "patch_sha256": "0315cfbcc7e7620e763c29a49d53278d25dc51db8698737be7d93964ed78f29a",
+      "patch_sha256": "284a71ad348f968f073304a157723342edfca23dfdc1517e66035e3ad1e726d7",
       "cli_package": "wordcraft-cli",
       "web_package": "wordcraft-web",
       "license": {"name": "WordCraft", "spdx": "MIT OR Apache-2.0"},
