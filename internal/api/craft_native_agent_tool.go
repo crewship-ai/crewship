@@ -934,7 +934,7 @@ func nativeAgentChangeRefused(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, errCraftNativeSheetNameRequired):
 		writeJSON(w, 400, map[string]string{"error": errCraftNativeSheetNameRequired.Error(), "reason": CraftSheetReasonInvalid})
 	case errors.As(err, &loss):
-		writeJSON(w, 422, map[string]any{"error": "saving this change would lose parts of the workbook file; nothing was saved", "reason": CraftSheetReasonFidelityLoss, "parts": loss.Parts})
+		craftWorkbookFidelityRefusal(w, loss.Parts)
 	default:
 		return false
 	}

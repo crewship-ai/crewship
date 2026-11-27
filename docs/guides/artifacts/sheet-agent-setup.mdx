@@ -154,11 +154,12 @@ crewship craft agent-access <page> --chat <chat-id>
 | `not_attached` | `no_write_access` | You need Edit on the Sheet yourself |
 | `holder_human` | | Someone (`holder.mine`: you) is editing it; release editing |
 
-While the agent works, two more answers can reach it:
+The agent can also receive these answers while it works:
 
 | `reason` | What it means |
 |---|---|
 | `consent_stale` | The Sheet was saved again after you attached it. The message is refused before the agent starts: "The Sheet changed after you allowed the agent to change it. Allow it again." Attach it again |
+| `fidelity_loss` | Crewship could not verify that the change preserves the workbook. It keeps the existing version. Changes to workbooks with package or VBA signatures are refused because signature validity cannot be verified. |
 | `busy` | The server already has as many Sheets open in its engine as it allows (two). The agent's change waits for its turn first; only if no Sheet frees up in time is it answered `busy`, with nothing changed. The agent tells you and tries the same change again |
 
 This answer is advice and grants nothing: every agent call checks everything
