@@ -42,6 +42,7 @@ func craftRealtimeInputs(raw []byte, edits craftWorkbookEdits, limit int) (map[c
 		return nil, err
 	}
 	inputs := make(map[craftRealtimeCell][32]byte)
+	edits.sharedString = craftSharedStringReader(parts)
 	edits.observe = func(sheet string, col, row int, input [32]byte) error {
 		if input == ([32]byte{}) {
 			return nil

@@ -23,6 +23,7 @@ type craftWorkbookEdits struct {
 	cells             map[string][]nativeAgentEngineArea
 	allowScalarValues bool // a human save may lack a precise list of edited values
 	observe           func(string, int, int, [32]byte) error
+	sharedString      func(int) (string, error)
 }
 
 func (e *craftWorkbookEdits) add(address string) bool {
@@ -182,7 +183,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 				if addressed && edits.observe != nil {
 					observe = func(input [32]byte) error { return edits.observe(sheet, col, row, input) }
 				}
-				cell, keep, err := craftWorksheetCell(d, el, addressed, edits.allowScalarValues, formulas, observe)
+				cell, keep, err := craftWorksheetCell(d, el, addressed, edits.allowScalarValues, formulas, observe, edits.sharedString)
 				if err != nil {
 					return craftWorksheetState{}, err
 				}
@@ -227,7 +228,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 // A simple cell has a known scalar type, optional style, a plain formula or
 // value, and no unknown attributes or child elements. An edit can replace its
 // content, while its style and address stay in the projection.
-func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool, formulas craftWorksheetHash, observe func([32]byte) error) ([32]byte, bool, error) {
+func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool, formulas craftWorksheetHash, observe func([32]byte) error, sharedString func(int) (string, error)) ([32]byte, bool, error) {
 	cellType := craftWorkbookAttr(el, "t")
 	simple := true
 	switch cellType {
@@ -259,7 +260,7 @@ func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowSca
 		if !ok {
 			return [32]byte{}, false, errCraftWorksheetXML
 		}
-		node, err := craftReadCellXML(d, child)
+		node, err := craftReadCellXML(d, child, observe != nil)
 		if err != nil {
 			return [32]byte{}, false, err
 		}
@@ -288,20 +289,9 @@ func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowSca
 		_, _ = formulas.Write(formula.digest[:])
 	}
 	if simple && observe != nil {
-		var input [32]byte
-		switch {
-		case formula.present:
-			input = formula.digest
-		case inline.present:
-			input = inline.digest
-		case value.nonempty:
-			h := craftWorksheetHash{sha256.New()}
-			if cellType == "n" {
-				cellType = ""
-			}
-			h.field(cellType)
-			_, _ = h.Write(value.digest[:])
-			input = h.sum()
+		input, err := craftTypedWorksheetInput(cellType, formula, value, inline, sharedString)
+		if err != nil {
+			return [32]byte{}, false, err
 		}
 		if err := observe(input); err != nil {
 			return [32]byte{}, false, err
@@ -329,9 +319,10 @@ func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowSca
 type craftCellXML struct {
 	present, plain, nonempty bool
 	digest                   [32]byte
+	text                     string
 }
 
-func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error) {
+func craftReadCellXML(d *xml.Decoder, el xml.StartElement, collectInput bool) (craftCellXML, error) {
 	out := craftWorksheetHash{sha256.New()}
 	out.token(el)
 	result := craftCellXML{present: true, plain: len(el.Attr) == 0}
@@ -342,6 +333,7 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 		normalized.token(el)
 	}
 	depth, children := 1, 0
+	var input strings.Builder
 	for depth > 0 {
 		tok, err := d.Token()
 		if err != nil {
@@ -368,6 +360,9 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 		case xml.EndElement:
 			depth--
 		case xml.CharData:
+			if collectInput && ((!inline && depth == 1) || (inline && depth == 2)) {
+				input.Write(child)
+			}
 			// OOXML escapes can encode whitespace even when the XML text has
 			// none. Keep the original attribute when either is possible.
 			if normalized.Hash != nil && depth == 2 && strings.ContainsAny(string(child), " \t\r\n_") {
@@ -391,6 +386,7 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 	}
 	result.plain = result.plain && (!inline || children == 1)
 	result.digest = out.sum()
+	result.text = input.String()
 	// GridCraft marks inline text with xml:space="preserve" when replay
 	// exports it. For a plain string without whitespace this is redundant.
 	if result.plain && normalized.Hash != nil {
