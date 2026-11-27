@@ -163,13 +163,22 @@ def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, te
     app, package = c['application'], c['web_package']
     env = remap(env, (source, '/' + app), (fonts, '/craft-fonts'), (Path.home(), '/home'))
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts))
+    profile = {'profile': 'release'}
+    if app == 'wordcraft':
+        # WordCraft links the full document engine into the browser. Keep its
+        # decoded editor bundle within the existing editor-origin budget.
+        env['CARGO_PROFILE_RELEASE_OPT_LEVEL'] = 'z'
+        profile['rust_opt_level'] = 'z'
     # The editor reports the same build identity as the engine (gridcraft:ready build).
     env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
     run([cargo, 'build', '--release', '--locked', '--target', 'wasm32-unknown-unknown', '-p', package], cwd=source, env=env)
     out = temp / (app + '-web')
-    run([bindgen / 'wasm-bindgen', target_dir / 'wasm32-unknown-unknown/release' / (package + '.wasm'),
+    raw_wasm = target_dir / 'wasm32-unknown-unknown/release' / (package + '.wasm')
+    print(f'{app}: Rust editor WASM {raw_wasm.stat().st_size} bytes', flush=True)
+    run([bindgen / 'wasm-bindgen', raw_wasm,
          '--target', 'web', '--weak-refs', '--no-typescript', '--out-name', package, '--out-dir', out])
     wasm = out / (package + '_bg.wasm')
+    print(f'{app}: wasm-bindgen editor WASM {wasm.stat().st_size} bytes', flush=True)
     optimized = out / (package + '_bg.opt.wasm')
     run([binaryen / 'bin/wasm-opt', '-Oz', '--all-features', wasm, '-o', optimized])
     optimized.replace(wasm)
@@ -182,13 +191,19 @@ def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, te
         raise ValueError(app + ': unexpected editor index.html')
     (out / 'index.html').write_text(html)
     shutil.copyfile(source / 'assets/app-icon' / icon, out / icon)
-    files = {str(p.relative_to(out)): sha256_bytes(p.read_bytes()) for p in sorted(out.rglob('*')) if p.is_file()}
-    if sum((out / name).stat().st_size for name in files) > MAX_EDITOR_BYTES:
-        raise ValueError(app + ': editor bundle exceeds the editor origin limit')
+    assets = [p for p in sorted(out.rglob('*')) if p.is_file()]
+    sizes = {str(p.relative_to(out)): p.stat().st_size for p in assets}
+    for name, size in sizes.items():
+        print(f'{app}: editor asset {name} {size} bytes', flush=True)
+    decoded_size = sum(sizes.values())
+    print(f'{app}: decoded editor bundle {decoded_size} bytes (limit {MAX_EDITOR_BYTES})', flush=True)
+    if decoded_size > MAX_EDITOR_BYTES:
+        raise ValueError(f'{app}: editor bundle exceeds the editor origin limit by {decoded_size - MAX_EDITOR_BYTES} bytes')
+    files = {str(p.relative_to(out)): sha256_bytes(p.read_bytes()) for p in assets}
     lock = sha256_bytes((source / 'Cargo.lock').read_bytes())
     manifest = json.dumps({'files': files, 'source_commit': c['commit'], 'toolchain': {
         'cargo_lock_sha256': lock, 'fonts_commit': fonts_commit(fonts), 'patch_sha256': c['patch_sha256'],
-        'profile': 'release', 'rustc': rustc_version, 'wasm_bindgen': bindgen_version}}, indent=2, sort_keys=True) + '\n'
+        **profile, 'rustc': rustc_version, 'wasm_bindgen': bindgen_version}}, indent=2, sort_keys=True) + '\n'
     (out / 'manifest.json').write_text(manifest)
     return out, sha256_bytes(manifest.encode())
 

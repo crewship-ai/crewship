@@ -111,7 +111,8 @@ test("WordCraft upgrade: old editor stays on its profile across live default act
     expect(table).toBeTruthy()
     const media = { "image1.png": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAYAAAB3AH1ZAAAAKElEQVR4nGMQibrznxJ8R0ODIsww6oBRB4w6YNQBow4YdcCoAwbaAQCfenQ9EOdSfAAAAABJRU5ErkJggg==" }
     legacy.media = media
-    legacy.body.push({ kind: "para", text: "\uFFFC", runs: [{ len: 3 }], objects: [{ type: "image", media: "image1.png", w: 32, h: 16, alt: "Synthetic picture" }] })
+    const image = { type: "image", media: "image1.png", w: 32, h: 16, alt: "Synthetic picture" }
+    legacy.body.push({ kind: "para", text: "\uFFFC", runs: [{ len: 3 }], objects: [image] })
 
     const original = Buffer.from(JSON.stringify(legacy))
     const ref = await N.createNative(api, WORKSPACE, "wordcraft", "Retained Word profile", original)
@@ -128,6 +129,9 @@ test("WordCraft upgrade: old editor stays on its profile across live default act
     })
     expect(install.status(), (await install.text()).slice(0, 400)).toBe(200)
     expect(frame.url()).toContain(`/b/${oldBundle}/index.html`)
+    const untouched = await N.readHead(api, ref)
+    expect(untouched.version).toBe(ref.initVersion)
+    expect(untouched.hash).toBe(N.sha256(original))
     const marker = "edit-through-retained-word-profile"
     await frame.locator("canvas").first().click({ position: { x: 520, y: 420 } })
     await N.typeMarker(page, frame, "wordcraft", marker, "B2")
@@ -147,6 +151,7 @@ test("WordCraft upgrade: old editor stays on its profile across live default act
     expect(current.body[0]).toEqual(heading)
     expect(current.body.find((block: { kind: string }) => block.kind === "table")).toEqual(table)
     expect(current.media).toEqual(media)
+    expect(current.body.flatMap((block: { objects?: unknown[] }) => block.objects ?? [])).toContainEqual(expect.objectContaining(image))
     const shared = await api.get(previewURL)
     expect(shared.status()).toBe(200)
     const pinned = await shared.json() as { version: string; bytes: string; editorBundle: string }
