@@ -186,7 +186,11 @@ func (m *Manager) openSession(ctx context.Context, key string, load func() ([]by
 	if err != nil {
 		return nil, err
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
+	cleanup := func() {
+		if err := os.RemoveAll(dir); err != nil {
+			slog.Default().Error("Sheet session directory could not be removed", "error", err)
+		}
+	}
 	// A Sheet kept as its workbook file opens as that file; anything else is the native document.
 	format, name := "", "doc.json"
 	if f, ferr := mooring.DetectWorkbook(doc); ferr == nil && (f == "xlsx" || f == "xlsm") {

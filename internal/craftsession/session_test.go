@@ -367,18 +367,31 @@ func TestOneSessionPerKeyAndASlotIsFreedForTheLeastRecentlyUsed(t *testing.T) {
 func TestIdleSessionIsClosedAndItsDirectoryRemoved(t *testing.T) {
 	root := t.TempDir()
 	m := newMgr(t, func(c *Config) { c.IdleTTL = 200 * time.Millisecond; c.TempRoot = root })
-	s, release, _ := m.Acquire(context.Background(), "doc1", doc(""))
+	s, release, err := m.Acquire(t.Context(), "doc1", doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+		t.Fatalf("expected one live session directory in the configured root, got %v (%v)", entries, err)
+	}
 	release()
+
+	// Worker.Done can close before Session.Close finishes removing the
+	// private work directory. Wait for both observable postconditions.
 	deadline := time.Now().Add(10 * time.Second)
-	for s.Alive() && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-	}
-	if s.Alive() {
-		t.Fatal("idle session kept its engine")
-	}
-	entries, _ := os.ReadDir(root)
-	if len(entries) != 0 {
-		t.Fatalf("session directory left behind: %v", entries)
+	for {
+		entries, err = os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !s.Alive() && len(entries) == 0 {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("idle session cleanup did not finish: alive=%v, directory entries=%v", s.Alive(), entries)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
