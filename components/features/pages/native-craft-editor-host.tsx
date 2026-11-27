@@ -625,7 +625,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      try{downloadNativeExport(file)}catch{setError('The export could not be downloaded. The document stays open.')}
     },
     onChanged(revision){if(!r||!liveMount()||sessionApplication==='gridcraft'&&r.revision===revision)return;r.revision=revision;if(r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited(revision);display(r)}},
-    onSaveRequest(request){if(r&&liveMount()&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Saving was not confirmed.');display(r)}})}},
+    onSaveRequest(request){
+     if(!r||!liveMount()||!r.writable||r.blocked||!r.coordinator)return
+     const coordinator=r.coordinator
+     r.ackedVersion=undefined
+     void coordinator.save(request.requestId).catch(()=>{
+      if(!r||!live(r))return
+      if(request.requestId&&!coordinator.keepsTicket(request.requestId))r.port.saveFailed(request.requestId,'Saving was not confirmed.')
+      display(r)
+     })
+    },
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&liveMount())failNative(r,'The connection to the editor ended. The last changes are not confirmed; the original editor stays locked.')},
     onReady(_version?:string,build?:string){if(!r||!liveMount())return;r.editorBuild=build;clearTimeout(timer);void(async()=>{
      const mounted=await port.bootstrap(snapshot.bytes,abort.signal,budget.stepMs)
@@ -1077,6 +1086,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const workbook=workbookFile(snapshot)
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,...(workbook?{format:workbook.format,idleMs:WORKBOOK_IDLE_MS}:{}),enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onTransportSettled(){agentQueue.settled()},
+    onRetiredTicket(requestId){if(live(r))r.port.saveFailed(requestId,'The server did not save this change.')},
     onState(state){r.phase=state;display(r);
      // Refused because the Sheet moved on: replay what was saved meanwhile and save on top, at most 3 times in a row (then the conflict shows).
      if(state.phase==='draft'&&state.reason==='moved'&&r.writable&&(r.movedTries??0)<3){r.movedTries=(r.movedTries??0)+1;agentQueue.moved()}
