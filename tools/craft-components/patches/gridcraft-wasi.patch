@@ -2594,10 +2594,10 @@ index 00000000..55f4931c
 +}
 diff --git a/apps/gridcraft-web/src/port_host.rs b/apps/gridcraft-web/src/port_host.rs
 new file mode 100644
-index 00000000..a20c44c1
+index 00000000..62b6688f
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_host.rs
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,395 @@
 +//! `?host=port&parent_origin=<canonical HTTP(S) origin>`: a sandboxed, opaque editor frame
 +//! bound to its embedding page over one private `MessagePort` (mooring protocol 2).
 +//!
@@ -2617,6 +2617,8 @@ index 00000000..a20c44c1
 +//! - `execute {requestId, commands, saved, baseRevision?, keep?, captureRevision?}` answers
 +//!   `executed`. For `keep:"agent"`, `captureRevision` is an optional decimal live revision from
 +//!   the archived save. A changed live revision returns `stale_revision` without replay.
++//! - `presence {document, actors, reducedMotion, truncated?}` paints an advisory snapshot.
++//!   `truncated` may be set when the host sends a subset of the activity ranges.
 +//! - `changed {document, revision, dirty}`, `dirty {dirty}`, `closed {}`, `edit-attempt`,
 +//!   `held-input-dropped` and `failed {code, error}` report state.
 +//!
@@ -2993,10 +2995,10 @@ index 00000000..a20c44c1
 +}
 diff --git a/apps/gridcraft-web/src/port_protocol.rs b/apps/gridcraft-web/src/port_protocol.rs
 new file mode 100644
-index 00000000..af72f5f0
+index 00000000..ba1b886c
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_protocol.rs
-@@ -0,0 +1,686 @@
+@@ -0,0 +1,690 @@
 +//! Mooring protocol 2 on the private port: the exact shape of every message a host sends,
 +//! checked before anything acts on it, and the editor's ledger of saves awaiting the host.
 +//!
@@ -3065,9 +3067,9 @@ index 00000000..af72f5f0
 +    pub range: gridcraft_engine::core::RangeRef,
 +}
 +
-+pub const MAX_AGENT_RANGES: usize = 2_000;
-+pub const MAX_ACTORS: usize = 128;
-+pub const MAX_ACTOR_RANGES: usize = 64;
++pub const MAX_AGENT_RANGES: usize = 256;
++pub const MAX_ACTORS: usize = 32;
++pub const MAX_ACTOR_RANGES: usize = 32;
 +
 +#[derive(Clone, Copy, PartialEq)]
 +enum Kind {
@@ -3088,7 +3090,9 @@ index 00000000..af72f5f0
 +            ("captureRevision", Str, true), ("version", Version, true), ("contentHash", Str, true),
 +            ("bytes", Bytes, true), ("agentRanges", List, true),
 +        ],
-+        "gridcraft:presence" => &[("document", Str, true), ("actors", List, true), ("reducedMotion", Bool, true)],
++        "gridcraft:presence" => &[
++            ("document", Str, true), ("actors", List, true), ("reducedMotion", Bool, true), ("truncated", Bool, false),
++        ],
 +        "gridcraft:open" => &[("requestId", Str, true), ("name", Str, true), ("bytes", Bytes, true), ("calculate", Bool, true), ("autoFit", Bool, true)],
 +        "gridcraft:set-access" => &[("requestId", Str, true), ("readOnly", Bool, true)],
 +        "gridcraft:save-request" => &[("requestId", Str, true)],
@@ -3620,19 +3624,21 @@ index 00000000..af72f5f0
 +            ("contentHash", s(&format!("sha256:{}", "f".repeat(64)))),
 +            ("bytes", Field::Bytes(123)), ("agentRanges", agent_ranges(count)),
 +        ]));
-+        assert!(matches!(merge(2_000), Ok(Inbound::AdoptMerged { agent_ranges, .. }) if agent_ranges.len() == 2_000));
-+        assert!(merge(2_001).is_err());
++        assert!(matches!(merge(256), Ok(Inbound::AdoptMerged { agent_ranges, .. }) if agent_ranges.len() == 256));
++        assert!(merge(257).is_err());
 +
-+        let presence = |activities, ranges| parse(&msg(&[
++        let presence = |activities, ranges, truncated| parse(&msg(&[
 +            ("type", s("gridcraft:presence")), ("document", s("7")), ("reducedMotion", Field::Bool(true)),
++            ("truncated", truncated),
 +            ("actors", Field::List((0..activities).map(|i| Field::Object(msg(&[
 +                ("actorId", s("agent-1")), ("activityId", s(&format!("run-{i}"))), ("label", s("Morgan")),
 +                ("ranges", agent_ranges(ranges)), ("ttlMs", Field::Num(1_000.0)),
 +            ]))).collect())),
 +        ]));
-+        assert!(matches!(presence(128, 64), Ok(Inbound::Presence { actors, .. }) if actors.len() == 128 && actors.iter().all(|actor| actor.ranges.len() == 64)));
-+        assert!(presence(129, 1).is_err());
-+        assert!(presence(1, 65).is_err());
++        assert!(matches!(presence(32, 32, Field::Bool(true)), Ok(Inbound::Presence { actors, .. }) if actors.len() == 32 && actors.iter().all(|actor| actor.ranges.len() == 32)));
++        assert!(presence(33, 1, Field::Bool(true)).is_err());
++        assert!(presence(1, 33, Field::Bool(true)).is_err());
++        assert!(presence(1, 1, s("true")).is_err());
 +    }
 +
 +    #[test]
