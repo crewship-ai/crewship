@@ -33,10 +33,9 @@ func TestSheetITInitializeWithAForeignChatCreatesNothing(t *testing.T) {
 	for _, chat := range []string{"sit-chat-member", "sit-chat-elsewhere", "sit-chat-missing", ""} {
 		page := "sit-wb-" + strings.TrimPrefix(chat, "sit-chat-")
 		f.seedPage(t, page, page, page, f.userID, "")
-		req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", bytes.NewReader(sitWorkbook(sitInitialL(), sitInitialOther()))).WithContext(ctx)
+		req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", workbookInitializeReader(sitWorkbook(sitInitialL(), sitInitialOther()))).WithContext(ctx)
 		req.SetPathValue("slug", "@"+page)
-		req.Header.Set("Content-Type", mooring.WorkbookMediaTypeXLSM)
-		req.Header.Set("X-Craft-File-Name", page+".xlsm")
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Craft-Chat", chat)
 		w := httptest.NewRecorder()
 		d.initialize(w, req)

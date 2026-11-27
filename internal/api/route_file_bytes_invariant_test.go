@@ -44,7 +44,7 @@ import (
 // handlerFuncSig matches an HTTP handler method definition: the shape every
 // handler in this package uses; see TestFileBytesScanFindsKnownHandlers for
 // the check that this is still true.
-var handlerFuncSig = regexp.MustCompile(`^func \(\w+ \*(\w+)\) (\w+)\(w http\.ResponseWriter, r \*http\.Request(?:,[^)]*)?\) \{`)
+var handlerFuncSig = regexp.MustCompile(`^func \(\w+ \*(\w+)\) (\w+)\(w http\.ResponseWriter, r \*http\.Request\) \{`)
 
 // fileBytesFunnelHandlers proxy to crewshipd's single files/download IPC
 // endpoint, which is where the guard lives (internal/server/routes_files.go).
@@ -76,7 +76,7 @@ var fileBytesExemptHandlers = map[string]string{
 	"InstanceBackupsHandler.DownloadBundle": "instance admins only (authedInstance); streams a whole backup archive " +
 		"whose path must be a backup_catalog row (catalogued) — the catalog, not the request, names the file, and it " +
 		"is never a per-file read of the crew/agent output tree",
-	"craftNativeDocumentsHTTP.sendExport": "streams a saved workbook or the engine export of an authorized Sheet after the private read and export audits",
+	"craftNativeDocumentsHTTP.exportXLSX": "streams a saved workbook or the engine export of an authorized Sheet after the private read and export audits",
 	"craftNativeDocumentsHTTP.downloadLegacyWorkbook": "loads the exact native Sheet JSON blob from artifact_version_blobs " +
 		"using the authorized Page and workspace, verifies its digest, and applies the private read audit before writing the attachment",
 	"PageHandler.ExportDesign": "renders one immutable Design version as HTML in memory (design.RenderHTML) from the " +

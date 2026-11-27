@@ -250,7 +250,8 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 	}
 	application, ok := m.documents.application(e.grant.Application)
 	profile, pinned := m.documents.profile(e.grant.Application)
-	if !ok || !pinned || application.Store.Format == mooring.NativeFormatWorkbook {
+	// Workbook Sheets are supported by the attachment-bound chat adapter.
+	if !ok || !pinned || application.Store.Format == mooring.NativeFormatWorkbook && e.chat == nil {
 		replyError(w, 503, "native Craft profile unavailable")
 		return
 	}
