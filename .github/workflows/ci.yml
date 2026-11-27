@@ -3022,6 +3022,19 @@ jobs:
               --pattern crewship-craft-wordcraft.craftpkg --dir "$RUNNER_TEMP/craft-retained-word"
             echo "CRAFT_GATE_RETAINED_WORD_DIR=$RUNNER_TEMP/craft-retained-word" >> "$GITHUB_ENV"
           fi
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        if: env.CRAFT_GATE_RETAINED_WORD_DIR != ''
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Qualify agent writes with both WordCraft WASI engines
+        if: env.CRAFT_GATE_RETAINED_WORD_DIR != ''
+        timeout-minutes: 12
+        env:
+          CREWSHIP_CRAFT_TEST_PACKAGES: ${{ github.workspace }}/build/craft-components/dist
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/verify-retained-word.py "$CRAFT_GATE_RETAINED_WORD_DIR"
+          go test -tags craftpackages -count=1 -timeout 10m -run '^TestReleaseCraftPackagesWordAgentProfiles$' -v ./internal/api/
       # Word and Sheet in one headed Chromium under xvfb, software WebGL.
       - name: Browser gate (open, edit, save, reopen through the real host)
         timeout-minutes: 15

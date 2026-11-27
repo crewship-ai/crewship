@@ -1,4 +1,4 @@
-//go:build craft_native_engine_qualification
+//go:build craft_native_engine_qualification || craftpackages
 
 package api
 
@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/craftengine"
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -178,201 +179,228 @@ func TestCraftNativeAgentHTTPOriginalCLIQualification(t *testing.T) {
 			if fmt.Sprintf("%x", sha256.Sum256(initial)) != pin.fixtureSHA {
 				t.Fatal("frozen qualification fixture hash mismatch")
 			}
-			adapter := NewCraftNativeAgentCLIAdapter()
-			validator := mooring.NativeCLIValidator{Application: p.Application, Engine: mustCraftNativeEngine(t, p)}
-			if err = validator.Validate(t.Context(), initial); err != nil {
-				t.Fatal("pinned original input", err)
-			}
-			f, source := originalSessionFixture(t)
-			f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native local qualification", source.UserID, "")
-			// Create this owned Page's immutable profile once, at its real pin.
-			mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,?,?,?,?)`, f.rig.wsID, p.Application, p.EngineRevision, p.CLISHA256, p.EditorBundle)
-			u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
-			human := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
-			h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "local-cli-qualification", now: time.Second})
-			documents := newCraftNativeDocumentsHTTP(h, nil)
-			m := newCraftNativeAgentManager(h, documents, CraftNativeHTTPConfig{AgentsEnabled: true})
-			f.rig.db.SetMaxOpenConns(1)
-			mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
-			cfg := mooring.NativeStoreConfig{Application: p.Application, EngineRevision: p.EngineRevision, EngineSHA256: p.CLISHA256, EditorBundle: p.EditorBundle, Validate: validator.Validate}
-			m.documents.applications = map[string]craftNativeApplication{p.Application: {Store: cfg}}
-			m.documents.profiles = map[string]CraftNativeDocumentProfile{p.Application: p}
-			m.config.AgentApply = adapter.Apply
-			m.config.AgentInspect = adapter.Inspect
-			m.human.agents = m
-			f.pages.artifactMasterToken = "local-http-qualification-master-not-a-provider-credential"
-			versions := artifacts.NewVersionStore(f.rig.db, artifacts.VersionOptions{Enabled: true, ContentType: p.Application})
-			if _, err = versions.Apply(human, artifacts.VersionKey{WorkspaceID: f.rig.wsID, PageID: "native-agent-page"}, artifacts.VersionRequest{EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: initial, MediaType: "application/json"}}}, func(context.Context, *sql.Tx) (string, error) { return "user:" + f.a.HumanUserID, nil }); err != nil {
-				t.Fatal(err)
-			}
-			internal := NewInternalHandler(f.rig.db, f.pages.artifactMasterToken, newTestLogger())
-			wireTestJournalForHandler(t, f.rig.db, internal)
-			resolver := &nativeAgentRuntimeResolver{&collaborationRuntimeResolver{handler: internal, message: f.a.MessageID, info: &chatbridge.ChatInfo{AgentID: f.a.AgentID, AgentSlug: "principal-agent", AgentRole: "AGENT", CrewID: f.a.CrewID, CrewSlug: "principal-crew", WorkspaceID: f.a.WorkspaceID, CLIAdapter: "CLAUDE_CODE", TimeoutSecs: 15, ToolProfile: "MINIMAL"}}}
-			runner := &nativeCLIHTTPQualificationRunner{manager: m, busy: true}
-			wh := &WebhookHandler{db: f.rig.db, resolver: resolver, orch: runner, container: &nativeAgentRuntimeProvider{}, logger: newTestLogger()}
-			runtime := &craftNativeAgentRuntime{WebhookRuntime: NewWebhookRuntime(wh), manager: m, environment: collaborationRuntimeEnvironment{}}
-			dispatcher := dispatch.New(work.NewStore(f.rig.db), runtime, m, dispatch.Config{Owner: "local-real-cli-qualification", Kinds: []work.Kind{{Source: work.SourceChat, DomainKind: craftNativeAgentDomain}}, Limits: work.SerialAgentLimits()}, newTestLogger())
-			m.runtime, m.dispatcher = runtime, dispatcher
-			mux := http.NewServeMux()
-			// HTTP handlers are real; the local original-human auth context is a fixture,
-			// not a login/Router-authentication or genuine-provider qualification.
-			humanRoute := func(pattern string, handler http.HandlerFunc) {
-				mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { handler(w, r.WithContext(human)) })
-			}
-			humanRoute("POST /api/v1/pages/{slug}/craft/tasks", m.task)
-			humanRoute("GET /api/v1/pages/{slug}/craft/tasks/{workID}", m.taskStatus)
-			humanRoute("POST /api/v1/pages/{slug}/craft/sessions", m.human.sessions)
-			humanRoute("POST /api/v1/pages/{slug}/craft/lease/acquire", m.human.acquire)
-			humanRoute("POST /api/v1/pages/{slug}/craft/lease/release", m.human.release)
-			humanRoute("POST /api/v1/pages/{slug}/craft/document/save", m.documents.saveSnapshot)
-			humanRoute("GET /api/v1/pages/{slug}/craft/document", m.documents.readSnapshot)
-			mux.HandleFunc("POST /api/v1/internal/craft-native/task", func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(context.WithValue(r.Context(), ctxInternalTokenWS, f.rig.wsID), ctxInternalTokenCrew, f.a.CrewID)
-				m.toolCall(w, r.WithContext(ctx))
-			})
-			server := httptest.NewServer(mux)
-			defer server.Close()
-			runner.endpoint = server.URL
-			call := func(method, op, session string, packet any, want int) []byte {
-				t.Helper()
-				code, raw, e := nativeCLIQualificationHTTP(t.Context(), server.URL, method, "/api/v1/pages/@native-agent-page/craft/"+op, "", session, packet)
-				if e != nil || code != want {
-					t.Fatalf("HTTP%s %s: status%d %s %v", method, op, code, raw, e)
-				}
-				return raw
-			}
-			var session struct {
-				Token string `json:"session_token"`
-				ID    string `json:"session_id"`
-			}
-			if json.Unmarshal(call("POST", "sessions", "", map[string]any{}, 201), &session) != nil || session.Token == "" {
-				t.Fatal("H1 admission missing")
-			}
-			var humanLease struct {
-				Generation string `json:"generation"`
-			}
-			if json.Unmarshal(call("POST", "lease/acquire", session.Token, map[string]any{}, 200), &humanLease) != nil {
-				t.Fatal("H1 lease missing")
-			}
-			var humanCommands json.RawMessage
-			if p.Application == "wordcraft" {
-				humanCommands = json.RawMessage(`[{"command":"caret.docEnd","params":{}},{"command":"text.insert","params":{"text":" HumanHTTPQualification"}}]`)
-				runner.commands = json.RawMessage(`[{"command":"caret.docEnd","params":{}},{"command":"text.insert","params":{"text":" AgentHTTPQualification"}}]`)
-			} else {
-				humanCommands = json.RawMessage(`[{"command":"cell.set","params":{"cell":"A1","input":"HumanHTTPQualification"}}]`)
-				runner.commands = json.RawMessage(`[{"command":"cell.set","params":{"cell":"B1","input":"AgentHTTPQualification"}}]`)
-			}
-			humanBytes, err := adapter.Apply(t.Context(), p, initial, humanCommands)
-			if err != nil {
-				t.Fatal(err)
-			}
-			sum := sha256.Sum256(humanBytes)
-			enginePin := mooring.NewNativeStore(f.rig.db, cfg).EnginePin()
-			humanPacket := craftNativeSnapshotBody{WorkspaceID: f.rig.wsID, PageID: "native-agent-page", ApplicationID: p.Application, EnginePin: enginePin, SessionID: session.ID, Generation: humanLease.Generation, BaseVersion: "1", EditorRevision: "h1-original-cli", ContentHash: fmt.Sprintf("sha256:%x", sum), Bytes: humanBytes}
-			var humanReceipt mooring.NativeSaveReceipt
-			if json.Unmarshal(call("POST", "document/save", session.Token, humanPacket, 200), &humanReceipt) != nil || humanReceipt.Version != "2" {
-				t.Fatal("actual human receipt missing")
-			}
-			var previousRun string
-			for index, message := range []string{f.a.MessageID, "principal-next-message"} {
-				var accepted struct {
-					WorkID string `json:"work_id"`
-				}
-				if json.Unmarshal(call("POST", "tasks", "", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: message, WholeDocument: true, Mode: craftNativeAgentModeApply}, 202), &accepted) != nil || accepted.WorkID == "" {
-					t.Fatal("actual HTTP task absent")
-				}
-				resolver.original = m.entries[accepted.WorkID].grant.Original
-				resolver.message = message
-				worked, e := dispatcher.RunOne(t.Context())
-				if e != nil || !worked {
-					t.Fatal("normal dispatcher", worked, e)
-				}
-				if runner.run == "" || runner.run == previousRun {
-					t.Fatal("fresh dispatcher run missing")
-				}
-				previousRun = runner.run
-				item, e := work.NewStore(f.rig.db).Get(t.Context(), accepted.WorkID)
-				want := work.StateFailed
-				if index == 1 {
-					want = work.StateSucceeded
-				}
-				if e != nil || item.State != want {
-					t.Fatalf("actual work outcome=%v error=%v", item, e)
-				}
-				var status struct {
-					State   string                      `json:"state"`
-					Events  []craftNativeAgentToolEvent `json:"events"`
-					Receipt *mooring.NativeSaveReceipt  `json:"last_committed_receipt"`
-				}
-				if json.Unmarshal(call("GET", "tasks/"+accepted.WorkID, "", nil, 200), &status) != nil {
-					t.Fatal("task status absent")
-				}
-				if index == 0 {
-					if status.Receipt != nil || len(status.Events) != 1 || status.Events[0].Operation != "acquire" || status.Events[0].Status != 409 || status.Events[0].HolderKind != "human" {
-						t.Fatal("actual refusal not proven", status)
-					}
-					var unchanged craftNativeDocumentResponse
-					if json.Unmarshal(call("GET", "document", session.Token, nil, 200), &unchanged) != nil || unchanged.Version != "2" || !bytes.Equal(unchanged.Bytes, humanBytes) {
-						t.Fatal("busy task changed native bytes")
-					}
-					call("POST", "lease/release", session.Token, map[string]string{"generation": humanLease.Generation}, 200)
-					runner.busy = false
-				} else {
-					receipt := runner.receipt
-					if status.Receipt == nil || *status.Receipt != receipt || receipt.Version != "3" || receipt.BaseVersion != "2" || receipt.Phase != "committed" || receipt.Durability != "node" || receipt.IssuedBy != "crewship" || receipt.SessionID != "native-agent:"+runner.run || receipt.EnginePin != enginePin || receipt.WorkspaceID != f.rig.wsID || receipt.PageID != "native-agent-page" || receipt.ApplicationID != p.Application {
-						t.Fatal("exact actual Node receipt absent", receipt, status)
-					}
-					var fresh craftNativeDocumentResponse
-					if json.Unmarshal(call("GET", "document", session.Token, nil, 200), &fresh) != nil || fresh.Version != receipt.Version {
-						t.Fatal("fresh H1 version absent")
-					}
-					generation, generationErr := strconv.ParseUint(receipt.Generation, 10, 64)
-					humanGeneration, humanGenerationErr := strconv.ParseUint(humanReceipt.Generation, 10, 64)
-					if generationErr != nil || humanGenerationErr != nil || generation <= humanGeneration {
-						t.Fatal("actual agent lease did not advance the human generation")
-					}
-					if p.Application == "wordcraft" {
-						before, beforeErr := adapter.Inspect(t.Context(), p, initial, json.RawMessage(`{"command":"text","params":{}}`))
-						after, afterErr := adapter.Inspect(t.Context(), p, fresh.Bytes, json.RawMessage(`{"command":"text","params":{}}`))
-						var original, current struct{ Text string }
-						if beforeErr != nil || afterErr != nil || json.Unmarshal(before, &original) != nil || json.Unmarshal(after, &current) != nil || current.Text != original.Text+" HumanHTTPQualification AgentHTTPQualification" {
-							t.Fatal("original engine text read did not preserve the entire prior Word body and both exact edits")
-						}
-					}
-					var actor string
-					if err = f.rig.db.QueryRow(`SELECT actor FROM artifact_versions WHERE page_id='native-agent-page' AND version=3`).Scan(&actor); err != nil || actor != "agent:"+f.a.AgentID {
-						t.Fatal("actual version lost original agent attribution", actor, err)
-					}
-					projection, owned, projectionErr := work.NewStore(f.rig.db).RunProjection(t.Context(), runner.run)
-					if projectionErr != nil || !owned || !projection.Ready || projection.Status != "COMPLETED" || projection.Result.Metadata["native_saved"] != true || projection.Result.Metadata["native_version"] != "3" {
-						t.Fatal("normal dispatcher did not project only the actual qualified saved version", projectionErr)
-					}
-					hash := fmt.Sprintf("sha256:%x", sha256.Sum256(fresh.Bytes))
-					if hash != receipt.CandidateHash || hash != receipt.ContentHash {
-						t.Fatal("fresh H1 bytes differ from receipt")
-					}
-					if err = validator.Validate(t.Context(), fresh.Bytes); err != nil {
-						t.Fatal("original native validator", err)
-					}
-					for _, check := range []struct {
-						query  json.RawMessage
-						marker string
-					}{{json.RawMessage(`{"command":"text","params":{}}`), "HumanHTTPQualification"}, {json.RawMessage(`{"command":"text","params":{}}`), "AgentHTTPQualification"}} {
-						if p.Application == "gridcraft" {
-							cell := "A1"
-							if strings.HasPrefix(check.marker, "Agent") {
-								cell = "B1"
-							}
-							check.query = json.RawMessage(fmt.Sprintf(`{"command":"cell.get","params":{"cell":%q}}`, cell))
-						}
-						inspected, e := adapter.Inspect(t.Context(), p, fresh.Bytes, check.query)
-						if e != nil || !bytes.Contains(inspected, []byte(check.marker)) {
-							t.Fatal("original engine read lost human/agent marker", e)
-						}
-					}
-					t.Logf("LOCAL HTTP qualification provider=TEST-STAND-IN app=%s originalCLI=%s run=%s version=%s hash=%s; no genuine model/MCP-process/browser claim", p.Application, p.CLISHA256, runner.run, receipt.Version, hash)
-				}
-			}
+			qualifyNativeAgentHTTP(t, p, initial, CraftNativeDocumentProfile{}, CraftNativeDocumentProfile{})
 		})
+	}
+}
+
+func mustCraftNativeEngine(t *testing.T, p CraftNativeDocumentProfile) craftengine.Engine {
+	t.Helper()
+	engine, err := craftNativeProfileEngine(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return engine
+}
+
+func qualifyNativeAgentHTTP(t *testing.T, p CraftNativeDocumentProfile, initial []byte, current, retained CraftNativeDocumentProfile) {
+	t.Helper()
+	adapter := NewCraftNativeAgentCLIAdapter()
+	validator := mooring.NativeCLIValidator{Application: p.Application, Engine: mustCraftNativeEngine(t, p)}
+	if err := validator.Validate(t.Context(), initial); err != nil {
+		t.Fatal("pinned original input", err)
+	}
+	f, source := originalSessionFixture(t)
+	f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native local qualification", source.UserID, "")
+	// Create this owned Page's immutable profile once, at its real pin.
+	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,?,?,?,?)`, f.rig.wsID, p.Application, p.EngineRevision, p.CLISHA256, p.EditorBundle)
+	u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
+	human := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
+	h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "local-cli-qualification", now: time.Second})
+	documents := newCraftNativeDocumentsHTTP(h, nil)
+	m := newCraftNativeAgentManager(h, documents, CraftNativeHTTPConfig{AgentsEnabled: true})
+	f.rig.db.SetMaxOpenConns(1)
+	mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
+	cfg := mooring.NativeStoreConfig{Application: p.Application, EngineRevision: p.EngineRevision, EngineSHA256: p.CLISHA256, EditorBundle: p.EditorBundle, Validate: validator.Validate}
+	m.documents.applications = map[string]craftNativeApplication{p.Application: {Store: cfg}}
+	m.documents.profiles = map[string]CraftNativeDocumentProfile{p.Application: p}
+	if current.Application != "" {
+		applications, profiles, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{current.Application: current}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.documents.applications, m.documents.profiles = applications, profiles
+		applications, profiles, err = qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{retained.Application: retained}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		application := applications[retained.Application]
+		m.documents.retainedWord[application.documentPin()] = qualifiedNativeDocumentProfile{application: application, profile: profiles[retained.Application]}
+	}
+	m.config.AgentApply = adapter.Apply
+	m.config.AgentInspect = adapter.Inspect
+	m.human.agents = m
+	f.pages.artifactMasterToken = "local-http-qualification-master-not-a-provider-credential"
+	versions := artifacts.NewVersionStore(f.rig.db, artifacts.VersionOptions{Enabled: true, ContentType: p.Application})
+	if _, err := versions.Apply(human, artifacts.VersionKey{WorkspaceID: f.rig.wsID, PageID: "native-agent-page"}, artifacts.VersionRequest{EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: initial, MediaType: "application/json"}}}, func(context.Context, *sql.Tx) (string, error) { return "user:" + f.a.HumanUserID, nil }); err != nil {
+		t.Fatal(err)
+	}
+	internal := NewInternalHandler(f.rig.db, f.pages.artifactMasterToken, newTestLogger())
+	wireTestJournalForHandler(t, f.rig.db, internal)
+	resolver := &nativeAgentRuntimeResolver{&collaborationRuntimeResolver{handler: internal, message: f.a.MessageID, info: &chatbridge.ChatInfo{AgentID: f.a.AgentID, AgentSlug: "principal-agent", AgentRole: "AGENT", CrewID: f.a.CrewID, CrewSlug: "principal-crew", WorkspaceID: f.a.WorkspaceID, CLIAdapter: "CLAUDE_CODE", TimeoutSecs: 15, ToolProfile: "MINIMAL"}}}
+	runner := &nativeCLIHTTPQualificationRunner{manager: m, busy: true}
+	wh := &WebhookHandler{db: f.rig.db, resolver: resolver, orch: runner, container: &nativeAgentRuntimeProvider{}, logger: newTestLogger()}
+	runtime := &craftNativeAgentRuntime{WebhookRuntime: NewWebhookRuntime(wh), manager: m, environment: collaborationRuntimeEnvironment{}}
+	dispatcher := dispatch.New(work.NewStore(f.rig.db), runtime, m, dispatch.Config{Owner: "local-real-cli-qualification", Kinds: []work.Kind{{Source: work.SourceChat, DomainKind: craftNativeAgentDomain}}, Limits: work.SerialAgentLimits()}, newTestLogger())
+	m.runtime, m.dispatcher = runtime, dispatcher
+	mux := http.NewServeMux()
+	// HTTP handlers are real; the local original-human auth context is a fixture,
+	// not a login/Router-authentication or genuine-provider qualification.
+	humanRoute := func(pattern string, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) { handler(w, r.WithContext(human)) })
+	}
+	humanRoute("POST /api/v1/pages/{slug}/craft/tasks", m.task)
+	humanRoute("GET /api/v1/pages/{slug}/craft/tasks/{workID}", m.taskStatus)
+	humanRoute("POST /api/v1/pages/{slug}/craft/sessions", m.human.sessions)
+	humanRoute("POST /api/v1/pages/{slug}/craft/lease/acquire", m.human.acquire)
+	humanRoute("POST /api/v1/pages/{slug}/craft/lease/release", m.human.release)
+	humanRoute("POST /api/v1/pages/{slug}/craft/document/save", m.documents.saveSnapshot)
+	humanRoute("GET /api/v1/pages/{slug}/craft/document", m.documents.readSnapshot)
+	mux.HandleFunc("POST /api/v1/internal/craft-native/task", func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(context.WithValue(r.Context(), ctxInternalTokenWS, f.rig.wsID), ctxInternalTokenCrew, f.a.CrewID)
+		m.toolCall(w, r.WithContext(ctx))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	runner.endpoint = server.URL
+	call := func(method, op, session string, packet any, want int) []byte {
+		t.Helper()
+		code, raw, e := nativeCLIQualificationHTTP(t.Context(), server.URL, method, "/api/v1/pages/@native-agent-page/craft/"+op, "", session, packet)
+		if e != nil || code != want {
+			t.Fatalf("HTTP%s %s: status%d %s %v", method, op, code, raw, e)
+		}
+		return raw
+	}
+	var session struct {
+		Token string `json:"session_token"`
+		ID    string `json:"session_id"`
+	}
+	if json.Unmarshal(call("POST", "sessions", "", map[string]any{}, 201), &session) != nil || session.Token == "" {
+		t.Fatal("H1 admission missing")
+	}
+	var humanLease struct {
+		Generation string `json:"generation"`
+	}
+	if json.Unmarshal(call("POST", "lease/acquire", session.Token, map[string]any{}, 200), &humanLease) != nil {
+		t.Fatal("H1 lease missing")
+	}
+	var humanCommands json.RawMessage
+	if p.Application == "wordcraft" {
+		humanCommands = json.RawMessage(`[{"command":"caret.docEnd","params":{}},{"command":"text.insert","params":{"text":" HumanHTTPQualification"}}]`)
+		runner.commands = json.RawMessage(`[{"command":"caret.docEnd","params":{}},{"command":"text.insert","params":{"text":" AgentHTTPQualification"}}]`)
+	} else {
+		humanCommands = json.RawMessage(`[{"command":"cell.set","params":{"cell":"A1","input":"HumanHTTPQualification"}}]`)
+		runner.commands = json.RawMessage(`[{"command":"cell.set","params":{"cell":"B1","input":"AgentHTTPQualification"}}]`)
+	}
+	humanBytes, err := adapter.Apply(t.Context(), p, initial, humanCommands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(humanBytes)
+	enginePin := mooring.NewNativeStore(f.rig.db, cfg).EnginePin()
+	humanPacket := craftNativeSnapshotBody{WorkspaceID: f.rig.wsID, PageID: "native-agent-page", ApplicationID: p.Application, EnginePin: enginePin, SessionID: session.ID, Generation: humanLease.Generation, BaseVersion: "1", EditorRevision: "h1-original-cli", ContentHash: fmt.Sprintf("sha256:%x", sum), Bytes: humanBytes}
+	var humanReceipt mooring.NativeSaveReceipt
+	if json.Unmarshal(call("POST", "document/save", session.Token, humanPacket, 200), &humanReceipt) != nil || humanReceipt.Version != "2" {
+		t.Fatal("actual human receipt missing")
+	}
+	var previousRun string
+	for index, message := range []string{f.a.MessageID, "principal-next-message"} {
+		var accepted struct {
+			WorkID string `json:"work_id"`
+		}
+		if json.Unmarshal(call("POST", "tasks", "", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: message, WholeDocument: true, Mode: craftNativeAgentModeApply}, 202), &accepted) != nil || accepted.WorkID == "" {
+			t.Fatal("actual HTTP task absent")
+		}
+		resolver.original = m.entries[accepted.WorkID].grant.Original
+		resolver.message = message
+		worked, e := dispatcher.RunOne(t.Context())
+		if e != nil || !worked {
+			t.Fatal("normal dispatcher", worked, e)
+		}
+		if runner.run == "" || runner.run == previousRun {
+			t.Fatal("fresh dispatcher run missing")
+		}
+		previousRun = runner.run
+		item, e := work.NewStore(f.rig.db).Get(t.Context(), accepted.WorkID)
+		want := work.StateFailed
+		if index == 1 {
+			want = work.StateSucceeded
+		}
+		if e != nil || item.State != want {
+			t.Fatalf("actual work outcome=%v error=%v", item, e)
+		}
+		var status struct {
+			State   string                      `json:"state"`
+			Events  []craftNativeAgentToolEvent `json:"events"`
+			Receipt *mooring.NativeSaveReceipt  `json:"last_committed_receipt"`
+		}
+		if json.Unmarshal(call("GET", "tasks/"+accepted.WorkID, "", nil, 200), &status) != nil {
+			t.Fatal("task status absent")
+		}
+		if index == 0 {
+			if status.Receipt != nil || len(status.Events) != 1 || status.Events[0].Operation != "acquire" || status.Events[0].Status != 409 || status.Events[0].HolderKind != "human" {
+				t.Fatal("actual refusal not proven", status)
+			}
+			var unchanged craftNativeDocumentResponse
+			if json.Unmarshal(call("GET", "document", session.Token, nil, 200), &unchanged) != nil || unchanged.Version != "2" || !bytes.Equal(unchanged.Bytes, humanBytes) {
+				t.Fatal("busy task changed native bytes")
+			}
+			call("POST", "lease/release", session.Token, map[string]string{"generation": humanLease.Generation}, 200)
+			runner.busy = false
+		} else {
+			receipt := runner.receipt
+			if status.Receipt == nil || *status.Receipt != receipt || receipt.Version != "3" || receipt.BaseVersion != "2" || receipt.Phase != "committed" || receipt.Durability != "node" || receipt.IssuedBy != "crewship" || receipt.SessionID != "native-agent:"+runner.run || receipt.EnginePin != enginePin || receipt.WorkspaceID != f.rig.wsID || receipt.PageID != "native-agent-page" || receipt.ApplicationID != p.Application {
+				t.Fatal("exact actual Node receipt absent", receipt, status)
+			}
+			var fresh craftNativeDocumentResponse
+			if json.Unmarshal(call("GET", "document", session.Token, nil, 200), &fresh) != nil || fresh.Version != receipt.Version {
+				t.Fatal("fresh H1 version absent")
+			}
+			generation, generationErr := strconv.ParseUint(receipt.Generation, 10, 64)
+			humanGeneration, humanGenerationErr := strconv.ParseUint(humanReceipt.Generation, 10, 64)
+			if generationErr != nil || humanGenerationErr != nil || generation <= humanGeneration {
+				t.Fatal("actual agent lease did not advance the human generation")
+			}
+			if p.Application == "wordcraft" {
+				before, beforeErr := adapter.Inspect(t.Context(), p, initial, json.RawMessage(`{"command":"text","params":{}}`))
+				after, afterErr := adapter.Inspect(t.Context(), p, fresh.Bytes, json.RawMessage(`{"command":"text","params":{}}`))
+				var original, current struct{ Text string }
+				if beforeErr != nil || afterErr != nil || json.Unmarshal(before, &original) != nil || json.Unmarshal(after, &current) != nil || current.Text != original.Text+" HumanHTTPQualification AgentHTTPQualification" {
+					t.Fatal("original engine text read did not preserve the entire prior Word body and both exact edits")
+				}
+			}
+			var actor string
+			if err = f.rig.db.QueryRow(`SELECT actor FROM artifact_versions WHERE page_id='native-agent-page' AND version=3`).Scan(&actor); err != nil || actor != "agent:"+f.a.AgentID {
+				t.Fatal("actual version lost original agent attribution", actor, err)
+			}
+			projection, owned, projectionErr := work.NewStore(f.rig.db).RunProjection(t.Context(), runner.run)
+			if projectionErr != nil || !owned || !projection.Ready || projection.Status != "COMPLETED" || projection.Result.Metadata["native_saved"] != true || projection.Result.Metadata["native_version"] != "3" {
+				t.Fatal("normal dispatcher did not project only the actual qualified saved version", projectionErr)
+			}
+			hash := fmt.Sprintf("sha256:%x", sha256.Sum256(fresh.Bytes))
+			if hash != receipt.CandidateHash || hash != receipt.ContentHash {
+				t.Fatal("fresh H1 bytes differ from receipt")
+			}
+			if err = validator.Validate(t.Context(), fresh.Bytes); err != nil {
+				t.Fatal("original native validator", err)
+			}
+			for _, check := range []struct {
+				query  json.RawMessage
+				marker string
+			}{{json.RawMessage(`{"command":"text","params":{}}`), "HumanHTTPQualification"}, {json.RawMessage(`{"command":"text","params":{}}`), "AgentHTTPQualification"}} {
+				if p.Application == "gridcraft" {
+					cell := "A1"
+					if strings.HasPrefix(check.marker, "Agent") {
+						cell = "B1"
+					}
+					check.query = json.RawMessage(fmt.Sprintf(`{"command":"cell.get","params":{"cell":%q}}`, cell))
+				}
+				inspected, e := adapter.Inspect(t.Context(), p, fresh.Bytes, check.query)
+				if e != nil || !bytes.Contains(inspected, []byte(check.marker)) {
+					t.Fatal("original engine read lost human/agent marker", e)
+				}
+			}
+			t.Logf("LOCAL HTTP qualification provider=TEST-STAND-IN app=%s originalCLI=%s run=%s version=%s hash=%s; no genuine model/MCP-process/browser claim", p.Application, p.CLISHA256, runner.run, receipt.Version, hash)
+		}
 	}
 }
