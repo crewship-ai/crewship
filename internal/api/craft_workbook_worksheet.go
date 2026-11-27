@@ -15,6 +15,8 @@ import (
 
 const craftSpreadsheetNS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
+var craftXMLSpace = xml.Name{Space: "http://www.w3.org/XML/1998/namespace", Local: "space"}
+
 var errCraftWorksheetXML = errors.New("cannot prove the worksheet's structure and cells")
 
 type craftWorkbookEdits struct {
@@ -295,12 +297,18 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 	out.token(el)
 	result := craftCellXML{present: true, plain: len(el.Attr) == 0}
 	inline := el.Name == (xml.Name{Space: craftSpreadsheetNS, Local: "is"})
+	var normalized craftWorksheetHash
+	if inline && result.plain {
+		normalized.Hash = sha256.New()
+		normalized.token(el)
+	}
 	depth, children := 1, 0
 	for depth > 0 {
 		tok, err := d.Token()
 		if err != nil {
 			return craftCellXML{}, err
 		}
+		canonical := tok
 		switch child := tok.(type) {
 		case xml.StartElement:
 			if depth >= 256 {
@@ -310,11 +318,22 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 			result.plain = result.plain && inline && depth == 1 && children == 1 &&
 				child.Name == (xml.Name{Space: craftSpreadsheetNS, Local: "t"}) &&
 				(len(child.Attr) == 0 || len(child.Attr) == 1 &&
-					child.Attr[0].Name == (xml.Name{Space: "http://www.w3.org/XML/1998/namespace", Local: "space"}))
+					child.Attr[0].Name == craftXMLSpace)
+			if result.plain && len(child.Attr) == 1 && child.Attr[0].Value == "preserve" {
+				child.Attr = nil
+				canonical = child
+			} else {
+				normalized.Hash = nil
+			}
 			depth++
 		case xml.EndElement:
 			depth--
 		case xml.CharData:
+			// OOXML escapes can encode whitespace even when the XML text has
+			// none. Keep the original attribute when either is possible.
+			if normalized.Hash != nil && depth == 2 && strings.ContainsAny(string(child), " \t\r\n_") {
+				normalized.Hash = nil
+			}
 			if strings.TrimSpace(string(child)) != "" {
 				result.nonempty = true
 				if inline && depth == 1 {
@@ -327,9 +346,17 @@ func craftReadCellXML(d *xml.Decoder, el xml.StartElement) (craftCellXML, error)
 			result.plain = false
 		}
 		out.token(tok)
+		if normalized.Hash != nil && result.plain {
+			normalized.token(canonical)
+		}
 	}
 	result.plain = result.plain && (!inline || children == 1)
 	result.digest = out.sum()
+	// GridCraft marks inline text with xml:space="preserve" when replay
+	// exports it. For a plain string without whitespace this is redundant.
+	if result.plain && normalized.Hash != nil {
+		result.digest = normalized.sum()
+	}
 	return result, nil
 }
 

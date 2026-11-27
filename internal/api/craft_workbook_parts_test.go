@@ -131,3 +131,51 @@ func TestWorkbookSaveFidelityChecksWorksheetDimensionAgainstCells(t *testing.T) 
 		})
 	}
 }
+
+func TestWorkbookSaveFidelityRecognizesRedundantInlineTextSpaceOnReplayedSheet(t *testing.T) {
+	const (
+		leftPart  = "xl/worksheets/sheet1.xml"
+		rightPart = "xl/worksheets/sheet2.xml"
+		preserve  = `<t xml:space="preserve">`
+	)
+	for _, tc := range []struct {
+		name, before, after string
+		status              int
+	}{
+		{"same replayed text", "<t>agent</t>", preserve + "agent</t>", 200},
+		{"changed replayed value", "<t>agent</t>", preserve + "other</t>", 422},
+		{"significant surrounding spaces", "<t> agent </t>", preserve + " agent </t>", 422},
+		{"encoded whitespace", "<t>_x0020_agent</t>", preserve + "_x0020_agent</t>", 422},
+		{"rich text", "<r><t>agent</t></r>", "<r>" + preserve + "agent</t></r>", 422},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			template := sitWorkbook(sitCells{"A1": "base"}, sitCells{"B2": "agent"})
+			right := string(sitParts(t, template)[rightPart])
+			if !strings.Contains(right, "<t>agent</t>") {
+				t.Fatalf("fixture did not have the expected inline string: %s", right)
+			}
+			base := workbookEdited(t, template, "", map[string]string{
+				rightPart: strings.Replace(right, "<t>agent</t>", tc.before, 1),
+			})
+			candidate := workbookEdited(t, base, "", map[string]string{
+				leftPart:  sitSheetXML(sitCells{"A1": "base", "B2": "human"}),
+				rightPart: strings.Replace(right, "<t>agent</t>", tc.after, 1),
+			})
+			rig := workbookDocumentsFixture(t, base)
+			touched := `["'L'!B2"]`
+			rig.touched = &touched
+			w := rig.save(candidate, "1", workbookHash(candidate))
+			if w.Code != tc.status {
+				t.Fatalf("status %d want %d: %s", w.Code, tc.status, w.Body)
+			}
+			if tc.status == 200 {
+				doc := workbookRead(t, rig.read(nil))
+				if doc.Version != "2" || !bytes.Equal(doc.Bytes, candidate) {
+					t.Fatalf("save did not retain the exact merged workbook: version %s", doc.Version)
+				}
+			} else if !strings.Contains(w.Body.String(), `"fidelity_loss"`) || rig.sitHead(t) != 1 {
+				t.Fatalf("non-fidelity refusal or version created: %s, head %d", w.Body, rig.sitHead(t))
+			}
+		})
+	}
+}
