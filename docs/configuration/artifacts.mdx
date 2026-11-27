@@ -281,6 +281,12 @@ report `runtime` (`wasm-process` or `wasm`), `degraded: true` and a short
 engine on purpose (it is then not reported as degraded). A fallback is slower
 for large workbooks and cannot stop a stuck run.
 
+| Environment variable | Default | Effect |
+|---|---|---|
+| `CREWSHIP_CRAFT_COMPILE_CACHE` | On when the data directory is writable | Uses the private `craft-compile-cache` directory under the server data root to reuse compiled engine modules. Set to `0` to compile in each worker. |
+| `CREWSHIP_CRAFT_SAVED_VALUES` | On for engine digests explicitly verified to support it | Lets Sheet sessions open bytes already computed by this server's engine using their saved values. Browser uploads still use normal validation. Set to `0` to disable the optimization. |
+| `CREWSHIP_SHEET_WORKBOOK` | Unset | Optional development and test assertion. Set to `1` to require a Sheet package whose manifest declares `document_format: workbook`. Startup fails if that package is unavailable. |
+
 #### Memory and time
 
 Two different numbers matter. The engine's **linear memory cap** is what the
