@@ -6768,7 +6768,7 @@ index 5dfac1d2..f0fa15b9 100644
 +    assert_eq!(read(&mut r)["values"][0], json!([1.0]));
 +}
 diff --git a/crates/engine/src/io.rs b/crates/engine/src/io.rs
-index 17fe80e4..b578c968 100644
+index 63415fd8..bc1fffca 100644
 --- a/crates/engine/src/io.rs
 +++ b/crates/engine/src/io.rs
 @@ -78,9 +78,24 @@ pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>
@@ -6806,7 +6806,7 @@ index 17fe80e4..b578c968 100644
      warnings.insert(0, DECRYPTED_NOTICE.into());
      Ok((wb, warnings))
  }
-@@ -1010,10 +1025,10 @@ fn script_sandbox_check(path: &str) -> Result<()> {
+@@ -1013,10 +1028,10 @@ fn script_sandbox_check(path: &str) -> Result<()> {
  
  /// The largest native file the reader still touches: its own cap plus one, used to stop
  /// reads whose bytes arrive faster than metadata can claim (device files, growing files).
@@ -6819,7 +6819,7 @@ index 17fe80e4..b578c968 100644
  pub fn read_file(path: &str) -> Result<Vec<u8>> {
      use std::io::Read;
      script_sandbox_check(path)?;
-@@ -1038,13 +1053,13 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
+@@ -1041,13 +1056,13 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
      Ok(buf)
  }
  
@@ -6835,7 +6835,7 @@ index 17fe80e4..b578c968 100644
  pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
      use std::io::Write;
      script_sandbox_check(path)?;
-@@ -1128,14 +1143,14 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+@@ -1131,14 +1146,14 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
  /// Apple targets ENOTSUP (45, which std leaves uncategorized there), or an unsupported-operation
  /// error (EOPNOTSUPP/ENOSYS, and ENOTSUP where it equals EOPNOTSUPP). Any other error is a real
  /// failure.
@@ -6852,7 +6852,7 @@ index 17fe80e4..b578c968 100644
  fn flush_unsupported_on(e: &std::io::Error, unix: bool, apple: bool) -> bool {
      let raw = e.raw_os_error();
      (unix && raw == Some(25)) || (apple && raw == Some(45)) || e.kind() == std::io::ErrorKind::Unsupported
-@@ -1148,7 +1163,7 @@ fn restored_mode(old: u32, group_kept: bool) -> u32 {
+@@ -1151,7 +1166,7 @@ fn restored_mode(old: u32, group_kept: bool) -> u32 {
      if group_kept { old & 0o7777 } else { old & 0o707 }
  }
  
@@ -7925,7 +7925,7 @@ index d64647b4..bb221e41 100644
      }
  }
 diff --git a/crates/model/src/lib.rs b/crates/model/src/lib.rs
-index 869d2df3..fd2f846c 100644
+index 9ee52a80..bb594a52 100644
 --- a/crates/model/src/lib.rs
 +++ b/crates/model/src/lib.rs
 @@ -31,8 +31,9 @@ pub use style::{
@@ -7934,16 +7934,16 @@ index 869d2df3..fd2f846c 100644
  pub use workbook::{
 +    VbaSignature,
      CalcMode, CalcSettings, DefinedName, DocProps, EQUATION_BUDGET_MESSAGE, MAX_EQUATION_LAYOUT_BYTES, PhoneticProps, PhoneticRun, PhoneticString,
--    RefHost, ShowObjects, Workbook, WorkbookView, WriteReservation,
-+    RefHost, ShowObjects, StructureId, Workbook, WorkbookView, WriteReservation,
+-    RefHost, ScriptDefault, ShowObjects, TextDefaults, Workbook, WorkbookView, WriteReservation,
++    RefHost, ScriptDefault, ShowObjects, StructureId, TextDefaults, Workbook, WorkbookView, WriteReservation,
  };
  
  /// Font used for new workbooks. Only a name: renderers substitute an available open font
 diff --git a/crates/model/src/workbook.rs b/crates/model/src/workbook.rs
-index 2c6689ec..81cdbbe2 100644
+index e38c3d19..5b423119 100644
 --- a/crates/model/src/workbook.rs
 +++ b/crates/model/src/workbook.rs
-@@ -195,6 +195,42 @@ pub struct PhoneticString {
+@@ -245,6 +245,42 @@ pub struct PhoneticString {
      pub props: Option<PhoneticProps>,
  }
  
@@ -7986,7 +7986,7 @@ index 2c6689ec..81cdbbe2 100644
  #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
  pub struct Workbook {
      pub sheets: Vec<Arc<Sheet>>,
-@@ -248,6 +284,15 @@ pub struct Workbook {
+@@ -298,6 +334,15 @@ pub struct Workbook {
      /// copy of the workbook (every edit's undo step) doesn't copy it.
      #[serde(default, with = "crate::b64::opt")]
      pub vba_project: Option<Arc<Vec<u8>>>,
@@ -8002,7 +8002,7 @@ index 2c6689ec..81cdbbe2 100644
      /// Field separator of the CSV this workbook was read from, so saving it as CSV writes the same
      /// separator back (a `;` file stays a `;` file). `None` = not read from CSV: CSV saves use `,`.
      #[serde(default, skip_serializing_if = "Option::is_none")]
-@@ -581,6 +626,8 @@ impl Workbook {
+@@ -636,6 +681,8 @@ impl Workbook {
              cell_styles: vec![],
              phonetics: vec![],
              vba_project: None,
