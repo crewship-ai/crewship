@@ -78,6 +78,7 @@ import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
 import { SavedDocumentPanel } from "./artifacts/saved-document-panel"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { WORKBOOK_UPLOAD_LIMIT } from "./artifact-context/sheet/workbook-upload"
 import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
@@ -1446,7 +1447,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const sheetIntakeDraft = !sheetIntakeOn && isDraft && executionProfile === "pending" && profileProbeSettled && !historyDenied && accessMode === "trusted"
     && !refusedScopes.has(chatReadScope) && Boolean(workspaceId && currentUserId && sessionId) && sessionKind === "direct" && canChat
   const takeSheetFiles = useCallback((files: File[]) => {
-    const split = splitForSheets(files)
+    const split = splitForSheets(files, documentsAvailability.gridcraftWorkbook ? WORKBOOK_UPLOAD_LIMIT : undefined)
     // Until the conversation is confirmed, only a workbook that is also attached is offered; one too
     // large to attach is refused as usual, so it is never silently dropped if the server says no.
     const offers = sheetIntakeOn ? split.offers : split.offers.filter(offer => offer.attached)
@@ -1454,7 +1455,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     if (offers.length) setSheetOffers(previous => [...previous.filter(offer => offer.scope === artifactScope), ...offers.map(offer => ({ ...offer, id: crypto.randomUUID(), scope: artifactScope }))])
     if (offers.length && !sheetIntakeOn) void ensureSessionForSend()
     return attach
-  }, [artifactScope, sheetIntakeOn, ensureSessionForSend])
+  }, [artifactScope, sheetIntakeOn, ensureSessionForSend, documentsAvailability.gridcraftWorkbook])
   const sheetDirty = useRef(false)
   const sheetCurrent = useRef<string | null>(null)
   sheetCurrent.current = sheetTarget?.pageId ?? null

@@ -1,9 +1,12 @@
-import { XLSX_IMPORT_LIMIT, XlsxImportError } from "@/lib/craft-xlsx-import"
+import { XlsxImportError } from "@/lib/craft-xlsx-import"
 import { initializeNativeWorkbook } from "@/lib/mooring/native-document-client"
+import { MAX_NATIVE_BYTES } from "@/lib/mooring/native-draft"
+
+export const WORKBOOK_UPLOAD_LIMIT = MAX_NATIVE_BYTES
 
 /** Why the server refused a workbook file before storing anything, in the words of a Sheet. */
 export const WORKBOOK_REFUSAL: Record<string, string> = {
-  too_large: `This workbook is larger than a Sheet can open (${XLSX_IMPORT_LIMIT >> 20} MB).`,
+  too_large: `This workbook is larger than a Sheet can open (${WORKBOOK_UPLOAD_LIMIT >> 20} MB).`,
   unpacked_too_large: "This workbook unpacks to more than a Sheet takes (512 MiB).",
   too_many_parts: "This workbook has more parts than a Sheet takes.",
   not_workbook: "This file is not a readable .xlsx or .xlsm workbook.",
@@ -19,6 +22,7 @@ export const WORKBOOK_REFUSAL: Record<string, string> = {
  * marked `beforeWrite`, so the creation may try again; any other answer is the creation's to check.
  */
 export async function uploadWorkbook(args: { workspaceId: string; pageId: string; file: File; signal: AbortSignal; /** The Sheet belongs to this chat from version 1 (X-Craft-Chat). */ chatId?: string }): Promise<Response> {
+  if (args.file.size > WORKBOOK_UPLOAD_LIMIT) throw Object.assign(new XlsxImportError("too_large", WORKBOOK_REFUSAL.too_large), { beforeWrite: true })
   const response = await initializeNativeWorkbook({ workspaceId: args.workspaceId, pageId: args.pageId, file: args.file, signal: args.signal, ...(args.chatId ? { chatId: args.chatId } : {}) })
   if (response.status === 413 || response.status === 415 || response.status === 404) {
     const code = await response.clone().json().then((v: unknown) => v && typeof v === "object" && typeof (v as { code?: unknown }).code === "string" ? (v as { code: string }).code : "", () => "")
