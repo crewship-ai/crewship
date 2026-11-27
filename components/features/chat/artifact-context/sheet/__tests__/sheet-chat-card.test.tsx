@@ -52,20 +52,20 @@ describe("SheetChatCard", () => {
     usePage.mockReturnValue({ page: null, loading: false, notFound: false })
     render(<SheetChatCard activity={{ state: "failed", reason: "not_attached", pageId: "pg_1" }} turnStreaming={false} />)
     const line = screen.getByTestId("sheet-refusal")
-    expect(line.textContent).toBe("The agent wanted to change a Sheet, but this message did not let it. To allow it, turn on “Let the agent change it” for the Sheet on your next message.")
+    expect(line.textContent).toBe("Allow edits in your next message.")
     expect(line.className).not.toMatch(/\bborder\b/)
     expect(screen.queryByText(/No Sheet of yours/)).toBeNull()
   })
   // Under the agent's reply, what it changed, with Undo and a way to see it.
   const changed = { state: "done" as const, pageId: "pg_1", operationId: "op-9", undoable: true, baseVersion: "6", saved: { version: "7" }, summary: { cellsChanged: 570, sheets: ["L"], ranges: ["'L'!L2:L571"], truncated: false } }
-  it("names the change in words, with Show in Sheet and Undo", () => {
+  it("names the change in words, with Open and Undo", () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
     const p = panel()
     render(wrap(p, <SheetChatCard activity={changed} turnStreaming={false} />))
     const card = screen.getByRole("article", { name: "Quarterly plan" })
     // The card says where, as the server counted it.
-    expect(card).toHaveTextContent("Changed Quarterly plan · version 7 · 570 cells in 'L'!L2:L571")
-    fireEvent.click(within(card).getByRole("button", { name: "Show in Sheet" }))
+    expect(card).toHaveTextContent("Updated Quarterly plan · 570 cells")
+    fireEvent.click(within(card).getByRole("button", { name: "Open" }))
     expect(p.open).toHaveBeenCalledWith("pg_1")
     expect(within(card).getByRole("button", { name: "Undo" })).toBeInTheDocument()
   })
@@ -74,9 +74,9 @@ describe("SheetChatCard", () => {
   it("offers no Undo, and no sentence about it, while the server does not say the change can be undone", () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
     render(wrap(panel(), <SheetChatCard activity={{ ...changed, undoable: undefined }} turnStreaming={false} />))
-    expect(screen.getByRole("article", { name: "Quarterly plan" })).toHaveTextContent("Changed Quarterly plan · version 7 · 570 cells in 'L'!L2:L571")
+    expect(screen.getByRole("article", { name: "Quarterly plan" })).toHaveTextContent("Updated Quarterly plan · 570 cells")
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull()
-    expect(screen.getByRole("button", { name: "Show in Sheet" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument()
   })
   // A change the server cannot undo says why and where the version before it is.
   it("explains a change too large to undo here, with the version before it in version history", () => {
@@ -84,8 +84,8 @@ describe("SheetChatCard", () => {
     render(wrap(panel(), <SheetChatCard activity={{ ...changed, undoable: false }} turnStreaming={false} />))
     const card = screen.getByRole("article", { name: "Quarterly plan" })
     expect(within(card).queryByRole("button", { name: "Undo" })).toBeNull()
-    expect(card).toHaveTextContent("This change is too large to undo here. You can restore version 6 from version history.")
-    const link = within(card).getByRole("link", { name: "version history" })
+    expect(card).toHaveTextContent("Undo unavailable · Version history.")
+    const link = within(card).getByRole("link", { name: "Version history" })
     expect(link.getAttribute("href")).toMatch(/[?&]version=6(&|$)/)
   })
   it("undoes by reverting the agent's cells as a new version, and shows it in the open Sheet", async () => {
@@ -94,7 +94,7 @@ describe("SheetChatCard", () => {
     render(wrap(panel(), <SheetChatCard activity={changed} turnStreaming={false} />))
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })) })
     expect(apiFetch, "the open editor of that Sheet is asked, with the operation").toHaveBeenCalledWith("pg_1", "op-9")
-    expect(screen.getByRole("status")).toHaveTextContent("Undone · version 8")
+    expect(screen.getByRole("status")).toHaveTextContent("Undone")
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull()
     expect(published).toHaveBeenCalledWith({ pageId: "pg_1", version: "8" })
   })
@@ -103,25 +103,25 @@ describe("SheetChatCard", () => {
     apiFetch.mockResolvedValue(new Response(JSON.stringify({ version: "9", skipped: [{ sheet: "L", cell: "B9" }, { sheet: "L", cell: "B10" }] }), { status: 201 }))
     render(wrap(panel(), <SheetChatCard activity={changed} turnStreaming={false} />))
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })) })
-    expect(screen.getByRole("status")).toHaveTextContent("Undone · version 9. 2 cells were left as they are because someone changed them since: 'L'!B9, 'L'!B10.")
-    expect(screen.getByRole("link", { name: "Open history" })).toHaveAttribute("href", "/artifacts/pg_1?workspace_id=ws1")
+    expect(screen.getByRole("status")).toHaveTextContent("Undone · 2 later edits kept.")
+    expect(screen.getByRole("link", { name: "Version history" })).toHaveAttribute("href", "/artifacts/pg_1?workspace_id=ws1")
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull()
   })
   // Skipped is a count; 200 for a repeat or for nothing left to revert.
-  it("names up to three ranges and counts the rest, and shows Show in Sheet as a quiet button", () => {
+  it("names up to three ranges and counts the rest, and shows Open as a quiet button", () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
     const many = { ...changed, summary: { ...changed.summary, ranges: ["'L'!A1:A2", "'L'!B1", "'Q 1'!C1:C9", "'L'!D1", "'L'!E1"] } }
     render(wrap(panel(), <SheetChatCard activity={many} turnStreaming={false} />))
-    expect(screen.getByRole("article")).toHaveTextContent("570 cells in 'L'!A1:A2, 'L'!B1, 'Q 1'!C1:C9 and 2 more")
+    expect(screen.getByRole("article")).toHaveTextContent("Version 7 in 'L'!A1:A2, 'L'!B1, 'Q 1'!C1:C9 and 2 more")
     // Dark in the light theme: the same quiet look as Undo.
-    expect(screen.getByRole("button", { name: "Show in Sheet" })).toHaveAttribute("data-variant", "outline")
+    expect(screen.getByRole("button", { name: "Open" })).toHaveAttribute("data-variant", "outline")
   })
   it("says how many cells it left when the server gives their number", async () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
     for (const [status, body, text] of [
-      [201, { version: "9", skipped: 3 }, "Undone · version 9. 3 cells were left as they are because someone changed them since."],
-      [201, { version: "9", skipped: 0 }, "Undone · version 9"],
-      [200, { version: "9", skipped: 570 }, "Undone · version 9. 570 cells were left as they are because someone changed them since."],
+      [201, { version: "9", skipped: 3 }, "Undone · 3 later edits kept."],
+      [201, { version: "9", skipped: 0 }, "Undone"],
+      [200, { version: "9", skipped: 570 }, "Undone · 570 later edits kept."],
     ] as const) {
       cleanup(); apiFetch.mockReset(); apiFetch.mockResolvedValue(new Response(JSON.stringify(body), { status }))
       render(wrap(panel(), <SheetChatCard activity={changed} turnStreaming={false} />))
@@ -137,7 +137,7 @@ describe("SheetChatCard", () => {
       const p = panel()
       render(wrap(p, <SheetChatCard activity={changed} turnStreaming={false} />))
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })) })
-      expect(screen.getByRole("status"), answer).toHaveTextContent("Undo works while you edit this Sheet beside the chat. Take over editing there, then press Undo again.")
+      expect(screen.getByRole("status"), answer).toHaveTextContent("Undo unavailable.")
       expect(screen.getByRole("button", { name: "Undo" }), "it can be pressed again").toBeInTheDocument()
       if (answer === "no_editor") expect(p.open, "the Sheet opens beside the chat").toHaveBeenCalledWith("pg_1")
       else expect(p.open).not.toHaveBeenCalled()
@@ -146,10 +146,10 @@ describe("SheetChatCard", () => {
   it("names each refusal of the undo endpoint in words", async () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
     for (const [status, code, text] of [
-      [404, "not_found", "This change can no longer be undone here."],
-      [409, "not_undoable", "This change can no longer be undone here."],
-      [409, "moved", "The Sheet changed meanwhile. Try Undo again."],
-      [422, "fidelity_loss", "Undo would drop parts of this workbook (macros or signatures), so nothing was changed."],
+      [404, "not_found", "Undo unavailable."],
+      [409, "not_undoable", "Undo unavailable."],
+      [409, "moved", "Couldn’t undo. Try again."],
+      [422, "fidelity_loss", "Couldn’t undo safely."],
     ] as const) {
       cleanup(); apiFetch.mockReset(); apiFetch.mockResolvedValue(new Response(JSON.stringify({ code }), { status }))
       render(wrap(panel(), <SheetChatCard activity={changed} turnStreaming={false} />))
@@ -160,7 +160,7 @@ describe("SheetChatCard", () => {
   })
   it("says in words why an undo could not be done now, and never shows a code", async () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
-    for (const [status, code, text] of [[409, "busy", "Someone is editing this Sheet now. Try Undo again when they are done."], [403, "forbidden", "You may not change this Sheet."], [500, "boom", "Undo did not go through. Try again."]] as const) {
+    for (const [status, code, text] of [[409, "busy", "Couldn’t undo. Try again."], [403, "forbidden", "Undo unavailable."], [500, "boom", "Couldn’t undo. Try again."]] as const) {
       cleanup(); apiFetch.mockReset(); apiFetch.mockResolvedValue(new Response(JSON.stringify({ code }), { status }))
       render(wrap(panel(), <SheetChatCard activity={changed} turnStreaming={false} />))
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })) })
@@ -219,22 +219,11 @@ describe("SheetChatCard", () => {
 // The person who holds the Sheet was told "Someone is editing this Sheet now."
 describe("a change refused because the person edits the Sheet", () => {
   const refused = { state: "failed" as const, pageId: "pg_1", reason: "holder_human" as const }
-  it("tells the person they are editing it and lets them hand it back", async () => {
+  it("keeps the reason in Details and offers no handoff", () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
-    const handBack = vi.fn(async () => ({ state: "returned" as const }))
-    render(wrap({ ...panel(), editingPageId: "pg_1", handBack }, <SheetChatCard activity={refused} turnStreaming={false} />))
-    expect(screen.getByTestId("sheet-refusal")).toHaveTextContent("You are editing this Sheet, so the agent could not change it.")
-    expect(screen.queryByText(/Someone is editing/)).toBeNull()
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Hand back" })) })
-    expect(handBack).toHaveBeenCalledOnce()
-    expect(screen.getByTestId("sheet-refusal")).toHaveTextContent("Handed back. Ask the agent again.")
-  })
-  it("says why it stays with the person when it could not be handed back", async () => {
-    usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })
-    const handBack = vi.fn(async () => ({ state: "kept" as const, reason: "unsaved" as const }))
-    render(wrap({ ...panel(), editingPageId: "pg_1", handBack }, <SheetChatCard activity={refused} turnStreaming={false} />))
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Hand back" })) })
-    expect(screen.getByTestId("sheet-refusal")).toHaveTextContent("Your last change is not saved yet, so you still edit the Sheet.")
+    render(wrap({ ...panel(), editingPageId: "pg_1" }, <SheetChatCard activity={refused} turnStreaming={false} />))
+    expect(screen.getByTestId("sheet-refusal")).toHaveTextContent("Couldn’t update the Sheet.")
+    expect(screen.queryByRole("button", { name: "Hand back" })).toBeNull()
   })
   it("says someone else edits it when the person does not", () => {
     usePage.mockReturnValue({ page: sheetPage, loading: false, notFound: false })

@@ -38,8 +38,8 @@ function portRig(){const state=rigNativeState?{nativeState:rigNativeState}:{};re
 beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);rigNativeState=undefined;client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;authSuspend=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>,options?:{suspend?:()=>Promise<void>})=>{privacyRetire=retire;authSuspend=options?.suspend;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
 afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks()})
 const mount=()=>render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled />)
-async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce());await waitFor(()=>expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled())}
-async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
+async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce());await waitFor(()=>expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled())}
+async function acquire(){fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('retired draft rendered state',()=>{
  it.each(['untouched','edited','unretired'] as const)('write retirement keeps leave guard only for recoverable work (%s)',async(kind)=>{
@@ -86,7 +86,7 @@ describe('native Word host authority and persistence',()=>{
   const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
   client.lease.mockResolvedValue(held)
   const confirmation=deferred<unknown>();client.leaseAction.mockReturnValueOnce(confirmation.promise)
-  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  mount();const ask=await screen.findByRole('button',{name:/^Request edit(ing)?$/})
   await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
   fireEvent.click(ask)
   expect(screen.queryByText('Request sent')).not.toBeInTheDocument()
@@ -96,27 +96,27 @@ describe('native Word host authority and persistence',()=>{
   expect(ports[0].setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
   const next={...held,generation:'9007199254740996'};client.lease.mockResolvedValue(next)
   await act(async()=>stream?.('lease',next))
-  expect(screen.getByRole('button',{name:'Request edit'})).toBeEnabled()
+  expect(screen.getByRole('button',{name:/^Request edit(ing)?$/})).toBeEnabled()
   expect(screen.queryByText('Request sent')).not.toBeInTheDocument()
  })
  it('keeps a confirmed handoff request truthful when the following lease read fails',async()=>{
   const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
   client.lease.mockResolvedValue(held)
-  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  mount();const ask=await screen.findByRole('button',{name:/^Request edit(ing)?$/})
   await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
   client.leaseAction.mockResolvedValueOnce({request_id:'confirmed-request',generation:held.generation})
   client.lease.mockRejectedValueOnce(Error('lease temporarily unavailable'))
   fireEvent.click(ask)
   await screen.findByText('The request was sent, but the current editing state cannot be loaded. The draft is kept.')
   expect(screen.getByRole('button',{name:'Request sent'})).toBeDisabled()
-  expect(screen.queryByText('The result of the action was not confirmed. The draft is kept.')).not.toBeInTheDocument()
+  expect(screen.queryByText('Couldn’t confirm changes.')).not.toBeInTheDocument()
   expect(client.leaseAction).toHaveBeenCalledOnce()
  })
  it('ignores a late handoff reply while the old admission retires',async()=>{
   const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
   client.lease.mockResolvedValue(held)
   const confirmation=deferred<unknown>();client.leaseAction.mockReturnValueOnce(confirmation.promise)
-  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  mount();const ask=await screen.findByRole('button',{name:/^Request edit(ing)?$/})
   await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
   fireEvent.click(ask)
   const successor=clientRig(),opening=deferred<{sessionId:string;applicationId:string}>()
@@ -127,18 +127,18 @@ describe('native Word host authority and persistence',()=>{
   await act(async()=>confirmation.resolve({request_id:'retired-request',generation:held.generation}))
   await act(async()=>opening.resolve({sessionId:'fresh-session',applicationId:'wordcraft'}))
   await waitFor(()=>expect(ports.at(-1)?.bootstrap).toHaveBeenCalled())
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Request edit'})).toBeEnabled())
+  await waitFor(()=>expect(screen.getByRole('button',{name:/^Request edit(ing)?$/})).toBeEnabled())
   expect(screen.queryByText('Request sent')).not.toBeInTheDocument()
  })
  it.each(['offline','malformed'])('does not claim handoff was requested when the server response is %s',async(failure)=>{
   client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson})
   if(failure==='offline')client.leaseAction.mockRejectedValueOnce(Error('offline'))
   else client.leaseAction.mockResolvedValueOnce({request_id:'missing-generation'})
-  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  mount();const ask=await screen.findByRole('button',{name:/^Request edit(ing)?$/})
   await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
   fireEvent.click(ask)
-  await screen.findByText('The result of the action was not confirmed. The draft is kept.')
-  expect(screen.getByRole('button',{name:'Request edit'})).toBeEnabled()
+  await screen.findByText('Couldn’t confirm changes.')
+  expect(screen.getByRole('button',{name:/^Request edit(ing)?$/})).toBeEnabled()
   expect(screen.queryByText('Request sent')).not.toBeInTheDocument()
  })
  it('keeps a freshly confirmed writer when an expired same-custody stream event overtakes its recheck',async()=>{
@@ -156,10 +156,10 @@ describe('native Word host authority and persistence',()=>{
  it('never unlocks on an older streamed grant when the final fresh HTTP lease proof denies custody',async()=>{
   mount();await ready();const checks=client.lease.mock.calls.length,proof=deferred<unknown>()
   client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
-  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
+  fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
   act(()=>stream?.('lease',ownedLease))
   await act(async()=>proof.resolve({...emptyLease,holder:otherPerson,generation:'9007199254740996'}))
-  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The result of the action was not confirmed.'))
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t confirm changes.'))
   expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(client.save).not.toHaveBeenCalled()
  })
 
@@ -201,7 +201,7 @@ describe('native Word host authority and persistence',()=>{
  it('M2: old read failure does not cancel an acquisition still awaiting its lease action',async()=>{
   mount();await ready();const frame=document.querySelector('iframe'),pending=deferred<unknown>(),action=deferred<typeof ownedLease>(),reads=client.read.mock.calls.length
   client.read.mockReturnValueOnce(pending.promise);act(()=>stream?.('lease',emptyLease));await waitFor(()=>expect(client.read).toHaveBeenCalledTimes(reads+1))
-  client.leaseAction.mockReturnValueOnce(action.promise);fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled())
+  client.leaseAction.mockReturnValueOnce(action.promise);fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled())
   try{await act(async()=>pending.reject(Error('old read failed')));expect(document.querySelector('iframe')).toBe(frame)}
   finally{client.lease.mockResolvedValue(ownedLease);await act(async()=>action.resolve(ownedLease))}
   await screen.findByText('Ready to edit');expect(journal.revokeRead).not.toHaveBeenCalled()
@@ -285,18 +285,18 @@ describe('native Word host authority and persistence',()=>{
   act(()=>stream?.('lease',revoked))
   await act(async()=>proof.resolve(ownedLease))
   await waitFor(()=>expect(document.querySelector('iframe')).not.toHaveStyle({visibility:'hidden'}))
-  expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})).not.toBeInTheDocument()
   expect(ports[0].setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
  })
  it('never unlocks an acquire after a newer streamed custody loss overtakes final proof',async()=>{
   mount();await ready()
   const proof=deferred<typeof ownedLease>(),checks=client.lease.mock.calls.length
   client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
-  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}))
   await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
   act(()=>stream?.('lease',{...emptyLease,can_edit:false}))
   await act(async()=>proof.resolve(ownedLease))
-  await screen.findByText('The result of the action was not confirmed. The draft is kept.')
+  await screen.findByText('Couldn’t confirm changes.')
   expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(client.save).not.toHaveBeenCalled()
  })
  it('bounds a retained-buffer read admission and ignores its late proof without dropping the buffer',async()=>{
@@ -550,7 +550,7 @@ describe('native Word host authority and persistence',()=>{
   const editorLease={...ownedLease,can_share:false}
   client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValue(editorLease);return editorLease})
   mount();await ready();await acquire()
-  expect(screen.getByRole('button',{name:'Hand back'})).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/})).toBeInTheDocument()
   expect(screen.queryByRole('button',{name:'Publish preview'})).not.toBeInTheDocument()
   expect(client.share).not.toHaveBeenCalled()
  })
@@ -580,12 +580,12 @@ describe('native Word host authority and persistence',()=>{
  it.each([false,undefined])('shows a read-only preview with no custody controls unless server confirms edit capability (%s)',async(canEdit)=>{
   client.lease.mockResolvedValue({...emptyLease,can_edit:canEdit})
   mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce())
-  expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
-  expect(screen.queryByRole('button',{name:'Request edit'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^Request edit(ing)?$/})).not.toBeInTheDocument()
   expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(client.share).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Publish preview'})).not.toBeInTheDocument();expect(m.openJournal).not.toHaveBeenCalled()
   act(()=>stream?.('lease',{...ownedLease,holder:otherPerson,mine:false,can_write:false,can_edit:canEdit}))
   await screen.findByText('Pavel is editing')
-  expect(screen.queryByRole('button',{name:'Request edit'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^Request edit(ing)?$/})).not.toBeInTheDocument()
   expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)
  })
 
@@ -705,11 +705,11 @@ describe('native Word host authority and persistence',()=>{
   })
   act(()=>stream?.('lease',leaseState==='handed'?ownedLease:emptyLease))
   await waitFor(()=>expect(ports[1]?.bootstrap).toHaveBeenCalledOnce())
-  expect(screen.getByRole('button',{name:'Take over editing'})).toBeDisabled()
-  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}))
+  expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}))
   expect(client.leaseAction).not.toHaveBeenCalled()
   await act(async()=>opening.resolve({bytes:newer.bytes,editorRevision:'reader:2',documentId:'doc'}))
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled())
+  await waitFor(()=>expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled())
   await acquire()
   expect(client.leaseAction).toHaveBeenCalledExactlyOnceWith('acquire',{},expect.any(AbortSignal))
  })
@@ -761,10 +761,10 @@ describe('native Word host authority and persistence',()=>{
   expect(blob).not.toHaveBeenCalled()
   }finally{if(originalCreate)Object.defineProperty(URL,'createObjectURL',originalCreate);else Reflect.deleteProperty(URL,'createObjectURL')}
  })
- it('puts its lock controls where the frame asks and keeps the save status in the page for assistive tech (#5132)',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled placeLease={controls=><div data-testid="popover">{controls}</div>}/>);await screen.findByText('Pavel is editing');const popover=screen.getByTestId('popover');expect(popover).toContainElement(screen.getByRole('toolbar',{name:'Document editing'}));expect(popover).toContainElement(screen.getByRole('button',{name:'Request edit'}));expect(document.querySelector('div.sr-only[role="status"]')).not.toBeNull();expect(client.leaseAction).not.toHaveBeenCalled()})
+ it('puts its lock controls where the frame asks and keeps the save status in the page for assistive tech (#5132)',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled placeLease={controls=><div data-testid="popover">{controls}</div>}/>);await screen.findByText('Pavel is editing');const popover=screen.getByTestId('popover');expect(popover).toContainElement(screen.getByRole('toolbar',{name:'Document editing'}));expect(popover).toContainElement(screen.getByRole('button',{name:/^Request edit(ing)?$/}));expect(document.querySelector('div.sr-only[role="status"]')).not.toBeNull();expect(client.leaseAction).not.toHaveBeenCalled()})
  it('hides only the editor surface when the body reads the document instead (#5132)',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});const {container}=render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled editorHidden/>);await screen.findByText('Pavel is editing');expect(container.querySelector('[aria-busy][tabindex="-1"]')).toHaveClass('hidden');expect(screen.getByRole('toolbar',{name:'Document editing'})).toBeInTheDocument()})
- it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});mount();await screen.findByText('Pavel is editing');expect(screen.getByRole('button',{name:'Request edit'})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})
- it('cannot unlock from an acquire response without a fresh matching current lease proof',async()=>{mount();await ready();client.leaseAction.mockImplementationOnce(async()=>ownedLease);fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled());await waitFor(()=>expect(screen.getByRole('alert')).toBeInTheDocument());expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()})
+ it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});mount();await screen.findByText('Pavel is editing');expect(screen.getByRole('button',{name:/^Request edit(ing)?$/})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})
+ it('cannot unlock from an acquire response without a fresh matching current lease proof',async()=>{mount();await ready();client.leaseAction.mockImplementationOnce(async()=>ownedLease);fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled());await waitFor(()=>expect(screen.getByRole('alert')).toBeInTheDocument());expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()})
  it('reports Saved only after durable local persist, engine validation, server receipt and editor ACK',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,ack=deferred<boolean>();p.ack.mockReturnValueOnce(ack.promise);act(()=>portOptions.at(-1)!.onChanged('r2','doc'));await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce());expect(journal.persist.mock.invocationCallOrder[0]).toBeLessThan(p.validate.mock.invocationCallOrder[0]);expect(p.validate.mock.invocationCallOrder[0]).toBeLessThan(client.save.mock.invocationCallOrder[0]);expect(screen.queryByText('Saved')).not.toBeInTheDocument();await act(async()=>ack.resolve(true));await screen.findByText('Saved')})
  it('retains the frozen engine and tells the truth when native failure precedes idle capture',async()=>{journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy']}]);mount();await ready();await acquire();const p=ports.at(-1)!,frame=document.querySelector('iframe');act(()=>{portOptions.at(-1)!.onChanged('not-yet-durable','doc');portOptions.at(-1)!.onError('native_port_closed')});await screen.findByText('Capturing the last changes was not confirmed');expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(p.close).toHaveBeenCalled();expect(p.snapshot).not.toHaveBeenCalled();expect(journal.persist).not.toHaveBeenCalled();expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(client.close).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'Keep a copy'})).toBeInTheDocument();expect(screen.queryByText('Saved')).not.toBeInTheDocument();expect(screen.queryByText(/draft kept/i)).not.toBeInTheDocument()})
  it('retains concurrent pending text after editor receipt acknowledgement fails',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,ack=deferred<boolean>(),frame=document.querySelector('iframe');p.ack.mockReturnValueOnce(ack.promise);act(()=>portOptions.at(-1)!.onChanged('r1','doc'));await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce());act(()=>portOptions.at(-1)!.onChanged('r2-before-idle','doc'));await act(async()=>ack.resolve(false));await screen.findByText('Capturing the last changes was not confirmed');expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(client.close).not.toHaveBeenCalled();expect(screen.queryByText('Saved')).not.toBeInTheDocument()})
@@ -773,18 +773,18 @@ describe('native Word host authority and persistence',()=>{
  it('late lease or ACK callbacks and an unregistered old privacy callback cannot revive or purge a fresh mount',async()=>{const first=mount();await ready();await acquire();const p=ports.at(-1)!,oldPrivacy=privacyRetire!,oldOptions=portOptions.at(-1)!,frame=document.querySelector('iframe');act(()=>oldOptions.onError('native_port_closed'));await screen.findByText('Capturing the last changes was not confirmed');act(()=>{stream?.('lease',ownedLease);oldOptions.onReady?.('late');oldOptions.onChanged('late-revision','doc')});expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(p.setReadOnly.mock.calls.filter(c=>c[0]===false)).toHaveLength(1);first.unmount();expect(m.registerPrivacy.mock.results[0].value).toHaveBeenCalledOnce();mount();await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled());const fresh=document.querySelector('iframe');await act(async()=>oldPrivacy());expect(document.querySelector('iframe')).toBe(fresh);expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()})
  it('detaches bootstrap failures that never acquired a writable journal',async()=>{const boot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValueOnce(boot.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());act(()=>portOptions[0].onError('bootstrap_failure'));expect(document.querySelector('iframe')).toBeNull();expect(m.openJournal).not.toHaveBeenCalled();expect(client.close).toHaveBeenCalled();expect(screen.queryByText('Capturing the last changes was not confirmed')).not.toBeInTheDocument()})
  it('reuses the same pending privacy barrier until exact journal purge finishes',async()=>{mount();await ready();await acquire();const purge=deferred<void>();journal.revokeRead.mockReturnValueOnce(purge.promise);let first!:Promise<void>,second!:Promise<void>;act(()=>{first=privacyRetire!();second=privacyRetire!()});expect(first).toBe(second);let finished=false;void second.then(()=>{finished=true});await act(async()=>Promise.resolve());expect(finished).toBe(false);expect(journal.revokeRead).toHaveBeenCalledOnce();await act(async()=>{purge.resolve();await second});expect(finished).toBe(true)})
- it('a late old observer privacy event uses the closed custody fence and cannot purge a fresh writer',async()=>{mount();await ready();await acquire();const oldJournal=journal,oldStream=stream,oldPrivacy=privacyRetire!;oldJournal.close.mockImplementation(async()=>{oldJournal.revokeRead.mockRejectedValue(Error('closed_journal_scope_purge_forbidden'))});act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}));await waitFor(()=>expect(oldJournal.close).toHaveBeenCalled());const freshJournal=journalRig();journal=freshJournal;client=clientRig();m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(freshJournal);const fresh=mount();await waitFor(()=>expect(within(fresh.container).getByRole('button',{name:'Take over editing'})).toBeEnabled());fireEvent.click(within(fresh.container).getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(freshJournal.recovery).toHaveBeenCalled());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));const freshFrame=fresh.container.querySelector('iframe');act(()=>oldStream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(oldJournal.revokeRead).toHaveBeenCalledOnce());await expect(oldPrivacy()).resolves.toBeUndefined();expect(oldJournal.eraseOwnRow).toHaveBeenCalledOnce();expect(m.purge).not.toHaveBeenCalled();expect(freshJournal.revokeRead).not.toHaveBeenCalled();expect(freshJournal.eraseOwnRow).not.toHaveBeenCalled();expect(freshJournal.close).not.toHaveBeenCalled();expect(fresh.container.querySelector('iframe')).toBe(freshFrame);expect(freshFrame).not.toHaveAttribute('inert')})
+ it('a late old observer privacy event uses the closed custody fence and cannot purge a fresh writer',async()=>{mount();await ready();await acquire();const oldJournal=journal,oldStream=stream,oldPrivacy=privacyRetire!;oldJournal.close.mockImplementation(async()=>{oldJournal.revokeRead.mockRejectedValue(Error('closed_journal_scope_purge_forbidden'))});act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}));await waitFor(()=>expect(oldJournal.close).toHaveBeenCalled());const freshJournal=journalRig();journal=freshJournal;client=clientRig();m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(freshJournal);const fresh=mount();await waitFor(()=>expect(within(fresh.container).getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled());fireEvent.click(within(fresh.container).getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(freshJournal.recovery).toHaveBeenCalled());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));const freshFrame=fresh.container.querySelector('iframe');act(()=>oldStream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(oldJournal.revokeRead).toHaveBeenCalledOnce());await expect(oldPrivacy()).resolves.toBeUndefined();expect(oldJournal.eraseOwnRow).toHaveBeenCalledOnce();expect(m.purge).not.toHaveBeenCalled();expect(freshJournal.revokeRead).not.toHaveBeenCalled();expect(freshJournal.eraseOwnRow).not.toHaveBeenCalled();expect(freshJournal.close).not.toHaveBeenCalled();expect(fresh.container.querySelector('iframe')).toBe(freshFrame);expect(freshFrame).not.toHaveAttribute('inert')})
  it('refuses a mismatched application snapshot before mounting executable content',async()=>{client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'});mount();await screen.findByRole('alert');expect(document.querySelector('iframe')).toBeNull();expect(m.openJournal).not.toHaveBeenCalled()})
- it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
+ it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  // #5104: a slow browser store once left the person holding a lease in a tab that could not edit.
  const leaseFollowsActions=()=>client.leaseAction.mockImplementation(async(action:string)=>{const next=action==='acquire'?ownedLease:emptyLease;client.lease.mockResolvedValue(next);return next})
  it('retries a journal that fails to open once and then takes over normally (#5104)',async()=>{m.openJournal.mockRejectedValueOnce(Error('storage slow'));mount();await ready();await acquire();expect(m.openJournal).toHaveBeenCalledTimes(2);expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false);expect(screen.queryByRole('alert')).not.toBeInTheDocument()})
- it('gives a fresh lease back when the journal never opens, and offers the take-over again (#5104)',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));leaseFollowsActions();mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));expect(m.openJournal).toHaveBeenCalledTimes(3);expect(client.leaseAction).toHaveBeenCalledWith('release',{generation:ownedLease.generation},expect.any(AbortSignal));expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('The draft storage in this browser could not be opened');await waitFor(()=>expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled());expect(screen.queryByRole('button',{name:'Hand back'})).not.toBeInTheDocument()})
- it('says so when the unused lease cannot be confirmed released (#5104)',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));client.leaseAction.mockImplementation(async(action:string)=>{if(action==='release')throw Error('offline');client.lease.mockResolvedValue(ownedLease);return ownedLease});mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Editing could not be released with confirmation'));expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()})
- it('a journal that opens only after the take-over gave up never unlocks the editor (#5104)',async()=>{const late=deferred<ReturnType<typeof journalRig>>(),lateJournal=journalRig();m.openJournal.mockReturnValueOnce(late.promise).mockRejectedValue(Error('storage unavailable'));leaseFollowsActions();vi.useFakeTimers({shouldAdvanceTime:true});try{mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledOnce());await vi.advanceTimersByTimeAsync(5000);await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));await act(async()=>{late.resolve(lateJournal)});await waitFor(()=>expect(lateJournal.close).toHaveBeenCalledOnce());expect(lateJournal.recovery).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()}finally{vi.useRealTimers()}})
- it('a recovery read that fails closes the unused journal before giving the lease back, and a later take-over works (#5104)',async()=>{const failing=journalRig();failing.recovery.mockRejectedValue(Error('recovery transaction timed out'));m.openJournal.mockResolvedValueOnce(failing);leaseFollowsActions();mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));expect(failing.close).toHaveBeenCalledOnce();const closedAt=failing.close.mock.invocationCallOrder[0],releaseAt=client.leaseAction.mock.invocationCallOrder[client.leaseAction.mock.calls.findIndex(c=>c[0]==='release')];expect(closedAt).toBeLessThan(releaseAt);expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);await waitFor(()=>expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled());await acquire();expect(journal.recovery).toHaveBeenCalled();expect(journal.close).not.toHaveBeenCalled()})
- it('a take-over click while a re-acquire after accepting a proposal is still opening its journal starts no second take-over (#5104)',async()=>{const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const};client.proposals.mockResolvedValue([proposal]);rigNativeState='revision:opened';mount();await ready();await acquire();const pending=deferred<ReturnType<typeof journalRig>>();m.openJournal.mockReturnValueOnce(pending.promise);client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'});fireEvent.click(await screen.findByRole('button',{name:'Accept'}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledTimes(2));const acquires=()=>client.leaseAction.mock.calls.filter(c=>c[0]==='acquire').length;expect(acquires()).toBe(2);const takeOver=screen.queryAllByRole('button',{name:'Take over editing'});for(const button of takeOver)fireEvent.click(button);await act(async()=>{await Promise.resolve()});expect(acquires()).toBe(2);await act(async()=>pending.resolve(journalRig()));await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));expect(acquires()).toBe(2);expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false)})
- it('no release or hand-off runs while a re-acquire after accepting a proposal is still opening its journal (#5104)',async()=>{const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const};client.proposals.mockResolvedValue([proposal]);rigNativeState='revision:opened';mount();await ready();await acquire();const pending=deferred<ReturnType<typeof journalRig>>();m.openJournal.mockReturnValueOnce(pending.promise);client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'});fireEvent.click(await screen.findByRole('button',{name:'Accept'}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledTimes(2));for(const button of screen.queryAllByRole('button',{name:'Hand back'}))fireEvent.click(button);act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));for(const button of screen.queryAllByRole('button',{name:'Hand over to Jana'}))fireEvent.click(button);await act(async()=>{await Promise.resolve()});expect(client.leaseAction.mock.calls.some(c=>c[0]==='release'||c[0]==='handoff')).toBe(false);await act(async()=>pending.resolve(journalRig()));await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));expect(client.leaseAction.mock.calls.some(c=>c[0]==='release'||c[0]==='handoff')).toBe(false)})
+ it('gives a fresh lease back when the journal never opens, and offers the take-over again (#5104)',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));leaseFollowsActions();mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));expect(m.openJournal).toHaveBeenCalledTimes(3);expect(client.leaseAction).toHaveBeenCalledWith('release',{generation:ownedLease.generation},expect.any(AbortSignal));expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent('The draft storage in this browser could not be opened');await waitFor(()=>expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled());expect(screen.queryByRole('button',{name:/^(Hand back|Finish editing)$/})).not.toBeInTheDocument()})
+ it('says so when the unused lease cannot be confirmed released (#5104)',async()=>{m.openJournal.mockRejectedValue(Error('storage unavailable'));client.leaseAction.mockImplementation(async(action:string)=>{if(action==='release')throw Error('offline');client.lease.mockResolvedValue(ownedLease);return ownedLease});mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Editing could not be released with confirmation'));expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()})
+ it('a journal that opens only after the take-over gave up never unlocks the editor (#5104)',async()=>{const late=deferred<ReturnType<typeof journalRig>>(),lateJournal=journalRig();m.openJournal.mockReturnValueOnce(late.promise).mockRejectedValue(Error('storage unavailable'));leaseFollowsActions();vi.useFakeTimers({shouldAdvanceTime:true});try{mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledOnce());await vi.advanceTimersByTimeAsync(5000);await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));await act(async()=>{late.resolve(lateJournal)});await waitFor(()=>expect(lateJournal.close).toHaveBeenCalledOnce());expect(lateJournal.recovery).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()}finally{vi.useRealTimers()}})
+ it('a recovery read that fails closes the unused journal before giving the lease back, and a later take-over works (#5104)',async()=>{const failing=journalRig();failing.recovery.mockRejectedValue(Error('recovery transaction timed out'));m.openJournal.mockResolvedValueOnce(failing);leaseFollowsActions();mount();await ready();fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('The document is free again'));expect(failing.close).toHaveBeenCalledOnce();const closedAt=failing.close.mock.invocationCallOrder[0],releaseAt=client.leaseAction.mock.invocationCallOrder[client.leaseAction.mock.calls.findIndex(c=>c[0]==='release')];expect(closedAt).toBeLessThan(releaseAt);expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);await waitFor(()=>expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled());await acquire();expect(journal.recovery).toHaveBeenCalled();expect(journal.close).not.toHaveBeenCalled()})
+ it('a take-over click while a re-acquire after accepting a proposal is still opening its journal starts no second take-over (#5104)',async()=>{const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const};client.proposals.mockResolvedValue([proposal]);rigNativeState='revision:opened';mount();await ready();await acquire();const pending=deferred<ReturnType<typeof journalRig>>();m.openJournal.mockReturnValueOnce(pending.promise);client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'});fireEvent.click(await screen.findByRole('button',{name:'Accept'}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledTimes(2));const acquires=()=>client.leaseAction.mock.calls.filter(c=>c[0]==='acquire').length;expect(acquires()).toBe(2);const takeOver=screen.queryAllByRole('button',{name:/^(Take over editing|Edit)$/});for(const button of takeOver)fireEvent.click(button);await act(async()=>{await Promise.resolve()});expect(acquires()).toBe(2);await act(async()=>pending.resolve(journalRig()));await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));expect(acquires()).toBe(2);expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false)})
+ it('no release or hand-off runs while a re-acquire after accepting a proposal is still opening its journal (#5104)',async()=>{const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const};client.proposals.mockResolvedValue([proposal]);rigNativeState='revision:opened';mount();await ready();await acquire();const pending=deferred<ReturnType<typeof journalRig>>();m.openJournal.mockReturnValueOnce(pending.promise);client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'});fireEvent.click(await screen.findByRole('button',{name:'Accept'}));await waitFor(()=>expect(m.openJournal).toHaveBeenCalledTimes(2));for(const button of screen.queryAllByRole('button',{name:/^(Hand back|Finish editing)$/}))fireEvent.click(button);act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));for(const button of screen.queryAllByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))fireEvent.click(button);await act(async()=>{await Promise.resolve()});expect(client.leaseAction.mock.calls.some(c=>c[0]==='release'||c[0]==='handoff')).toBe(false);await act(async()=>pending.resolve(journalRig()));await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));expect(client.leaseAction.mock.calls.some(c=>c[0]==='release'||c[0]==='handoff')).toBe(false)})
  it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})));expect(journal.discardRecovered).not.toHaveBeenCalledWith(expect.objectContaining({draft:other}));expect(screen.getAllByRole('button',{name:'Compare'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
  it('reconciles the lost save before closing the client when the connection retires',async()=>{mount();await ready();await acquire();client.save.mockImplementationOnce(()=>new Promise(()=>{}));client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>receipt(r));act(()=>portOptions.at(-1)!.onChanged('pending','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',reason:'session_closed'}));await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(client.reconcile).toHaveBeenCalled();expect(client.reconcile.mock.invocationCallOrder[0]).toBeLessThan(client.close.mock.invocationCallOrder[0])})
  // The button sits outside the frame; a person who pressed it keeps typing into the document.
@@ -827,9 +827,9 @@ describe('native Word host authority and persistence',()=>{
  })
  it('offers old local recovery only for compare or copy and never publishes it on mount or acquire',async()=>{journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy']}]);mount();await ready();expect(m.openJournal).not.toHaveBeenCalled();await acquire();await screen.findByRole('button',{name:'Compare'});expect(screen.getByRole('button',{name:'Keep a copy'})).toBeInTheDocument();expect(client.save).not.toHaveBeenCalled();expect(journal.persist).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Compare'}));const server=await screen.findByRole('textbox',{name:'Server version'});expect(server).toHaveAttribute('readonly');expect(screen.getByRole('textbox',{name:'Local draft'})).toHaveAttribute('readonly');expect(server).toHaveValue('{\"body\":[]}');expect(client.save).not.toHaveBeenCalled()})
  it('does not send a whole version when native engine validation fails',async()=>{mount();await ready();await acquire();ports.at(-1)!.validate.mockRejectedValueOnce(Error('invalid engine state'));act(()=>portOptions.at(-1)!.onChanged('r2','doc'));await waitFor(()=>expect(ports.at(-1)!.validate).toHaveBeenCalledOnce());await screen.findByText('Unsaved draft');expect(client.save).not.toHaveBeenCalled();expect(screen.queryByText('Saved')).not.toBeInTheDocument()})
- it('awaits pending-draft IDB and the applied native read-only ACK before server handoff and journal release',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,disk=deferred<void>(),guard=deferred<boolean>();journal.persist.mockReturnValueOnce(disk.promise);p.setReadOnly.mockImplementationOnce(()=>guard.promise);client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,generation:'9007199254740996',holder:{actor_id:'user:other',display_name:'Jana',kind:'human'}});return emptyLease});act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}));await waitFor(()=>expect(journal.persist).toHaveBeenCalledOnce());expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')?.style.pointerEvents).toBe('none');await act(async()=>disk.resolve());await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)));expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);await act(async()=>guard.resolve(true));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true));expect(journal.revokeRead).not.toHaveBeenCalled();await waitFor(()=>expect(journal.close).toHaveBeenCalled());const handoffIndex=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff');expect(client.leaseAction.mock.invocationCallOrder[handoffIndex]).toBeLessThan(journal.close.mock.invocationCallOrder[0]);expect(client.save).toHaveBeenCalledOnce()})
- it('commits and acknowledges the last edit before handing custody to another human before idle autosave',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,saved=new TextEncoder().encode('{"body":[1]}'),initial=await client.read();client.save.mockImplementationOnce(async(r:NativeSaveRequest)=>{client.read.mockResolvedValue({...initial,version:'2',bytes:r.bytes});return receipt(r)});client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease});act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));await screen.findByRole('button',{name:'Hand over to Jana'});act(()=>portOptions.at(-1)!.onChanged('last-unflushed-edit','doc'));fireEvent.click(screen.getByRole('button',{name:'Hand over to Jana'}));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true));expect(client.save).toHaveBeenCalled();expect(p.ack).toHaveBeenCalled();const handoff=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff');expect(client.save.mock.invocationCallOrder[0]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff]);expect(p.ack.mock.invocationCallOrder[0]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff]);await waitFor(()=>expect(ports.at(-1)).not.toBe(p));await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled());expect(ports.at(-1)!.bootstrap.mock.calls[0][0]).toEqual(saved);expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(await client.read()).toMatchObject({version:'2',bytes:saved})})
- it('awaits successful editor receipt acknowledgement before transferring custody',async()=>{mount();await ready();await acquire();const acknowledgement=deferred<boolean>(),p=ports.at(-1)!;p.ack.mockReturnValueOnce(acknowledgement.promise);act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}));await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce());expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);await act(async()=>acknowledgement.resolve(true));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))})
+ it('awaits pending-draft IDB and the applied native read-only ACK before server handoff and journal release',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,disk=deferred<void>(),guard=deferred<boolean>();journal.persist.mockReturnValueOnce(disk.promise);p.setReadOnly.mockImplementationOnce(()=>guard.promise);client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,generation:'9007199254740996',holder:{actor_id:'user:other',display_name:'Jana',kind:'human'}});return emptyLease});act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await waitFor(()=>expect(journal.persist).toHaveBeenCalledOnce());expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')?.style.pointerEvents).toBe('none');await act(async()=>disk.resolve());await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)));expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);await act(async()=>guard.resolve(true));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true));expect(journal.revokeRead).not.toHaveBeenCalled();await waitFor(()=>expect(journal.close).toHaveBeenCalled());const handoffIndex=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff');expect(client.leaseAction.mock.invocationCallOrder[handoffIndex]).toBeLessThan(journal.close.mock.invocationCallOrder[0]);expect(client.save).toHaveBeenCalledOnce()})
+ it('commits and acknowledges the last edit before handing custody to another human before idle autosave',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,saved=new TextEncoder().encode('{"body":[1]}'),initial=await client.read();client.save.mockImplementationOnce(async(r:NativeSaveRequest)=>{client.read.mockResolvedValue({...initial,version:'2',bytes:r.bytes});return receipt(r)});client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease});act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/});act(()=>portOptions.at(-1)!.onChanged('last-unflushed-edit','doc'));fireEvent.click(screen.getByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true));expect(client.save).toHaveBeenCalled();expect(p.ack).toHaveBeenCalled();const handoff=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff');expect(client.save.mock.invocationCallOrder[0]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff]);expect(p.ack.mock.invocationCallOrder[0]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff]);await waitFor(()=>expect(ports.at(-1)).not.toBe(p));await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled());expect(ports.at(-1)!.bootstrap.mock.calls[0][0]).toEqual(saved);expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(await client.read()).toMatchObject({version:'2',bytes:saved})})
+ it('awaits successful editor receipt acknowledgement before transferring custody',async()=>{mount();await ready();await acquire();const acknowledgement=deferred<boolean>(),p=ports.at(-1)!;p.ack.mockReturnValueOnce(acknowledgement.promise);act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce());expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);await act(async()=>acknowledgement.resolve(true));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))})
  describe('the first click or keystroke in a Sheet takes over editing',()=>{
   type Attempts={onEditAttempt?:(kind:'pointer'|'key')=>void;onHeldInputDropped?:(reason:string)=>void}
   const attempt=(kind:'pointer'|'key'='key')=>act(()=>(portOptions.at(-1) as unknown as Attempts).onEditAttempt!(kind))
@@ -930,7 +930,7 @@ describe('native Word host authority and persistence',()=>{
   ] as const)('%s: the bar and a click offer only what the server allows',async(_,lease,mayEdit)=>{
    client.lease.mockResolvedValue(lease)
    mount();await readyReader()
-   const takeOver=()=>screen.queryByRole('button',{name:'Take over editing'})
+   const takeOver=()=>screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})
    if(mayEdit){
     await waitFor(()=>expect(takeOver()).toBeEnabled())
     rebindable();attempt()
@@ -990,13 +990,13 @@ describe('native Word host authority and persistence',()=>{
    const ref=mountWithHandBack();await ready();await acquire()
    client.leaseAction.mockImplementation(async(action:string)=>{if(action==='release')client.lease.mockResolvedValue(emptyLease);return emptyLease})
    await act(async()=>{await ref.current!()})
-   await waitFor(()=>expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled())
+   await waitFor(()=>expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled())
    expect(client.leaseAction.mock.calls.filter(c=>c[0]==='acquire')).toHaveLength(1)
   })
  })
- it('flushes and acknowledges the final whole version before explicit release too',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!;act(()=>portOptions.at(-1)!.onChanged('last-before-release','doc'));fireEvent.click(screen.getByRole('button',{name:'Hand back'}));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true));expect(client.save).toHaveBeenCalled();expect(p.ack).toHaveBeenCalled()})
- it('never hands off an uncertain final save and retains the original private draft',async()=>{mount();await ready();await acquire();client.save.mockRejectedValueOnce(Error('lost ACK'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}));await screen.findByRole('alert');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull();expect(screen.queryByText('Saved')).not.toBeInTheDocument()})
- it('a failed durable capture keeps the guarded native frame and never transfers custody',async()=>{mount();await ready();await acquire();journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}));await screen.findByText('The draft cannot be captured safely. The handover did not happen.');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')).not.toBeNull();expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal));expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
+ it('flushes and acknowledges the final whole version before explicit release too',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!;act(()=>portOptions.at(-1)!.onChanged('last-before-release','doc'));fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}));await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true));expect(client.save).toHaveBeenCalled();expect(p.ack).toHaveBeenCalled()})
+ it('never hands off an uncertain final save and retains the original private draft',async()=>{mount();await ready();await acquire();client.save.mockRejectedValueOnce(Error('lost ACK'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await screen.findByRole('alert');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull();expect(screen.queryByText('Saved')).not.toBeInTheDocument()})
+ it('a failed durable capture keeps the guarded native frame and never transfers custody',async()=>{mount();await ready();await acquire();journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await screen.findByText('The draft cannot be captured safely. The handover did not happen.');expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false);expect(document.querySelector('iframe')).not.toBeNull();expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal));expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('explicit read retirement immediately removes content and purges without awaiting a hung native capture',async()=>{mount();await ready();await acquire();ports.at(-1)!.snapshot.mockReturnValueOnce(new Promise(()=>{}));act(()=>stream?.('lease',{...ownedLease,can_write:false}));await waitFor(()=>expect(ports.at(-1)!.snapshot).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(document.querySelector('iframe')).toBeNull());expect(journal.revokeRead).toHaveBeenCalledOnce();expect(client.save).not.toHaveBeenCalled()})
  it('hands off after a changed pulse during an identical final snapshot settles locally without a duplicate save',async()=>{
   mount();await ready();await acquire()
@@ -1009,7 +1009,7 @@ describe('native Word host authority and persistence',()=>{
   })
   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
   act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-  fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+  fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
   expect(captures).toBeGreaterThanOrEqual(2)
   expect(client.save).toHaveBeenCalledOnce()
@@ -1026,12 +1026,12 @@ describe('native Word host authority and persistence',()=>{
   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:action==='handoff'?{actor_id:'user:other',display_name:'Jana',kind:'human'}:null,generation:'9007199254740996'});return emptyLease})
   if(action==='handoff'){
    act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-   fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
-  }else fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+   fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
+  }else fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]===action)).toBe(true))
   expect(p.snapshot).toHaveBeenCalled()
   expect(client.save).not.toHaveBeenCalled()
-  expect(screen.queryByText('The result of the action was not confirmed. The draft is kept.')).not.toBeInTheDocument()
+  expect(screen.queryByText('Couldn’t confirm changes.')).not.toBeInTheDocument()
  })
  // The final save is already proven and write is retired, so a failed POST can
  // only be sent again. The other person must not wait for this tab to close.
@@ -1043,12 +1043,12 @@ describe('native Word host authority and persistence',()=>{
   const press=async()=>{
    if(action==='handoff'){
     act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-    fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
-   }else fireEvent.click(await screen.findByRole('button',{name:'Hand back'}))
+    fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
+   }else fireEvent.click(await screen.findByRole('button',{name:/^(Hand back|Finish editing)$/}))
   }
   await press()
   await waitFor(()=>expect(client.leaseAction.mock.calls.filter(c=>c[0]===action)).toHaveLength(1))
-  await screen.findByText('The result of the action was not confirmed. The draft is kept.')
+  await screen.findByText('Couldn’t confirm changes.')
   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:action==='handoff'?{actor_id:'user:other',display_name:'Jana',kind:'human'}:null,generation:'9007199254740996'});return {}})
   await press()
   await waitFor(()=>expect(client.leaseAction.mock.calls.filter(c=>c[0]===action)).toHaveLength(2))
@@ -1067,7 +1067,7 @@ describe('native Word host authority and persistence',()=>{
    await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce())
    client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:null,generation:'9007199254740996'});return emptyLease})
    const captures=p.snapshot.mock.calls.length
-   fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+   fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
    await waitFor(()=>expect(p.snapshot.mock.calls.length).toBeGreaterThan(captures))
    await act(async()=>{await vi.advanceTimersByTimeAsync(50)})
    expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false)
@@ -1091,7 +1091,7 @@ describe('native Word host authority and persistence',()=>{
    await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
    client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
    act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-   fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+   fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
    await waitFor(()=>expect(p.validate).toHaveBeenCalledTimes(2))
    await act(async()=>{})
    expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false)
@@ -1114,7 +1114,7 @@ describe('native Word host authority and persistence',()=>{
    p.ack.mockReturnValueOnce(acknowledgement.promise)
    client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
    act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-   act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+   act(()=>portOptions.at(-1)!.onChanged('final-edit','doc'));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
    await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce())
    await act(async()=>{await vi.advanceTimersByTimeAsync(30000)})
    expect(client.reauthorize).toHaveBeenCalledOnce()
@@ -1359,7 +1359,7 @@ describe('write access removed while read access remains (#4348)',()=>{
   expect(screen.getByRole('status')).toHaveTextContent('Read-only')
   expect(screen.getByRole('alert')).toHaveTextContent('Edit access was removed')
   expect(screen.queryByText(/Editor disconnected/)).not.toBeInTheDocument()
-  expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})).not.toBeInTheDocument()
   expect(screen.getByRole('button',{name:'Keep a copy'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Compare'})).toBeInTheDocument()
   expect(journal.revokeRead).not.toHaveBeenCalled()
   // The fresh read view stays subject to read authority: losing read stops delivery and never reconnects.
@@ -1561,7 +1561,7 @@ describe('agent proposals while a person holds the editor (#4480)',()=>{
  it('releases an untouched normalized document without writing a version (#4699)',async()=>{
   rigNativeState='revision:opened'
   mount();await ready();await acquire()
-  fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
   expect(client.save).not.toHaveBeenCalled()
  })
@@ -1569,7 +1569,7 @@ describe('agent proposals while a person holds the editor (#4480)',()=>{
   rigNativeState='revision:opened'
   mount();await ready();await acquire()
   ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[2]}'),editorRevision:'snapshot-2',documentId:'doc',nativeState:'revision:typed'})
-  fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
   expect(client.save).toHaveBeenCalledOnce()
  })
@@ -1644,7 +1644,7 @@ describe('unchanged-content transfer (G4 B1/B2)',()=>{
  it('B1: releases custody when the editor content is identical to the loaded version',async()=>{
   mount();await ready();await acquire()
   ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
-  fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
   expect(client.save).not.toHaveBeenCalled()
  })
@@ -1660,7 +1660,7 @@ describe('unchanged-content transfer (G4 B1/B2)',()=>{
   mount();await ready();await acquire();const p=ports.at(-1)!
   act(()=>portOptions.at(-1)!.onChanged('edit','doc'))
   await screen.findByText('Saved');expect(client.save).toHaveBeenCalledOnce()
-  fireEvent.click(screen.getByRole('button',{name:'Hand back'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
   expect(client.save).toHaveBeenCalledOnce();expect(p.ack).toHaveBeenCalledOnce()
  })
@@ -1678,7 +1678,7 @@ describe('unchanged-content transfer (G4 B1/B2)',()=>{
   ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
   act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
-  fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+  fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
   expect(client.save).not.toHaveBeenCalled()
  })
@@ -1737,7 +1737,7 @@ describe('native host lease expiry re-verification',()=>{
    if(server==='lost')client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'})
    await act(async()=>{await vi.advanceTimersByTimeAsync(16_000)})
    await waitFor(()=>expect(client.lease.mock.calls.length).toBeGreaterThan(checks))
-   if(server==='renewed'){await act(async()=>{await vi.advanceTimersByTimeAsync(2_000)});expect(p.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything());expect(screen.getByRole('button',{name:'Hand back'})).toBeInTheDocument()}
+   if(server==='renewed'){await act(async()=>{await vi.advanceTimersByTimeAsync(2_000)});expect(p.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything());expect(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/})).toBeInTheDocument()}
    else await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
   }finally{vi.useRealTimers()}
  })
@@ -1790,8 +1790,8 @@ describe('native host lease expiry re-verification',()=>{
    expect(client.read.mock.calls.length).toBe(reads)
    expect(ports.at(-1)).toBe(p)
    expect(screen.queryByText(/Read-only/)).not.toBeInTheDocument()
-   expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
-   expect(screen.getByRole('button',{name:'Hand back'})).toBeInTheDocument()
+   expect(screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})).not.toBeInTheDocument()
+   expect(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/})).toBeInTheDocument()
   }finally{vi.useRealTimers()}
  })
  // Retirement starts synchronously with freezeInput (the frame turns inert);
@@ -1860,7 +1860,7 @@ describe('native agent start gating',()=>{
  it('allows a start while a person holds the document and names the holder kind',async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());await allowed(true);expect(start()).toHaveAttribute('data-holder','human')})
  it('allows no start on a read-only document',async()=>{client.lease.mockResolvedValue({...emptyLease,can_edit:false});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());await screen.findByText('Read-only',{selector:'[role="status"] span'});expect(start()).toHaveAttribute('data-enabled','false')})
  it('withdraws the start once the connection is retired',async()=>{mount();await ready();await allowed(true);await act(async()=>stream?.('session_retired',{}));await allowed(false)})
- it('withdraws the start while a blocked host keeps an uncaptured draft',async()=>{mount();await ready();await acquire();await allowed(true);journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}));await screen.findByText('The draft cannot be captured safely. The handover did not happen.');await allowed(false)})
+ it('withdraws the start while a blocked host keeps an uncaptured draft',async()=>{mount();await ready();await acquire();await allowed(true);journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}));await screen.findByText('The draft cannot be captured safely. The handover did not happen.');await allowed(false)})
  it('withdraws the start until retiring the write has finished',async()=>{
   mount();await ready();await acquire();await allowed(true)
   const capture=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();ports.at(-1)!.snapshot.mockReturnValue(capture.promise)
@@ -1886,22 +1886,22 @@ describe('application turned off while the editor is open',()=>{
   const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
   mount();await ready()
   client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_draining','wordcraft'))
-  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}))
+  fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}))
   expect(await screen.findByText(WORD_OFF)).toBeInTheDocument()
   expect(screen.queryByText(/The result of the action was not confirmed/)).not.toBeInTheDocument()
-  expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^(Take over editing|Edit)$/})).not.toBeInTheDocument()
   expect(within(screen.getByRole('toolbar',{name:'Document editing'})).getByText('Read-only')).toBeInTheDocument()
   expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
  })
  it('a refused edit request on a Sheet says Sheet is off and stops offering it',async()=>{
   const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
   client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson})
-  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  mount();const ask=await screen.findByRole('button',{name:/^Request edit(ing)?$/})
   await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
   client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_disabled','gridcraft'))
   fireEvent.click(ask)
   expect(await screen.findByText(SHEET_OFF)).toBeInTheDocument()
-  expect(screen.queryByRole('button',{name:'Request edit'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/^Request edit(ing)?$/})).not.toBeInTheDocument()
  })
  it('the holder keeps editing and saving through the drain when a hand-over is refused',async()=>{
   const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
@@ -1911,12 +1911,12 @@ describe('application turned off while the editor is open',()=>{
   // (TestCraftNativeDrainKeepsOnlyTheHoldingSession); a hand-over is refused.
   m.apiFetch.mockImplementation(async(url:string)=>String(url).includes('/craft/availability')?new Response(JSON.stringify({enabled:true,can_edit:false,application:'wordcraft',edit_refusal:'app_draining',applications:{wordcraft:'draining',gridcraft:'open'}})):undefined)
   client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_draining','wordcraft'))
-  fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+  fireEvent.click(await screen.findByRole('button',{name:/^(Hand over to Jana|Pass editing to Jana)$/}))
   expect(await screen.findByText('An administrator turned Word off on this server, so editing cannot be handed over. You can keep editing; your changes keep saving until it closes.')).toBeInTheDocument()
   expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false)
   expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything())
   await waitFor(()=>expect(screen.getByText('Ready to edit')).toBeInTheDocument())
-  expect(screen.getByRole('button',{name:'Hand back'})).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:/^(Hand back|Finish editing)$/})).toBeInTheDocument()
   const saves=client.save.mock.calls.length
   ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[3]}'),editorRevision:'drain-edit',documentId:'doc'})
   act(()=>portOptions.at(-1)!.onChanged('drain-edit','doc'))

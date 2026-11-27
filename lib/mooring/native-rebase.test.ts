@@ -38,6 +38,17 @@ describe("replaying others' saved versions over the person's unsaved work", () =
     expect(d.execute).toHaveBeenCalledWith([clear], { keep: "human", label: "Morgan: change", baseRevision: "doc:4" }, d.signal)
     expect(d.rebaseBase).toHaveBeenCalledWith("6", HASH)
   })
+  it("gives precedence only to the agent's authorized operations in a chat Sheet", async () => {
+    const replayed = { revision: "doc:9", savedRevision: "doc:saved-8", dirty: false, conflicts: [{ sheet: "L", cell: "B9" }] }
+    const d = deps(log(), { keep: "agent", execute: vi.fn(async () => replayed) })
+    await expect(rebaseOverLocal(d)).resolves.toMatchObject({ kind: "rebased", version: "6", conflicts: replayed.conflicts })
+    expect(d.execute).toHaveBeenCalledWith([clear], { keep: "agent", label: "Morgan: change", baseRevision: "doc:4" }, d.signal)
+    expect(d.rebaseBase).toHaveBeenCalledWith("6", HASH, replayed)
+
+    const human = deps(log({}, [{ version: 6, base_version: 5, actor_kind: "human", engine_pin: "pin", replayable: true, ops: [clear] }]), { keep: "agent" })
+    await expect(rebaseOverLocal(human)).resolves.toMatchObject({ kind: "layout" })
+    expect(human.execute).not.toHaveBeenCalled()
+  })
   it("leaves the person's work untouched when a version cannot be replayed, and offers the choice", async () => {
     for (const answer of [log({ replayable: false }, [{ version: 6, base_version: 5, replayable: false, engine_pin: "pin" }])]) {
       const d = deps(answer)

@@ -59,6 +59,7 @@ installMemoryStorage()
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } })
 beforeEach(() => {
+  sessionStorage.clear()
   extra.metadata = undefined
   access.value = { allowed: true, max_sheets: 1 }
   refs.value = { refs: [] }
@@ -81,37 +82,33 @@ afterEach(() => { cleanup() })
 const openSheet = async () => {
   render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind="direct" />)
   fireEvent.click(await screen.findByRole("button", { name: "Open Sheet" }))
-  const toggle = await screen.findByRole("switch", { name: /Let the agent change it/ })
+  const toggle = await screen.findByRole("switch", { name: /Allow agent edits/ })
   // Usable once the server answered and the editor said which version it shows.
   await waitFor(() => expect(toggle).toBeEnabled())
   return toggle
 }
 const send = () => fireEvent.click(screen.getByRole("button", { name: "Send message" }))
 
-it("sends nothing about the Sheet while the choice is off, its default", async () => {
-  expect(await openSheet()).not.toBeChecked()
-  send()
-  expect(chat.sendMessage).toHaveBeenCalledWith("Update it")
-})
-
-it("sends exactly the Sheet once chosen, for that message only", async () => {
-  fireEvent.click(await openSheet())
+it("defaults to the visible Sheet version and lets the person turn agent edits off", async () => {
+  const toggle = await openSheet()
+  expect(toggle).toBeChecked()
   send()
   expect(chat.sendMessage).toHaveBeenLastCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "3" }] })
-  await waitFor(() => expect(screen.getByRole("switch")).not.toBeChecked())
+  fireEvent.click(toggle)
   send()
   expect(chat.sendMessage).toHaveBeenLastCalledWith("Update it")
+  expect(toggle).not.toBeChecked()
 })
 
 it("keeps the choice when the message did not go", async () => {
   chat.sendMessage.mockReturnValue(false)
-  fireEvent.click(await openSheet())
+  await openSheet()
   send()
   expect(screen.getByRole("switch")).toBeChecked()
 })
 
 it("never drops the choice silently: a message that carries something else is held and says why", async () => {
-  fireEvent.click(await openSheet())
+  await openSheet()
   extra.metadata = { document_create_intent: { name: "x" } }
   send()
   expect(chat.sendMessage).not.toHaveBeenCalled()
@@ -119,7 +116,7 @@ it("never drops the choice silently: a message that carries something else is he
 })
 
 it("removed from the message, the Sheet stays open and is not sent", async () => {
-  fireEvent.click(await openSheet())
+  await openSheet()
   fireEvent.click(screen.getByRole("button", { name: "Remove Quarterly plan from this message" }))
   expect(screen.queryByRole("switch")).toBeNull()
   expect(screen.getByTestId("sheet-editor")).toBeInTheDocument()
@@ -137,84 +134,13 @@ it("offers an added workbook as a Sheet and still attaches it; an ordinary file 
   expect(await screen.findByTestId("sheet-offer")).toHaveTextContent("Budget.xlsx")
 })
 
-// The agent may start the moment the message arrives, so the Sheet must be free by then, confirmed by the server.
-it("sends only after the server confirmed the person's edit access went back", async () => {
-  let settle!: (v: { state: string }) => void
-  editor.handBack = vi.fn(() => new Promise<{ state: string }>(resolve => { settle = resolve }))
-  fireEvent.click(await openSheet())
-  send()
-  await waitFor(() => expect(editor.handBack).toHaveBeenCalledTimes(1))
-  expect(chat.sendMessage).not.toHaveBeenCalled()
-  expect(screen.getByRole("switch")).toBeDisabled()
-  await act(async () => settle({ state: "returned" }))
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "3" }] }))
-  expect(chat.sendMessage).toHaveBeenCalledTimes(1)
-})
-
-// Consent to change the Sheet never goes out on an unconfirmed hand-over: the message waits, says why, and the person chooses.
-it.each([
-  ["unsaved", async () => ({ state: "kept", reason: "unsaved" }), /not saved/],
-  ["busy", async () => ({ state: "kept", reason: "busy" }), /still working/],
-  ["unconfirmed", async () => ({ state: "kept", reason: "unconfirmed" }), /not confirmed/],
-  ["failed", async () => { throw Error("offline") }, /not confirmed/],
-] as const)("holds the message when the hand-over was not confirmed (%s), says why and offers the choices", async (_, handBack, text) => {
-  editor.handBack = vi.fn(handBack) as typeof editor.handBack
-  fireEvent.click(await openSheet())
-  send()
-  const alert = await screen.findByRole("alert")
-  expect(alert).toHaveTextContent(text)
-  expect(chat.sendMessage).not.toHaveBeenCalled()
-  expect(within(alert).getByRole("button", { name: "Send text only" })).toBeInTheDocument()
-  expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument()
-})
-
-it("sends only the text, without the Sheet, when the person chooses that", async () => {
+it("binds consent to the visible version without handing editing back while a local draft is pending", async () => {
   editor.handBack = vi.fn(async () => ({ state: "kept", reason: "unsaved" }))
-  fireEvent.click(await openSheet())
-  send()
-  fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Send text only" }))
-  send()
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1))
-  expect(chat.sendMessage).toHaveBeenCalledWith("Update it")
-  expect(editor.handBack).toHaveBeenCalledTimes(1)
-  expect(screen.getByRole("switch")).not.toBeChecked()
-})
-
-it("tries the hand-over again and sends with the Sheet once it is confirmed", async () => {
-  editor.handBack = vi.fn().mockResolvedValueOnce({ state: "kept", reason: "busy" }).mockResolvedValueOnce({ state: "returned" })
-  fireEvent.click(await openSheet())
-  send()
-  fireEvent.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Try again" }))
-  send()
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "3" }] }))
-  expect(screen.queryByRole("alert")).toBeNull()
-})
-
-it("a hand-over that never answers holds the message too", async () => {
-  editor.handBack = vi.fn(() => new Promise<{ state: string }>(() => {}))
-  fireEvent.click(await openSheet())
-  // Fake time only once the panel is ready, so the waits above run on real time.
-  vi.useFakeTimers({ shouldAdvanceTime: true })
-  try {
-    send()
-    await act(async () => { await vi.advanceTimersByTimeAsync(13_000) })
-    expect(await screen.findByRole("alert")).toHaveTextContent(/not confirmed/)
-    expect(chat.sendMessage).not.toHaveBeenCalled()
-  } finally { vi.useRealTimers() }
-})
-
-it("a message that does not let the agent change the Sheet takes nothing from the person", async () => {
-  editor.handBack = vi.fn(async () => ({ state: "returned" }))
-  await openSheet()
-  send()
-  expect(chat.sendMessage).toHaveBeenCalledWith("Update it")
-  expect(editor.handBack).not.toHaveBeenCalled()
-})
-
-it("says before sending that unsaved work keeps the Sheet with the person", async () => {
-  fireEvent.click(await openSheet())
+  expect(await openSheet()).toBeChecked()
   act(() => editor.status?.({ ...opened, dirty: true, editing: true, holderIsMe: true }))
-  expect(await screen.findByText(/last change is not saved yet/)).toBeInTheDocument()
+  send()
+  expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "3" }] })
+  expect(editor.handBack).not.toHaveBeenCalled()
 })
 
 it("finds a Sheet opened here again after a reload", async () => {
@@ -239,21 +165,11 @@ it("asks the server about this Sheet in this chat, and offers no choice it would
   expect(chat.sendMessage).toHaveBeenCalledWith("Update it")
 })
 
-it("asks again when someone else changed the Sheet after the person allowed it, and sends nothing until then", async () => {
-  fireEvent.click(await openSheet())
-  await act(async () => { editor.status?.({ ...opened, version: "4" }) })
-  expect(screen.getByRole("switch")).not.toBeChecked()
-  expect(screen.getByText(/The Sheet changed after you allowed the agent to change it/)).toBeInTheDocument()
+it("binds the next message to the latest visible committed version", async () => {
+  expect(await openSheet()).toBeChecked()
+  act(() => editor.status?.({ ...opened, version: "4" }))
   send()
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it"))
-})
-
-it("sends the version saved while handing over, which the person saw", async () => {
-  editor.handBack = vi.fn(async () => { editor.status?.({ ...opened, holderIsMe: true, savedVersion: "4", version: "4" }); return { state: "returned" } })
-  fireEvent.click(await openSheet())
-  await act(async () => { editor.status?.({ ...opened, holderIsMe: true, editing: true }) })
-  send()
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "4" }] }))
+  expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "4" }] })
 })
 
 it("lists the Sheets the server says messages in this conversation carried, in any browser", async () => {
@@ -277,21 +193,21 @@ describe("on a phone, where no Sheet is open beside the chat", () => {
     render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind="direct" />)
     const links = await screen.findByRole("region", { name: "Sheets in this conversation" })
     fireEvent.click(within(links).getByRole("button", { name: "Use Quarterly plan with the next message" }))
-    const toggle = await screen.findByRole("switch", { name: /Let the agent change it/ })
+    const toggle = await screen.findByRole("switch", { name: /Allow agent edits/ })
     await waitFor(() => expect(toggle).toBeEnabled())
     return toggle
   }
 
   it("names the version the leave is for, who saved it and when, and offers to view it first", async () => {
     const toggle = await choose()
-    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeChecked()
     const chip = screen.getByRole("group", { name: "Sheet for this message" })
     expect(chip).toHaveTextContent(/Version 12, saved .* by Dana/)
     expect(within(chip).getByRole("link", { name: "View it first" }).getAttribute("href")).toContain("pg_1")
   })
 
   it("sends the version shown", async () => {
-    fireEvent.click(await choose())
+    await choose()
     send()
     await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "12" }] }))
   })
@@ -300,21 +216,11 @@ describe("on a phone, where no Sheet is open beside the chat", () => {
     phone.value = true; refs.value = listed; access.value = { allowed: true, max_sheets: 1 }
     render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind="direct" />)
     fireEvent.click(within(await screen.findByRole("region", { name: "Sheets in this conversation" })).getByRole("button", { name: "Use Quarterly plan with the next message" }))
-    const toggle = await screen.findByRole("switch", { name: /Let the agent change it/ })
-    fireEvent.click(toggle)
+    const toggle = await screen.findByRole("switch", { name: /Allow agent edits/ })
+    expect(toggle).toBeDisabled()
     send()
-    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it"))
+    expect(chat.sendMessage).not.toHaveBeenCalled()
   })
-})
-
-it("a second press of Send while the Sheet is being handed over sends nothing more", async () => {
-  let settle!: (v: { state: string }) => void
-  editor.handBack = vi.fn(() => new Promise<{ state: string }>(resolve => { settle = resolve }))
-  fireEvent.click(await openSheet())
-  send(); send()
-  await waitFor(() => expect(editor.handBack).toHaveBeenCalledTimes(1))
-  await act(async () => settle({ state: "returned" }))
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledTimes(1))
 })
 
 // A client starts like this: a new chat, then the workbook. The draft has no row until something creates it.
@@ -357,9 +263,9 @@ describe("in a new chat that has not sent anything yet", () => {
     expect(screen.queryByRole("button", { name: "Open Sheet" })).toBeNull()
     act(() => { intake.take?.([book()]) })
     fireEvent.click(await screen.findByRole("button", { name: "Open Sheet" }))
-    const toggle = await screen.findByRole("switch", { name: /Let the agent change it/ })
+    const toggle = await screen.findByRole("switch", { name: /Allow agent edits/ })
     await waitFor(() => expect(toggle).toBeEnabled())
-    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeChecked()
   })
 
   it.each([["refused", 403, "trusted"], ["not found", 404, "trusted"], ["restricted", 201, "restricted"]])("offers nothing when the server %s the conversation", async (_name, create, mode) => {
@@ -374,19 +280,21 @@ describe("in a new chat that has not sent anything yet", () => {
 })
 
 // The person presses Send while the Sheet exists but its editor is still
-// opening. The message waits for the version, from the editor or from the server, and goes with the Sheet; never without.
+// opening. The message waits for the version the editor actually displays.
 describe("sent while the Sheet's editor is still opening", () => {
   const openingSheet = async () => {
     editor.silent = true
     render(<ChatPanel agentId="agent-1" agentSlug="riley" agentName="Riley" sessionId="sess-1" askForms={null} sessionKind="direct" />)
     fireEvent.click(await screen.findByRole("button", { name: "Open Sheet" }))
-    await screen.findByRole("switch", { name: /Let the agent change it/ })
+    await screen.findByRole("switch", { name: /Allow agent edits/ })
   }
-  it("goes with the version the server names, without waiting for the grid", async () => {
+  it("waits for the displayed version even if the server already named a different head", async () => {
     access.value = { allowed: true, default_allowed: true, max_sheets: 1, head_version: "1" }
     await openingSheet()
     send()
-    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "1" }] }))
+    expect(chat.sendMessage).not.toHaveBeenCalled()
+    act(() => editor.status?.(opened))
+    await waitFor(() => expect(chat.sendMessage).toHaveBeenCalledWith("Update it", { artifact_refs: [{ page_id: "pg_1", version: "3" }] }))
   })
   it("waits while no version is known yet, then goes with the one the editor shows", async () => {
     access.value = { allowed: true, default_allowed: true, max_sheets: 1 }

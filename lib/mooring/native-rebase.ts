@@ -1,4 +1,5 @@
-import { NATIVE_EXECUTE_MAX_BYTES, NATIVE_EXECUTE_MAX_COMMANDS, validExecuteLabel, type NativeExecuteCommand, type NativeExecuteConflict, type NativeExecuteOptions } from "./native-editor-port"
+import type { NativeExecuteOptions as ReplayExecuteOptions } from "./native-editor-port"
+import { NATIVE_EXECUTE_MAX_BYTES, NATIVE_EXECUTE_MAX_COMMANDS, validExecuteLabel, type NativeExecuteCommand, type NativeExecuteConflict, type NativeExecuteOptions, type NativeExecuteResult } from "./native-editor-port"
 
 /** One command from the operations log, as the server recorded it. */
 export interface ReplayOp { command: string; params?: Record<string, unknown> }
@@ -27,11 +28,12 @@ export interface RebaseDeps {
   sameBuild: boolean
   /** GET …/craft/document/operations?from=<base>: status and parsed body. */
   operations(from: string, signal: AbortSignal): Promise<{ status: number; body: unknown }>
-  execute(commands: NativeExecuteCommand[], options: NativeExecuteOptions, signal: AbortSignal): Promise<{ revision: string; conflicts?: NativeExecuteConflict[]; conflictsTruncated?: boolean }>
+  execute(commands: NativeExecuteCommand[], options: NativeExecuteOptions, signal: AbortSignal): Promise<Pick<NativeExecuteResult, "revision" | "conflicts" | "conflictsTruncated" | "dirty" | "savedRevision">>
   /** The save controller's move of its base under the unsaved work. */
-  rebaseBase(version: string, contentHash: string): boolean
+  rebaseBase(version: string, contentHash: string, result?: Awaited<ReturnType<RebaseDeps["execute"]>>): boolean
   /** The undo step's text, e.g. "Morgan: change". */
   label: string
+  keep?: ReplayExecuteOptions["keep"]
   signal: AbortSignal
 }
 
@@ -50,7 +52,7 @@ const object = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeo
 const versionOf = (v: unknown): string | undefined => typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? String(v) : typeof v === "string" && VERSION.test(v) ? v : undefined
 
 interface ParsedLog { head: string; headHash?: string; replayable: boolean; /** Every version names the engine it was written with. */ pinned: boolean; pins: string[]; commands: NativeExecuteCommand[]; operationIds: string[]; actorName?: string }
-function parse(body: unknown, base: string, replay: ReplayAdapter | null): ParsedLog | undefined {
+function parse(body: unknown, base: string, replay: ReplayAdapter | null, agentWins: boolean): ParsedLog | undefined {
   if (!object(body) || !Array.isArray(body.versions)) return undefined
   const head = versionOf(body.head) ?? versionOf(body.to)
   if (!head || versionOf(body.from) !== base) return undefined
@@ -64,6 +66,7 @@ function parse(body: unknown, base: string, replay: ReplayAdapter | null): Parse
     // The versions follow one another from the base, none missing.
     if (!version || from !== String(expected) || BigInt(version) !== expected + 1n) return undefined
     expected = BigInt(version)
+    if (agentWins && v.actor_kind !== "agent") replayable = false
     if (typeof v.engine_pin === "string" && v.engine_pin.length > 0) pins.push(v.engine_pin)
     else pinned = false
     if (typeof v.operation_id === "string" && v.operation_id.length <= 128) operationIds.push(v.operation_id)
@@ -83,7 +86,7 @@ export async function rebaseOverLocal(deps: RebaseDeps): Promise<RebaseOutcome> 
   const answer = await deps.operations(deps.base, deps.signal)
   if (answer.status === 413) return { kind: "reload", reason: "too_many" }
   if (answer.status !== 200) return { kind: "reload", reason: `operations_${answer.status}` }
-  const log = parse(answer.body, deps.base, deps.replay)
+  const log = parse(answer.body, deps.base, deps.replay, deps.keep === "agent")
   if (!log) return { kind: "reload", reason: "operations_malformed" }
   if (log.head === deps.base) return { kind: "current" }
   const named = log.actorName ? { actorName: log.actorName } : {}
@@ -101,7 +104,7 @@ export async function rebaseOverLocal(deps: RebaseDeps): Promise<RebaseOutcome> 
   try {
     // The undo step carries the name the agent wrote under; the caller's label otherwise.
     const label = log.actorName ? `${log.actorName}: change`.slice(0, 80) : deps.label
-    result = await deps.execute(log.commands, { keep: "human", label, baseRevision: deps.savedRevision }, deps.signal)
+    result = await deps.execute(log.commands, { keep: deps.keep ?? "human", label, baseRevision: deps.savedRevision }, deps.signal)
   } catch (error) {
     if (deps.signal.aborted) throw error
     const code = error instanceof Error ? error.message : ""
@@ -109,7 +112,8 @@ export async function rebaseOverLocal(deps: RebaseDeps): Promise<RebaseOutcome> 
     if (code === "not_replayable") return layout
     return { kind: "reload", reason: code === "pin_mismatch" || code === "stale_base" ? code : "execute_failed" }
   }
-  if (!deps.rebaseBase(log.head, log.headHash)) return { kind: "reload", reason: "rebase_refused" }
+  const moved = deps.keep === "agent" ? deps.rebaseBase(log.head, log.headHash, result) : deps.rebaseBase(log.head, log.headHash)
+  if (!moved) return { kind: "reload", reason: "rebase_refused" }
   return { kind: "rebased", version: log.head, conflicts: result.conflicts ?? [], truncated: result.conflictsTruncated === true, operationIds: log.operationIds, ...named }
 }
 

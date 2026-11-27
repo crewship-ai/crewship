@@ -63,7 +63,7 @@ export function NativeDocumentProvenance({ workspaceId, pageId, viewerId }: { wo
 function EditRows({ artifacts, pageView = false }: { artifacts: NativeArtifactEdit[]; pageView?: boolean }) {
   return <ul className="space-y-2">{artifacts.map(edit => <li key={JSON.stringify([edit.page_id, edit.chat_id])} className="rounded-xl border border-border p-2.5">
     {!pageView && <a className="font-medium text-primary underline" href={chatItemHref(null, edit.page_id, `/pages/${encodeURIComponent("@" + edit.page_id)}`)}>{edit.title}</a>}
-    <p>Edited by agent in this chat</p>
+    <p>Edited by agent</p>
     <a className="text-primary underline" href={`/chat/${encodeURIComponent(edit.agent_slug)}?session=${encodeURIComponent(edit.chat_id)}&message=${encodeURIComponent(edit.message_id)}`}>Open source message</a>
     <p className="text-muted-foreground">Saved revision {edit.last_revision} · <time dateTime={edit.edited_at}>{new Date(edit.edited_at).toLocaleString()}</time></p>
   </li>)}</ul>
@@ -136,7 +136,7 @@ function AccessView({ workspaceId, chatId, viewerId, pageId, chooseDocument, cho
   const unavailable = query.isError || expired
   if (pageId) return <section aria-label="Document edit provenance" className="shrink-0 border-b p-2 text-xs">
     {!artifacts ? <p role="status">{unavailable ? "Current provenance access could not be verified." : "Checking edit provenance…"}</p>
-      : artifacts.length === 0 ? <p>No agent edits are recorded for this document.</p> : <EditRows artifacts={artifacts} pageView />}
+      : artifacts.length === 0 ? <p>No agent edits yet.</p> : <EditRows artifacts={artifacts} pageView />}
     {artifacts && query.data?.truncated && <p>Only recent recorded edits are shown.</p>}
   </section>
   if (chooseDocument) {
@@ -161,7 +161,7 @@ function AccessView({ workspaceId, chatId, viewerId, pageId, chooseDocument, cho
       : documents.length === 0 ? <p className="text-muted-foreground">The agent cannot open any document you can see.</p>
       : <ul className="space-y-2">{documents.map((doc) => <li key={doc.page_id} className="rounded-xl border border-border bg-card p-2.5">
         <a className="font-medium text-primary underline" href={chatItemHref(null, doc.page_id, `/pages/${encodeURIComponent("@" + doc.page_id)}`)}>{doc.title}</a>
-        <p>Agent access: {doc.document_grant === "write" ? "read and write" : "read only"}</p>
+        <p>{doc.document_grant === "write" ? "Can edit" : "Can view"}</p>
         {!doc.policy_allows && <p className="text-muted-foreground">Agent access is blocked by workspace policy.</p>}
         {doc.task_status === "active" && doc.policy_allows && doc.tasks.some((task) => Date.parse(task.expires_at) > Date.now())
           ? doc.tasks.filter((task) => Date.parse(task.expires_at) > Date.now()).map((task) => <div key={task.run_id}>

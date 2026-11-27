@@ -1,3 +1,4 @@
+import { readMergedSheetSave, sheetRecord, type MergedSheetSave } from "./sheet-realtime"
 import { compactNativeJson } from "./native-compact"
 import { MAX_NATIVE_BYTES, MAX_WORKBOOK_BYTES, type NativeDraft, type NativeDraftJournal, type NativeFileFormat, validNativeDraft, validNativeVersion, validWorkbookFormat } from "./native-draft"
 
@@ -67,6 +68,7 @@ export interface SingleEditorSaveOptions {
     reconcile?(request: NativeSaveRequest, signal: AbortSignal): Promise<unknown>
   }
   onState(state: NativeSaveState): void
+  adoptMerged?(save: MergedSheetSave, captureId: string): Promise<{ nativeState: string; dirty: boolean }>
   onReceipt?(receipt: NativeSaveReceipt, captureId?: string): void | Promise<unknown>
   onTransportSettled?(): void
   onRetiredTicket?(requestId: string): void
@@ -190,6 +192,45 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   async function settle(raw: unknown, attempt: Prepared, unchangedAllowed: boolean) {
     if (!active || !writable) return
+    if (options.adoptMerged && sheetRecord(raw) && raw.kind === "merged") {
+      const merged = await readMergedSheetSave(raw, attempt.draft)
+      if (!active || !writable) return
+      if (!merged || !attempt.captureId) {
+        unconfirmed = attempt
+        emit("uncertain", "invalid_receipt")
+        return
+      }
+      // No exact-byte ACK for the submitted export. Move the editor's own
+      // saved checkpoint and preserve commands entered after that export.
+      const epoch = edits
+      try {
+        const adopted = await options.adoptMerged(merged, attempt.captureId)
+        if (!active || !writable) return
+        baseVersion = merged.receipt.version
+        keepLocalFor = undefined
+        unconfirmed = undefined
+        confirmed = { nativeState: adopted.nativeState, contentHash: merged.contentHash, version: baseVersion }
+        latest = undefined
+        baselineStale = false
+        rebases++
+        // Retirement is scoped to the old submitted row; never erase a newer draft.
+        await confirmRow(attempt.draft)
+        if (!active || !writable) return
+        owedReceipt = undefined
+        retirementRetried = false
+        dirty = adopted.dirty || edits !== epoch
+        emit(dirty ? "dirty" : "saved")
+      } catch {
+        if (!active || !writable) return
+        // The server committed. Keep the draft and stop automatic publication
+        // when the editor or local journal cannot confirm the new checkpoint.
+        unconfirmed = undefined
+        blocked = "merge_adoption"
+        dirty = true
+        emit("draft", blocked)
+      }
+      return
+    }
     const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
     if (!validReceipt(receipt, attempt, unchangedAllowed)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
     if (!active || !writable) return
@@ -602,6 +643,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     if (!attempt || !options.transport.reconcile) return
     try {
       const raw = await bounded(signal => options.transport.reconcile!(attempt.draft, signal), new AbortController())
+      // A merged reply cannot retire a revoked editor's draft. Its saved checkpoint
+      // was never adopted, and the canonical bytes may differ from the local capture.
       const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
       if (!active || unconfirmed !== attempt || !validReceipt(receipt, attempt)) return
       unconfirmed = undefined
@@ -718,7 +761,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     },
     /** The version the next save goes on top of (the person's unsaved work is on it). */
     currentBase(): string { return baseVersion },
-    rebaseBase(version: string, contentHash: string, rebaseOptions: { keepLocal?: boolean } = {}): boolean {
+    rebaseBase(version: string, contentHash: string, rebaseOptions: { keepLocal?: boolean; cleanCheckpoint?: string } = {}): boolean {
       // A save the server refused because the Sheet moved on (409) is exactly what a rebase answers.
       if (!active || !writable || blocked && blocked !== "moved" || unconfirmed || pending || held || !validNativeVersion(version) || !/^sha256:[a-f0-9]{64}$/.test(contentHash)) return false
       if (BigInt(version) <= BigInt(baseVersion)) return false
@@ -727,8 +770,16 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       rebases++
       baseVersion = version
       baselineStale = false
-      confirmed = { nativeState: undefined, contentHash, version, seeded: true }
+      const previous = latest
+      const checkpoint = rebaseOptions.cleanCheckpoint
+      confirmed = { nativeState: checkpoint, contentHash, version, seeded: checkpoint === undefined }
       latest = undefined
+      if (checkpoint !== undefined) {
+        dirty = false
+        if (previous) void confirmRow(previous.draft).catch(() => {})
+        emit("saved")
+        return true
+      }
       edits++
       dirty = true
       void save(undefined, ++nextAutosave).catch(() => {})

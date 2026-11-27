@@ -33,6 +33,8 @@ export function publishAgentVersion(event: AgentVersionEvent): void {
 
 // --- What the editor host offers the policy. ---
 export interface AgentVersionHost {
+  /** Chat Sheets verify the server's ordered operations before replaying a tool result. */
+  preferOperations?: boolean
   /** What the open editor is now. confirmedVersion is the saved version it shows: a reading editor always, a writable one only while it is clean. */
   state(): { mode: "none" | "reader" | "writable"; clean: boolean; confirmedVersion?: string }
   /** The targets of a writable, clean editor. */
@@ -111,7 +113,7 @@ export function createAgentVersionQueue(host: AgentVersionHost) {
       try {
         await nextPaint()
         if (disposed) return
-        if (follows && commands && commands.length > 0 && host.replayReader) {
+        if (!host.preferOperations && follows && commands && commands.length > 0 && host.replayReader) {
           // A failed replay is followed by the whole version, which replaces the document.
           if (await host.replayReader(commands, event.version, abort.signal).catch(() => false) || disposed) return
         }
@@ -137,7 +139,7 @@ export function createAgentVersionQueue(host: AgentVersionHost) {
     // otherwise the operations log, in the editor's own names, brings the version in.
     const commandsGiven = !event.commandsOmitted && (event.commands?.length ?? 0) > 0 && event.contentHash !== undefined
       && event.commands!.every(c => (NATIVE_EXECUTE_COMMANDS as readonly string[]).includes(c.command))
-    if (host.rebase && (viaLog || !state.clean || !commandsGiven)) {
+    if (host.rebase && (host.preferOperations || viaLog || !state.clean || !commandsGiven)) {
       // Unsaved work: say at once that it is kept, until the replay over it is done (it never replaces it).
       host.notice(state.clean ? undefined : AGENT_CHANGED_FINISH)
       host.working?.(true)
