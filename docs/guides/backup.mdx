@@ -1050,7 +1050,7 @@ Once the restored copy is ready, Crewship switches it into place atomically.
 The report prints **Previous data directory (retained)** and includes
 `previous_data_dir` in JSON. That path holds the complete original, including
 its database and secrets. If the target contains workbooks, recovery also
-requires `--discard-workbooks` because the recovered instance will lack them.
+requires `--discard-workbooks` to acknowledge the loss of workbook history absent from the bundle.
 Keep the retained directory protected until you have verified the recovered
 instance and decided how long to keep the original.
 

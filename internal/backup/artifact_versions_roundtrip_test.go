@@ -146,7 +146,11 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 // constructor so every pooled connection is FULL; collectors need nested reads.
 func openDurableArtifactBackupDB(t *testing.T) *sql.DB {
 	t.Helper()
-	fixture := openMigratedDB(t)
+	return reopenDurableBackupDB(t, openMigratedDB(t))
+}
+
+func reopenDurableBackupDB(t *testing.T, fixture *sql.DB) *sql.DB {
+	t.Helper()
 	var seq int
 	var name, filename string
 	if err := fixture.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &filename); err != nil {

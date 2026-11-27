@@ -156,22 +156,45 @@ func targetWorkbookPages(ctx context.Context, q workbookTargetQuerier, workspace
 // workbookPageIDs lists workbook Page IDs in workspaceIDs, or in the whole
 // database when workspaceIDs is empty (offline recovery replaces all of it).
 func workbookPageIDs(ctx context.Context, q workbookTargetQuerier, workspaceIDs []string) ([]string, error) {
-	var exists bool
-	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads')`).Scan(&exists); err != nil {
+	var gridcraft, native, migrations bool
+	const schemas = `SELECT
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gridcraft_heads'),
+		(SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN (
+			'craft_native_documents', 'artifact_version_heads', 'artifact_versions')) = 3,
+		EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='craft_workbook_migrations')`
+	if err := q.QueryRowContext(ctx, schemas).Scan(&gridcraft, &native, &migrations); err != nil {
 		return nil, err
 	}
-	if !exists {
+	var sources []string
+	if gridcraft {
+		sources = append(sources, "SELECT workspace_id,page_id FROM gridcraft_heads")
+	}
+	if native {
+		// The native profile records the application, not the file format.
+		// The latest manifest distinguishes a workbook from native JSON.
+		sources = append(sources, `SELECT h.workspace_id,h.page_id
+			FROM artifact_version_heads h
+			JOIN craft_native_documents d ON d.workspace_id=h.workspace_id AND d.page_id=h.page_id
+			JOIN artifact_versions v ON v.workspace_id=h.workspace_id AND v.page_id=h.page_id AND v.version=h.latest_version
+			WHERE h.content_type='gridcraft' AND d.application_id='gridcraft'
+				AND json_extract(v.manifest_json,'$.entry_point') IN ('workbook.xlsx','workbook.xlsm')`)
+	}
+	if migrations {
+		sources = append(sources, "SELECT workspace_id,page_id FROM craft_workbook_migrations")
+	}
+	if len(sources) == 0 {
 		return nil, nil
 	}
-	scope := "1=1"
+	scope := ""
 	args := make([]any, len(workspaceIDs))
 	if len(workspaceIDs) > 0 {
-		scope = equalityOrIN("h.workspace_id", len(workspaceIDs))
+		scope = " WHERE " + equalityOrIN("workspace_id", len(workspaceIDs))
 		for i, id := range workspaceIDs {
 			args[i] = id
 		}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT h.page_id FROM gridcraft_heads h WHERE `+scope+` ORDER BY h.page_id`, args...)
+	query := `SELECT DISTINCT page_id FROM (` + strings.Join(sources, " UNION ALL ") + `)` + scope + ` ORDER BY page_id`
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +222,7 @@ func workbookDestructionError(ids []string, operation, remedy string) error {
 		named = named[:shown]
 		more = fmt.Sprintf(" and %d more", len(ids)-shown)
 	}
-	return fmt.Errorf("%w; %s would destroy them (workbook page IDs: %s%s). Save their contents first (crewship workbook read), %s", ErrWorkbookTargetReplacement, operation, strings.Join(named, ", "), more, remedy)
+	return fmt.Errorf("%w; %s would destroy them (workbook page IDs: %s%s). Back up or export their current contents first, %s", ErrWorkbookTargetReplacement, operation, strings.Join(named, ", "), more, remedy)
 }
 
 // Recovery is offline. Inspect the existing database before prepareDataDir can

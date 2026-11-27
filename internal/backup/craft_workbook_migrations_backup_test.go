@@ -24,27 +24,9 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,'Legacy Sheet','u_admin','{}')`, scope.ArtifactID, ws, scope.ArtifactID); err != nil {
 		t.Fatal(err)
 	}
-	principal := mooring.EditLeasePrincipal{ActorID: "u_admin", SessionID: "test-sheet-session"}
-	store := func(db *sql.DB, workbook bool) (*mooring.NativeStore, *mooring.EditLeaseStore) {
-		leases := mooring.NewEditLeaseStore(db, mooring.EditLeaseConfig{Enabled: true, Clock: recoveredOwnerClock{}, TTL: time.Minute, Authority: func(context.Context, *sql.Tx, mooring.EditLeaseAccess) error { return nil }})
-		cfg := mooring.NativeStoreConfig{
-			Enabled: true, Application: "gridcraft", EngineRevision: "e68d192282499bed81a9800d742cb9b239d367e5",
-			EngineSHA256: strings.Repeat("a", 64), EditorBundle: strings.Repeat("b", 64), Leases: leases,
-			Authorize: func(context.Context, *sql.Tx, mooring.EditLeaseScope, string) (mooring.EditLeasePrincipal, error) {
-				return principal, nil
-			},
-			Validate: func(context.Context, []byte) error { return nil },
-		}
-		if workbook {
-			cfg.Format = mooring.NativeFormatWorkbook
-			cfg.EngineRevision, cfg.EngineSHA256, cfg.EditorBundle = strings.Repeat("c", 40), strings.Repeat("d", 64), strings.Repeat("e", 64)
-			cfg.Validate = mooring.ValidateWorkbook
-		}
-		return mooring.NewNativeStore(db, cfg), leases
-	}
-	legacy, leases := store(source, false)
+	legacy, leases := workbookBackupStore(source, false)
 	original := []byte("{\n  \"sheets\": [{\"name\":\"Example\"}]\n}\n")
-	lease, _, err := legacy.Initialize(ctx, scope, principal, original)
+	lease, _, err := legacy.Initialize(ctx, scope, workbookBackupPrincipal, original)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +37,7 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, _ := store(source, true)
+	current, _ := workbookBackupStore(source, true)
 	input, err := current.LegacyWorkbook(ctx, scope, true)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +75,7 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 			if asWorkspace != "" && (restored.WorkspaceID == ws || restored.ArtifactID == scope.ArtifactID) {
 				t.Fatalf("fork retained source anchors: %+v", restored)
 			}
-			restoredStore, _ := store(target, true)
+			restoredStore, _ := workbookBackupStore(target, true)
 			state, err := restoredStore.Read(ctx, restored)
 			if err != nil || state.LatestVersion != 2 || !bytes.Equal(state.Manifest.Files["workbook.xlsx"].Content, workbook) {
 				t.Fatalf("restored workbook: head=%d, %v", state.LatestVersion, err)
@@ -111,7 +93,7 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 	if err := backup.RestoreDump(ctx, target, migrated); err != nil {
 		t.Fatal(err)
 	}
-	current, _ = store(target, true)
+	current, _ = workbookBackupStore(target, true)
 	newer := workbookBackupFixture(t, "after")
 	history := artifacts.NewVersionStore(target, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft"})
 	key := artifacts.VersionKey{WorkspaceID: ws, PageID: scope.ArtifactID}
@@ -119,7 +101,7 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 		BaseVersion: 2, EntryPoint: "workbook.xlsx",
 		Files: map[string]artifacts.VersionFile{"workbook.xlsx": {Content: newer, MediaType: mooring.WorkbookMediaTypeXLSX}},
 	}
-	author := func(context.Context, *sql.Tx) (string, error) { return principal.ActorID, nil }
+	author := func(context.Context, *sql.Tx) (string, error) { return workbookBackupPrincipal.ActorID, nil }
 	if version, err := history.Apply(ctx, key, update, author); err != nil || version.Version != 3 {
 		t.Fatalf("newer edit: %+v %v", version, err)
 	}
@@ -138,6 +120,26 @@ func TestCraftWorkbookMigrationBackupRoundTrip(t *testing.T) {
 	if err != nil || kept.WorkbookVersion != 2 || sha256.Sum256(kept.Bytes) != sha256.Sum256(original) {
 		t.Fatalf("restore changed migration receipt or source: version=%d, SHA-256 %x, %v", kept.WorkbookVersion, sha256.Sum256(kept.Bytes), err)
 	}
+}
+
+var workbookBackupPrincipal = mooring.EditLeasePrincipal{ActorID: "u_admin", SessionID: "test-sheet-session"}
+
+func workbookBackupStore(db *sql.DB, workbook bool) (*mooring.NativeStore, *mooring.EditLeaseStore) {
+	leases := mooring.NewEditLeaseStore(db, mooring.EditLeaseConfig{Enabled: true, Clock: recoveredOwnerClock{}, TTL: time.Minute, Authority: func(context.Context, *sql.Tx, mooring.EditLeaseAccess) error { return nil }})
+	cfg := mooring.NativeStoreConfig{
+		Enabled: true, Application: "gridcraft", EngineRevision: "e68d192282499bed81a9800d742cb9b239d367e5",
+		EngineSHA256: strings.Repeat("a", 64), EditorBundle: strings.Repeat("b", 64), Leases: leases,
+		Authorize: func(context.Context, *sql.Tx, mooring.EditLeaseScope, string) (mooring.EditLeasePrincipal, error) {
+			return workbookBackupPrincipal, nil
+		},
+		Validate: func(context.Context, []byte) error { return nil },
+	}
+	if workbook {
+		cfg.Format = mooring.NativeFormatWorkbook
+		cfg.EngineRevision, cfg.EngineSHA256, cfg.EditorBundle = strings.Repeat("c", 40), strings.Repeat("d", 64), strings.Repeat("e", 64)
+		cfg.Validate = mooring.ValidateWorkbook
+	}
+	return mooring.NewNativeStore(db, cfg), leases
 }
 
 func workbookBackupFixture(t *testing.T, marker string) []byte {
