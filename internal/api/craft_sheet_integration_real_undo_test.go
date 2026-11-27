@@ -31,7 +31,7 @@ func (e undoTestEngine) Open(ctx context.Context, base []byte) (CraftNativeSheet
 }
 
 func (e undoTestEngine) Retain(session CraftNativeSheetSession, snapshot []byte) {
-	e.manager.Rekey(session.(undoTestSession).Key(), sheetKey(snapshot))
+	e.manager.Retain(session.(undoTestSession).Session, sheetKey(snapshot))
 }
 
 func (e undoTestEngine) Discard(session CraftNativeSheetSession) {

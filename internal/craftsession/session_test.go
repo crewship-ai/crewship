@@ -539,19 +539,12 @@ func TestSheetNamesWithAnApostropheAreAddressable(t *testing.T) {
 	}
 }
 
-func TestRekeyMovesTheWarmSessionToTheNewVersion(t *testing.T) {
+func TestRetainMovesTheWarmSessionToTheNewVersion(t *testing.T) {
 	ctx := context.Background()
 	m := newMgr(t, nil)
 	s, release, _ := m.Acquire(ctx, "v1", doc(""))
 	release()
-	_, rb, _ := m.Acquire(ctx, "other", doc(""))
-	defer rb()
-	if m.Rekey("v1", "other") || m.Rekey("nope", "x") || m.Rekey("v1", "v1") {
-		t.Fatal("rekey onto a taken or unknown key")
-	}
-	if !m.Rekey("v1", "v2") {
-		t.Fatal("rekey refused")
-	}
+	m.Retain(s, "v2")
 	before := launches.Load()
 	s2, release2, err := m.Acquire(ctx, "v2", doc(""))
 	if err != nil || s2 != s || launches.Load() != before {
@@ -576,6 +569,39 @@ func TestRekeyMovesTheWarmSessionToTheNewVersion(t *testing.T) {
 	m.mu.Unlock()
 	if stale {
 		t.Fatal("a dead session stays filed under its new key")
+	}
+}
+
+func TestRetainOnAnOccupiedKeyDiscardsTheEditedSession(t *testing.T) {
+	ctx := t.Context()
+	m := newMgr(t, nil)
+	before, releaseBefore, err := m.Acquire(ctx, "before", doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseBefore()
+	after, releaseAfter, err := m.Acquire(ctx, "after", doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseAfter()
+
+	m.Retain(before, "after")
+	if before.Alive() || !after.Alive() {
+		t.Fatal("the edited engine must close while the destination survives")
+	}
+	reopened, releaseReopened, err := m.Acquire(ctx, "before", doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseReopened()
+	kept, releaseKept, err := m.Acquire(ctx, "after", doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseKept()
+	if reopened == before || kept != after {
+		t.Fatal("the old key must reopen, and the destination key must stay warm")
 	}
 }
 

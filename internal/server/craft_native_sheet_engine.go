@@ -148,7 +148,7 @@ func (e sheetEngine) Open(ctx context.Context, base []byte) (goapi.CraftNativeSh
 // Retain moves the warm session to the key of the content it now holds.
 func (e sheetEngine) Retain(session goapi.CraftNativeSheetSession, snapshot []byte) {
 	if s, ok := session.(sheetSession); ok {
-		e.m.Rekey(s.Key(), contentKey(snapshot))
+		e.m.Retain(s.Session, contentKey(snapshot))
 	}
 }
 

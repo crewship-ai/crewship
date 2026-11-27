@@ -237,31 +237,30 @@ func (m *Manager) openSession(ctx context.Context, key string, load func() ([]by
 	return sess, nil
 }
 
-// Rekey renames the open session oldKey to newKey, for a caller that keys
-// sessions by the content of the saved version: after a snapshot has been
-// stored as a new version, the same warm engine serves the next call. It
-// returns false (and changes nothing) when oldKey is not open and idle-safe,
-// or newKey is already taken.
-func (m *Manager) Rekey(oldKey, newKey string) bool {
+// Retain files the engine under the hash of the snapshot it now holds.
+// If a different engine already has that hash, the edited engine is removed
+// from the old key before closing it, so an old-version read opens its bytes.
+func (m *Manager) Retain(session *Session, newKey string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	oldKey := session.Key()
 	e := m.open[oldKey]
-	if e == nil || m.open[newKey] != nil || oldKey == newKey {
-		return false
+	if e != nil && e.sess == session && session.Alive() {
+		if oldKey == newKey {
+			m.mu.Unlock()
+			return
+		}
+		delete(m.open, oldKey)
+		if m.open[newKey] == nil {
+			e.key = newKey
+			m.open[newKey] = e
+			session.rekey(newKey)
+			m.mu.Unlock()
+			return
+		}
 	}
-	select {
-	case <-e.ready:
-	default:
-		return false
-	}
-	if e.err != nil || e.sess == nil || !e.sess.Alive() {
-		return false
-	}
-	delete(m.open, oldKey)
-	e.key = newKey
-	m.open[newKey] = e
-	e.sess.rekey(newKey)
-	return true
+	session.broken.Store(true)
+	m.mu.Unlock()
+	session.Close()
 }
 
 // forget drops a closed session from the table.
