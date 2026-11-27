@@ -1,3 +1,5 @@
+import { SHEET_REALTIME_CAPABILITIES, type MergedSheetSave, type SheetPresence, type SheetRealtimeCapability } from "./sheet-realtime"
+import type { SheetMergedAdopted } from "./native-editor-port"
 // GridCraft editor ↔ host, mooring protocol 2: the workbook
 // file (.xlsx or .xlsm) is the source of truth. The host opens the stored file as it is
 // and stores what the editor saves; there is no native JSON, no re-export after open and
@@ -39,7 +41,7 @@ export interface GridcraftPortOptions {
   onExport?(file: { name: string; bytes: Uint8Array }): void
   onError(reason: string): void
   /** build: the engine build the editor runs; absent in a development build. */
-  onReady?(version: string, build?: string): void
+  onReady?(version: string, build?: string, capabilities?: readonly SheetRealtimeCapability[]): void
   onEditAttempt?(kind: NativeEditAttempt): void
   onHeldInputDropped?(reason: NativeHeldInputDropped): void
   /** Deadline of access and execute requests; open and save take their own. */
@@ -53,6 +55,8 @@ export interface GridcraftPort {
   ack(requestId: string, version: string): boolean
   saveFailed(requestId: string, code: GridcraftSaveFailure): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
+  adoptMerged(save: MergedSheetSave, captureId: string, signal: AbortSignal): Promise<SheetMergedAdopted>
+  setPresence(actors: SheetPresence[], reducedMotion: boolean): void
   execute(commands: NativeExecuteCommand[], options: NativeExecuteOptions, signal: AbortSignal): Promise<NativeExecuteResult>
   readonly document: string | undefined
   close(): void
@@ -70,14 +74,18 @@ const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(va
 const failure = (value: Record<string, unknown>) => exact(value, ["type", "requestId", "code", "error"]) && code(value.code) && errorText(value.error)
 // The cells the person kept: display text of each side, at most 256 characters (longer ones end in "…").
 const cellText = (value: unknown): value is string => typeof value === "string" && value.length <= 257
-function executeConflicts(value: unknown): NativeExecuteConflict[] | undefined {
+function executeConflicts(value: unknown, addressesOnly: boolean): NativeExecuteConflict[] | undefined {
   if (!Array.isArray(value) || value.length > NATIVE_EXECUTE_MAX_CONFLICTS) return undefined
   const out: NativeExecuteConflict[] = []
   for (const c of value) {
-    if (!c || typeof c !== "object" || !exact(c as Record<string, unknown>, ["sheet", "cell", "agent", "kept"])) return undefined
+    if (!c || typeof c !== "object" || !exact(c as Record<string, unknown>, addressesOnly ? ["sheet", "cell"] : ["sheet", "cell", "agent", "kept"])) return undefined
     const { sheet, cell, agent, kept } = c as Record<string, unknown>
-    if (!text(sheet, 255) || typeof cell !== "string" || !/^\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6}$/.test(cell) || !cellText(agent) || !cellText(kept)) return undefined
-    out.push({ sheet, cell, agent, kept })
+    if (!text(sheet, 255) || typeof cell !== "string" || !/^\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6}$/.test(cell)  ) return undefined
+    if (addressesOnly) out.push({ sheet, cell })
+    else {
+      if (!cellText(agent) || !cellText(kept)) return undefined
+      out.push({ sheet, cell, agent, kept })
+    }
   }
   return out
 }
@@ -96,7 +104,7 @@ function saveRefusal(value: Record<string, unknown>): { code: string; parts: Gri
 const fileBytes = (value: unknown): Uint8Array | null => value instanceof ArrayBuffer && value.byteLength > 0 && value.byteLength <= GRIDCRAFT_MAX_FILE_BYTES ? new Uint8Array(value) : null
 const deadline = (ms: number) => Number.isFinite(ms) && ms >= 1 && ms <= MAX_DEADLINE_MS
 
-interface Pending { kind: "open" | "save" | "access" | "execute"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
+interface Pending { kind: "open" | "save" | "access" | "execute" | "adopt"; captureId?: string; version?: string; readOnly?: boolean; agentWins?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
 
 export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPort {
   if (!options.frame || !/^[a-f0-9]{64}$/.test(options.bundle)) throw new Error("invalid_native_port")
@@ -106,6 +114,7 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
   // Saves the editor started (save-request seen, file not yet), and files waiting for ack or failure.
   const tickets = new Map<string, string>(), unanswered = new Map<string, GridcraftSavedFile>()
   let port: NativeStructuredPort | undefined, closed = false, loads = 0, ready = false, opening = false
+  let capabilities: SheetRealtimeCapability[] = []
   let bound: string | undefined, confirmedReadOnly = true, lastAcked: bigint | undefined, calculated = false
   const observe = (callback: () => void) => { try { callback() } catch { /* an observer never decides persistence */ } }
   const savesInFlight = () => [...pending.values()].filter(request => request.kind === "save").length + tickets.size + unanswered.size
@@ -128,12 +137,13 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       const expire = () => {
         // A late import or access change cannot be undone: end the port rather than guess.
         if (kind === "open") { request.finish(); reject(new Error("native_request_timeout")); close("native_open_unconfirmed") }
-        else if (kind === "access") close("native_access_unconfirmed")
+        else if (kind === "access" || kind === "adopt") close(`native_${kind}_unconfirmed`)
         else { request.finish(); reject(new Error("native_request_timeout")) }
       }
-      const abort = () => { if (kind === "open" || kind === "access") close(`native_${kind}_unconfirmed`); else { request.finish(); reject(new Error("native_request_aborted")) } }
+      const abort = () => { if (kind === "open" || kind === "access" || kind === "adopt") close(`native_${kind}_unconfirmed`); else { request.finish(); reject(new Error("native_request_aborted")) } }
       const timer = setTimeout(expire, ms)
-      const request: Pending = { kind, readOnly, resolve, reject, finish() { clearTimeout(timer); signal.removeEventListener("abort", abort); pending.delete(id) } }
+      const adoption = kind === "adopt" ? { captureId: message.captureId as string, version: message.version as string } : {}
+      const request: Pending = { kind, readOnly, agentWins: kind === "execute" && message.keep === "agent", ...adoption, resolve, reject, finish() { clearTimeout(timer); signal.removeEventListener("abort", abort); pending.delete(id) } }
       pending.set(id, request); signal.addEventListener("abort", abort, { once: true })
       post({ ...message, requestId: id }, transfer)
     })
@@ -150,10 +160,30 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
     if (!record(raw) || typeof raw.type !== "string") { close("native_port_protocol"); return }
     switch (raw.type) {
       case "gridcraft:ready": {
-        if (!exact(raw, ["type", "version", "accessProtocol", "readOnly", ...("build" in raw ? ["build"] : [])]) || !text(raw.version, 128) || raw.accessProtocol !== 1 || typeof raw.readOnly !== "boolean" || "build" in raw && !engineBuildToken(raw.build)) break
+        if (!exact(raw, ["type", "version", "accessProtocol", "readOnly", ...("build" in raw ? ["build"] : []), ...("capabilities" in raw ? ["capabilities"] : [])]) || !text(raw.version, 128) || raw.accessProtocol !== 1 || typeof raw.readOnly !== "boolean" || "build" in raw && !engineBuildToken(raw.build)) break
         if (ready || raw.readOnly !== true) { close("native_access_boot_writable"); return }
         const build = "build" in raw ? raw.build as string : undefined
-        ready = true; observe(() => build === undefined ? options.onReady?.(raw.version as string) : options.onReady?.(raw.version as string, build)); return
+        if ("capabilities" in raw) {
+          const flags = raw.capabilities
+          if (!Array.isArray(flags) || flags.length > SHEET_REALTIME_CAPABILITIES.length
+            || new Set(flags).size !== flags.length || !flags.every(flag => SHEET_REALTIME_CAPABILITIES.includes(flag))) break
+          capabilities = flags as SheetRealtimeCapability[]
+        }
+        ready = true
+        observe(() => "capabilities" in raw ? options.onReady?.(raw.version as string, build, capabilities)
+          : build === undefined ? options.onReady?.(raw.version as string) : options.onReady?.(raw.version as string, build))
+        return
+      }
+      case "gridcraft:merged-adopted": {
+        const request = answer(raw, "adopt"); if (!request) return
+        if (!exact(raw, ["type", "requestId", "captureId", "document", "revision", "savedRevision", "version", "dirty"])
+          || !bound || raw.document !== bound || raw.captureId !== request.captureId || raw.version !== request.version
+          || !u64(raw.revision) || !savedRevisionToken(raw.savedRevision) || typeof raw.dirty !== "boolean") break
+        unanswered.delete(request.captureId!)
+        lastAcked = BigInt(raw.revision)
+        request.finish()
+        request.resolve({ revision: `${bound}:${raw.revision}`, savedRevision: `${bound}:${raw.savedRevision}`, dirty: raw.dirty } satisfies SheetMergedAdopted)
+        return
       }
       case "gridcraft:opened": {
         const request = answer(raw, "open"); if (!request) return
@@ -192,10 +222,12 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       }
       case "gridcraft:executed": {
         const request = answer(raw, "execute"); if (!request) return
-        const conflicts = "conflicts" in raw ? executeConflicts(raw.conflicts) : undefined
-        if (!exact(raw, ["type", "requestId", "document", "revision", "applied", ...("savedRevision" in raw ? ["savedRevision"] : []), ...("conflicts" in raw ? ["conflicts"] : []), ...("conflictsTruncated" in raw ? ["conflictsTruncated"] : [])]) || "savedRevision" in raw && !savedRevisionToken(raw.savedRevision) || "conflicts" in raw && !conflicts || "conflictsTruncated" in raw && (raw.conflictsTruncated !== true || !conflicts) || !documentID(raw.document) || !u64(raw.revision) || !Number.isSafeInteger(raw.applied) || (raw.applied as number) < 1 || (raw.applied as number) > NATIVE_EXECUTE_MAX_COMMANDS) break
+        const agentWins = request.agentWins === true
+        const conflicts = "conflicts" in raw ? executeConflicts(raw.conflicts, agentWins) : undefined
+        if (agentWins && (typeof raw.dirty !== "boolean" || !savedRevisionToken(raw.savedRevision) || !conflicts)) break
+        if (!exact(raw, ["type", "requestId", "document", "revision", "applied", ...(agentWins ? ["dirty"] : []), ...("savedRevision" in raw ? ["savedRevision"] : []), ...("conflicts" in raw ? ["conflicts"] : []), ...("conflictsTruncated" in raw ? ["conflictsTruncated"] : [])]) || "savedRevision" in raw && !savedRevisionToken(raw.savedRevision) || "conflicts" in raw && !conflicts || "conflictsTruncated" in raw && (raw.conflictsTruncated !== true || !conflicts) || !documentID(raw.document) || !u64(raw.revision) || !Number.isSafeInteger(raw.applied) || (raw.applied as number) < 1 || (raw.applied as number) > NATIVE_EXECUTE_MAX_COMMANDS) break
         if (raw.document !== bound) { close("native_document_changed"); return }
-        request.finish(); request.resolve({ documentId: bound, revision: `${bound}:${raw.revision}`, ...("savedRevision" in raw ? { savedRevision: `${bound}:${raw.savedRevision}` } : {}), applied: raw.applied as number, ...(conflicts ? { conflicts, conflictsTruncated: raw.conflictsTruncated === true } : {}) } satisfies NativeExecuteResult); return
+        request.finish(); request.resolve({ documentId: bound, revision: `${bound}:${raw.revision}`, ...("savedRevision" in raw ? { savedRevision: `${bound}:${raw.savedRevision}` } : {}), applied: raw.applied as number, ...(agentWins ? { dirty: raw.dirty as boolean } : {}), ...(conflicts ? { conflicts, conflictsTruncated: raw.conflictsTruncated === true } : {}) } satisfies NativeExecuteResult); return
       }
       case "gridcraft:save-request": {
         if (!exact(raw, ["type", "requestId", "document", "revision"]) || !requestID(raw.requestId) || !documentID(raw.document) || !u64(raw.revision)) break
@@ -297,6 +329,19 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       if (!readOnly && bound === undefined) throw new Error("native_open_required")
       return await rpc("access", { type: "gridcraft:set-access", readOnly }, signal, timeoutMs, undefined, readOnly) as boolean
     },
+    async adoptMerged(save, captureId, signal) {
+      const file = unanswered.get(captureId)
+      if (!capabilities.includes("merge-capture-v1") || !file || file.document !== bound || confirmedReadOnly
+        || `${file.document}:${file.revision}` !== save.receipt.editorRevision) throw new Error("native_merge_unavailable")
+      const bytes = new Uint8Array(save.bytes).buffer
+      return await rpc("adopt", {
+        type: "gridcraft:adopt-merged", captureId, document: file.document, captureRevision: file.revision,
+        version: save.receipt.version, contentHash: save.contentHash, bytes, agentRanges: save.agentRanges,
+      }, signal, timeoutMs, [bytes]) as SheetMergedAdopted
+    },
+    setPresence(actors, reducedMotion) {
+      if (bound && capabilities.includes("presence-v1")) post({ type: "gridcraft:presence", document: bound, actors, reducedMotion })
+    },
     async execute(commands, executeOptions, signal) {
       if (bound === undefined) throw new Error("native_open_required")
       if (!Array.isArray(commands) || commands.length < 1 || commands.length > NATIVE_EXECUTE_MAX_COMMANDS) throw new Error("native_execute_invalid")
@@ -314,7 +359,7 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       const keep = executeOptions?.keep, label = executeOptions?.label
       // keep:"human" is always based on a saved version the editor confirmed.
       // A saved version's own revision (saved-<n>) is a base only for keep; the editor takes nothing else.
-      if (keep === undefined && base !== undefined && !u64(base) || keep !== undefined && (keep !== "human" || !validExecuteLabel(label) || base === undefined) || keep === undefined && label !== undefined) throw new Error("native_execute_invalid")
+      if (keep === undefined && base !== undefined && !u64(base) || keep !== undefined && ((keep !== "human" && (keep !== "agent" || !capabilities.includes("agent-wins-v1"))) || !validExecuteLabel(label) || base === undefined) || keep === undefined && label !== undefined) throw new Error("native_execute_invalid")
       return await rpc("execute", { type: "gridcraft:execute", commands: json, saved: true, ...(base !== undefined ? { baseRevision: base } : {}), ...(keep ? { keep, label } : {}) }, signal, timeoutMs) as NativeExecuteResult
     },
     close() { close() },

@@ -42,9 +42,10 @@ type State = "loading" | "enabled" | "preview" | "readonly" | "off" | "disabled"
  */
 export type NativeAvailability = Exclude<State, "off">
 
-export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability, placeLease, editorHidden, historyPresence, handBackRef, prepareLeaveRef, toolbar, historyHref }: { workspaceId: string; pageId: string; fallback: ReactNode
+export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability, placeLease, editorHidden, historyPresence, handBackRef, prepareLeaveRef, toolbar, historyHref, realtimeChatId }: { workspaceId: string; pageId: string; fallback: ReactNode
   /** The panel beside the chat: the host's compact bar renders into this element (see NativeCraftEditorHost). */
   toolbar?: HTMLElement | null
+  realtimeChatId?: string
   /** The version history link in that bar's menu. */
   historyHref?: string
   /** Where the lock controls render: the frame's status popover. */
@@ -95,7 +96,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
   if (state === "loading") return <p role="status" className="p-4 text-sm text-muted-foreground">Connecting…</p>
   // The host's UI and draft journal are remounted for every person and document.
   if (state === "enabled") return <div data-testid="native-editor" className={editorHidden ? "flex flex-col" : "flex min-h-[520px] flex-1 flex-col overflow-hidden"}>
-    <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled
+    <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled realtimeChatId={realtimeChatId}
       placeHistory={node => inHistory(node, historyPresence)} placeAgentStart={asEditMode} onStatus={onStatus} placeLease={placeLease} editorHidden={editorHidden} handBackRef={handBackRef} prepareLeaveRef={prepareLeaveRef} toolbar={toolbar} historyHref={historyHref} />
   </div>
   if (state === "preview") return <div className="flex min-h-[520px] flex-1 flex-col overflow-hidden">

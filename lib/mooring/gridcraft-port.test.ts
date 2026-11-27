@@ -1,6 +1,7 @@
 // GridCraft editor ↔ host, mooring protocol 2: the workbook file is the source of truth.
 import { afterEach, expect, it, vi } from "vitest"
 import { createGridcraftPort, GridcraftSaveRefused, type GridcraftPortOptions } from "./gridcraft-port"
+import { SHEET_REALTIME_CAPABILITIES, type SheetRealtimeCapability } from "./sheet-realtime"
 import type { NativeStructuredPort } from "./native-editor-port"
 
 afterEach(() => { vi.useRealTimers() })
@@ -18,9 +19,9 @@ type Rig = ReturnType<typeof rig>
 const signal = () => new AbortController().signal
 const latest = (r: Rig) => r.port.postMessage.mock.calls.at(-1)![0] as Record<string, unknown>
 const workbook = () => new Uint8Array([0x50, 0x4b, 3, 4, 9]).buffer
-function connect(r: Rig) { r.adapter.loaded(); expect(r.adapter.handleWindowMessage(r.hello)).toBe(true); r.receive({ type: "gridcraft:ready", version: "4870243e", accessProtocol: 1, readOnly: true }) }
-async function open(r: Rig, format: "xlsx" | "xlsm" = "xlsx") {
-  connect(r)
+function connect(r: Rig, capabilities?: readonly SheetRealtimeCapability[]) { r.adapter.loaded(); expect(r.adapter.handleWindowMessage(r.hello)).toBe(true); r.receive({ type: "gridcraft:ready", version: "4870243e", accessProtocol: 1, readOnly: true, ...(capabilities ? { capabilities } : {}) }) }
+async function open(r: Rig, format: "xlsx" | "xlsm" = "xlsx", capabilities?: readonly SheetRealtimeCapability[]) {
+  connect(r, capabilities)
   const opening = r.adapter.open({ name: `Book.${format}`, bytes: new Uint8Array(workbook()) }, { calculate: false, autoFit: false }, signal(), 30_000)
   const request = latest(r)
   r.receive({ type: "gridcraft:opened", requestId: request.requestId, document: "doc-1", revision: "3", format, calculated: false, warnings: [{ code: "vba_preserved", count: 1 }] })
@@ -316,4 +317,36 @@ it("carries the cells the person changed with a save, and takes anything it cann
   old.receive({ type: "gridcraft:save-request", requestId: "editor-1", document: "doc-1", revision: "5" })
   old.receive(savedFile("editor-1", "5"))
   expect((old.options.onSave as ReturnType<typeof vi.fn>).mock.calls[0][0].touched, "an editor that does not say").toBeUndefined()
+})
+
+
+it("updates a merged capture only through a correlated adoption and replays agent wins with metadata only", async () => {
+  const r = rig()
+  try {
+    await open(r, "xlsx", SHEET_REALTIME_CAPABILITIES)
+    const access = r.adapter.setReadOnly(false, signal())
+    r.receive({ type: "gridcraft:access", requestId: latest(r).requestId, readOnly: false })
+    await access
+    const save = r.adapter.requestSave(signal(), 30_000)
+    r.receive(savedFile(latest(r).requestId))
+    const capture = await save
+    const contentHash = `sha256:${"a".repeat(64)}`
+    const merged = {
+      receipt: {
+        workspaceId: "w", pageId: "p", applicationId: "gridcraft" as const, enginePin: bundle,
+        generation: "1", sessionId: "session", editorRevision: "doc-1:4", baseVersion: "2", version: "3",
+        contentHash, candidateHash: contentHash, durability: "node" as const, issuedBy: "crewship" as const, phase: "committed" as const,
+      },
+      contentHash, bytes: new Uint8Array(workbook()), agentRanges: [{ sheet: "L", a1: "B3:B5" }],
+    }
+    const adoption = r.adapter.adoptMerged(merged, capture.requestId, signal())
+    expect(latest(r)).toMatchObject({ type: "gridcraft:adopt-merged", document: "doc-1", captureId: capture.requestId, captureRevision: "4", version: "3", agentRanges: merged.agentRanges })
+    r.receive({ type: "gridcraft:merged-adopted", requestId: latest(r).requestId, document: "doc-1", captureId: capture.requestId, revision: "6", savedRevision: "saved-5", version: "3", dirty: true })
+    await expect(adoption).resolves.toEqual({ revision: "doc-1:6", savedRevision: "doc-1:saved-5", dirty: true })
+    expect(r.adapter.ack(capture.requestId, "3")).toBe(false)
+    const replay = r.adapter.execute([{ command: "cell.set", params: { cell: "L!B3", input: "agent" } }], { keep: "agent", baseRevision: "doc-1:saved-5", label: "Agent: change" }, signal())
+    expect(latest(r)).toMatchObject({ type: "gridcraft:execute", keep: "agent", baseRevision: "saved-5" })
+    r.receive({ type: "gridcraft:executed", requestId: latest(r).requestId, document: "doc-1", revision: "8", savedRevision: "saved-7", applied: 1, dirty: false, conflicts: [{ sheet: "L", cell: "B3" }] })
+    await expect(replay).resolves.toMatchObject({ savedRevision: "doc-1:saved-7", dirty: false, conflicts: [{ sheet: "L", cell: "B3" }] })
+  } finally { r.adapter.close() }
 })

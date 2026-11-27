@@ -9,7 +9,7 @@ import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {parseNativeRestoreReceipt,parseNativeVersionDocument,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionDocument,type NativeVersionList} from "./native-versions"
 
 export interface NativeDocumentClientOptions {
- workspaceId:string;pageId:string;fetch?:typeof fetch
+ workspaceId:string;pageId:string;chatId?:string;fetch?:typeof fetch
  /** Transport fixtures supply their own credential rotation; production uses tryRefresh. */
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
@@ -38,11 +38,15 @@ function nativeProposal(raw:unknown):NativeProposal|null{
 export class LegacyWorkbookError extends Error {
  constructor(readonly code?: string) { super("legacy_workbook_unavailable") }
 }
+export type NativeDocumentAdmission = {sessionId:string;applicationId:string;realtime?:{canWrite:boolean;generation?:string}}
+export type NativeDocumentEvent = "lease" | "session_retired" | "sheet_agent_presence" | "sheet_agent_presence_snapshot" | "presence_disconnected"
+
 export interface NativeDocumentClient {
- open(signal: AbortSignal): Promise<{sessionId: string; applicationId: string}>
+ open(signal: AbortSignal): Promise<NativeDocumentAdmission>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
+ operations?(from:string,signal:AbortSignal):Promise<{status:number;body:unknown}>
  originalWorkbook?(signal:AbortSignal):Promise<Uint8Array>
- events(signal:AbortSignal,onEvent:(event:"lease"|"session_retired",value:Record<string,unknown>)=>void):Promise<void>
+ events(signal:AbortSignal,onEvent:(event:NativeDocumentEvent,value:Record<string,unknown>)=>void):Promise<void>
  reauthorize(signal:AbortSignal):Promise<boolean>
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
@@ -120,8 +124,9 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
  const send:typeof fetch=(input,init)=>transport(input,{...init,redirect:"error"})
  const base=`/api/v1/pages/${encodeURIComponent("@"+options.pageId)}/craft/`
  const query=new URLSearchParams({workspace_id:options.workspaceId}).toString()
+ let realtime=false
  let active=true,token:string|undefined,sessionId:string|undefined,applicationId:string|undefined
- let opening:Promise<{sessionId:string;applicationId:string}>|undefined,reauthorizing:Promise<boolean>|undefined,reauthorizeAbort:AbortController|undefined
+ let opening:Promise<NativeDocumentAdmission>|undefined,reauthorizing:Promise<boolean>|undefined,reauthorizeAbort:AbortController|undefined
  const refresh=options.refresh??(options.fetch?undefined:tryRefresh),bearer=options.bearer??(()=>getAuthMode()==='bearer')
  let cookieRefreshedAt:number|undefined,rotation=0,eventRunning=false,eventRecovering=false,eventAbort:AbortController|undefined
  const rotationReason=new Error('native_credential_rotated')
@@ -195,16 +200,26 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!opening)opening=(async()=>{
     await freshCookie(signal)
     if(!active||signal.aborted)throw new Error('native_client_unavailable')
-    const response=await send(`${base}sessions?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json"},body:"{}"})
+    const response=await send(`${base}sessions?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json"},body:options.chatId ? JSON.stringify({chat_id:options.chatId}) : "{}"})
     if(!active||!response.ok)throw new Error("native_session_unavailable")
     const value:unknown=await response.json()
     if(!active||!value||typeof value!=="object")throw new Error("invalid_native_session")
     const v=value as Record<string,unknown>
     if(typeof v.session_token!=="string"||!/^[a-f0-9]{64}$/.test(v.session_token)||!identifier(v.session_id)||v.page_id!==options.pageId||(v.application_id!=="wordcraft"&&v.application_id!=="gridcraft"))throw new Error("invalid_native_session")
     token=v.session_token;sessionId=v.session_id;applicationId=v.application_id
-    return {sessionId,applicationId}
+    realtime=Boolean(options.chatId)&&v.realtime_sheet===true&&applicationId==="gridcraft"
+    const generation=validNativeVersion(v.generation)&&v.generation!=="0"?v.generation:undefined
+    return {sessionId,applicationId,...(realtime?{realtime:{canWrite:v.can_write===true&&Boolean(generation),generation}}:{})}
    })()
    return opening
+  },
+  async operations(from,signal){
+   ready()
+   if(!validNativeVersion(from)||from==="0")throw new Error("native_operations_invalid")
+   const response=await send(`${base}document/operations?${query}&from=${from}`,{signal,cache:"no-store",headers:{"X-Craft-Session":token!}})
+   ready()
+   const body:unknown=await response.json().catch(()=>null);ready()
+   return {status:response.status,body}
   },
   async undo(operationId,generation,signal){
    ready()
@@ -333,17 +348,17 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
           else if(line.startsWith('data: ')&&!data)data=line.slice(6)
           else throw new Error('invalid_native_stream')
          }
-         if(event!=='lease'&&event!=='session_retired')throw new Error('invalid_native_stream')
+         if(event!=='lease'&&event!=='session_retired'&&!(realtime&&(event==='sheet_agent_presence'||event==='sheet_agent_presence_snapshot')))throw new Error('invalid_native_stream')
          const v:unknown=JSON.parse(data)
          if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('invalid_native_stream')
          const record=v as Record<string,unknown>
          if(event==='session_retired'&&(record.delivery!=='stopped'||!['purge','retain'].includes(String(record.draft))||typeof record.reason!=='string'))throw new Error('invalid_native_stream')
-         ready();if(event==='lease')verifiedLease=true;onEvent(event,record)
+         ready();if(event==='lease'||event==='sheet_agent_presence_snapshot')verifiedLease=true;onEvent(event as NativeDocumentEvent,record)
          if(event==='session_retired')return
         }
         if(done){if(buffer.trim())throw new Error('invalid_native_stream');throw new NativeMetadataTransportError('native_stream_disconnected')}
        }
-      }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
+      }finally{if(realtime&&active&&!signal.aborted)onEvent('presence_disconnected',{});await reader.cancel().catch(()=>{});reader.releaseLock()}
      }catch(error){
       const aborted=error===rotationReason||typeof error==='object'&&error!==null&&'name'in error&&error.name==='AbortError'
       if(active&&!signal.aborted&&controller.signal.reason===rotationReason&&rotation!==startedRotation&&aborted){reconnecting=true;retries=0;continue}

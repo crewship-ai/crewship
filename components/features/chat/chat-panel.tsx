@@ -86,14 +86,13 @@ import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linke
 import { ArtifactViewerProvider, type ArtifactViewerTarget } from "./artifact-context/projects/artifact-viewer-context"
 import { SheetPanelProvider } from "./artifact-context/sheet/sheet-panel-context"
 import { SheetMessageChip } from "./artifact-context/sheet/sheet-message-chip"
-import { SHEET_CONSENT_STALE, useSheetMessage } from "./artifact-context/sheet/use-sheet-message"
+import { useSheetMessage } from "./artifact-context/sheet/use-sheet-message"
 import { SheetFromFileRow } from "./artifact-context/sheet/sheet-from-file"
 import { ConversationSheetLinks } from "./artifact-context/sheet/conversation-sheet-links"
 import { conversationSheets, rememberConversationSheet } from "./artifact-context/sheet/conversation-sheets"
 import { conversationRefsKey, useConversationSheets } from "./artifact-context/sheet/use-conversation-sheets"
 import { useSheetAgentAccess } from "./artifact-context/sheet/use-sheet-agent-access"
-import { handBackSheet } from "./artifact-context/sheet/hand-back-sheet"
-import type { NativeCraftHandBack, NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
+import type { NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { SheetIntakeProvider, sheetReplacesAttachment, splitForSheets, withdrawSheetAttachment, type SheetOffer } from "./artifact-context/sheet/sheet-intake"
 import { SheetSidePanel } from "./artifact-context/sheet/sheet-side-panel"
 import { confirmLeaveUnsavedSheet } from "./artifact-context/sheet/confirm-unsaved-sheet"
@@ -788,24 +787,11 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   refreshParticipantsRef.current = refreshParticipants
   const { prepareSend: prepareArtifactSend, markSent: artifactMarkSent, confirmEcho: artifactConfirmEcho } = artifactComposer
   artifactEchoRef.current = artifactConfirmEcho
-  const sheetHandBack = useRef<(() => Promise<NativeCraftHandBack>) | null>(null)
   const [panelWidth, setPanelWidth] = useSplitWidth(currentUserId)
   // Workbooks of this message being made into Sheets, when the last one finished, and whether its choice is still being checked.
   const sheetsMaking = useRef(new Set<string>()), sheetMadeAt = useRef(0), sheetAccessCheckingRef = useRef(false), sheetWithdrawn = useRef<string[]>([])
   // Sheets of this message that could not be made, and the wait of a message held for them.
   const sheetsFailed = useRef(new Set<string>()), sheetHold = useRef<AbortController | null>(null), sheetOfferIds = useRef(new Set<string>())
-  const [sheetHandingBack, setSheetHandingBack] = useState(false)
-  const sheetHandingBackRef = useRef(false)
-  // A message held because the hand-over was not confirmed: why, for the conversation it was written in.
-  const [sheetHeld, setSheetHeld] = useState<{ scope: string; say: string } | null>(null)
-  // A message let the agent change this Sheet: the panel says it waits for the agent until the turn ends.
-  const [sheetAwaitsAgent, setSheetAwaitsAgent] = useState<string | null>(null)
-  // The editor's latest report, read the moment a held message is sent, without waiting for a render.
-  const sheetStatusRef = useRef<NativeCraftHostStatus | undefined>(undefined)
-  const sendScopeRef = useRef(artifactScope)
-  sendScopeRef.current = artifactScope
-  const sendWithPageRef = useRef(sendMessageWithPage)
-  sendWithPageRef.current = sendMessageWithPage
   // Filled below, where the Sheet beside the chat is known; only the composer's own send reads it.
   const sheetMessageRef = useRef<Pick<ReturnType<typeof useSheetMessage>, "metadata" | "sent">>({ metadata: () => undefined, sent: () => {} })
   // The Sheet the message should carry, still opening: its version is not known yet, and nothing else stops it.
@@ -861,36 +847,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       const sizeCheck = checkChatMessageSize(sessionId, text, refs)
       if (!sizeCheck.ok) { toast.error(sizeCheck.message); return false }
     }
-    const markSent = () => { artifactMarkSent(text, prepared.intent); if (refs) { sheet.sent(); setSheetAwaitsAgent(refs.artifact_refs[0].page_id); void queryClient.invalidateQueries({ queryKey: conversationRefsKey(workspaceId, sessionId) }) } }
-    const askBack = refs ? sheetHandBack.current : null
-    // One press of Send is one message: a second one during the hand-over sends nothing more.
-    if (refs && askBack && sheetHandingBackRef.current) return false
-    if (refs && askBack) {
-      // The agent may start the moment the message arrives, so the Sheet is free, confirmed, before it goes.
-      // Without that confirmation leave to change the Sheet never goes: the message waits and the person chooses.
-      const scope = sendScopeRef.current
-      setSheetHeld(null)
-      sheetHandingBackRef.current = true
-      setSheetHandingBack(true)
-      return handBackSheet(askBack).then(({ hold, say }) => {
-        // Another conversation or person is shown now: this message is not theirs to send.
-        if (sendScopeRef.current !== scope) return false
-        if (hold) { setSheetHeld({ scope, say: say ?? "Passing the Sheet to the agent was not confirmed. The message was not sent." }); return false }
-        // A save of their own that finished while handing over is a version the person saw: send that one. Any other change asks again.
-        const latest = sheetStatusRef.current
-        const agreed = refs.artifact_refs[0]
-        const shown = latest?.version ?? agreed.version
-        const bound = shown === agreed.version ? refs
-          : shown === latest?.savedVersion ? { artifact_refs: [{ ...agreed, version: shown }] } : null
-        if (!bound) { setSheetHeld({ scope, say: SHEET_CONSENT_STALE + " The message was not sent." }); return false }
-        if (say) toast.info(say)
-        const went = sendWithPageRef.current(text, bound)
-        if (went instanceof Promise) return went.then((accepted) => { if (accepted) markSent(); return accepted })
-        if (went === false) return false
-        markSent()
-        return true
-      }).finally(() => { sheetHandingBackRef.current = false; setSheetHandingBack(false) })
-    }
+    const markSent = () => { artifactMarkSent(text, prepared.intent); if (refs) { sheet.sent(); void queryClient.invalidateQueries({ queryKey: conversationRefsKey(workspaceId, sessionId) }) } }
     const sent = outgoing ? sendMessageWithPage(text, outgoing) : sendMessageWithPage(text)
     if (sent instanceof Promise) return sent.then((accepted) => {
       if (accepted) markSent()
@@ -1403,40 +1360,19 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const sheetForMessage = sheetPicked && sheetDetached !== sheetPicked && sessionKind === "direct" && canChat ? sheetPicked : null
   const sheetBlocked = pageContextSlug && !pageContextRemoved ? "This message carries a Page. Remove it to let the agent change the Sheet."
     : proposalActive ? "This message asks for a proposal. Remove it to let the agent change the Sheet." : null
-  const [sheetStatus, setSheetStatus] = useState<NativeCraftHostStatus>()
+  const [sheetEditor, setSheetEditor] = useState<{ pageId: string; scope: string; status: NativeCraftHostStatus }>()
+  const sheetStatus = sheetEditor && sheetEditor.pageId === sheetTarget?.pageId && sheetEditor.scope === artifactScope ? sheetEditor.status : undefined
   // The server says whether the agent may change this Sheet in this chat, and why not; the client adds no rules of its own.
-  const sheetAccess = useSheetAgentAccess(workspaceId, sheetForMessage, sessionId, Boolean(sheetStatus?.holderIsMe))
+  const sheetAccess = useSheetAgentAccess(workspaceId, sheetForMessage, sessionId, false)
   sheetAccessCheckingRef.current = sheetAccess.checking
-  // The server starts the choice on in the person's own private chat for a Sheet uploaded there (it still decides on every message).
-  const sheetDefaultAllowed = "defaultAllowed" in sheetAccess && sheetAccess.defaultAllowed === true
-  // Beside the chat the editor says which version it shows; on a phone the server names the version the chip shows.
-  // Until the editor beside the chat says, the version the server names is the one it opens (a message sent
-  // while the editor is opening goes with the Sheet, without waiting for the grid).
-  const sheetSeenVersion = sheetTarget ? sheetStatus?.version ?? sheetAccess.seen?.version : sheetAccess.seen?.version
+  const sheetDefaultAllowed = true
+  // On desktop the opened editor names the causal base. The phone's chip displays the version the server names.
+  const sheetSeenVersion = sheetTarget ? (sheetStatus?.ready ? sheetStatus.version : undefined) : sheetAccess.seen?.version
   const sheetMessage = useSheetMessage({ scope: artifactScope, pageId: sheetForMessage, blocked: sheetBlocked ?? sheetAccess.refusal ?? (sheetAccess.checking ? "checking" : null) ?? (sheetSeenVersion ? null : "opening"), version: sheetSeenVersion, ownSave: sheetTarget ? sheetStatus?.savedVersion : undefined, defaultAllowed: sheetDefaultAllowed })
   sheetMessageRef.current = sheetMessage
   sheetOpeningRef.current = sheetMessage.awaitsVersion && !sheetBlocked && !sheetAccess.refusal
-  const sheetWarning = sheetHandingBack ? "Passing the Sheet to the agent…"
-    : !sheetStatus?.holderIsMe ? null
-    : sheetStatus.dirty ? "Your last change is not saved yet. If it still is not when you send, you keep editing and the agent cannot change the Sheet."
-    : "You are editing. Editing passes to the agent when you send; take it over again whenever you want."
-  // The turn that carried the leave has ended, or the conversation changed: nothing is awaited any more.
-  const sheetTurnSeen = useRef(false)
-  useEffect(() => {
-    if (!sheetAwaitsAgent) { sheetTurnSeen.current = false; return }
-    if (isStreaming) sheetTurnSeen.current = true
-    else if (sheetTurnSeen.current) { sheetTurnSeen.current = false; setSheetAwaitsAgent(null) }
-  }, [isStreaming, sheetAwaitsAgent])
-  useEffect(() => { setSheetAwaitsAgent(null) }, [artifactScope])
-  const heldHere = sheetHeld && sheetHeld.scope === artifactScope && sheetForMessage ? sheetHeld.say : null
-  const sheetHeldNotice = heldHere
-    ? <div role="alert" className="mx-3 mb-2 flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-        <p className="min-w-0 flex-1">{heldHere} Your message is still here.</p>
-        <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={() => { sheetMessage.setAllowed(false); setSheetHeld(null); focusComposer(); toast.info("The agent will not change the Sheet. Send again to send the text only.") }}>Send text only</Button>
-        <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={() => { setSheetHeld(null); focusComposer(); toast.info("Send again to try passing the Sheet to the agent.") }}>Try again</Button>
-      </div> : null
   const sheetChip = sheetForMessage && workspaceId
-    ? <SheetMessageChip workspaceId={workspaceId} pageId={sheetForMessage} allowed={sheetMessage.allowed} blocked={sheetBlocked} checking={sheetAccess.checking} refusal={sheetAccess.refusal} warning={sheetWarning} notice={sheetMessage.stale ? SHEET_CONSENT_STALE : null} seen={sheetTarget ? null : sheetAccess.seen} sending={isStreaming || sheetHandingBack}
+    ? <SheetMessageChip workspaceId={workspaceId} pageId={sheetForMessage} allowed={sheetMessage.allowed} blocked={sheetBlocked} checking={sheetAccess.checking} refusal={sheetAccess.refusal} warning={null} seen={sheetTarget ? null : sheetAccess.seen} sending={isStreaming}
         standing={sheetDefaultAllowed} onAllowedChange={sheetMessage.setAllowed} onRemove={() => { sheetMessage.setAllowed(false); setSheetDetached(sheetForMessage); focusComposer() }} /> : null
   // Workbooks added to the message, each offered as a Sheet; another conversation starts with none.
   const [sheetOffers, setSheetOffers] = useState<(SheetOffer & { id: string; scope: string })[]>([])
@@ -1519,8 +1455,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   // would change the root element and remount the whole chat (composer, scroll).
   const sheetPickValue = useMemo(() => phoneSheetSession ? { choose: openSheet, chosenPageId: phoneSheet } : null, [phoneSheetSession, openSheet, phoneSheet])
   const sheetPanelValue = sheetSession ? { open: openSheet, noteChanged: noteSheetChanged, activePageId: sheetTarget?.shown ? sheetTarget.pageId : null,
-    editingPageId: sheetTarget && sheetStatus?.holderIsMe && sheetStatus.editing ? sheetTarget.pageId : null, chatId: sheetChat ?? null,
-    handBack: async () => sheetHandBack.current ? sheetHandBack.current() : undefined } : null
+    editingPageId: sheetTarget && sheetStatus?.editing ? sheetTarget.pageId : null, chatId: sheetChat ?? null } : null
   const withProjects = (node: ReactNode) => <SheetPanelProvider value={sheetPanelValue} pick={sheetPickValue} workspaceId={verifiedChatReadScope && workspaceId ? workspaceId : null}><SheetIntakeProvider value={sheetIntakeOn || sheetIntakeDraft ? takeSheetFiles : null}>{chatArtifactProjects()
     ? <ArtifactViewerProvider workspaceId={workspaceId ?? ""} enabled={artifactProjectsOn} target={projectTarget} onTargetChange={changeProject} sendToAgent={sendCommentToAgent}>{node}</ArtifactViewerProvider>
     : node}</SheetIntakeProvider></SheetPanelProvider>
@@ -1951,7 +1886,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
             {artifactStrip}
             {sheetLinks}
             {sheetFileRows}
-            {sheetHeldNotice}
             {sheetChip}
             {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
           </div>
@@ -2101,7 +2035,6 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         {artifactStrip}
         {sheetLinks}
         {sheetFileRows}
-        {sheetHeldNotice}
         {sheetChip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         {canChat ? <ChatComposer
@@ -2143,7 +2076,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         style={{ "--chat-panel-width": `${panelWidth}%` } as CSSProperties}
         className={viewerAsideClass({ expanded: documentExpanded, overlay: chatArtifactProjects(), beside: sheetBeside })}>
         {sheetShown ? null : viewerPanel}
-        {sheetTarget && workspaceId && <SheetSidePanel key={sheetTarget.pageId} workspaceId={workspaceId} pageId={sheetTarget.pageId} hidden={!sheetShown} dirtyRef={sheetDirty} handBackRef={sheetHandBack} onStatus={(status) => { sheetStatusRef.current = status; setSheetStatus(status) }} agentPending={sheetAwaitsAgent === sheetTarget.pageId && sheetStatus?.holder?.kind !== "agent"}
+        {sheetTarget && workspaceId && <SheetSidePanel key={`${artifactScope}:${sheetTarget.pageId}`} workspaceId={workspaceId} pageId={sheetTarget.pageId} hidden={!sheetShown} dirtyRef={sheetDirty} realtimeChatId={sheetChat ?? sessionId ?? undefined} onStatus={status => setSheetEditor(status ? { pageId: sheetTarget.pageId, scope: artifactScope, status } : undefined)}
           expanded={documentExpanded} onExpandedChange={setDocumentExpanded} onClose={() => { setSheet(null); const opener = sheetOpener.current; requestAnimationFrame(() => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); else focusComposer() }) }} opener={sheetOpener.current} />}
       </aside>
       <div style={{ display: viewerOpen ? "none" : "contents" }} inert={viewerOpen}>

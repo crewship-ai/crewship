@@ -1,5 +1,6 @@
 "use client"
 
+import { readSheetPresence, readSheetRealtimeAuthority, SHEET_REALTIME_CAPABILITIES, type SheetPresence, type SheetRealtimeCapability } from "@/lib/mooring/sheet-realtime"
 import {agentVersionHref} from '@/lib/mooring/version-href'
 import * as React from "react"
 import {createPortal,flushSync} from "react-dom"
@@ -35,7 +36,7 @@ import {NativeCraftVersionHistory} from "./native-craft-version-history"
 import {NativeAppOffError,appDrainHolderText,appOffText,nativeAppOff} from "@/lib/mooring/native-app-off"
 import type {NativeVersionDocument,NativeVersionList} from "@/lib/mooring/native-versions"
 
-interface Lease extends NativeCraftLeaseView {expires_at: string|null}
+interface Lease extends NativeCraftLeaseView {expires_at: string|null; realtime?:boolean}
 const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v)
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=512&&!v.includes('\0')
@@ -113,7 +114,7 @@ export function workbookFile(snapshot:NativeDocumentSnapshot):{format:'xlsx'|'xl
  return {format,fileName:name.toLowerCase().endsWith(`.${format}`)?name:`${name.replace(/\.(xlsx|xlsm)$/i,'')}.${format}`}
 }
 function holds(view:Lease,generation?:string):boolean{return view.can_edit===true&&view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)}
-function owns(view:Lease,generation?:string):boolean{return holds(view,generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
+function owns(view:Lease,generation?:string):boolean{return holds(view,generation)&&(view.realtime===true||typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now())}
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
 export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:string):string|null {
  try{
@@ -155,7 +156,7 @@ export interface NativeCraftHostStatus {ready:boolean;phase?:string;savedVersion
 export type NativeCraftHandBack={state:'returned'}|{state:'not_held'}|{state:'kept';reason:'unsaved'|'busy'|'unconfirmed'}
 /** How long a save already on its way may still finish before the access is kept instead. */
 const HAND_BACK_SAVE_MS=3000
-interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean
+interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean;realtimeChatId?:string
  /** Where the version history renders; inline by default. The Artifacts frame moves it into its History drawer. */
  placeHistory?:(history:React.ReactNode)=>React.ReactNode
  /** Where the agent task form renders, once the server admits agents; inline by default. */
@@ -185,13 +186,16 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  }
  return kept
 }
-interface Runtime {/** The engine build the editor named in ready. */editorBuild?:string;/** The engine build the server named for this Sheet. */engineBuild?:string;/** The editor revision of the version last saved (or opened): the base a replay keeping the person's cells names. */savedRevision?:string;held?:boolean;/** Rebases after a save refused as moved, in a row. */movedTries?:number;mountedVersion:string;bundle:string;revision?:string;transferSaved?:boolean;enginePin:string;sessionId:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
+interface Runtime {capabilities?:readonly SheetRealtimeCapability[];/** The engine build the editor named in ready. */editorBuild?:string;/** The engine build the server named for this Sheet. */engineBuild?:string;/** The editor revision of the version last saved (or opened): the base a replay keeping the person's cells names. */savedRevision?:string;held?:boolean;/** Rebases after a save refused as moved, in a row. */movedTries?:number;mountedVersion:string;bundle:string;revision?:string;transferSaved?:boolean;enginePin:string;sessionId:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 const READ_ONLY_REFUSED='Edit access was removed. Unsaved changes stay as a local draft. Reload the page to see the shared version.'
 const METADATA_RETRY_MS=5000,METADATA_RETRY_MAX_MS=60000
-export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,placeHistory,placeAgentStart,onStatus,placeLease,editorHidden=false,handBackRef,prepareLeaveRef,toolbar,historyHref}:Props){
+export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,placeHistory,placeAgentStart,onStatus,placeLease,editorHidden=false,handBackRef,prepareLeaveRef,toolbar,historyHref,realtimeChatId}:Props){
  const compact=Boolean(toolbar)
+ const realtimeSheet=Boolean(realtimeChatId)
+ const [realtimeDetail,setRealtimeDetail]=React.useState<string>()
+ const [presenceLabel,setPresenceLabel]=React.useState<string>()
  // Opening the latest version again (after a conflict) is a fresh open of the same page: the unsaved draft stays in this browser and is offered beside it.
  const [reopened,setReopened]=React.useState(0)
  const [attemptState,setAttemptState]=React.useState('')
@@ -249,16 +253,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{if(!view.holder||view.mine)setTakeNotice(notice=>notice==='held'?undefined:notice)},[view.holder,view.mine])
  const statusSink=React.useRef(onStatus);statusSink.current=onStatus
  const openProposals=proposals.filter(proposal=>proposal.state==='open').length
- const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
- React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:view.mine,openProposals,recoveredDrafts:recoveries.length,version:savedVersion??openedVersion,...(conflictShown?{conflict:true}:{})})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,openedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,openProposals,recoveries.length,conflictShown])
+ const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='merge_adoption'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
+ React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:!realtimeSheet&&view.mine,openProposals,recoveredDrafts:recoveries.length,version:savedVersion??openedVersion,...(conflictShown?{conflict:true}:{})})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,openedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,realtimeSheet,openProposals,recoveries.length,conflictShown])
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setOpenedFile(undefined);setFidelityAsk(false);setFidelityLoss(null);setFidelityKept(false);fidelity.current={warnings:0,accepted:false}
   setOfferWithdrawn(false);setAccessCheck(false);setStateScope(identityKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setExporting(false);setExportNote(undefined);setExportRefused(undefined);setPublishedVersion(undefined);setHistoryKey(0);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setAppOff(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
+  setRealtimeDetail(undefined);setPresenceLabel(undefined)
   setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined);setAgentNotice(undefined);setAgentWorking(false);setTakeNotice(undefined);setLegacySource(false)
   const lifetime=new AbortController()
   // Replaced only by a fresh read admission after the server retires write (#4348).
-  let client=createNativeDocumentClient({workspaceId,pageId})
+  let client=createNativeDocumentClient({workspaceId,pageId,...(realtimeChatId?{chatId:realtimeChatId}:{})})
+  let realtimeGeneration:string|undefined
+  const presence=new Map<string,{actor:SheetPresence;expires:number}>()
+  let presenceTimer:ReturnType<typeof setTimeout>|undefined
+  const motion=typeof matchMedia==='function'?matchMedia('(prefers-reduced-motion: reduce)'):undefined
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
@@ -284,7 +293,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   const readLossAbort=new AbortController()
   const draftScope={human:humanId,workspace:workspaceId,page:pageId},readConfirmed=()=>confirmNativeRead(draftScope)
   // While a return waits for its read, an older answer grants nothing and cancels nothing.
-  function readAccess(value:boolean){if(value){if(!offerStale){frameWithdrawn=false;readConfirmed();reveal()}}else{clearTimeout(accessNotice);setAccessCheck(false)}readable=value;setReadVerified(value)}
+  function readAccess(value:boolean){if(value){if(!offerStale){frameWithdrawn=false;readConfirmed();reveal()}}else{clearTimeout(accessNotice);setAccessCheck(false);if(realtimeSheet){presence.clear();paintPresence()}}readable=value;setReadVerified(value)}
   function withdrawOffer(value:boolean){offerStale=value;setOfferWithdrawn(value)}
   // Opacity, not visibility: a hidden frame stops rendering (#5060). Neither inert nor
   // blur: both drop the engine's focus inside its frame, no call brings that back, and
@@ -302,6 +311,38 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   function reveal(){const r=concealed;concealed=undefined;clearTimeout(accessNotice);setAccessCheck(false);if(!r?.ready)return;r.frame.style.opacity='';r.frame.removeAttribute('aria-hidden');if(!r.frame.hasAttribute('inert')){r.frame.style.pointerEvents='';r.frame.removeAttribute('tabindex')}r.coordinator?.release()}
   function offerRecoveries(rows:NativeRecovery[]){keptRecoveries=rows.length>0;setRecoveries(rows)}
   const live=(r:Runtime)=>!dead&&!lifetime.signal.aborted&&current===r&&!r.abort.signal.aborted
+  function paintPresence(){
+   clearTimeout(presenceTimer)
+   const now=Date.now(),actors:SheetPresence[]=[]
+   let next=Infinity
+   for(const [id,item] of presence){
+    if(item.expires<=now){presence.delete(id);continue}
+    next=Math.min(next,item.expires);actors.push({...item.actor,ttlMs:item.expires-now})
+   }
+   const r=current
+   if(r?.ready&&live(r))r.port.setPresence?.(actors,motion?.matches??false)
+   const label=actors.find(actor=>!actor.ranges.length||!r?.capabilities?.includes('presence-v1'))?.label
+   if(!dead)setPresenceLabel(label)
+   if(next!==Infinity)presenceTimer=setTimeout(paintPresence,Math.max(1,next-now))
+  }
+  function receivePresence(event:string,value:Record<string,unknown>){
+   if(event==='presence_disconnected')presence.clear()
+   else {
+    const snapshot=event==='sheet_agent_presence_snapshot'
+    const rows=snapshot?value.operations:[value]
+    if(!Array.isArray(rows)||rows.length>32)return
+    const parsed=rows.map(readSheetPresence)
+    if(parsed.some(row=>!row))return
+    if(snapshot)presence.clear()
+    for(const row of parsed){
+     if(!row)continue
+     const {phase,presence:actor}=row
+     if(phase==='ended'||actor.ttlMs===0)presence.delete(actor.activityId)
+     else if(presence.size<32||presence.has(actor.activityId))presence.set(actor.activityId,{actor,expires:Date.now()+actor.ttlMs})
+    }
+   }
+   paintPresence()
+  }
   const display=(r:Runtime)=>{
    if(!live(r))return
    const phase=r.phase?.phase
@@ -323,6 +364,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   // An agent's saved version of this Sheet reaches the open editor (live): replayed when the editor is clean and the version
   // follows its own, opened as before when it only reads, and never over anything the person has not saved.
   const agentHost:AgentVersionHost={
+   preferOperations:realtimeSheet,
    state:()=>{
     const r=current
     if(dead||!r||!r.ready||r.retiring&&!r.retirementFinished)return{mode:'none',clean:false}
@@ -365,17 +407,27 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     const coordinator=r.coordinator
     const release=coordinator.beginReplay()
     if(!release)return{kind:'reload',reason:'save_unsettled'}
-    try{return await rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',signal,
-     operations:async(from,s)=>{let res:Response;try{res=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/document/operations?${new URLSearchParams({workspace_id:workspaceId,from})}`,{signal:s,cache:'no-store',redirect:'error'})}catch(error){if(s.aborted)throw error;return{status:0,body:null}}return{status:res.status,body:await res.json().catch(()=>null)}},
+    try{return await rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',...(realtimeSheet?{keep:'agent' as const}:{}),signal,
+     operations:async(from,s)=>{if(realtimeSheet)return client.operations?.(from,s)??{status:404,body:null};let res:Response;try{res=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/document/operations?${new URLSearchParams({workspace_id:workspaceId,from})}`,{signal:s,cache:'no-store',redirect:'error'})}catch(error){if(s.aborted)throw error;return{status:0,body:null}}return{status:res.status,body:await res.json().catch(()=>null)}},
      // The saved version a replay over unsaved work reports is the base of the next one.
      execute:(commands,options,s)=>r.port.execute(commands,options,s).then(result=>{if(result.savedRevision&&live(r))r.savedRevision=result.savedRevision;return result}),
-     rebaseBase:(version,hash)=>live(r)&&coordinator.rebaseBase(version,hash)})}
+     rebaseBase:(version,hash,result)=>{
+      if(!live(r))return false
+      const checkpoint=realtimeSheet&&result?.dirty===false?result.revision:undefined
+      if(!coordinator.rebaseBase(version,hash,checkpoint?{cleanCheckpoint:checkpoint}:{}))return false
+      if(realtimeSheet){
+       r.version=version;setOpenedVersion(version)
+       if(checkpoint){r.ackedVersion=version;display(r)}
+      }
+      return true
+     }})}
     finally{release()}
    },
    retryMoved:()=>{const r=current;if(r&&live(r))r.coordinator?.retryMoved()},
    rebased:(_event,outcome)=>{
     // Keep mine moves this editor's save base to the head, as it is, while the same editor is open.
     const r=current;keepMine.current=r&&r.coordinator?(version,hash)=>live(r)&&r.coordinator!.rebaseBase(version,hash,{keepLocal:true}):undefined
+    if(realtimeSheet){if(!dead&&outcome.kind==='layout')setRealtimeDetail('Review changes before saving.');return}
     if(!dead)setRebaseNote(outcome.kind==='current'||outcome.kind==='reload'||outcome.kind==='rebased'&&outcome.conflicts.length===0?undefined:outcome)},
    working:on=>{if(!dead)setAgentWorking(on)},
    baseRevision:()=>current?.savedRevision??current?.revision,
@@ -547,9 +599,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    }
    if(!networkRetired)renewNow()
   }
+  function admissionLease(raw:unknown):Lease{
+   if(!realtimeSheet)return leaseView(raw)
+   if(!object(raw))throw Error('invalid_lease')
+   if(raw.realtime_sheet!==true){
+    const legacy=leaseView(raw)
+    return {...vacant,can_edit:legacy.can_edit}
+   }
+   const access=readSheetRealtimeAuthority(raw,realtimeGeneration)
+   if(!access)throw Error('invalid_lease')
+   const writable=access.generation!==undefined
+   return {...vacant,realtime:true,can_edit:access.canEdit,can_write:writable,mine:writable,generation:access.generation??null}
+  }
   async function currentLease(admission:typeof client,signal:AbortSignal){
    const observed=leaseObservation
-   const proof=leaseView(await admission.lease(signal))
+   const proof=admissionLease(await admission.lease(signal))
    if(dead||authSuspended||signal.aborted||client!==admission)throw Error('native_admission_retired')
    let confirmed=proof
    if(observed!==leaseObservation){
@@ -637,7 +701,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      })
     },
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&liveMount())failNative(r,'The connection to the editor ended. The last changes are not confirmed; the original editor stays locked.')},
-    onReady(_version?:string,build?:string){if(!r||!liveMount())return;r.editorBuild=build;clearTimeout(timer);void(async()=>{
+    onReady(_version?:string,build?:string,capabilities?:readonly SheetRealtimeCapability[]){if(!r||!liveMount())return;r.editorBuild=build;r.capabilities=capabilities;clearTimeout(timer);void(async()=>{
      const mounted=await port.bootstrap(snapshot.bytes,abort.signal,budget.stepMs)
      if(!r||!liveMount())throw Error('native_startup_canceled')
      r.savedRevision=mounted.editorRevision
@@ -648,7 +712,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      r.mountedState=mounted?.nativeState;r.ready=true;setOpenedVersion(r.version);setHistoryKey(n=>n+1)
      frame.style.visibility='';frame.removeAttribute('inert')
      if(offerStale)conceal(r);else frame.style.opacity=''
-     readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
+     readAccess(true);setRetainedBuffer(false);display(r);paintPresence();resolve(r)
      if(offerStale&&!offerCheck)askContent()
     })().catch((cause:unknown)=>{
      // A code as it is; an editor's own sentence shortened and without what it quotes,
@@ -704,7 +768,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     const result=await client.decideProposal(id,'accept',r.generation,lifetime.signal)
     if(result.state==='stale'){setError('The document changed after the proposal was prepared. The proposal was not applied; the document is unchanged.');if(live(r)&&r.writable)resumeViewing(r);return}
     if(!await retireWrite(r))return
-    transition=false;await acquire()
+    if(realtimeSheet)await reopenRealtimeAfterMutation();else{transition=false;await acquire()}
    })().catch(()=>{
     if(dead)return
     if(r&&r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
@@ -799,7 +863,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    transition=true
    try{
     if(!await retireWrite(r))return false
-    if(live(r)&&holds(viewNow,r.generation))await releaseUnused(r.generation)
+    if(!realtimeSheet&&live(r)&&holds(viewNow,r.generation))await releaseUnused(r.generation)
     return live(r)
    }catch{
     if(live(r))setError('The local draft could not be captured. The editor is still open.')
@@ -889,6 +953,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   // ordinary disconnected state with the draft kept.
   async function reopenReadOnly(retry=false){
    if(dead||authSuspended||readOpening||networkRetired&&!(retry&&current?.blocked))return
+   realtimeGeneration=undefined;presence.clear();paintPresence()
    const message='Edit access was removed. The document is read-only.'
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);dropPrivateViews()
    if(!metadataOnly)setError(message)
@@ -1014,7 +1079,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   }
   async function observeLease(raw:unknown,streamed=false){
    // A failed engine still relies on this monitor for current read authority.
-   const next=leaseView(raw)
+   const next=admissionLease(raw)
    if(nativeFailed)return
    if(streamed)leaseObservation++
    viewNow=next;setView(next)
@@ -1024,7 +1089,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    // an expiry-only lapse goes through leaseWatch's bounded server recheck.
    if(r?.writable&&!(streamed?holds:owns)(next,r.generation)){if(!await retireWrite(r))return}
    if(initializing||r&&!r.ready)readerRefreshNeeded=true
-   else if(!transition)await refreshReader()
+   else if(!transition&&!acquiring)await refreshReader()
   }
   // One take-over at a time (#5104): a later one must never meet the cleanup of
   // an earlier one, which could otherwise release the same-session generation.
@@ -1045,6 +1110,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   // The person clicked or typed in the read-only Sheet. Taking over is the same
   // action as the button; the server decides, and nothing unlocks before it did.
   function editAttempt(r:Runtime,kind:'pointer'|'key'){
+   if(realtimeSheet)return
    // Which condition held is kept on the mount: a reason only, never content.
    const why=sessionApplication!=='gridcraft'?'application':!live(r)?'not_live':!r.ready?'not_ready':r.writable?'writing':r.blocked?'blocked':undefined
    if(why){setAttemptState(`ignored:${why}`);return}
@@ -1058,7 +1124,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    setAttemptState('taking');setTakeNotice('taking');attempted=true
    control.current('acquire',{},taken=>{attempted=false;if(dead||taken)return;setTakeNotice(undefined);if(current)dropHeld(current)})
   }
-  async function acquire(){
+  async function acquire(realtimeOpen?:{snapshot:NativeDocumentSnapshot;runtime:Runtime}){
+   if(realtimeSheet&&!realtimeOpen)throw Error('realtime_admission_required')
    if(acquiring)throw new AcquireFailure('busy',undefined,Error('acquire_in_progress'))
    // Startup limits must never detach a writer's uncaptured buffer.
    if(current&&(current.writable||current.blocked||!current.nativeReadOnly))throw Error('unsaved_editor_replacement')
@@ -1068,15 +1135,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const startup=armAdmissionDeadline()
    let taken:string|undefined,mounted:Runtime|undefined,opened:NativeDraftJournal|undefined
    try{
-   const response=leaseView(await client.leaseAction('acquire',{},lifetime.signal))
+   const response=realtimeOpen?viewNow:leaseView(await client.leaseAction('acquire',{},lifetime.signal))
    const proof=await currentLease(client,lifetime.signal)
    if(!owns(response)||!owns(proof,response.generation!))throw Error('lease_not_current')
-   taken=proof.generation!
+   taken=realtimeOpen?undefined:proof.generation!
    // Never import an old local draft. A new generation begins from a fresh server whole read.
    acquireStage='read'
-   const snapshot=await client.read(lifetime.signal)
+   const snapshot=realtimeOpen?.snapshot??await client.read(lifetime.signal)
    acquireStage='mount'
-   const kept=keepMounted(snapshot,proof.generation!),heldInput=current?.held===true
+   const kept=realtimeOpen?.runtime??keepMounted(snapshot,proof.generation!),heldInput=current?.held===true
    const r=kept??await mountEditor(snapshot,proof.generation!);mounted=r
    acquireStage='journal'
    // A slow browser store gets a bounded number of attempts; a late answer
@@ -1093,6 +1160,17 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    // A workbook file saves as its format, 10 s after the last change: each save is the whole file.
    const workbook=workbookFile(snapshot)
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,...(workbook?{format:workbook.format,idleMs:WORKBOOK_IDLE_MS}:{}),enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+    ...(realtimeOpen?{async adoptMerged(save,captureId){
+     if(!live(r)||!r.writable||!r.port.adoptMerged)throw Error('native_merge_unavailable')
+     const adopted=await r.port.adoptMerged(save,captureId,r.abort.signal)
+     if(!live(r)||!r.writable)throw Error('native_merge_retired')
+     r.savedRevision=adopted.savedRevision;r.revision=adopted.revision;r.version=save.receipt.version
+     r.ackedVersion=save.receipt.version;setOpenedVersion(save.receipt.version)
+     const adoptedClean=Promise.resolve(!adopted.dirty)
+     r.receiptAck=adoptedClean;r.receiptVersion=save.receipt.version
+     r.lastAck=adoptedClean;r.lastAckVersion=save.receipt.version
+     return {nativeState:adopted.dirty?adopted.savedRevision:adopted.revision,dirty:adopted.dirty}
+    }}:{}),
     onTransportSettled(){agentQueue.settled()},
     onRetiredTicket(requestId){if(live(r))r.port.saveFailed(requestId,'The server did not save this change.')},
     onState(state){r.phase=state;display(r);
@@ -1150,6 +1228,19 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     throw new AcquireFailure(acquireStage,released,cause)
    }finally{acquiring=false;finishAdmission(startup)}
   }
+  async function enableRealtime(snapshot:NativeDocumentSnapshot,r:Runtime){
+   if(!realtimeGeneration||!owns(viewNow,r.generation)){setRealtimeDetail('You can view this Sheet.');return}
+   if(!workbookFile(snapshot)||!sameEngineBuild(r.editorBuild,r.engineBuild)||!SHEET_REALTIME_CAPABILITIES.every(capability=>r.capabilities?.includes(capability))){
+    setRealtimeDetail('This editor version does not support live editing.');return
+   }
+   await acquire({snapshot,runtime:r})
+  }
+  async function reopenRealtimeAfterMutation(){
+   const snapshot=await client.read(lifetime.signal)
+   const proof=await currentLease(client,lifetime.signal)
+   const r=await mountEditor(snapshot,proof.generation??'1')
+   await enableRealtime(snapshot,r)
+  }
   async function releaseUnused(generation:string):Promise<boolean>{
    try{
     await client.leaseAction('release',{generation},lifetime.signal)
@@ -1198,7 +1289,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('restore_save_unconfirmed')
     await client.restore({workspaceId,pageId,applicationId:sessionApplication!,enginePin:r.enginePin,sessionId,generation:r.generation,baseVersion:r.ackedVersion,targetVersion:target},lifetime.signal)
     if(!await retireWrite(r))return
-    transition=false;await acquire()
+    if(realtimeSheet)await reopenRealtimeAfterMutation();else{transition=false;await acquire()}
    }catch{
     if(dead)return
     if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
@@ -1218,7 +1309,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   // Passes the access on only from a clean editor: it waits briefly for a save
   // already on its way, never forces one, and answers from the server's proof.
   handBack.current=async()=>{
-   if(dead||!viewNow.mine)return {state:'not_held'}
+   if(realtimeSheet||dead||!viewNow.mine)return {state:'not_held'}
    const deadline=Date.now()+HAND_BACK_SAVE_MS
    const unsettled=()=>transition||acquiring||!current?.ready||current.phase?.dirty===true
    while(!dead&&viewNow.mine&&unsettled()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,100))
@@ -1235,6 +1326,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const settled=report&&((released:boolean)=>{if(answered)return;answered=true;report(released)})
    if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||acquiring){settled?.(false);return}
    // What saving here would change is said before the first edit, not after.
+   if(realtimeSheet){settled?.(false);return}
    if(action==='acquire'&&fidelity.current.warnings>0&&!fidelity.current.accepted){settled?.(false);setFidelityAsk(true);return}
    transition=true;setBusy(true);setError(undefined)
    let handoffConfirmed=false
@@ -1285,7 +1377,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     }
     const off=cause instanceof AcquireFailure?cause.inner:cause
     if(!dead&&off instanceof NativeAppOffError){setAppOff(off.label);setError(viewNow.mine&&current?.writable?appDrainHolderText(off.label):appOffText(off.label));setSavedVersion(undefined);return}
-    if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'The request was sent, but the current editing state cannot be loaded. The draft is kept.':'The result of the action was not confirmed. The draft is kept.');setSavedVersion(undefined)}
+    if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'The request was sent, but the current editing state cannot be loaded. The draft is kept.':'Couldn’t confirm changes.');setSavedVersion(undefined)}
    }).finally(()=>{settled?.(false);transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
   downloadOriginalWorkbook.current=()=>{
@@ -1302,12 +1394,20 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const admission=client
    const opened=await admission.open(lifetime.signal);if(dead||client!==admission)return
    if(opened.applicationId!=='wordcraft'&&opened.applicationId!=='gridcraft')throw Error('unsupported_native_application');sessionApplication=opened.applicationId;sessionId=opened.sessionId
+   realtimeGeneration=realtimeSheet&&opened.realtime?.canWrite?opened.realtime.generation:undefined
    // Start authority monitoring before document delivery and the potentially
    // slow import. Lease events cannot start reader refreshes during bootstrap.
    watch();if(dead||client!==admission)return
    const snapshot=await admission.read(lifetime.signal);if(dead||client!==admission)return
    await currentLease(admission,lifetime.signal);if(dead||client!==admission)return
-   await mountEditor(snapshot,viewNow.generation??'1');if(dead||client!==admission)return;finishAdmission(initialStartup);setBusy(false)
+   const r=await mountEditor(snapshot,viewNow.generation??'1')
+   if(dead||client!==admission)return
+   finishAdmission(initialStartup)
+   if(realtimeSheet){
+    if(!opened.realtime)setRealtimeDetail('Live editing is unavailable for this Sheet.')
+    else await enableRealtime(snapshot,r).catch(()=>{if(!dead)setRealtimeDetail('Editing could not start. Reopen the Sheet to try again.')})
+   }
+   setBusy(false)
    void loadProposals();proposalWatch=setInterval(()=>{if(viewNow.can_edit===true)void loadProposals()},5000)
   })().catch(cause=>{
    if(dead)return
@@ -1336,12 +1436,13 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     if(recheckSince){if(Date.now()-recheckSince>=RECHECK_MS)retire();return}
     if(!holds(viewNow,r.generation)){retire();return}
     const since=Date.now();recheckSince=since
-    void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
+    void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;if(!owns(raw,r.generation)){retire();return}}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
    renewNow=()=>{void own.reauthorize(lifetime.signal).then(()=>{readConfirmed();if((offerStale&&readable||frameWithdrawn)&&!offerCheck&&client===own)askContent()}).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('The connection was closed.').catch(()=>stop('Editor access was not confirmed.'))})}
    reauthorize=setInterval(renewNow,NATIVE_REAUTHORIZE_INTERVAL_MS)
    void own.events(lifetime.signal,(event,value)=>{
     if(dead||client!==own)return
+    if(event==='sheet_agent_presence'||event==='sheet_agent_presence_snapshot'||event==='presence_disconnected'){receivePresence(event,value);return}
     if(event==='session_retired'&&value.draft==='purge'){
      void retirePrivacy().catch(()=>setError('Deleting the local draft was not confirmed.'));return
     }
@@ -1353,8 +1454,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     readConfirmed();void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Current access cannot be confirmed.').catch(()=>stop('Editor access was not confirmed.'))})
    }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Connection lost. The write is not confirmed.').catch(()=>stop('Editor access was not confirmed.'))})
   }
-  return()=>{unsubscribeAgent();unregisterUndo();agentQueue.dispose();closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};retrySave.current=()=>{};downloadXlsx.current=()=>{};downloadOriginalWorkbook.current=()=>{};stop('Editor closed',true)}
- },[enabled,humanId,workspaceId,pageId,scopeKey,identityKey])
+  motion?.addEventListener('change',paintPresence)
+  return()=>{motion?.removeEventListener('change',paintPresence);clearTimeout(presenceTimer);unsubscribeAgent();unregisterUndo();agentQueue.dispose();closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};retrySave.current=()=>{};downloadXlsx.current=()=>{};downloadOriginalWorkbook.current=()=>{};stop('Editor closed',true)}
+ },[enabled,humanId,workspaceId,pageId,scopeKey,identityKey,realtimeChatId])
  function copy(draft:NativeDraft){
   // A workbook file draft is downloaded as the workbook it is (it starts with the zip signature).
   const named=draft as NativeDraft&{format?:unknown;name?:unknown},zip=draft.bytes[0]===0x50&&draft.bytes[1]===0x4b
@@ -1368,23 +1470,25 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const downloadBlocked=exporting||(exportRefused?.reason==='too_large'&&exportRefused.version===(savedVersion??openedVersion??''))
  const savedValues=Boolean(openedFile&&readVerified&&!connectionRetired&&!openedFile.calculated)
  const bar=toolbar&&stateScope===identityKey&&enabled?createPortal(<TooltipProvider><div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
-  <NativeCraftLeaseBar variant="inline" view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
-  {readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<HintTooltip hint={TAKE_OVER_HINT}><Button size="sm" disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button></HintTooltip>}
+  {!realtimeSheet&&<NativeCraftLeaseBar variant="inline" view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>}
+  {!realtimeSheet&&readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<HintTooltip hint={TAKE_OVER_HINT}><Button size="sm" disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button></HintTooltip>}
   {/* No badges in the bar; the note about saved values is in the menu, and only until the Sheet is recalculated. */}
   <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="ml-auto shrink-0" aria-label="More for this Sheet"><MoreHorizontal className="size-4" aria-hidden/></Button></DropdownMenuTrigger>
    <DropdownMenuContent align="end" className="max-w-xs">
+    {realtimeSheet&&(realtimeDetail||agentNotice)&&<p className="px-2 py-1.5 text-xs text-muted-foreground">{realtimeDetail??agentNotice}</p>}
+    {realtimeSheet&&openedFile&&openedFile.warnings.length>0&&<details className="px-2 py-1.5 text-xs"><summary>Workbook details</summary><ul>{openedFile.warnings.map(w=><li key={w.code}>{sheetWarningText(w.code,w.count)}</li>)}</ul></details>}
     {savedValues&&<><HintTooltip hint={SAVED_VALUES_HINT} side="left"><p className="px-2 py-1.5 text-xs text-muted-foreground">{SAVED_VALUES_NOTE}</p></HintTooltip><DropdownMenuSeparator/></>}
-    {mayDownload&&<DropdownMenuItem disabled={downloadBlocked} onSelect={()=>downloadXlsx.current()}><span>Download .{openedFile?.format??'xlsx'}{dirty&&<small className="block text-muted-foreground">Last saved version, without unsaved changes</small>}</span></DropdownMenuItem>}
-    {mayDownload&&openedFile&&<DropdownMenuItem disabled={exporting} onSelect={()=>downloadXlsx.current('1')}>Download original (version 1)</DropdownMenuItem>}
+    {mayDownload&&<DropdownMenuItem disabled={downloadBlocked} onSelect={()=>downloadXlsx.current()}><span>{realtimeSheet?'Download Excel':`Download .${openedFile?.format??'xlsx'}`}{dirty&&<small className="block text-muted-foreground">Last saved version, without unsaved changes</small>}</span></DropdownMenuItem>}
+    {mayDownload&&openedFile&&<DropdownMenuItem disabled={exporting} onSelect={()=>downloadXlsx.current('1')}>{realtimeSheet?'Download original':'Download original (version 1)'}</DropdownMenuItem>}
     {historyHref&&<DropdownMenuItem asChild><a href={historyHref} target="_blank" rel="noopener noreferrer">Version history</a></DropdownMenuItem>}
-    {mayPublish&&<DropdownMenuItem disabled={busy} onSelect={()=>publishPreview.current()}>Publish preview</DropdownMenuItem>}
+    {mayPublish&&<DropdownMenuItem disabled={busy} onSelect={()=>publishPreview.current()}>{realtimeSheet?'Share preview':'Publish preview'}</DropdownMenuItem>}
    </DropdownMenuContent></DropdownMenu>
  </div></TooltipProvider>,toolbar):null
  if(stateScope!==identityKey)return <p role="status" className="p-6">Connecting…</p>
  if(!enabled)return <p className="p-6">The native editor is not turned on.</p>
  return <section className={editorHidden?'flex flex-col':'flex h-full min-h-[600px] flex-col'} aria-label={applicationId==='gridcraft'?'GridCraft workbook':'WordCraft document'}>
   {bar}
-  {(()=>{const controls=<><NativeCraftLeaseBar variant={placeLease?'popover':'bar'} view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>{readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<HintTooltip hint={TAKE_OVER_HINT}><Button disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button></HintTooltip>}</>;return compact?null:placeLease?placeLease(controls):controls})()}
+  {(()=>{const controls=<><NativeCraftLeaseBar concise={applicationId==='wordcraft'} variant={placeLease?'popover':'bar'} view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>{readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<HintTooltip hint={TAKE_OVER_HINT}><Button disabled={busy} onClick={()=>control.current('acquire',{})}>{applicationId==='wordcraft'?'Edit':'Take over editing'}</Button></HintTooltip>}</>;return compact||realtimeSheet?null:placeLease?placeLease(controls):controls})()}
   <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired} workId={agentWork}/>
   <NativeCraftAgentStart workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&applicationId!==undefined&&!hostBlocked&&!hostRetiring} holder={view.holder?.kind??null} onStarted={agentStarted} place={placeAgentStart}/>
   {!compact&&mayPublish&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publish preview</Button>}
@@ -1398,7 +1502,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {exportNote&&(exportNote.alert?<p role="alert" className="px-3 py-2">{exportNote.text}</p>:<p aria-live="polite" className="px-3 py-2 text-sm text-muted-foreground">{exportNote.text}</p>)}
   <div role="status" className={placeLease||compact?'sr-only':'px-3 py-2'} data-save-phase={saveTrace?.phase} data-save-reason={saveTrace?.reason} data-quota-used={quota?.usedBytes} data-quota-limit={quota?.limitBytes} data-quota-level={quota?.level}><span>{label}</span>{savedVersion&&<span> · version {savedVersion}</span>}{quota&&(quota.level==='full'||quota.level==='critical'||quota.warning)&&<span className="ml-3 text-muted-foreground">{quota.level==='full'?'Version history is full':quota.level==='critical'?'Version history is almost full':'Version history is nearing its limit'}</span>}</div>
   {!compact&&savedValues&&<HintTooltip hint={SAVED_VALUES_HINT}><p tabIndex={0} className="w-fit px-3 pb-1 text-xs text-muted-foreground">{SAVED_VALUES}</p></HintTooltip>}
-  {openedFile&&readVerified&&!connectionRetired&&fidelityAsk&&<div role="alertdialog" aria-labelledby="sheet-fidelity-title" aria-describedby="sheet-fidelity-body" className="space-y-2 border-y px-3 py-3">
+  {!realtimeSheet&&openedFile&&readVerified&&!connectionRetired&&fidelityAsk&&<div role="alertdialog" aria-labelledby="sheet-fidelity-title" aria-describedby="sheet-fidelity-body" className="space-y-2 border-y px-3 py-3">
    <p id="sheet-fidelity-title" className="font-medium">Before you edit this workbook</p>
    <div id="sheet-fidelity-body" className="space-y-2 text-sm">
     <ul className="list-disc space-y-1 pl-5">{openedFile.warnings.map(w=><li key={w.code}>{sheetWarningText(w.code,w.count)}</li>)}</ul>
@@ -1406,7 +1510,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    </div>
    <div className="flex flex-wrap gap-2"><Button onClick={()=>{fidelity.current.accepted=true;setFidelityAsk(false);control.current('acquire',{})}}>Edit anyway</Button><Button variant="outline" onClick={()=>setFidelityAsk(false)}>Keep reading</Button></div>
   </div>}
-  {openedFile&&readVerified&&!connectionRetired&&!fidelityAsk&&openedFile.warnings.length>0&&<details className="px-3 pb-2 text-sm">
+  {!realtimeSheet&&openedFile&&readVerified&&!connectionRetired&&!fidelityAsk&&openedFile.warnings.length>0&&<details className="px-3 pb-2 text-sm">
    <summary className="cursor-pointer text-muted-foreground">What this editor keeps as it is in this workbook</summary>
    <ul className="mt-1 list-disc space-y-1 pl-5">{openedFile.warnings.map(w=><li key={w.code}>{sheetWarningText(w.code,w.count)}</li>)}</ul>
   </details>}
@@ -1414,7 +1518,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {saveTrace?.reason==='document_too_large'&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>This workbook is larger than the 32 MiB a Sheet can save, so it is NOT saved on the server.</b> Your changes stay in this editor. Do not close the tab; remove data or split the workbook, or download it as a file.</p></div>}
   {/* One sentence and two actions; the detail folded, so the grid keeps its room. */}
   {conflictShown&&<div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-sm">
-   <p className="min-w-0 flex-1 basis-56">Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.</p>
+   <p className="min-w-0 flex-1 basis-56">{realtimeSheet?'Review changes':'Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.'}</p>
    <div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" onClick={()=>setReopened(n=>n+1)}>Load the latest version</Button><Button size="sm" variant="outline" onClick={()=>downloadDraft.current()}>Download my changes</Button></div>
    <details className="basis-full text-xs text-muted-foreground"><summary className="cursor-pointer">What happens</summary>Your changes stay in this editor and in this browser. Load the latest version to see what changed; your changes are offered beside it to compare or keep as a copy. Saving again here would be refused, because the server already holds a newer version.</details>
   </div>}
@@ -1422,9 +1526,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {saveTrace?.phase==='draft'&&saveTrace.reason==='fidelity_loss'&&!connectionRetired&&<p role="alert" className="border-y px-3 py-2 text-sm">This save would drop macros or signatures, so it was not saved. Your work is kept.</p>}
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Storage is full, so nothing more can be saved. Your changes are not saved on the server yet.</b> The editor keeps them and the draft stays in this browser. All earlier versions stay.</p><p className="text-sm text-muted-foreground">Do not close the editor. As soon as space is free, choose Save again (or Ctrl+S). To be safe, download your work as a file.</p><div className="flex flex-wrap gap-2"><Button onClick={()=>retrySave.current()}>Save again</Button><Button variant="outline" onClick={()=>downloadDraft.current()}>Download draft</Button></div></div>}
   {retainedBuffer&&<div role="group" aria-label="Local copy recovery" className="space-y-2 border-y px-3 py-2"><p>The last changes were not captured with confirmation. The original editor stays locked; its content is not overwritten by a new document.</p>{readVerified&&!offerWithdrawn?<Button disabled={busy} variant="outline" onClick={()=>downloadDraft.current()}>Download the local copy</Button>:<Button disabled={busy||authEnded} variant="outline" onClick={()=>retryRead.current()}>Check access again</Button>}</div>}
-  {uncertain&&<Button variant="outline" onClick={()=>reconcile.current(true)}>Check the result</Button>}
+  {uncertain&&<Button variant="outline" onClick={()=>reconcile.current(true)}>{realtimeSheet?'Check save':'Check the result'}</Button>}
   {legacySource&&<Button type="button" variant="outline" className="mx-3 self-start" onClick={()=>downloadOriginalWorkbook.current()}>Download original Sheet</Button>}
-  {agentNotice&&<p role="status" data-testid="agent-changed-notice" className="px-3 py-2">{agentNotice}</p>}
+  {!realtimeSheet&&agentNotice&&<p role="status" data-testid="agent-changed-notice" className="px-3 py-2">{agentNotice}</p>}
   {rebaseNote&&<RebaseNote key={`${rebaseNote.kind}:${rebaseNote.kind==='layout'?rebaseNote.head:rebaseNote.kind==='rebased'?rebaseNote.version:''}`} note={rebaseNote} historyHref={historyHref} onDismiss={()=>setRebaseNote(undefined)} onKeepMine={layout=>{const c=keepMine.current;return Boolean(c&&keepLocalOver(layout,c))}}/>}
   {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Open at {mismatch.address}</a></>}</p>}
   {(shownProposals.length>0||shownRecoveries.length>0)&&<div data-craft-banner={shownProposals.length>0?'proposal':'draft'} className={'mx-2 my-1.5 grid gap-0.5 rounded-lg border p-1 text-sm '+(shownProposals.length>0?'border-chip-violet-fg/30 bg-chip-violet-bg':'border-warn/40 bg-warn/10')}>
@@ -1440,7 +1544,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {accessCheck&&<p className="px-3 py-2 text-sm text-muted-foreground">Checking access…</p>}
   {/* Over the top edge of the editor, so nothing below moves when a line comes or goes. */}
   <div className="pointer-events-none relative z-10 h-0"><div className="absolute inset-x-2 top-2 flex flex-col items-center gap-1 text-sm">
-   {agentWorking&&<p role="status" data-testid="agent-working" className="max-w-full rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">The agent is changing the Sheet…</p>}
+   {realtimeSheet&&presenceLabel&&<p role="status" data-testid="sheet-agent-presence">{presenceLabel} is working…</p>}
+   {!realtimeSheet&&agentWorking&&<p role="status" data-testid="agent-working" className="max-w-full rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">The agent is changing the Sheet…</p>}
    <div aria-live="polite" data-take-over-notice={takeNotice??''} data-edit-attempt={attemptState} className="max-w-full">{takeNotice&&!connectionRetired&&<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">
     <span>{takeNotice==='taking'?'Taking over editing…':takeNotice==='taken'?'You are editing now.':takeNotice==='viewer'?'You can view this Sheet but not edit it.':takeNotice==='dropped'?'What you typed was not entered. Click the cell and type it again.':view.holder?.kind==='agent'?`${view.holder.display_name.trim()||'The agent'} is changing this Sheet. You can edit when it is done.`:view.holder&&(view.holder.actor_id===`user:${humanId}`||view.holder.actor_id===humanId)?'You are editing this Sheet in another tab or window.':`${view.holder?.display_name.trim()||'Someone'} is editing this Sheet. Use Request edit to ask for it.`}</span>
     <Button size="xs" variant="ghost" className="coarse:min-h-[44px]" onClick={()=>setTakeNotice(undefined)}>Dismiss</Button>

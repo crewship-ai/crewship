@@ -153,7 +153,7 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
     })
     await page.goto(url)
     await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
-    const frame = await acquire(page)
+    const frame = await openEditor(page)
     await editCell(page, frame, "lost acknowledgement cell", "B2")
     const reconcile = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/craft/document/reconcile"))
     await page.keyboard.press("Control+s")
@@ -161,18 +161,19 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
     expect(lostVersion).toBe(String(Number(ref.initVersion) + 1))
     await expect.poll(() => page.evaluate(() => window.sheetTestEvents.find(event => event.type === "gridcraft:save-ack")?.version)).toBe(lostVersion)
     const panel = page.getByTestId("sheet-side-panel")
-    await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Saved · version ${lostVersion}`)
+    await expect(panel.getByTestId("sheet-panel-state")).toHaveText("Saved")
+    await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", lostVersion!)
     expect(saves, "the browser asks about the original save without sending it again").toBe(1)
 
     await panel.getByRole("button", { name: "Close Sheet" }).click()
     await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
-    await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Viewing · version ${lostVersion}`)
+    await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", lostVersion!)
     const head = await readWorkbook(context.request, craft)
     expect(head.version).toBe(lostVersion)
     expect(hasValue(head.bytes, "lost acknowledgement cell")).toBe(true)
     await panel.getByRole("button", { name: "More for this Sheet" }).click()
     const downloading = page.waitForEvent("download")
-    await page.getByRole("menuitem", { name: /^Download \.xlsx/ }).click()
+    await page.getByRole("menuitem", { name: /^Download Excel/ }).click()
     const exported = await (await downloading).createReadStream()
     expect(hasValue(Buffer.concat(await exported.toArray()), "lost acknowledgement cell")).toBe(true)
   } finally {
@@ -182,13 +183,8 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
   }
 })
 
-async function acquire(page: Page) {
-  await page.getByRole("button", { name: "Take over editing", exact: true }).click()
-  const warning = page.getByRole("button", { name: "Edit anyway", exact: true })
-  const handingBack = page.getByRole("button", { name: "Hand back", exact: true })
-  await expect(warning.or(handingBack)).toBeVisible()
-  if (await warning.isVisible()) await warning.click()
-  await expect(handingBack).toBeVisible()
+async function openEditor(page: Page) {
+  await expect(page.getByTestId("sheet-panel-state")).toHaveAttribute("data-editing", "true")
   const frame = await native.frameOf(page, "gridcraft")
   await frame.locator("canvas").first().click({ position: { x: 54, y: 240 } })
   return frame
@@ -200,7 +196,7 @@ async function editCell(page: Page, frame: Frame, value: string, cell: "A3" | "B
   await page.keyboard.type(value)
   await frame.waitForFunction(() => document.activeElement?.tagName === "INPUT", {}, { timeout: 5_000 })
   await page.keyboard.press("Enter")
-  await expect(page.getByTestId("sheet-panel-state")).toHaveText("Not saved yet")
+  await expect(page.getByTestId("sheet-panel-state")).toHaveAttribute("data-dirty", "true")
 }
 
 interface EditorEvent {
@@ -213,7 +209,8 @@ interface EditorEvent {
   version?: string
   keep?: string
   build?: string
-  conflicts?: Array<{ sheet: string; cell: string; kept: string; agent: string }>
+  dirty?: boolean
+  conflicts?: Array<{ sheet: string; cell: string }>
 }
 
 declare global {
@@ -222,6 +219,7 @@ declare global {
     sheetTestFiles: Array<{ document?: string; revision?: string; bytes: number[] }>
     sheetTestHoldPaint: boolean
     sheetTestReleasePaint(): void
+    sheetTestHasDeferredPaint(): boolean
   }
 }
 
@@ -257,6 +255,7 @@ async function watchEditor(page: Page) {
       : frame(cb)
     window.setTimeout = ((cb: TimerHandler, ms?: number, ...args: unknown[]) =>
       window.sheetTestHoldPaint && ms === 100 ? (deferred.push(() => timeout(cb, 0, ...args)), 0) : timeout(cb, ms, ...args)) as typeof window.setTimeout
+    window.sheetTestHasDeferredPaint = () => deferred.length > 0
     window.sheetTestReleasePaint = () => {
       window.sheetTestHoldPaint = false
       for (const start of deferred.splice(0)) start()
@@ -289,11 +288,11 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       await page.goto(url)
       await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
       const panel = page.getByTestId("sheet-side-panel")
-      const frame = await acquire(page)
+      const frame = await openEditor(page)
       await editCell(page, frame, "human seed", "A3")
       const firstSave = page.waitForResponse(response => response.url().includes("/craft/document/save?") && response.status() === 200)
       await page.keyboard.press("Control+s")
-      await expect(panel.getByTestId("sheet-panel-state")).toHaveText(/^Saved · version \d+$/, { timeout: 15_000 })
+      await expect(panel.getByTestId("sheet-panel-state")).toHaveText("Saved", { timeout: 15_000 })
       const saved = await firstSave
       const binding = saved.request().postDataJSON() as Record<string, unknown>
       const session = await saved.request().headerValue("X-Craft-Session")
@@ -302,7 +301,7 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       const { version: savedVersion } = await saved.json() as { version: string }
       const base = Number(savedVersion)
       const agentOps = new Map<string, ReturnType<typeof cellSet>>()
-      // Commit the simulated agent's change over the real head using the test editor's lease.
+      // Commit the simulated agent's change over the real head using the test editor's admission.
       // Only the actor and replay commands are simulated. A subsequent browser save sees the real CAS version.
       const send = async (version: number, command: ReturnType<typeof cellSet>) => {
         const head = await readWorkbook(context.request, craft)
@@ -347,13 +346,18 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       } else {
         await page.evaluate(() => { window.sheetTestHoldPaint = true })
         await send(base + 1, operation)
-        await expect(page.getByTestId("agent-working")).toBeVisible()
+        await expect.poll(() => page.evaluate(() => window.sheetTestHasDeferredPaint())).toBe(true)
         await editCell(page, frame, "human", "B2")
         await page.evaluate(() => window.sheetTestReleasePaint())
       }
-      const conflicts = race === "saved revision" || race === "same cell" ? [{ sheet: "Data", cell: "B2", kept: "human", agent: "agent" }] : []
-      await expect.poll(async () => (await executes()).at(-1), { message: "GridCraft replays over the saved baseline and preserves the user's cells" })
-        .toMatchObject({ savedRevision: expect.any(String), conflicts })
+      const conflicts = race === "saved revision" || race === "same cell" ? [{ sheet: "Data", cell: "B2" }] : []
+      await expect.poll(async () => (await executes()).at(-1), { message: "GridCraft replays over the saved baseline with agent precedence only on overlapping cells" })
+        .toMatchObject({ savedRevision: expect.any(String), conflicts, dirty: conflicts.length === 0 })
+      if (conflicts.length > 0) {
+        const head = await readWorkbook(context.request, craft)
+        expect(head.version).toBe(String(base + (race === "saved revision" ? 2 : 1)))
+        expect((await workbookCell(page, head.bytes, "Data", "B2")).value).toBe("agent")
+      }
       if (race === "other sheet") {
         const readSnapshot = () => page.evaluate(() => window.sheetTestFiles.at(-1))
         const cells = async (bytes: number[]) => ({
@@ -364,7 +368,7 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
           const snapshot = await readSnapshot()
           return snapshot && cells(snapshot.bytes)
         }).toEqual({ human: "human", agent: "agent" })
-        await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Saved · version ${base + 2}`, { timeout: 15_000 })
+        await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", String(base + 2), { timeout: 15_000 })
         const beforeUndo = await readSnapshot()
         if (!beforeUndo?.document || !beforeUndo.revision) throw new Error("The merged export did not identify its editor revision")
         const undoFrom = { document: beforeUndo.document, revision: beforeUndo.revision }
@@ -396,7 +400,7 @@ for (const transition of ["switch chat", "narrow window"] as const) {
       const open = page.getByRole("button", { name: `Open ${name}`, exact: true })
       await open.click()
       const panel = page.getByTestId("sheet-side-panel")
-      const frame = await acquire(page)
+      const frame = await openEditor(page)
       const marker = "draft" + randomUUID().replaceAll("-", "")
       await editCell(page, frame, marker, "B2")
 
@@ -417,8 +421,8 @@ for (const transition of ["switch chat", "narrow window"] as const) {
       expect(hasValue(stored.bytes, "saved base")).toBe(true)
       expect(hasValue(stored.bytes, marker)).toBe(false)
       if (await panel.isHidden()) await open.click()
-      await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Viewing · version ${ref.initVersion}`)
-      await acquire(page)
+      await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", ref.initVersion)
+      await openEditor(page)
       const copy = panel.getByRole("button", { name: "Keep a copy", exact: true })
       await expect(copy, "the edit before autosave is available as a local draft").toBeVisible()
       const downloading = page.waitForEvent("download")

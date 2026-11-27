@@ -63,7 +63,7 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
     onExport: file => options.onExport?.(file),
     onError: reason => options.onError(reason),
     // The editor's engine build goes along: without it no replay over unsaved work runs.
-    onReady: (version, build) => build === undefined ? options.onReady?.(version) : options.onReady?.(version, build),
+    onReady: (version, build, capabilities) => capabilities ? options.onReady?.(version, build, capabilities) : build === undefined ? options.onReady?.(version) : options.onReady?.(version, build),
     onEditAttempt: kind => options.onEditAttempt?.(kind),
     onHeldInputDropped: reason => options.onHeldInputDropped?.(reason),
   })
@@ -110,6 +110,18 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       return snapshotOf(remember(file))
     },
     async validate() { if (!opened) throw new Error("native_validation_unavailable") },
+    async adoptMerged(save, captureId, signal) {
+      const kept = files.get(captureId)
+      if (!kept || revisionOf(kept.file) !== save.receipt.editorRevision
+        || BigInt(save.receipt.version) <= lastAcknowledged) throw new Error("native_merge_unavailable")
+      const result = await inner.adoptMerged(save, captureId, signal)
+      lastAcknowledged = BigInt(save.receipt.version)
+      files.delete(captureId)
+      current = result.revision
+      dirty = result.dirty
+      return result
+    },
+    setPresence: (actors, reducedMotion) => inner.setPresence(actors, reducedMotion),
     async ack(receipt, captureId) {
       if (!receipt || typeof receipt !== "object") return acknowledgementFailed("receipt")
       const saved = { ...receipt }
@@ -145,7 +157,14 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       for (const id of [...files.keys()]) { inner.saveFailed(id, "conflict"); files.delete(id) }
       return true
     },
-    execute: (commands, executeOptions, signal) => inner.execute(commands, executeOptions, signal),
+    async execute(commands, executeOptions, signal) {
+      const result = await inner.execute(commands, executeOptions, signal)
+      if (executeOptions.keep === "agent" && result.dirty !== undefined) {
+        current = result.revision
+        dirty = result.dirty
+      }
+      return result
+    },
     close: () => inner.close(),
   }
 }

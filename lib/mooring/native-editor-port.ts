@@ -1,3 +1,4 @@
+import type { MergedSheetSave, SheetPresence, SheetRealtimeCapability } from "./sheet-realtime"
 import { verifyEditorHello, transferEditorPort, record, type CapabilityWindow, type WindowEnvelope } from "./channel"
 import { validNativeDraft, validNativeVersion, type NativeDraft } from "./native-draft"
 import { createGridcraftNativePort } from "./gridcraft-native-port"
@@ -21,7 +22,7 @@ export interface NativeEditorPortOptions {
   onSaveRequest(request: { requestId?: string; editorRevision: string; documentId: string; saveAs?: boolean }): void
   onError(reason: string): void
   /** build: the engine build the editor names in ready (GridCraft); absent otherwise. */
-  onReady?(version: string, build?: string): void
+  onReady?(version: string, build?: string, capabilities?: readonly SheetRealtimeCapability[]): void
   // New hosts require a qualified editor that boots with its native write guard.
   requireAccessProtocol?: boolean
   onExport?(file: { name: string; bytes: Uint8Array; saveAs?: boolean }): void
@@ -42,6 +43,8 @@ export interface NativeEditorPort {
   bootstrap(bytes: Uint8Array, signal: AbortSignal, timeoutMs?: number): Promise<NativeEditorSnapshot>
   snapshot(signal: AbortSignal, manualRequestId?: string): Promise<NativeEditorSnapshot>
   validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
+  adoptMerged?(save: MergedSheetSave, captureId: string, signal: AbortSignal): Promise<SheetMergedAdopted>
+  setPresence?(actors: SheetPresence[], reducedMotion: boolean): void
   ack(receipt: NativeSaveReceipt, captureId?: string): Promise<boolean>
   saveFailed(requestId: string, error: string): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
@@ -69,12 +72,13 @@ export interface NativeExecuteCommand { command: (typeof NATIVE_EXECUTE_COMMANDS
  * person's unsaved state; a cell the person changed since the base keeps their value and is named in `conflicts`.
  * The whole replay is one undo step called `label`. Refused atomically (not_replayable, pin_mismatch, stale_base).
  */
-export interface NativeExecuteOptions { baseRevision?: string; keep?: "human"; label?: string }
+export interface NativeExecuteOptions { baseRevision?: string; keep?: "human" | "agent"; label?: string }
 /** A cell both changed: shown in the chat card only (cell contents never go to the server's logs or audit). */
-export interface NativeExecuteConflict { sheet: string; cell: string; agent: string; kept: string }
+export interface NativeExecuteConflict { sheet: string; cell: string; agent?: string; kept?: string }
 /** savedRevision: over unsaved work, the revision of the editor's saved version after the replay, apart
  *  from `revision` (the merged content); the next replay keeping the person's cells names it as its base. */
-export interface NativeExecuteResult { documentId: string; revision: string; savedRevision?: string; applied: number; conflicts?: NativeExecuteConflict[]; conflictsTruncated?: boolean }
+export interface SheetMergedAdopted { revision: string; savedRevision: string; dirty: boolean }
+export interface NativeExecuteResult { documentId: string; revision: string; savedRevision?: string; dirty?: boolean; applied: number; conflicts?: NativeExecuteConflict[]; conflictsTruncated?: boolean }
 /** An engine build as the editor (ready.build) and the server (engineBuild) name it: "<version>+<commit12> patch <sha256>". */
 export const engineBuildToken = (value: unknown): value is string => typeof value === "string" && value.length <= 160 && /^[0-9A-Za-z.\-]{1,64}\+[a-f0-9]{12} patch [a-f0-9]{64}$/.test(value)
 /** A saved version's revision as the editor names it: a u64, or saved-<n> after a replay over unsaved work. */

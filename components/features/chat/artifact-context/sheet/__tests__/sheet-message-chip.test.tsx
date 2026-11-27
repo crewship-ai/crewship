@@ -23,7 +23,7 @@ describe("SheetMessageChip", () => {
   it("names the Sheet and says the agent gets nothing while the choice is off", () => {
     chip()
     expect(screen.getByRole("group", { name: "Sheet for this message" })).toHaveTextContent("Quarterly plan")
-    const choice = screen.getByRole("switch", { name: /Let the agent change it/ })
+    const choice = screen.getByRole("switch", { name: /Allow agent edits/ })
     expect(choice).not.toBeChecked()
     expect(choice).toHaveAccessibleDescription(/does not get this Sheet/)
   })
@@ -89,9 +89,9 @@ describe("SheetMessageChip", () => {
     expect(onAllowedChange).toHaveBeenCalledWith(false)
   })
   // The choice says in one sentence what it allows, on hover and on keyboard focus.
-  it("explains Let the agent change it in one sentence when the switch has focus, keeping its own description", () => {
+  it("explains Allow agent edits in one sentence when the switch has focus, keeping its own description", () => {
     chip()
-    const choice = screen.getByRole("switch", { name: /Let the agent change it/ })
+    const choice = screen.getByRole("switch", { name: /Allow agent edits/ })
     act(() => choice.focus())
     expect(screen.getByRole("tooltip")).toHaveTextContent("The agent may change this workbook in this message. Every change can be undone.")
     expect(choice).toHaveAccessibleDescription(/does not get this Sheet/)

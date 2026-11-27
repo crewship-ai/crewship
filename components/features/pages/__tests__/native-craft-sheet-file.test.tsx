@@ -7,6 +7,7 @@ import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import type {GridcraftNativePortOptions} from '@/lib/mooring/gridcraft-native-port'
 import type {NativeEditorPort,NativeStructuredPort} from '@/lib/mooring/native-editor-port'
+import {SHEET_REALTIME_CAPABILITIES} from '@/lib/mooring/sheet-realtime'
 import {publishAgentVersion} from '@/lib/mooring/native-agent-version'
 import {suspendOtherDocumentDrafts} from '@/lib/document-queue'
 import {PendingSheetDraftCapture} from '@/lib/local-draft-seal'
@@ -40,16 +41,21 @@ function makeClient(format:'xlsx'|'xlsm'){
   exportXlsx:vi.fn(async(_signal:AbortSignal,version?:string)=>({blob:new Blob(['PK']),filename:`Plan.${format}`,version:version??'3'})),
  }
 }
+let realtimeCapabilities: boolean
 let executed:Record<string,unknown>|null=null
 let client:ReturnType<typeof makeClient>
 // Fake timers, as in native-craft-startup: the host's deadlines and polls advance with the test, and hashes it started settle in between.
 const digest=webcrypto.subtle.digest.bind(webcrypto.subtle)
 let hashes:Promise<ArrayBuffer>[],network:ReturnType<typeof vi.fn>
 async function settle(ms=500){let remaining=ms;do{const step=Math.min(100,remaining);await act(async()=>{await vi.advanceTimersByTimeAsync(step);await Promise.all(hashes)});remaining-=step}while(remaining>0)}
-async function mount(format:'xlsx'|'xlsm'='xlsx',toolbar?:HTMLElement){
+async function mount(format:'xlsx'|'xlsm'='xlsx',toolbar?:HTMLElement,realtimeChatId?:string, generation?:string){
  client=makeClient(format);mock.client.mockReturnValue(client)
+ if(generation){
+  client.open.mockResolvedValue({sessionId:'diagnostic-session',applicationId:'gridcraft',realtime:{canWrite:true,generation:'1'}})
+  client.lease.mockResolvedValue({realtime_sheet:true,can_edit:true,can_write:true,holder:null,generation})
+ }
  const warn=vi.spyOn(console,'warn')
- render(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="diagnostic-page" humanId="diagnostic-human" enabled {...(toolbar?{toolbar,historyHref:'/artifacts/diagnostic-page'}:{})} />)
+ render(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="diagnostic-page" humanId="diagnostic-human" enabled realtimeChatId={realtimeChatId} {...(toolbar?{toolbar,historyHref:'/artifacts/diagnostic-page'}:{})} />)
  await settle()
  // A start that failed says which step refused, as codes only: show them instead of a missing button.
  expect(warn.mock.calls.flat().map(String).filter(line=>line.startsWith('native_')),'native start codes').toEqual([])
@@ -62,7 +68,7 @@ beforeEach(()=>{
  vi.spyOn(webcrypto.subtle,'digest').mockImplementation((algorithm,data)=>{const hash=digest(algorithm,data);hashes.push(hash);return hash})
  // No network here: a draft key the journal might ask for is simply not given.
  network=vi.fn(async()=>new Response(null,{status:404}));vi.stubGlobal('fetch',network)
- refuse=null;refuseFile=false;executed=null;wires=[];revision='1';sent=[];adapters=[];seen=[];opened={calculated:false,warnings:[]}
+ refuse=null;refuseFile=false;realtimeCapabilities=false;executed=null;wires=[];revision='1';sent=[];adapters=[];seen=[];opened={calculated:false,warnings:[]}
  mock.journal.mockResolvedValue({persist:vi.fn(),confirm:vi.fn(),discardRecovered:vi.fn(),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn(),revokeRead:vi.fn(),eraseOwnRow:vi.fn()})
  mock.legacy.mockImplementation(()=>{throw Error('a workbook file never opens through the native JSON port')})
  mock.gridcraft.mockImplementation((options:GridcraftNativePortOptions)=>{
@@ -78,7 +84,7 @@ beforeEach(()=>{
    },0)
   }}
   wires.push(wire)
-  const frame={postMessage(){queueMicrotask(()=>wire.onmessage?.({data:{type:'gridcraft:ready',version:'diagnostic',accessProtocol:1,readOnly:true,build:ENGINE_BUILD}}))}}
+  const frame={postMessage(){queueMicrotask(()=>wire.onmessage?.({data:{type:'gridcraft:ready',version:'diagnostic',accessProtocol:1,readOnly:true,build:ENGINE_BUILD,...(realtimeCapabilities?{capabilities:SHEET_REALTIME_CAPABILITIES}:{})}}))}}
   const port=createGridcraftNativePort({...options,frame,createChannel:()=>({port1:wire,port2:{}})})
   adapters.push(port)
   queueMicrotask(()=>port.handleWindowMessage({source:frame,origin:'null',data:{type:'gridcraft:hello',protocol:2,bundle:options.bundle}}))
@@ -113,6 +119,32 @@ describe('a Sheet stored as its workbook file',()=>{
  it('does not say so when the editor calculated the workbook',async()=>{
   opened.calculated=true;await mount()
   expect(screen.queryByText(/Values saved in the file/)).not.toBeInTheDocument()
+ })
+ it('opens a chat workbook without taking custody and keeps the old editor read only',async()=>{
+  const toolbar=document.createElement('div')
+  document.body.append(toolbar)
+  try{
+   opened.warnings=[{code:'vba_preserved',count:1}]
+   await mount('xlsm',toolbar,'chat-1')
+   act(()=>wires[0].onmessage?.({data:{type:'gridcraft:edit-attempt',document:'doc',kind:'key'}}))
+   await settle()
+   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+   expect(within(toolbar).queryByText('Take over editing')).not.toBeInTheDocument()
+   expect(client.leaseAction).not.toHaveBeenCalled()
+   expect(sent.some(message=>message.type==='gridcraft:set-access'&&message.readOnly===false)).toBe(false)
+  }finally{toolbar.remove()}
+ })
+ it.each([
+  { generation:'1', capabilities:true, writable:true },
+  { generation:'2', capabilities:true, writable:false },
+  { generation:'1', capabilities:false, writable:false },
+ ])('admits automatic chat editing only with the matching server generation and editor capabilities ($generation, $capabilities)',async({generation,capabilities,writable})=>{
+  realtimeCapabilities=capabilities
+  await mount('xlsx',undefined,'chat-1',generation)
+  expect(mock.client).toHaveBeenCalledWith({workspaceId:'diagnostic-workspace',pageId:'diagnostic-page',chatId:'chat-1'})
+  expect(sent.some(message=>message.type==='gridcraft:set-access'&&message.readOnly===false)).toBe(writable)
+  expect(client.leaseAction).not.toHaveBeenCalled()
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
  })
  it('asks before the first edit what saving here would change, and takes over only when the person says so',async()=>{
   opened.warnings=[{code:'vba_preserved',count:1},{code:'unsupported_function_held',count:12}];await mount('xlsm')

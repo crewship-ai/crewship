@@ -80,7 +80,7 @@ describe('native startup budgets with the real capability adapter',()=>{
   await tick(8000)
   expect(received).toHaveLength(3)
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  expect(screen.getByRole('button',{name:'Take over editing'})).toBeEnabled()
+  expect(screen.getByRole('button',{name:/^(Take over editing|Edit)$/})).toBeEnabled()
   expect(client.events).toHaveBeenCalledOnce()
   expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()
   expect(closed).not.toHaveBeenCalled()
@@ -158,7 +158,7 @@ describe('authority and cancellation throughout slow initialization',()=>{
  it.each(['expired','handoff'] as const)('never unlocks a writer whose lease %s during slow import',async loss=>{
   await mount('wordcraft');await tick(24000)
   client.leaseAction.mockImplementation(async()=>{const proof=owned();client.lease.mockResolvedValue(proof);return proof})
-  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await tick(8000)
+  fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await tick(8000)
   if(loss==='handoff'){
    const next={...vacant,holder:{...holder,actor_id:'other-person'},generation:'2',can_write:false,expires_at:new Date(Date.now()+15000).toISOString()}
    client.lease.mockResolvedValue(next);act(()=>stream?.('lease',next))
@@ -251,7 +251,7 @@ it('stops before document delivery if the initial stream immediately reports rea
 it('bounds an acquisition that never answers without reviving the prior read-only frame',async()=>{
  await mount('wordcraft');await tick(24000)
  client.leaseAction.mockReturnValue(new Promise(()=>{}))
- fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await tick(60000)
+ fireEvent.click(screen.getByRole('button',{name:/^(Take over editing|Edit)$/}));await tick(60000)
  expect(document.querySelector('iframe')).toBeNull();expect(client.close).toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(mock.journal).not.toHaveBeenCalled()
  expect(screen.getByRole('alert')).toHaveTextContent('The document cannot be opened safely')
 })

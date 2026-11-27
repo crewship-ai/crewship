@@ -42,7 +42,8 @@ function saveState(status: NativeCraftHostStatus | undefined): string {
  * something is unsaved. While the agent holds the lock the host shows the
  * Sheet read-only and says so; nothing here takes or releases a lock.
  */
-export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpandedChange, onClose, dirtyRef, handBackRef, onStatus, agentPending, opener }: {
+export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpandedChange, onClose, dirtyRef, handBackRef, onStatus, agentPending, opener, realtimeChatId }: {
+  realtimeChatId?: string
   workspaceId: string
   pageId: string
   hidden: boolean
@@ -62,7 +63,7 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
   const { page } = usePage(workspaceId, `@${pageId}`)
   const [status, setStatus] = useState<NativeCraftHostStatus>()
   const prepareLeaveRef = useRef<(() => Promise<boolean>) | null>(null)
-  const prepareLeave = useCallback(() => prepareLeaveRef.current?.() ?? Promise.resolve(true), [])
+  const prepareLeave = useCallback(() => prepareLeaveRef.current?.() ?? Promise.resolve(!realtimeChatId), [realtimeChatId])
   useUnsavedNavigationGuard(Boolean(status?.holderIsMe || status?.dirty), "", prepareLeave)
   useEffect(() => { if (dirtyRef) dirtyRef.current = Boolean(status?.dirty) }, [dirtyRef, status?.dirty])
   useEffect(() => () => { if (dirtyRef) dirtyRef.current = false }, [dirtyRef])
@@ -71,9 +72,10 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
   useEffect(() => { statusSink.current?.(status) }, [status])
   useEffect(() => () => { statusSink.current?.(undefined) }, [])
   const close = useCallback(async () => {
+    if (realtimeChatId && status?.dirty && prepareLeaveRef.current && await prepareLeave()) { onClose(); return }
     if (status?.dirty && !(await confirmLeaveUnsavedSheet())) return
     onClose()
-  }, [status?.dirty, onClose])
+  }, [status?.dirty, onClose, prepareLeave, realtimeChatId])
   // A large Sheet takes long to open: say so once it has, and keep the panel alive.
   const ready = Boolean(status?.ready)
   const [slow, setSlow] = useState(false)
@@ -101,11 +103,16 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
     if (!active || active === document.body || (opener && active === opener)) headingRef.current?.focus()
   }, [hidden]) // eslint-disable-line react-hooks/exhaustive-deps -- each time it is shown
   const title = page?.name || "Sheet"
-  const agentHolds = status?.holder?.kind === "agent" && !status.holderIsMe
+  const realtime=Boolean(realtimeChatId)
+  const agentHolds = !realtime && status?.holder?.kind === "agent" && !status.holderIsMe
   // The host's bar (who edits, the saved-values badge, the menu) renders into this element.
   const [bar, setBar] = useState<HTMLDivElement | null>(null)
-  const state = agentHolds ? "The agent is changing the Sheet…" : agentPending && ready ? "Waiting for the agent…" : !ready ? (slow ? "Calculating the workbook… a large one can take a minute." : "Opening the Sheet…") : saving && status?.editing ? savingLine : saveState(status)
-  const hint = stateHint(status, state)
+  const liveState = !ready ? (status?.dirty ? "Not saved" : "Opening…")
+    : status?.conflict || status?.phase === "draft" || status?.phase === "uncertain" ? "Not saved"
+    : status?.dirty || saving ? "Saving…"
+    : status?.editing ? "Saved" : "Read only"
+  const state = realtime ? liveState : agentHolds ? "The agent is changing the Sheet…" : agentPending && ready ? "Waiting for the agent…" : !ready ? (slow ? "Calculating the workbook… a large one can take a minute." : "Opening the Sheet…") : saving && status?.editing ? savingLine : saveState(status)
+  const hint = realtime ? undefined : stateHint(status, state)
   const tone = !ready || saving || agentHolds || agentPending ? "busy" : status?.conflict || status?.editing && (status.dirty || status.phase === "uncertain") ? "warn" : status?.editing && status.savedVersion ? "ok" : "plain"
   return <section aria-label="Sheet editor" hidden={hidden} data-testid="sheet-side-panel" data-expanded={expanded}
     className="flex h-full min-w-0 flex-col overflow-hidden border-l bg-background"
@@ -118,7 +125,7 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
         <SheetIcon size="sm" />
         <h2 ref={headingRef} tabIndex={-1} className="min-w-0 flex-1 truncate text-sm font-semibold outline-none">{title}</h2>
         {(() => {
-          const badge = <span role="status" data-testid="sheet-panel-state" data-tone={tone} title={hint ? undefined : state} tabIndex={hint ? 0 : undefined}
+          const badge = <span role="status" data-testid="sheet-panel-state" data-editing={Boolean(status?.editing)} data-dirty={Boolean(status?.dirty)} data-version={status?.version} data-tone={tone} title={hint ? undefined : state} tabIndex={hint ? 0 : undefined}
             className="min-w-0 max-w-[50%] shrink truncate rounded-full border px-2 py-0.5 text-xs text-muted-foreground data-[tone=warn]:border-warn/50 data-[tone=warn]:text-foreground">{state}</span>
           return hint ? <HintTooltip hint={hint}>{badge}</HintTooltip> : badge
         })()}
@@ -134,7 +141,7 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
       <div className="h-full w-full bg-primary opacity-0 transition-opacity [[data-active=true]>&]:opacity-60 motion-safe:[[data-active=true]>&]:animate-pulse" />
     </div>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <ArtifactNativeEditor workspaceId={workspaceId} pageId={pageId} fallback={null} onStatus={setStatus} handBackRef={handBackRef} prepareLeaveRef={prepareLeaveRef}
+      <ArtifactNativeEditor realtimeChatId={realtimeChatId} workspaceId={workspaceId} pageId={pageId} fallback={null} onStatus={setStatus} handBackRef={handBackRef} prepareLeaveRef={prepareLeaveRef}
         toolbar={bar} historyHref={artifactsItemHref(workspaceId, pageId)} />
     </div>
   </section>

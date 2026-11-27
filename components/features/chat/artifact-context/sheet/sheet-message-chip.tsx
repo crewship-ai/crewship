@@ -59,7 +59,7 @@ export function SheetMessageChip({ workspaceId, pageId, allowed, blocked, warnin
     {/* The hint opens on hover over the switch and its label, and when the switch has focus. */}
     {!notPrivate && <HintTooltip hint="The agent may change this workbook in this message. Every change can be undone."><span className="flex items-center gap-2">
       <Switch id={`${id}-switch`} size="sm" checked={on} disabled={Boolean(blocked) || notFound || sending || checking} aria-describedby={`${id}-about`} onCheckedChange={onAllowedChange} />
-      <label htmlFor={`${id}-switch`} className="coarse:py-3">Let the agent change it</label>
+      <label htmlFor={`${id}-switch`} className="coarse:py-3">Allow agent edits</label>
     </span></HintTooltip>}
     <Button type="button" variant="ghost" size="icon" className="size-7 coarse:size-[44px]" onClick={onRemove}
       aria-label={`Remove ${name ?? "Sheet"} from this message`}><X className="size-4" aria-hidden /></Button>
