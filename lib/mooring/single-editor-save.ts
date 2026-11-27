@@ -69,6 +69,7 @@ export interface SingleEditorSaveOptions {
   onState(state: NativeSaveState): void
   onReceipt?(receipt: NativeSaveReceipt, captureId?: string): void | Promise<unknown>
   onTransportSettled?(): void
+  onRetiredTicket?(requestId: string): void
   idleMs?: number
   /** A workbook Sheet (the file is the document): its format as opened. */
   format?: NativeFileFormat
@@ -76,7 +77,7 @@ export interface SingleEditorSaveOptions {
   /** Waits before asking the server about an unconfirmed save; the last one repeats. */
   reconcileBackoffMs?: number[]
 }
-interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string; captureId?: string; /** rebaseBase calls seen when the snapshot was asked for. */ rebases?: number }
+interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string; captureId?: string; requestId?: string; /** rebaseBase calls seen when the snapshot was asked for. */ rebases?: number }
 
 const RECONCILE_BACKOFF_MS = [2_000, 10_000, 30_000, 60_000]
 
@@ -119,7 +120,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // A validated receipt whose local row retirement failed. It is delivered to
   // the receipt observer (the native ACK) once that row is retired, or
   // superseded by a newer receipt; it is never sent again (#4852).
-  let owedReceipt: { receipt: NativeSaveReceipt; captureId?: string } | undefined
+  let owedReceipt: { receipt: NativeSaveReceipt; captureId?: string; requestId?: string } | undefined
   // After a retired attempt the confirmed baseline is no longer proof of the
   // server head (another holder may have committed meanwhile). Until a new
   // receipt, every capture is sent with the base-version fence (#4900 review).
@@ -205,7 +206,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // that one retry.
       if (!active || !writable) return
       confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }; baselineStale = false
-      owedReceipt = { receipt, captureId: attempt.captureId }
+      owedReceipt = { receipt, captureId: attempt.captureId, requestId: attempt.requestId }
       retirementRetried = true
       unretired(attempt); return
     }
@@ -300,6 +301,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // so the server's base fence decides: saved, or a visible conflict
         // with the draft kept (#4899). A plain 409 stays a conflict.
         unconfirmed = undefined; confirmed = undefined; baselineStale = true; dirty = true
+        if (attempt.requestId !== undefined) {
+          try { options.onRetiredTicket?.(attempt.requestId) } catch { /* The server already retired it. */ }
+        }
         emit("dirty", "not_committed")
       } else if (reconcile && error instanceof NativeSaveError && error.reason === "conflict") {
         // Reconcile proved nothing and recorded nothing (lease lost, retirement
@@ -404,7 +408,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Word's engine identity, and a workbook file's editor revision (its file is not the stored one byte for byte).
         const nativeState = (options.applicationId === "wordcraft" || workbook) && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
         if (rebasesAsked !== rebases) { lastFailedPreparation = sequence; scheduleIfNeeded(); return }
-        latest = { nativeState, captureId: snapshot.captureId, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash, ...(snapshot.touched !== undefined ? { touched: snapshot.touched } : {}) }, epoch, sequence, rebases: rebasesAsked }
+        latest = { nativeState, requestId, captureId: snapshot.captureId, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash, ...(snapshot.touched !== undefined ? { touched: snapshot.touched } : {}) }, epoch, sequence, rebases: rebasesAsked }
         return latest
       } catch {
         lastFailedPreparation = sequence
@@ -480,7 +484,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
           // for the next edit, Ctrl+S or flush (#4852). A press is owed its ACK
           // from that retry and fails until then.
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) {
-            if (confirmation) owedReceipt = { receipt: confirmation, captureId: attempt.captureId }
+            if (confirmation) owedReceipt = { receipt: confirmation, captureId: attempt.captureId, requestId: attempt.requestId }
             unretired(attempt)
             if (!retirementRetried) { retirementRetried = true; scheduleIfNeeded() }
           }
@@ -667,6 +671,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       else scheduleIfNeeded()
     },
     save: (requestId?: string) => save(requestId),
+    // A reconciliation or local receipt retirement can still owe this native
+    // request its acknowledgement. The editor needs the original ticket.
+    keepsTicket(requestId: string): boolean {
+      return unconfirmed?.requestId === requestId || owedReceipt !== undefined && owedReceipt?.requestId === requestId
+    },
     /** Hold transmission while a replay moves both the editor and the save base. */
     beginReplay(): (() => void) | undefined {
       if (!active || !writable || replaying || held || unconfirmed || pending || blocked && blocked !== "moved") return undefined
