@@ -8,6 +8,8 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import type {GridcraftNativePortOptions} from '@/lib/mooring/gridcraft-native-port'
 import type {NativeEditorPort,NativeStructuredPort} from '@/lib/mooring/native-editor-port'
 import {publishAgentVersion} from '@/lib/mooring/native-agent-version'
+import {suspendOtherDocumentDrafts} from '@/lib/document-queue'
+import {PendingSheetDraftCapture} from '@/lib/local-draft-seal'
 import {NativeCraftEditorHost,fidelityPartsText,nativeOpenBudget,sheetWarningText,workbookFile} from '../native-craft-editor-host'
 // The editor and the server run the same engine build unless a test says otherwise.
 const ENGINE_BUILD='0.19.1+59f6b6c14a37 patch '+'d'.repeat(64)
@@ -189,6 +191,29 @@ describe('saving a workbook file',()=>{
   expect(sent.some(m=>m.type==='gridcraft:set-access'&&m.readOnly===false),'the editor was made writable').toBe(true)
  }
  const change=async()=>{revision=String(Number(revision)+1);await act(async()=>{wires.at(-1)!.onmessage?.({data:{type:'gridcraft:changed',document:'doc',revision,dirty:true}})})}
+ it('allows the session-end retry to persist the same frozen workbook locally',async()=>{
+  await editing()
+  await change()
+  const journal=await mock.journal.mock.results.at(-1)!.value as {persist:ReturnType<typeof vi.fn>}
+  journal.persist.mockRejectedValue(Error('storage busy'))
+  try{
+   const first=suspendOtherDocumentDrafts(null).catch(error=>error)
+   await settle(2_000)
+   expect(await first).toBeInstanceOf(PendingSheetDraftCapture)
+   expect(document.querySelector('iframe')).not.toBeNull()
+   expect(client.save).not.toHaveBeenCalled()
+
+   journal.persist.mockResolvedValue(undefined)
+   const second=suspendOtherDocumentDrafts(null)
+   await settle(2_000)
+   await second
+   expect(journal.persist).toHaveBeenLastCalledWith(expect.objectContaining({format:'xlsx',editorRevision:'doc:2'}),true)
+   expect(client.save).not.toHaveBeenCalled()
+  }finally{
+   journal.persist.mockResolvedValue(undefined)
+   await suspendOtherDocumentDrafts('diagnostic-human')
+  }
+ })
  // Concurrent editing: the agent saves while the person has unsaved work in the open Sheet.
  it('adds the agent version to unsaved work, keeps the person\'s cells, names them, and saves on top of the agent',async()=>{
   await editing()

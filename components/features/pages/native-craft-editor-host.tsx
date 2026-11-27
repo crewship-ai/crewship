@@ -4,6 +4,7 @@ import {agentVersionHref} from '@/lib/mooring/version-href'
 import * as React from "react"
 import {createPortal,flushSync} from "react-dom"
 import {registerDocumentDraftWriter} from "@/lib/document-queue"
+import {LocalDraftReadRevoked,PendingSheetDraftCapture} from "@/lib/local-draft-seal"
 import {Bot,MoreHorizontal,RotateCcw} from "lucide-react"
 import {Button} from "@/components/ui/button"
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from "@/components/ui/dropdown-menu"
@@ -829,14 +830,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const visibility=r.frame.style.visibility
    freezeInput(r);unseen(r)
    let draft:NativeDraft
+   let persisting=false
    try{
     const snapshot=await r.port.snapshot(r.abort.signal)
-    draft={applicationId:sessionApplication!,enginePin:r.enginePin,sessionId:r.sessionId,generation:r.generation,baseVersion:r.receiptVersion??r.version,editorRevision:snapshot.editorRevision,bytes:snapshot.bytes.slice()}
+    draft={applicationId:sessionApplication!,enginePin:r.enginePin,sessionId:r.sessionId,generation:r.generation,baseVersion:r.receiptVersion??r.version,editorRevision:snapshot.editorRevision,bytes:snapshot.bytes.slice(),...(snapshot.format?{format:snapshot.format}:{})}
     await r.port.validate(draft,r.abort.signal)
+    persisting=true
     await r.journal!.persist(draft,true)
-   }catch{
+   }catch(cause){
     // Not even the local copy is confirmed: the suspension refuses with its own code, and the buffer stays in the tab.
-    if(live(r))r.frame.style.visibility=visibility
+    if(live(r)){
+     r.frame.style.visibility=visibility
+     if(persisting&&sessionApplication==='gridcraft'&&!(cause instanceof LocalDraftReadRevoked)){
+      throw new PendingSheetDraftCapture('native_auth_draft_capture_unconfirmed',{cause})
+     }
+    }
     throw Error('native_auth_draft_capture_unconfirmed')
    }
    if(!live(r))return false

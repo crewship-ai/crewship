@@ -7,11 +7,11 @@ import { installLocalDraftKeyFixture } from "@/lib/local-draft-seal.test-support
 const fixture = `
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import {AuthProvider,sessionEndDraftRetry,useAuth} from '@/hooks/use-auth';import {AUTH_EVENT} from '@/lib/api-fetch';
+import {AuthProvider,useAuth} from '@/hooks/use-auth';import {AUTH_EVENT} from '@/lib/api-fetch';
 import {useDesign} from '@/components/features/artifacts-design/use-design';
 import {upsertDesignNode} from '@/components/features/artifacts-design/design-document';
 window.BroadcastChannel=undefined;
-const f=window.designRetentionFixture={auth:null,design:null,expiryRetryWaitMs:sessionEndDraftRetry.delaysMs.reduce((total,delay)=>total+delay,0)};
+const f=window.designRetentionFixture={auth:null,design:null};
 const network=window.fetch.bind(window);
 window.fetch=async(url,init)=>{
  const path=String(url);
@@ -26,7 +26,7 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
 f.edit=()=>upsertDesignNode(f.design.doc,{id:'draft',type:'text',text:'PRIVATE_CANVAS_CHANGE',x:0,y:0,width:100,height:40});
 f.expire=()=>window.dispatchEvent(new CustomEvent(AUTH_EVENT,{detail:{reason:'session_expired'}}));
 `;
-type Fixture={ design:{editable:boolean}; edit():void; expire():void; expiryRetryWaitMs:number }
+type Fixture={ design:{editable:boolean}; edit():void; expire():void }
 it.skipIf(!existsSync(chromium.executablePath())).each([false,true,"settled"])("retains the Design canvas, blocking expiry when capture exceeds its limit (%s)",async oversized=>{
  const built=buildSync({stdin:{contents:oversized===true?fixture.replace("text:'PRIVATE_CANVAS_CHANGE'", "text:'PRIVATE_CANVAS_CHANGE'.repeat(150000)"):fixture,loader:"tsx",resolveDir:process.cwd()},bundle:true,write:false,platform:"browser",format:"iife",define:{"process.env.NODE_ENV":'"test"'}})
  const browser=await chromium.launch({headless:true})
@@ -42,9 +42,7 @@ it.skipIf(!existsSync(chromium.executablePath())).each([false,true,"settled"])("
    await page.evaluate(()=>(window as unknown as {designRetentionFixture:Fixture}).designRetentionFixture.expire())
   }else await page.evaluate(()=>{const f=(window as unknown as {designRetentionFixture:Fixture}).designRetentionFixture;f.edit();f.expire()})
   if(oversized===true){
-   const retryWaitMs=await page.evaluate(()=>(window as unknown as {designRetentionFixture:Fixture}).designRetentionFixture.expiryRetryWaitMs)
-   // Expiry offers recovery only after the shared draft-capture retries are exhausted.
-   await page.getByRole("alertdialog").waitFor({timeout:retryWaitMs+3000})
+   await page.getByRole("alertdialog").waitFor({timeout:3000})
    expect(page.url()).toContain("/pages/design")
    return
   }

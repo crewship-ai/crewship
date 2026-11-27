@@ -1,6 +1,4 @@
-// When a session ends while an editor is still writing its last draft, the draft
-// sweep can run out of its time and fail once. The tab tries the whole step again (both draft stores) before it shows
-// "Keep this tab open"; the overlay stays for a sweep that keeps failing, and nothing leaves the tab until one passes.
+// Only a still-open Sheet whose final local write failed gets the automatic retry.
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
@@ -13,12 +11,13 @@ vi.mock("@/lib/document-draft-sign-out", () => ({ recordSignOut: vi.fn(async () 
 import { AuthProvider, useAuth, sessionEndDraftRetry, sessionRetryPolicy } from "@/hooks/use-auth"
 import { AUTH_CHANNEL, AUTH_EVENT } from "@/lib/api-fetch"
 import { SIGNED_OUT_URL } from "@/lib/signed-out"
+import { PendingSheetDraftCapture } from "@/lib/local-draft-seal"
 
 const okJSON = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response
 const wrapper = ({ children }: { children: React.ReactNode }) => <AuthProvider>{children}</AuthProvider>
 const realPolicy = { ...sessionRetryPolicy }
 const realRetry = [...sessionEndDraftRetry.delaysMs]
-const timedOut = () => Promise.reject(new Error("storage is unavailable"))
+const pendingCapture = () => Promise.reject(new PendingSheetDraftCapture("The Sheet still holds an unconfirmed draft"))
 const overlay = () => document.querySelector('[role="alertdialog"]')
 let replace: ReturnType<typeof vi.spyOn>
 class FakeBroadcastChannel {
@@ -49,11 +48,8 @@ async function expireAfter(breakIt: () => void) {
 }
 
 describe("a session that ends while a draft is still being written", () => {
-  it.each([
-    ["the artifact drafts", () => artifact.mockImplementationOnce(timedOut)],
-    ["the document drafts", () => documents.mockImplementationOnce(timedOut)],
-  ])("goes to sign-in when %s miss their time once, after trying both stores again", async (_, breakIt) => {
-    await expireAfter(breakIt)
+  it("tries both stores again when the Sheet's final capture fails once", async () => {
+    await expireAfter(() => documents.mockImplementationOnce(pendingCapture))
     await waitFor(() => expect(replace).toHaveBeenCalledTimes(1))
     expect(String(replace.mock.calls[0][0])).toContain("/login")
     expect(overlay()).toBeNull()
@@ -65,7 +61,7 @@ describe("a session that ends while a draft is still being written", () => {
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("authenticated"))
     artifact.mockClear(); documents.mockClear()
-    artifact.mockImplementationOnce(timedOut)
+    documents.mockImplementationOnce(pendingCapture)
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response)
     act(() => { FakeBroadcastChannel.instances.find(c => c.name === AUTH_CHANNEL)!.onmessage?.({ data: { type: "signout", human: "u1" } }) })
     await waitFor(() => expect(replace).toHaveBeenCalledWith(SIGNED_OUT_URL))
@@ -74,9 +70,20 @@ describe("a session that ends while a draft is still being written", () => {
   })
 
   it("keeps the tab with Keep this tab open when the sweep fails every time, and leaves nothing", async () => {
-    await expireAfter(() => artifact.mockImplementation(timedOut))
+    await expireAfter(() => documents.mockImplementation(pendingCapture))
     await waitFor(() => expect(overlay()).not.toBeNull())
-    expect(artifact).toHaveBeenCalledTimes(1 + sessionEndDraftRetry.delaysMs.length)
+    expect(documents).toHaveBeenCalledTimes(1 + sessionEndDraftRetry.delaysMs.length)
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["the artifact store", artifact],
+    ["a document without a pending Sheet capture", documents],
+  ] as const)("offers recovery after the first failure from %s", async (_, store) => {
+    await expireAfter(() => store.mockRejectedValueOnce(new Error("storage is unavailable")))
+    await waitFor(() => expect(overlay()).not.toBeNull())
+    expect(artifact).toHaveBeenCalledTimes(1)
+    expect(documents).toHaveBeenCalledTimes(1)
     expect(replace).not.toHaveBeenCalled()
   })
 })

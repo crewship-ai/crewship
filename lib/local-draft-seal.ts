@@ -4,6 +4,8 @@ export interface LocalDraftScope { human: string; workspace: string; page: strin
 export interface SealedLocalDraft { format: "crewship-local-draft-v1"; envelope: string; iv: string; ciphertext: string }
 export class LocalDraftProtectionError extends Error {}
 export class LocalDraftReadRevoked extends LocalDraftProtectionError {}
+/** A live Sheet still holds the snapshot whose final local write failed. */
+export class PendingSheetDraftCapture extends Error {}
 export interface LocalDraftCipher {
   seal(text: string, purpose: string): Promise<string>
   open(sealed: string, purpose: string): Promise<string>

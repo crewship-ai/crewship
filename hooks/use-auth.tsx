@@ -20,7 +20,7 @@ import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocume
 import { clearSignOut, recordSignOut, sweepSignOuts } from "@/lib/document-draft-sign-out"
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
-import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
+import { beginLocalDraftIdentity, finishLocalDraftIdentity, PendingSheetDraftCapture } from "@/lib/local-draft-seal"
 import { askConfirm, confirmHostMounted } from "@/components/ui/confirm-host"
 
 const DRAFT_DISCARD_WARNING = "Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. Continue? New changes arriving during sign-out are kept."
@@ -44,17 +44,14 @@ async function preserveDraftsForIdentity(human: string | null) {
   return generation
 }
 
-/**
- * The waits before a session end tries the draft sweep again. An editor still
- * writing its last draft holds the store, and the sweep can run out of its time once; Keep this tab open follows
- * only a sweep that keeps failing. Until one passes, the tab neither leaves nor shows anything to another identity.
- */
+/** Give a still-open Sheet a chance to finish writing its last local draft. */
 export const sessionEndDraftRetry = { delaysMs: [500, 1500, 3000] }
 
 async function preserveDraftsPatiently(human: string | null) {
   for (let attempt = 0; ; attempt++) {
     try { return await preserveDraftsForIdentity(human) }
     catch (error) {
+      if (!(error instanceof PendingSheetDraftCapture)) throw error
       const wait = sessionEndDraftRetry.delaysMs[attempt]
       if (wait === undefined) throw error
       await new Promise(resolve => setTimeout(resolve, wait))
