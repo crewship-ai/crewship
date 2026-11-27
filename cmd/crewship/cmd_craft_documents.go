@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -218,6 +219,34 @@ func craftVersion(cmd *cobra.Command, args []string) error {
 		return e
 	}
 	return craftEmit(cmd, meta, token)
+}
+
+func craftOriginalWorkbook(cmd *cobra.Command, args []string) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "" {
+		return cli.WithExitCode(fmt.Errorf("output must be a file path or -"), cli.ExitValidation)
+	}
+	c, token, err := craftReadOnlyAdmission(cmd, args[0])
+	if err != nil {
+		return err
+	}
+	response, err := c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/original-workbook")
+	if err != nil {
+		return craftTransportError("original Sheet request failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return craftHTTPError(response, token)
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, craftNativeBytesLimit+1))
+	if err != nil || len(content) > craftNativeBytesLimit || !json.Valid(content) {
+		return fmt.Errorf("invalid original Sheet response")
+	}
+	if output == "-" {
+		_, err = cmd.OutOrStdout().Write(content)
+		return err
+	}
+	return craftWritePrivateFile(output, content)
 }
 
 // craftWritePrivateFile writes private document bytes to path as a new 0600

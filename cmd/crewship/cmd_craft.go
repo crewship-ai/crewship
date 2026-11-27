@@ -32,6 +32,9 @@ func newCraftCommand() *cobra.Command {
 	version := &cobra.Command{Use: "version <page> <version>", Args: cobra.ExactArgs(2), Short: "Read one saved native version's bytes, read-only (preview or diagnose; restore through connect)", RunE: craftVersion}
 	version.Flags().StringP("output", "o", "", "Write the decoded native document to this file (- for stdout) and print only its metadata")
 	craft.AddCommand(version)
+	original := &cobra.Command{Use: "original-workbook <page>", Args: cobra.ExactArgs(1), Short: "Download a legacy Sheet's original JSON", RunE: craftOriginalWorkbook}
+	original.Flags().StringP("output", "o", "-", "Write the original bytes to a private file or - for stdout")
+	craft.AddCommand(original)
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", Long: "Read bounded NDJSON actions; watch keeps the lease stream alive.\n\nThe share action needs the page's owner: Edit rights or a workspace role exit 4. Each lease row says so in can_share.", RunE: craftConnect})
 	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as native Word or Sheet; keep its admission in this process", RunE: craftInitialize}
 	initialize.Flags().String("application", "word", `Application to create: "word" or "sheet"`)
