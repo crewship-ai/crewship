@@ -335,6 +335,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // Publishing and revoking are opposites, so they do not share a glyph.
   "artifact.mooring_created": FilePlus,
   "artifact.mooring_committed": FilePen,
+  "artifact.sheet_read": Eye,
   "artifact.mooring_mandate_admitted": KeyRound,
   "artifact.mooring_mandate_revoked": Ban,
   "artifact.project_shared": Globe,

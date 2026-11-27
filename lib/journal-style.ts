@@ -347,6 +347,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.owner_transferred": "page",
   "artifact.mooring_created": "page",
   "artifact.mooring_committed": "page",
+  "artifact.sheet_read": "page",
   "artifact.mooring_mandate_admitted": "page",
   "artifact.mooring_mandate_revoked": "page",
   "artifact.project_shared": "page",

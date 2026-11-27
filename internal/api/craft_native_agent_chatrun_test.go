@@ -424,18 +424,18 @@ func TestChatRunSheetRevocationDuringTheEngineNeverPublishes(t *testing.T) {
 // holder's kind and the engine never runs.
 func TestChatRunSheetHumanHoldingTheLeaseRefusesTheAgent(t *testing.T) {
 	r := newChatRunToolRig(t)
-	human := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, &AuthUser{ID: r.a.HumanUserID, SessionID: r.source.ID, OriginalCredential: r.source}), ctxAuthKind, AuthKindSession), ctxWorkspaceID, r.a.WorkspaceID), *r.source)
+	human := craftNativeHumanAs(t, r.f.rig, r.a.HumanUserID)
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{}`)).WithContext(human)
-	req.SetPathValue("slug", "@sheet-own")
+	req.SetPathValue("slug", "sheet-own")
 	w := httptest.NewRecorder()
 	r.m.human.sessions(w, req)
 	var session struct {
 		Token string `json:"session_token"`
 	}
-	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &session) != nil {
-		t.Skipf("human admission is not available in this fixture: %d %s", w.Code, w.Body)
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &session) != nil || session.Token == "" {
+		t.Fatalf("human admission: %d %s", w.Code, w.Body)
 	}
-	if held := craftNativeLeaseCall(r.m.human, human, session.Token, "@sheet-own", "acquire", `{}`); held.Code != 200 {
+	if held := craftNativeLeaseCall(r.m.human, human, session.Token, "sheet-own", "acquire", `{}`); held.Code != 200 {
 		t.Fatal("human acquire", held.Code, held.Body)
 	}
 	refused := r.call(r.token, `{"operation":"acquire"}`)

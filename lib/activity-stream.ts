@@ -293,6 +293,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       // one, and a webhook credential that writes a panel from outside.
       "artifact.mooring_created",
       "artifact.mooring_committed",
+      "artifact.sheet_read",
       "artifact.mooring_mandate_admitted",
       "artifact.mooring_mandate_revoked",
       "artifact.project_shared",

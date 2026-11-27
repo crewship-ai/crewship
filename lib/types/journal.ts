@@ -234,6 +234,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // §7.3.2 public links, §8b webhooks, and the owner handoff.
   "artifact.mooring_created",
   "artifact.mooring_committed",
+  "artifact.sheet_read",
   "artifact.mooring_mandate_admitted",
   "artifact.mooring_mandate_revoked",
   "artifact.project_shared",
