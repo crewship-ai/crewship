@@ -90,7 +90,10 @@ export class NativeMetadataTransportError extends Error {}
 /** X-Craft-Touched: the addresses as JSON, every character outside ASCII escaped, so a sheet name of any
  * script fits a header; or unknown. */
 function touchedHeader(touched:string[]|"unknown"):string{
- return touched==="unknown"?"unknown":JSON.stringify(touched).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"))
+ if(touched==="unknown")return touched
+ const ascii=JSON.stringify(touched).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"))
+ // Match the server's 64 KiB cap against the ASCII bytes that Fetch actually sends.
+ return ascii.length<=64*1024?ascii:"unknown"
 }
 /** Create version 1 from an Excel upload and optionally link it to a chat atomically. */
 export async function initializeNativeWorkbook(args:{workspaceId:string;pageId:string;file:Blob;chatId?:string;fetch?:typeof fetch;signal?:AbortSignal}):Promise<Response>{
