@@ -177,12 +177,11 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   if(response.status===415)throw new NativeSaveError("unsupported")
   // The file would lose or change macros, signatures or customXml; nothing was stored.
   if(response.status===422&&operation==="save"&&await refusalCode(response)==="fidelity_loss")throw new NativeSaveError("fidelity_loss")
-  if(response.status===413&&request.format!==undefined)throw new NativeSaveError(await refusalCode(response)==="quota"?"quota":"too_large")
   if(response.status===413){
    // The server says "quota" for a full version history; any other 413 (the body cap, a proxy in
    // front of the server) means the document itself is too large to send, which is not a quota.
-   let detail="";try{const body:unknown=await response.clone().json();if(typeof body==="object"&&body!==null&&typeof (body as {detail?:unknown}).detail==="string")detail=(body as {detail:string}).detail;else if(typeof body==="object"&&body!==null&&typeof (body as {error?:unknown}).error==="string")detail=(body as {error:string}).error}catch{/* a proxy page */}
-   throw new NativeSaveError(/quota/i.test(detail)?"quota":"too_large")
+   let detail="",code="";try{const body:unknown=await response.clone().json();if(body&&typeof body==="object"&&typeof (body as {code?:unknown}).code==="string")code=(body as {code:string}).code;if(typeof body==="object"&&body!==null&&typeof (body as {detail?:unknown}).detail==="string")detail=(body as {detail:string}).detail;else if(typeof body==="object"&&body!==null&&typeof (body as {error?:unknown}).error==="string")detail=(body as {error:string}).error}catch{/* a proxy page */}
+   throw new NativeSaveError(code==="quota"||/quota/i.test(detail)?"quota":"too_large")
   }
   // A refused bearer or write is insufficient evidence to erase readable data.
   // Only the independently authenticated lifecycle's explicit read loss purges.

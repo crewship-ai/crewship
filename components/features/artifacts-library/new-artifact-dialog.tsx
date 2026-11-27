@@ -5,8 +5,7 @@ import { useRouter } from "next/navigation"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Eye, FileSpreadsheet, Plus, Search, TriangleAlert } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
-import { XLSX_IMPORT_LIMIT } from "@/lib/craft-xlsx-import"
-import { uploadWorkbook } from "@/components/features/chat/artifact-context/sheet/workbook-upload"
+import { WORKBOOK_UPLOAD_LIMIT, uploadWorkbook } from "@/components/features/chat/artifact-context/sheet/workbook-upload"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -227,7 +226,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
     : kind?.live(caps) === true && (handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true && (start !== "upload" || (Boolean(file) && (file?.size ?? 0) <= XLSX_IMPORT_LIMIT)))) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true))))
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true && (start !== "upload" || (Boolean(file) && (file?.size ?? 0) <= WORKBOOK_UPLOAD_LIMIT)))) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true))))
   const primaryLabel = created ? "Open it" : start === "upload" && busy ? "Uploading…" : start === "upload" && !word.retrying ? "Upload and open" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const cancelled = create.error?.name === "AbortError"
   const refusal = cancelled ? "The upload was cancelled. The empty Sheet was created: choose the file again to continue, or open it from the library." : created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
@@ -290,7 +289,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
             className={cn("rounded-card border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-[44px]", t === chosenTemplate && "border-transparent ring-2 ring-primary")}>{t}</button>)}
         </div>}
         {start === "upload" && kind.key === "sheet" && <div className="flex flex-col gap-2">
-          <CreateSurfaceField label="Workbook" htmlFor="new-artifact-xlsx" hint={`An .xlsx or .xlsm file up to ${XLSX_IMPORT_LIMIT >> 20} MiB. It becomes the Sheet's first version as it is, macros kept and never run; your file stays yours.`}>
+          <CreateSurfaceField label="Workbook" htmlFor="new-artifact-xlsx" hint={`An .xlsx or .xlsm file up to ${WORKBOOK_UPLOAD_LIMIT >> 20} MiB. It becomes the Sheet's first version as it is, macros kept and never run; your file stays yours.`}>
             <input id="new-artifact-xlsx" type="file" accept={WORKBOOK_ACCEPT} disabled={busy}
               className={cn(CREATE_SURFACE_INPUT, "rounded-md border bg-transparent px-2 py-1.5 file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs")}
               onChange={event => {
@@ -299,7 +298,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
                 if (next && !name.trim()) setName(workbookBaseName(next.name).slice(0, 120))
               }} />
           </CreateSurfaceField>
-          {file && file.size > XLSX_IMPORT_LIMIT && <p role="alert" className="text-xs text-destructive">This workbook is over {XLSX_IMPORT_LIMIT >> 20} MiB, which is more than an import accepts.</p>}
+          {file && file.size > WORKBOOK_UPLOAD_LIMIT && <p role="alert" className="text-xs text-destructive">This workbook is over {WORKBOOK_UPLOAD_LIMIT >> 20} MiB, which is more than an import accepts.</p>}
           {file && <p className="flex items-center gap-2 text-xs text-muted-foreground"><FileSpreadsheet aria-hidden className="size-3.5 shrink-0 text-sheet" /><span className="truncate">{file.name}</span><span>· {(file.size / (1024 * 1024)).toFixed(1)} MiB</span></p>}
           {importState && <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2.5 text-xs">
             <span className="min-w-0 flex-1">Uploading the workbook…</span>
