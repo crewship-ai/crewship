@@ -51,7 +51,7 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// Send a file only after both read and export audits succeed.
-	sendExport := func(data []byte, ext, mediaType string) {
+	sendExport := func(data []byte, format, mediaType string) {
 		if !d.auditRead(w, r, entry) {
 			return
 		}
@@ -61,13 +61,13 @@ func (d *craftNativeDocumentsHTTP) exportXLSX(w http.ResponseWriter, r *http.Req
 			craftNativeDocumentError(w, errCraftNativeAccess)
 			return
 		}
-		if err = recordCraftSheetExported(r.Context(), d, entry, source.UserID, version, data); err != nil {
+		if err = recordCraftSheetExported(r.Context(), d, entry, source.UserID, version, format, data); err != nil {
 			replyError(w, 500, "the export could not be audited")
 			return
 		}
 		h := w.Header()
 		h.Set("Content-Type", mediaType)
-		h.Set("Content-Disposition", craftExportDisposition(capture.record.Name, ext))
+		h.Set("Content-Disposition", craftExportDisposition(capture.record.Name, format))
 		h.Set("Content-Length", strconv.Itoa(len(data)))
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Craft-Version", strconv.FormatInt(version, 10))
@@ -175,13 +175,13 @@ func (d *craftNativeDocumentsHTTP) faithfulExporter() (func(context.Context, []b
 	}, nil
 }
 
-func recordCraftSheetExported(ctx context.Context, d *craftNativeDocumentsHTTP, entry *craftNativeSession, userID string, version int64, data []byte) error {
+func recordCraftSheetExported(ctx context.Context, d *craftNativeDocumentsHTTP, entry *craftNativeSession, userID string, version int64, format string, data []byte) error {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(data)
-	meta, err := json.Marshal(map[string]any{"version": strconv.FormatInt(version, 10), "format": "xlsx", "bytes": len(data), "sha256": hex.EncodeToString(sum[:8])})
+	meta, err := json.Marshal(map[string]any{"version": strconv.FormatInt(version, 10), "format": format, "bytes": len(data), "sha256": hex.EncodeToString(sum[:8])})
 	if err != nil {
 		return err
 	}

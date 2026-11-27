@@ -265,6 +265,10 @@ func TestWorkbookSheetExportIsTheStoredFile(t *testing.T) {
 	if w.Code != 200 || !bytes.Equal(w.Body.Bytes(), rig.original) || h.Get("Content-Type") != mooring.WorkbookMediaTypeXLSM || !strings.Contains(h.Get("Content-Disposition"), ".xlsm") || h.Get("X-Craft-Version") != "1" {
 		t.Fatalf("export %d %v", w.Code, h)
 	}
+	rows := auditRowsOf(t, rig.d.human.pages.db, auditActionCraftSheetExported, "native-page")
+	if len(rows) != 1 || rows[0].meta["format"] != "xlsm" {
+		t.Fatalf("expected a single XLSM export audit, got %+v", rows)
+	}
 }
 
 // History of a workbook Sheet names each version's file (format, hash, size), and a version read
