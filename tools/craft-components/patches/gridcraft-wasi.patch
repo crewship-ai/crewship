@@ -5662,6 +5662,25 @@ index 1887b06a..9dd7f8b3 100644
 +        assert_eq!(save(&mut undo, "second save without changes"), restored, "an unchanged second save returns the precise latest package");
 +    }
 +}
+diff --git a/crates/engine/src/cmd/formulas.rs b/crates/engine/src/cmd/formulas.rs
+index 7b2e2732..18406d3f 100644
+--- a/crates/engine/src/cmd/formulas.rs
++++ b/crates/engine/src/cmd/formulas.rs
+@@ -1048,8 +1048,13 @@ fn calc_options(s: &mut Session, p: &Json) -> Result<Json> {
+         // Switching precision as displayed recalculates the workbook, in manual mode too, so the
+         // values change as soon as it is switched on or off.
+         let precision_changed = c.precision_as_displayed != before.precision_as_displayed;
+-        if mode == Some(CalcMode::Automatic) || (iteration_changed && c.mode != CalcMode::Manual) || precision_changed {
++        if precision_changed {
++            // The precision option can rewrite workbook constants.
+             cx.structural = true;
++        } else if mode == Some(CalcMode::Automatic) || (iteration_changed && c.mode != CalcMode::Manual) {
++            // Rebuilding the calculation graph does not restructure the workbook.
++            // Managed edits temporarily use manual calculation for a batch.
++            cx.recalc_all = true;
+         }
+         Ok(json!({
+             "mode": format!("{:?}", c.mode),
 diff --git a/crates/engine/src/cmd/inspect.rs b/crates/engine/src/cmd/inspect.rs
 index d6646743..2d255e2a 100644
 --- a/crates/engine/src/cmd/inspect.rs
@@ -6081,10 +6100,10 @@ index 52a0c648..76912d58 100644
              && let Some(d) = self.docs.iter_mut().find(|d| d.uid == uid)
              && !Arc::ptr_eq(&d.wb, &wb)
 diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
-index 098f714e..81ea0f4e 100644
+index 098f714e..db3bd06d 100644
 --- a/crates/engine/src/tests.rs
 +++ b/crates/engine/src/tests.rs
-@@ -8489,3 +8489,232 @@ fn a_refused_cut_paste_leaves_the_cut_to_paste_plainly() {
+@@ -8489,3 +8489,269 @@ fn a_refused_cut_paste_leaves_the_cut_to_paste_plainly() {
      s.execute("edit.paste", json!({})).unwrap();
      assert_eq!((v(&s, "E1"), v(&s, "C3"), v(&s, "D3")), (Value::Empty, Value::Number(1.0), Value::Number(2.0)));
  }
@@ -6316,6 +6335,43 @@ index 098f714e..81ea0f4e 100644
 +    assert_eq!(pair["columns"][0]["range"], json!("Sheet1!H8:I20"), "{pair}");
 +    let tail = s.execute("range.columnByHeader", json!({"header": "tail"})).unwrap();
 +    assert_eq!(tail["columns"][0]["range"], serde_json::Value::Null, "{tail}");
++}
++
++// A managed write batches several cells by switching to manual calculation,
++// then restores automatic mode. Saving and restoring forced text is still an
++// ordinary cell edit against the original package.
++#[test]
++fn managed_workbook_saves_and_restores_text_after_a_calculation_mode_round_trip() {
++    let mut original = s();
++    original.execute("cell.set", json!({"cell": "C2", "input": "'007"})).unwrap();
++    original.execute("cell.set", json!({"cell": "D2", "input": "'=abc"})).unwrap();
++    let bytes = crate::io::save_bytes(&original.doc().unwrap().wb, "Book.xlsx").unwrap();
++
++    let mut managed = Session::new();
++    managed
++        .execute("file.open", json!({
++            "name": "Book.xlsx", "base64": crate::io::base64_encode(&bytes),
++            "preservePackage": true, "calculate": false, "autoFit": false,
++        }))
++        .unwrap();
++    let structure = managed.doc().unwrap().wb.structure;
++    for (c2, d2) in [("done", "done"), ("'007", "'=abc")] {
++        managed.execute("formulas.calculationOptions", json!({"mode": "manual"})).unwrap();
++        managed.execute("cell.set", json!({"cell": "C2", "input": c2})).unwrap();
++        managed.execute("cell.set", json!({"cell": "D2", "input": d2})).unwrap();
++        managed.execute("formulas.calculationOptions", json!({"mode": "automatic"})).unwrap();
++        assert!(structure.same(managed.doc().unwrap().wb.structure));
++        let saved = managed.execute("file.saveBytes", json!({"format": "xlsx", "fidelity": true})).unwrap();
++        assert_eq!(saved["parts"], json!([]));
++        let raw = crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap();
++        let (wb, _) = gridcraft_xlsx::read_xlsx(&raw).unwrap();
++        let sh = wb.sheet(0).unwrap();
++        for (addr, input) in [("C2", c2), ("D2", d2)] {
++            let cell = sh.cell(CellRef::parse(addr).unwrap()).unwrap();
++            assert!(cell.formula.is_none());
++            assert_eq!(cell.value, Value::text(input.strip_prefix('\'').unwrap_or(input)));
++        }
++    }
 +}
 diff --git a/crates/engine/src/timings.rs b/crates/engine/src/timings.rs
 new file mode 100644
