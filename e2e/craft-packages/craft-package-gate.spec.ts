@@ -47,6 +47,29 @@ async function open(browser: Browser, ref: N.NativeRef, log: string[]): Promise<
 // lower case and unique, so a case-insensitive match still identifies them.
 const holds = (text: string, marker: string) => text.toLowerCase().includes(marker)
 
+/** Read the cell from the persisted XLSX. A shared string elsewhere is insufficient. */
+async function expectMarker(page: Page, app: N.NativeApp, head: N.Head, cell: string, marker: string) {
+  if (app === "wordcraft") {
+    expect(holds(head.text, marker), "the saved document holds " + marker).toBe(true)
+    return
+  }
+  const sheet = head.workbookParts?.["xl/worksheets/sheet1.xml"]
+  expect(sheet, "the saved XLSX contains Sheet1").toBeTruthy()
+  const actual = await page.evaluate(({ sheet, strings, cell }) => {
+    const parser = new DOMParser()
+    const sheetDoc = parser.parseFromString(sheet, "application/xml")
+    const item = Array.from(sheetDoc.getElementsByTagNameNS("*", "c")).find(node => node.getAttribute("r") === cell)
+    const value = item?.getElementsByTagNameNS("*", "v")[0]?.textContent
+    const text = (node?: Element) => node && Array.from(node.getElementsByTagNameNS("*", "t"), tag => tag.textContent).join("")
+    if (item?.getAttribute("t") === "s" && value != null && strings) {
+      const lookup = parser.parseFromString(strings, "application/xml")
+      return text(lookup.getElementsByTagNameNS("*", "si")[Number(value)])
+    }
+    return item?.getAttribute("t") === "inlineStr" ? text(item) : value
+  }, { sheet: sheet!, strings: head.workbookParts?.["xl/sharedStrings.xml"], cell })
+  expect(actual, "the saved value at " + cell).toBe(marker)
+}
+
 function edited(status: string, after: string): boolean {
   const saved = status.match(/^Saved · version (\d+)/)
   return saved ? BigInt(saved[1]) > BigInt(after) : /^(Unsaved draft|Saving)/.test(status)
@@ -79,7 +102,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const v1 = await editAndSave(page, app, first, "B2", ref.initVersion)
       const head1 = await N.readHead(api, ref)
       expect(head1.version).toBe(v1)
-      expect(holds(head1.text, first), "the saved document holds the first marker").toBe(true)
+      await expectMarker(page, app, head1, "B2", first)
       await page.context().close()
 
       // Reopen in a fresh browser context: a new frame, a new bootstrap from the saved version.
@@ -87,8 +110,8 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const v2 = await editAndSave(again, app, second, "B3", v1)
       const head2 = await N.readHead(api, ref)
       expect(head2.version).toBe(v2)
-      expect(holds(head2.text, first), "the reopened editor kept the first marker").toBe(true)
-      expect(holds(head2.text, second), "the saved document holds the second marker").toBe(true)
+      await expectMarker(again, app, head2, "B2", first)
+      await expectMarker(again, app, head2, "B3", second)
       await again.context().close()
     } finally {
       await info.attach("console", { body: log.join("\n") || "(none)", contentType: "text/plain" })
