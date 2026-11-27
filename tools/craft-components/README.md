@@ -26,15 +26,15 @@ always give the same package and pin.
 
 ## Patches
 
-`patches/*.patch` are the source changes on top of the pinned public commits. The
-WordCraft patch and the first rows below are minimal WASI changes, offered upstream;
-the GridCraft patch also carries the private-port editor host (mooring protocol 2):
+`patches/*.patch` are the source changes on top of the pinned public commits. The patches adapt file I/O and dependencies for WASI and provide the private-port
+editor hosts used by Crewship:
 
 | File | Change |
 |---|---|
 | `engine/src/io.rs` | file I/O is browser-only on `wasm32-unknown-unknown`, not on every `wasm32` |
 | `engine/src/safe_save.rs` (Word) | no `process::id()` on WASI |
 | `fonts/build.rs` (Word) | the web size budget applies to the browser build only; WASI embeds every craft-fonts face so server PDFs match the editor |
+| `apps/wordcraft-web/src/private_host.rs` and Word engine/UI | `?host=port` adds a read-only bootstrap, native snapshots, save receipts and exports over a private `MessagePort` (mooring protocol 1) |
 | `core/src/date.rs`, `core/Cargo.toml` (Sheet) | the clock comes from `std` on WASI, not `js-sys` |
 | `engine/src/cmd/file.rs`, `engine/src/io.rs` (Sheet) | `file.open` takes `calculate` and `autoFit`: `false` keeps the file's values and row heights |
 | `calc/src/held.rs` (Sheet) | a formula calling an Excel function the engine lacks keeps the value its file holds |
