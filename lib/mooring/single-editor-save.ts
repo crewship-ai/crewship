@@ -242,7 +242,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   const confirmRow = (draft: NativeDraft) => journalStep(() => options.journal.confirm(draft))
   // Whether nothing newer than `attempt` was captured or edited since it was prepared.
-  const newerThan = (attempt: Prepared) => preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash
+  const newerThan = (attempt: Prepared) => {
+    // GridCraft can report the revision of a just-exported workbook after
+    // delivering the file. The same revision is already in the save.
+    const editedAfterCapture = edits !== attempt.epoch && (!workbook || lastRevision !== attempt.draft.editorRevision)
+    return preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || editedAfterCapture || latest?.draft.contentHash !== attempt.draft.contentHash
+  }
   // The server holds these bytes but their local recovery row could not be
   // retired. Say so instead of "unsaved" when nothing newer exists; newer
   // edits keep the plain storage reason. Either way the editor stays dirty
