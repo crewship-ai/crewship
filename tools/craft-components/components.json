@@ -10,9 +10,9 @@
     {
       "application": "wordcraft",
       "repository": "https://github.com/storytold/wordcraft.git",
-      "commit": "b0fb5cb571b6a4a3abb60e2c48ca7f5b22cd8d72",
+      "commit": "72ca96a27c795d6289775f6c12954c2cdbd62908",
       "patch": "patches/wordcraft-wasi.patch",
-      "patch_sha256": "aea97a2a0742e0fddd0c4a2bf0054f90917063d7d3b115552eae30ac8cab44d2",
+      "patch_sha256": "83ac2fb790294e43e448b83e49b75869c50be4932a8e378eb822285ad4648611",
       "cli_package": "wordcraft-cli",
       "web_package": "wordcraft-web",
       "license": {"name": "WordCraft", "spdx": "MIT OR Apache-2.0"},
