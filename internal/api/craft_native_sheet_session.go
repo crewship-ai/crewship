@@ -190,6 +190,7 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	// Translate every command first: a request that cannot be expressed is
 	// refused before any session is opened.
 	type step = sheetApplyStep
+	workbook := p.Workbook || craftNativeSheetWorkbook(raw)
 	steps := make([]step, 0, len(parsed))
 	for _, command := range parsed {
 		var params map[string]json.RawMessage
@@ -216,6 +217,12 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 			if err != nil || json.Unmarshal(params["values"], &values) != nil {
 				return nil, ErrCraftNativeAgentEngine
 			}
+			if workbook {
+				address, err = craftResolvedWriteRange(address, params["range"], params["values"])
+				if err != nil {
+					return nil, err
+				}
+			}
 			steps = append(steps, step{rng: address, values: values})
 		case "formulas.calculateNow": // every write already recalculates
 		default:
@@ -224,7 +231,6 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	}
 	// In a workbook file every write names its sheet: the file's active sheet on the server is not
 	// the sheet the person sees.
-	workbook := p.Workbook || craftNativeSheetWorkbook(raw)
 	var edits craftWorkbookEdits
 	if workbook {
 		if _, err := mooring.DetectWorkbook(raw); err != nil {
