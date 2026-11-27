@@ -55,6 +55,26 @@ it("keeps a lost acknowledgement uncertain, never retries blindly, and reconcile
   await r.controller.close()
 })
 
+it.each(["doc:7", "doc:8"])("reconciles a workbook save when the editor later reports %s", async revision => {
+  const r = rig()
+  const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: new Uint8Array([0x50, 0x4b, 1]), editorRevision: "doc:7", format: "xlsx" }) }
+  const controller = createSingleEditorSave({ ...r.options, applicationId: "gridcraft", format: "xlsx", engine, idleMs: 10_000 })
+  r.transport.save.mockRejectedValueOnce(new Error("lost acknowledgement"))
+  try {
+    await expect(controller.save("ticket")).rejects.toThrow("unconfirmed")
+    expect(controller.keepsTicket("ticket")).toBe(true)
+    controller.edited(revision)
+    await controller.reconcile()
+    const newer = revision === "doc:8"
+    expect(r.state).toHaveBeenLastCalledWith({ phase: newer ? "dirty" : "saved", dirty: newer })
+    expect(r.onReceipt).toHaveBeenCalledOnce()
+    expect(controller.keepsTicket("ticket")).toBe(false)
+    expect(r.transport.save).toHaveBeenCalledOnce()
+  } finally {
+    await controller.close()
+  }
+})
+
 it("rejects an ACK with another generation or content and preserves the local draft", async () => {
   const r = rig()
   r.transport.save.mockImplementationOnce(async req => ({ ...receipt(req), generation: "2" }))
