@@ -7,7 +7,6 @@ import * as native from "../acceptance/prd/outage-lostack/native"
 const origin = process.env.CRAFT_GATE_ORIGIN!
 const workspace = process.env.CRAFT_GATE_WORKSPACE!
 const account = { email: process.env.CRAFT_GATE_EMAIL!, password: process.env.CRAFT_GATE_PASSWORD! }
-const media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const query = new URLSearchParams({ workspace_id: workspace })
 
 function workbook(): Buffer {
@@ -39,8 +38,8 @@ async function createWorkbook(api: APIRequestContext, chatId: string) {
   const { id: pageId } = await creation.json() as { id: string }
   const craft = (path: string) => `/api/v1/pages/${encodeURIComponent("@" + pageId)}/craft/${path}?${query}`
   const init = await api.post(craft("initialize"), {
-    headers: { "Content-Type": media, "X-Craft-File-Name": "concurrency.xlsx", "X-Craft-Chat": chatId },
-    data: workbook(),
+    headers: { "X-Craft-Chat": chatId },
+    data: { application_id: "gridcraft", bytes: workbook().toString("base64") },
   })
   expect(init.status(), await init.text()).toBe(201)
   const { generation, session_token, version } = await init.json() as { generation: string; session_token: string; version: string }
@@ -76,11 +75,10 @@ async function readWorkbook(api: APIRequestContext, craft: (path: string) => str
   const { session_token } = await session.json() as { session_token: string }
   const stored = await api.get(craft("document"), { headers: { "X-Craft-Session": session_token } })
   expect(stored.status()).toBe(200)
-  return {
-    bytes: await stored.body(),
-    version: stored.headers()["x-craft-version"],
-    pin: (JSON.parse(stored.headers()["x-craft-document"]) as { enginePin: string }).enginePin,
-  }
+  const { bytes, version, enginePin, format } = await stored.json() as { bytes: string; version: string; enginePin: string; format: string }
+  expect(format).toBe("xlsx")
+  expect(version).toBe(stored.headers()["x-craft-version"])
+  return { bytes: Buffer.from(bytes, "base64"), version, pin: enginePin }
 }
 
 test("Sheet reconciles a committed save whose reply was lost", async ({ browser }, info) => {

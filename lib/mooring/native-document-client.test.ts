@@ -317,6 +317,20 @@ describe("workbook Sheet transport",()=>{
   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
   expect(await client.read(signal())).toMatchObject({version:"3",bytes:file,format:"xlsm",applicationId:"gridcraft"})
  })
+ it("converts an older workbook before reading the file and keeps the original available",async()=>{
+  const original=Uint8Array.of(123,125)
+  const send=vi.fn<typeof fetch>()
+   .mockResolvedValueOnce(opened())
+   .mockResolvedValueOnce(Response.json({code:"legacy_workbook"},{status:409}))
+   .mockResolvedValueOnce(Response.json({version:"3"}))
+   .mockResolvedValueOnce(json(meta({legacySource:true})))
+   .mockResolvedValueOnce(new Response(original,{headers:{"Content-Disposition":'attachment; filename="sheet-original.json"'}}))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  expect(await client.read(signal())).toMatchObject({version:"3",bytes:file,legacySource:true,format:"xlsm"})
+  expect(String(send.mock.calls[2][0])).toContain("/document/migrate-workbook?")
+  expect(send.mock.calls[2][1]?.method).toBe("POST")
+  expect(await client.originalWorkbook!(signal())).toEqual(original)
+ })
  // The engine the server runs, as the installed package names it; a malformed one is not taken.
  it("names the server's engine build when the server gives one, and nothing otherwise",async()=>{
   for(const [engineBuild,want] of [["0.19.1+59f6b6c14a37 patch dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","0.19.1+59f6b6c14a37 patch dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],[undefined,undefined],["0.19.1 patch x",undefined]] as const){
@@ -344,7 +358,8 @@ describe("workbook Sheet transport",()=>{
   await client.save({...save,touched:[]},signal())
   await client.save({...save,touched:"unknown"},signal())
   await client.save(save,signal())
-  expect(seen).toEqual(['["\'Rozpo\\u010det\'!B2","\'L\'!A1:C9"]',"[]","unknown",null])
+  await client.save({...save,touched:Array.from({length:90},(_,i)=>"'"+ "日".repeat(200)+"'!A"+(i+1))},signal())
+  expect(seen).toEqual(['["\'Rozpo\\u010det\'!B2","\'L\'!A1:C9"]',"[]","unknown",null,"unknown"])
   expect(JSON.parse(seen[0]!)).toEqual(["'Rozpočet'!B2","'L'!A1:C9"])
  })
  it("saves the file and its binding as JSON, and names refusals by code",async()=>{
