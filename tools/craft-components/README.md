@@ -99,7 +99,10 @@ and `playwright.craft-packages.config.ts` runs `e2e/craft-packages/` in full hea
 Chromium under Xvfb with software WebGL. For Word and for Sheet it opens a new
 document, takes over editing, types a marker, saves with ctrl+s, reopens it in a
 fresh browser context, types a second marker and saves again; the server's head must
-hold both markers. Any host refusal ("did not connect safely", "cannot be opened
+hold both markers. A legacy Sheet case starts from native JSON with a populated
+cell, converts it in the browser, edits and reopens the workbook, checks the
+preserved and edited cells, then downloads and compares the original JSON byte
+for byte. Any host refusal ("did not connect safely", "cannot be opened
 safely") fails at once. The spec types only once the editor has taken the keyboard
 (its canvas or its hidden text input has focus) and saves only once the host shows
 the edit: the editor handles keys on its next frame, so on a slow runner keys sent

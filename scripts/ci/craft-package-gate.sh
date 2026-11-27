@@ -8,8 +8,8 @@
 # scripts/build-craft-components.py. A throwaway server (its own data directory,
 # HOME and port, nothing shared) trusts exactly those pins, the packages are
 # installed and turned on through the CLI, and playwright.craft-packages.config.ts
-# runs under xvfb: open, edit, save, reopen for Word and Sheet. Exit status is the
-# test result. CRAFT_GATE_PORT picks the port (default 18480).
+# runs under xvfb: open, edit, save, reopen for Word, Sheet and a converted legacy
+# Sheet. Exit status is the test result. CRAFT_GATE_PORT picks the port (default 18480).
 set -euo pipefail
 
 binary="$(realpath "$1")"
@@ -89,6 +89,6 @@ done
 run_crewship admin instance applications --server "$origin" | tee "$output/applications.txt"
 
 cd "$root"
-CRAFT_GATE_ORIGIN="$origin" CRAFT_GATE_WORKSPACE="$workspace" \
+CRAFT_GATE_ORIGIN="$origin" CRAFT_GATE_WORKSPACE="$workspace" CRAFT_GATE_LEGACY_DB="$state/data/crewship.db" \
 CRAFT_GATE_EMAIL=demo@crewship.ai CRAFT_GATE_PASSWORD=password123 CRAFT_GATE_OUTPUT="$output" \
   xvfb-run -a -s "-screen 0 1600x1200x24" pnpm exec playwright test --config=playwright.craft-packages.config.ts

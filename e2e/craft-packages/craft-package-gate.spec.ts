@@ -5,7 +5,11 @@
 // full Chromium. Each application goes through: open, edit, save, reopen, edit,
 // save. The server's head must hold both markers, so the reopened editor started
 // from the saved document rather than a blank one.
+import { execFileSync } from "node:child_process"
+import { readFile } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
 import { expect, test, type Browser, type Page } from "@playwright/test"
+import { emptyGridCraftNativeDocument } from "../../lib/mooring/gridcraft-empty"
 import { emptyGridCraftWorkbook } from "../../lib/mooring/gridcraft-empty-workbook"
 import { apiAs, loginStorageState, type StorageState } from "../acceptance/prd/auth"
 import * as N from "../acceptance/prd/outage-lostack/native"
@@ -16,7 +20,7 @@ const ACCOUNT = { email: process.env.CRAFT_GATE_EMAIL ?? "", password: process.e
 const CONNECT_MS = 60_000
 const SAVE_MS = 45_000
 // The host's own refusals. Any of them means the package must not be pinned.
-const REFUSED = /did not connect safely|cannot be opened safely|connection to the editor ended|only available at/
+const REFUSED = /did not connect safely|cannot be opened safely|connection to the editor ended|only available at|could not be converted/
 
 let owner: StorageState
 test.beforeAll(async () => {
@@ -119,3 +123,64 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
     }
   })
 }
+
+test("Legacy Sheet: convert nonempty JSON, edit, reload and download the original", async ({ browser }, info) => {
+  const database = process.env.CRAFT_GATE_LEGACY_DB
+  if (!database || new URL(ORIGIN).hostname !== "127.0.0.1") {
+    throw new Error("the legacy fixture requires the disposable Craft browser gate server")
+  }
+  const log: string[] = []
+  const api = await apiAs(ORIGIN, owner)
+  try {
+    const created = await api.post(`/api/v1/pages?workspace_id=${encodeURIComponent(WORKSPACE)}`, {
+      data: { name: "Legacy package gate Sheet", slug: `craft-gate-legacy-${Date.now()}`, panels: [], allow_empty: true, created_by_test: true },
+    })
+    expect(created.status(), `create legacy fixture Page: ${(await created.text()).slice(0, 300)}`).toBe(201)
+    const { id: pageId } = await created.json() as { id: string }
+    const ref = { pageId, workspaceId: WORKSPACE, initVersion: "1" }
+
+    const legacyMarker = "legacy-cell-before-conversion"
+    const editMarker = "edited-after-conversion"
+    const reloadMarker = "edited-after-reload"
+    const legacy = JSON.parse(new TextDecoder().decode(emptyGridCraftNativeDocument()))
+    legacy.sheets[0].cells = {
+      bands: { 0: { rows: { 1: { 1: { value: { t: "Text", v: legacyMarker }, formula: null, style: 0 } } } } },
+      len: 1,
+    }
+    const original = Buffer.from(JSON.stringify(legacy, null, 2) + "\n")
+    execFileSync("python3", [
+      fileURLToPath(new URL("./seed-legacy-sheet.py", import.meta.url)), database, WORKSPACE, pageId,
+    ], { input: original, timeout: 15_000 })
+
+    const page = await open(browser, ref, log)
+    const converted = await N.readHead(api, ref)
+    expect(converted.version).toBe("2")
+    await expectMarker(page, "gridcraft", converted, "B2", legacyMarker)
+    const saved = await editAndSave(page, "gridcraft", editMarker, "B3", converted.version)
+    const editedHead = await N.readHead(api, ref)
+    expect(editedHead.version).toBe(saved)
+    await expectMarker(page, "gridcraft", editedHead, "B2", legacyMarker)
+    await expectMarker(page, "gridcraft", editedHead, "B3", editMarker)
+    await page.context().close()
+
+    const reopened = await open(browser, ref, log)
+    const final = await editAndSave(reopened, "gridcraft", reloadMarker, "B4", saved)
+    const head = await N.readHead(api, ref)
+    expect(head.version).toBe(final)
+    await expectMarker(reopened, "gridcraft", head, "B2", legacyMarker)
+    await expectMarker(reopened, "gridcraft", head, "B3", editMarker)
+    await expectMarker(reopened, "gridcraft", head, "B4", reloadMarker)
+
+    const [download] = await Promise.all([
+      reopened.waitForEvent("download", { timeout: 30_000 }),
+      reopened.getByRole("button", { name: "Download original Sheet" }).click(),
+    ])
+    expect(download.suggestedFilename()).toBe("sheet-original.json")
+    const actual = await readFile(await download.path())
+    expect(actual.equals(original), "the downloaded JSON matches the original byte for byte").toBe(true)
+    await reopened.context().close()
+  } finally {
+    await info.attach("console", { body: log.join("\n") || "(none)", contentType: "text/plain" })
+    await api.dispose()
+  }
+})
