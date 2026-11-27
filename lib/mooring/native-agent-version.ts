@@ -163,9 +163,7 @@ export function createAgentVersionQueue(host: AgentVersionHost) {
       await nextPaint()
       if (disposed) return
       const latest = host.state()
-      if (latest.mode !== "writable") return
-      const now = host.targets()
-      if (now?.port !== targets.port || now.save !== targets.save) return
+      if (latest.mode !== "writable" || targets.isCurrent?.() === false) return
       const collect = async () => {
         if (host.rebase) await rebase()
         else if (host.state().clean) await reload()
