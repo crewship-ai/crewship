@@ -10083,7 +10083,7 @@ index 561dce41..6dbdc66f 100644
      }
 diff --git a/crates/xlsx/src/package_edit.rs b/crates/xlsx/src/package_edit.rs
 new file mode 100644
-index 00000000..66e786cf
+index 00000000..41439264
 --- /dev/null
 +++ b/crates/xlsx/src/package_edit.rs
 @@ -0,0 +1,621 @@
@@ -10426,12 +10426,12 @@ index 00000000..66e786cf
 +            let (next, (old, new)) = edits.pop_first().ok_or(WORKSHEET)?;
 +            output.extend_from_slice(&cell_xml(next, old, new, None, data)?);
 +        }
++        written = cell.whole.end;
 +        if let Some((old, new)) = edits.remove(&at) {
 +            output.extend_from_slice(&cell_xml(at, old, new, Some(cell), data)?);
 +        } else {
-+            output.extend_from_slice(&data[cell.whole.clone()]);
++            output.extend_from_slice(&data[cell.whole]);
 +        }
-+        written = cell.whole.end;
 +        Ok(())
 +    })?;
 +    for (at, (old, new)) in edits {
