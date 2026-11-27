@@ -10,7 +10,7 @@ import (
 // With workbook Sheets the xlsx import is gone (an upload starts the Sheet as its file through
 // initialize); a native server keeps it until migration.
 func TestWorkbookSheetsHaveNoImport(t *testing.T) {
-	rig := workbookMigrationFixture(t)
+	rig := workbookDocumentsFixture(t)
 	call := func(d *craftNativeDocumentsHTTP, name string, h func(*craftNativeDocumentsHTTP) http.HandlerFunc) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/v1/pages/native-page/craft/import", strings.NewReader("PK")).WithContext(rig.ctx)
 		r.SetPathValue("slug", "native-page")
@@ -30,7 +30,7 @@ func TestWorkbookSheetsHaveNoImport(t *testing.T) {
 			t.Errorf("workbook %s: %d %s", name, w.Code, w.Body)
 		}
 	}
-	native := newCraftNativeDocumentsHTTP(rig.h, map[string]craftNativeApplication{"gridcraft": {Store: rig.d.applications["gridcraft"].Store}})
+	native := newCraftNativeDocumentsHTTP(rig.d.human, map[string]craftNativeApplication{"gridcraft": {Store: rig.d.applications["gridcraft"].Store}})
 	p := native.applications["gridcraft"]
 	p.Store.Format = ""
 	native.applications["gridcraft"] = p
