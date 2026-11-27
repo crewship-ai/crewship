@@ -48,6 +48,7 @@ const (
 	CraftSheetReasonFeatureOff      = "feature_off"
 	CraftSheetReasonAgentPolicy     = "agent_policy"
 	CraftSheetReasonNotAttached     = "not_attached"
+	CraftSheetReasonPreviewOnly     = "preview_only"
 	CraftSheetReasonHolderHuman     = "holder_human"
 	CraftSheetReasonProposal        = "proposal_required"
 	CraftSheetReasonStale           = "stale"
@@ -64,6 +65,7 @@ const (
 )
 
 var craftSheetReasonText = map[string]string{
+	CraftSheetReasonPreviewOnly:  "This Sheet is read-only for now.",
 	CraftSheetReasonNotUndoable:  "The Sheet change could not be made undoable, so nothing was changed. Try a smaller range or leave those cells unchanged.",
 	CraftSheetReasonFeatureOff:   "Agent access to Sheets is not turned on for this workspace.",
 	CraftSheetReasonAgentPolicy:  "This workspace does not let this agent's crew change artifacts.",
@@ -210,7 +212,7 @@ func (m *craftNativeAgentManager) chatRunTool(w http.ResponseWriter, r *http.Req
 	}
 	if parseErr == nil && input.Operation != "read" && input.Operation != "release" {
 		if profile, ok := m.documents.application(e.grant.Application); ok && profile.ChatSheetPreviewOnly {
-			replyChatSheetRefusal(w, http.StatusForbidden, CraftSheetReasonEngineFailed)
+			replyChatSheetRefusal(w, http.StatusForbidden, CraftSheetReasonPreviewOnly)
 			return
 		}
 	}

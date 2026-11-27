@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -77,8 +78,9 @@ func testUnqualifiedChatWorkbook(t *testing.T, s *sitScenario, workbook func(sit
 			args = sitApply(agentGeneration, "preview-only-agent")
 			args["base_version"] = "2"
 		}
-		if got, refused := s.toolCall(call, action, args); !refused {
-			t.Fatalf("%s was admitted in preview-only mode: %s", action, got)
+		if got, refused := s.toolCall(call, action, args); !refused || !strings.Contains(got, CraftSheetReasonPreviewOnly) ||
+			!strings.Contains(got, craftSheetReasonText[CraftSheetReasonPreviewOnly]) {
+			t.Fatalf("%s did not report preview-only access: %s", action, got)
 		}
 	}
 	if w := s.humanRequest(http.MethodGet, "", legacy, nil, s.m.human.lease); w.Code != 200 {

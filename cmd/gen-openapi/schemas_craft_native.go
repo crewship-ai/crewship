@@ -47,7 +47,7 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	schemas["NativeCraftShareReceipt"] = obj(map[string]any{"version": generation(false), "durability": map[string]any{"type": "string", "enum": []string{"node"}}, "issuedBy": map[string]any{"type": "string", "enum": []string{"crewship"}}, "phase": map[string]any{"type": "string", "enum": []string{"shared"}}}, "version", "durability", "issuedBy", "phase")
 	schemas["NativeCraftAgentAccess"] = obj(map[string]any{
 		"allowed":         boolean(),
-		"reason":          map[string]any{"type": "string", "enum": []string{"feature_off", "agent_policy", "not_attached", "holder_human", "engine_failed"}, "description": "Why the agent may not change this Sheet: the reason the agent itself would be told. Absent when allowed."},
+		"reason":          map[string]any{"type": "string", "enum": []string{"feature_off", "agent_policy", "not_attached", "holder_human", "engine_failed", "preview_only"}, "description": "Why the agent may not change this Sheet: the reason the agent itself would be told. Absent when allowed."},
 		"message":         map[string]any{"type": "string", "description": "The reason as a sentence."},
 		"detail":          map[string]any{"type": "string", "description": "A finer code for the caller, who may read the Sheet: workspace_flag_off, chat_not_private, not_a_sheet, not_owner, not_in_personal_space, no_write_access, agent_unavailable, agents_app_disabled, or an application status reason. New codes may be added."},
 		"holder":          obj(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "mine": map[string]any{"type": "boolean", "description": "The caller's own editor holds it."}}, "kind", "mine"),

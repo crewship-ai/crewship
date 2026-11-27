@@ -169,7 +169,7 @@ func (m *craftNativeHTTP) agentAccessRefusal(ctx context.Context, tx *sql.Tx, sc
 		return CraftSheetReasonEngineFailed, string(why), nil
 	}
 	if profile, ok := m.agents.documents.application(craftapps.Sheet); ok && profile.ChatSheetPreviewOnly {
-		return CraftSheetReasonEngineFailed, "preview_only", nil
+		return CraftSheetReasonPreviewOnly, "", nil
 	}
 	if !m.pages.artifactRunModesOn(ctx, scope.WorkspaceID) {
 		return CraftSheetReasonFeatureOff, craftSheetDetailWorkspaceFlag, nil
