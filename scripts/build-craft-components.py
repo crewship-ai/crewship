@@ -435,6 +435,7 @@ def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
             engine = add_file(stage, f'{app}/engine.wasm', build_engine(c, source, fonts, cargo, env, target_dir, artifacts))
             editor_dir, editor_digest = build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, temp,
                                                      rustc_version, config['tools']['wasm-bindgen']['version'], artifacts)
+            print(f'{app}: engine {engine["sha256"]} ({engine["size"]} bytes), editor {editor_digest}', flush=True)
             editor_files = [add_file(stage, f'{app}/editor/{editor_digest}/{p.relative_to(editor_dir)}', p.read_bytes())
                             for p in sorted(editor_dir.rglob('*')) if p.is_file()]
             notices = [add_file(stage, f'{app}/licenses/{name}', (source / name).read_bytes()) for name in c['notices']]
@@ -452,7 +453,6 @@ def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
             notices.append(add_file(stage, f'{app}/licenses/sbom.cdx.json',
                                     sbom(component, crates, recipe['fonts']['repository'], fonts_commit(fonts))))
             components.append(component)
-            print(f'{app}: engine {engine["sha256"]} ({engine["size"]} bytes), editor {editor_digest}', flush=True)
         toolchain = f'{rustc_version}; wasm-bindgen {config["tools"]["wasm-bindgen"]["version"]}; binaryen {config["tools"]["binaryen"]["version"]}'
         if out.exists():
             shutil.rmtree(out)
