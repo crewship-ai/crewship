@@ -97,6 +97,23 @@ func TestSheetITRealtimeWithTheRealEngine(t *testing.T) {
 				restored = "human B3"
 			}
 			read(4, []any{"human B2", restored, "open B4"})
+
+			// A stale capture can cross the actual workbook's Undo version.
+			// The adapter may rewrite the workbook, so prove the cell inputs
+			// from the cold persisted bytes rather than from warm engine state.
+			stale := realSheetTestWorkbook(t, sitCells{"B2": "open B2", "B3": "open B3", "B4": "open B4", "C2": "human C2"})
+			w = s.humanSaveWith(editor.SessionToken, editor.Generation, "1", stale, "real-sheet-save-after-undo", "", map[string]string{"X-Craft-Touched": `["'L'!C2"]`})
+			var afterUndo craftRealtimeMerged
+			wantedHeadRange := "B2"
+			if order == "human_first" {
+				wantedHeadRange = "B2:B3"
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &afterUndo) != nil ||
+				len(afterUndo.AgentRanges) != 0 || len(afterUndo.Overlap) != 0 ||
+				len(afterUndo.HeadRanges) != 1 || afterUndo.HeadRanges[0] != (craftSheetRange{Sheet: "L", A1: wantedHeadRange}) ||
+				!bytes.Equal(afterUndo.Bytes, s.stored(5)) {
+				t.Fatalf("real merge over Undo: HTTP %d, effective agent %v, head %v", w.Code, afterUndo.AgentRanges, afterUndo.HeadRanges)
+			}
 		})
 	}
 }
