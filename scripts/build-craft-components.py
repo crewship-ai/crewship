@@ -345,10 +345,37 @@ def license_allowed(expression):
         return False
 
 
-def check_licenses(crates):
-    refused = [f'{c["name"]} {c["version"]}: {c["license"]}' for c in crates if not license_allowed(c['license'])]
+WORD_JPEG_LICENSE = {
+    'name': 'jpeg-encoder',
+    'version': '0.7.1',
+    'license': '(MIT OR Apache-2.0) AND IJG',
+}
+WORD_JPEG_LOCK_PIN = {
+    'name': WORD_JPEG_LICENSE['name'],
+    'version': WORD_JPEG_LICENSE['version'],
+    'source': 'registry+https://github.com/rust-lang/crates.io-index',
+    'checksum': 'a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6',
+}
+
+
+def check_licenses(crates, application=None, lock_path=None):
+    notices = {}
+    refused = []
+    for crate in crates:
+        if license_allowed(crate['license']):
+            continue
+        if application == 'wordcraft' and crate == WORD_JPEG_LICENSE and lock_path is not None:
+            packages = tomllib.loads(lock_path.read_text())['package']
+            matches = [p for p in packages if p['name'] == crate['name'] and p['version'] == crate['version']]
+            if matches == [WORD_JPEG_LOCK_PIN]:
+                directory = RECIPE / 'notices/jpeg-encoder-0.7.1'
+                notices.update({f'jpeg-encoder-0.7.1/{name}': (directory / name).read_bytes()
+                                for name in ('ATTRIBUTION.md', 'LICENSE-IJG', 'LICENSE-MIT')})
+                continue
+        refused.append(f'{crate["name"]} {crate["version"]}: {crate["license"]}')
     if refused:
         raise ValueError('crates under a license the packages may not carry:\n  ' + '\n  '.join(refused))
+    return notices
 
 
 def sbom(component, crates, fonts_repository, fonts_commit_id):
@@ -441,7 +468,8 @@ def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
             for name, raw in font_notices(fonts).items():
                 notices.append(add_file(stage, f'{app}/licenses/craft-fonts/{name}', raw))
             crates = crate_inventory(c, source, cargo, env, artifacts)
-            check_licenses(crates)
+            for name, raw in check_licenses(crates, app, source / 'Cargo.lock').items():
+                notices.append(add_file(stage, f'{app}/licenses/{name}', raw))
             notices.append(add_file(stage, f'{app}/licenses/crates.json', json.dumps(crates, indent=1).encode() + b'\n'))
             component = {
                 'application': app, 'version': f'{version}+{c["commit"][:12]}', 'engine_revision': c['commit'],

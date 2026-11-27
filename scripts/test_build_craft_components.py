@@ -38,6 +38,26 @@ class LicensePolicy(unittest.TestCase):
         self.assertIn('file 3', str(refused.exception))
         self.assertNotIn('ok 1', str(refused.exception))
 
+    def test_word_jpeg_exception_requires_the_exact_registry_crate_and_carries_notices(self):
+        crate = build.WORD_JPEG_LICENSE
+        with tempfile.TemporaryDirectory() as d:
+            lock = Path(d) / 'Cargo.lock'
+            pinned_entry = '[[package]]\n' + ''.join(
+                f'{key} = {json.dumps(value)}\n' for key, value in build.WORD_JPEG_LOCK_PIN.items())
+            lock.write_text(pinned_entry)
+            notices = build.check_licenses([crate], 'wordcraft', lock)
+            root = 'jpeg-encoder-0.7.1/'
+            self.assertEqual(set(notices), {root + name for name in ('LICENSE-IJG', 'LICENSE-MIT', 'ATTRIBUTION.md')})
+            self.assertIn(b'This software is based in part on the work of the Independent JPEG Group.',
+                          notices[root + 'ATTRIBUTION.md'])
+            for app, dependency in [('gridcraft', crate), ('wordcraft', {**crate, 'version': '0.7.2'}),
+                                    ('wordcraft', {**crate, 'name': 'other'}), ('wordcraft', {**crate, 'license': 'IJG'})]:
+                with self.subTest(app=app, dependency=dependency), self.assertRaises(ValueError):
+                    build.check_licenses([dependency], app, lock)
+            lock.write_text(pinned_entry.replace(build.WORD_JPEG_LOCK_PIN['checksum'], '0' * 64))
+            with self.assertRaises(ValueError):
+                build.check_licenses([crate], 'wordcraft', lock)
+
 
 class WordArtifactInventory(unittest.TestCase):
     def test_records_only_artifacts_for_the_requested_wasm_target(self):
