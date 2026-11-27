@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -223,7 +223,7 @@ func TestSheetITAgentWriteRollsBackWhenUndoJournalCannotBeStored(t *testing.T) {
 	}
 	got := s.headSheets(s.humanSession())
 	for sheet, cells := range fixture.Initial {
-		if !maps.Equal(got[sheet], cells) {
+		if !reflect.DeepEqual(got[sheet], cells) {
 			t.Errorf("persisted %s = %v, want %v", sheet, got[sheet], cells)
 		}
 	}
