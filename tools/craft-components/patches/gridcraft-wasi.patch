@@ -2594,10 +2594,10 @@ index 00000000..55f4931c
 +}
 diff --git a/apps/gridcraft-web/src/port_host.rs b/apps/gridcraft-web/src/port_host.rs
 new file mode 100644
-index 00000000..62b6688f
+index 00000000..0a58126e
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_host.rs
-@@ -0,0 +1,395 @@
+@@ -0,0 +1,397 @@
 +//! `?host=port&parent_origin=<canonical HTTP(S) origin>`: a sandboxed, opaque editor frame
 +//! bound to its embedding page over one private `MessagePort` (mooring protocol 2).
 +//!
@@ -2617,6 +2617,8 @@ index 00000000..62b6688f
 +//! - `execute {requestId, commands, saved, baseRevision?, keep?, captureRevision?}` answers
 +//!   `executed`. For `keep:"agent"`, `captureRevision` is an optional decimal live revision from
 +//!   the archived save. A changed live revision returns `stale_revision` without replay.
++//! - `adopt-merged {requestId, captureId, document, captureRevision, version, contentHash, bytes,
++//!   agentRanges, headRanges}` answers `merged-adopted`. Both range lists are required.
 +//! - `presence {document, actors, reducedMotion, truncated?}` paints an advisory snapshot.
 +//!   `truncated` may be set when the host sends a subset of the activity ranges.
 +//! - `changed {document, revision, dirty}`, `dirty {dirty}`, `closed {}`, `edit-attempt`,
@@ -2941,7 +2943,7 @@ index 00000000..62b6688f
 +        let limit = match key.as_str() {
 +            "actors" => port_protocol::MAX_ACTORS,
 +            "ranges" => port_protocol::MAX_ACTOR_RANGES,
-+            "agentRanges" => port_protocol::MAX_AGENT_RANGES,
++            "agentRanges" | "headRanges" => port_protocol::MAX_MERGE_RANGES,
 +            _ => 0,
 +        };
 +        Some((key, read_field(&value, depth + 1, limit)))
@@ -2995,10 +2997,10 @@ index 00000000..62b6688f
 +}
 diff --git a/apps/gridcraft-web/src/port_protocol.rs b/apps/gridcraft-web/src/port_protocol.rs
 new file mode 100644
-index 00000000..ba1b886c
+index 00000000..76e48a04
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_protocol.rs
-@@ -0,0 +1,690 @@
+@@ -0,0 +1,698 @@
 +//! Mooring protocol 2 on the private port: the exact shape of every message a host sends,
 +//! checked before anything acts on it, and the editor's ledger of saves awaiting the host.
 +//!
@@ -3038,7 +3040,7 @@ index 00000000..ba1b886c
 +pub enum Inbound {
 +    AdoptMerged {
 +        request_id: String, capture_id: String, document: String, capture_revision: String,
-+        version: String, content_hash: String, bytes: usize, agent_ranges: Vec<SheetRange>,
++        version: String, content_hash: String, bytes: usize, agent_ranges: Vec<SheetRange>, head_ranges: Vec<SheetRange>,
 +    },
 +    ExecuteAgent { request_id: String, commands: String, base_revision: String, capture_revision: Option<u64> },
 +    Presence { document: String, actors: Vec<PresenceActor>, reduced_motion: bool },
@@ -3067,7 +3069,7 @@ index 00000000..ba1b886c
 +    pub range: gridcraft_engine::core::RangeRef,
 +}
 +
-+pub const MAX_AGENT_RANGES: usize = 256;
++pub const MAX_MERGE_RANGES: usize = 256;
 +pub const MAX_ACTORS: usize = 32;
 +pub const MAX_ACTOR_RANGES: usize = 32;
 +
@@ -3088,7 +3090,7 @@ index 00000000..ba1b886c
 +        "gridcraft:adopt-merged" => &[
 +            ("requestId", Str, true), ("captureId", Str, true), ("document", Str, true),
 +            ("captureRevision", Str, true), ("version", Version, true), ("contentHash", Str, true),
-+            ("bytes", Bytes, true), ("agentRanges", List, true),
++            ("bytes", Bytes, true), ("agentRanges", List, true), ("headRanges", List, true),
 +        ],
 +        "gridcraft:presence" => &[
 +            ("document", Str, true), ("actors", List, true), ("reducedMotion", Bool, true), ("truncated", Bool, false),
@@ -3169,8 +3171,11 @@ index 00000000..ba1b886c
 +            {
 +                return Err("adopt-merged: invalid capture, version or hash.".into());
 +            }
-+            let agent_ranges = get("agentRanges").and_then(|ranges| parse_ranges(ranges, MAX_AGENT_RANGES)).ok_or("adopt-merged: invalid agent ranges.")?;
-+            Inbound::AdoptMerged { request_id, capture_id, document, capture_revision, version, content_hash, bytes: *bytes, agent_ranges }
++            let agent_ranges = get("agentRanges").and_then(|ranges| parse_ranges(ranges, MAX_MERGE_RANGES)).ok_or("adopt-merged: invalid agent ranges.")?;
++            let head_ranges = get("headRanges").and_then(|ranges| parse_ranges(ranges, MAX_MERGE_RANGES)).ok_or("adopt-merged: invalid head ranges.")?;
++            Inbound::AdoptMerged {
++                request_id, capture_id, document, capture_revision, version, content_hash, bytes: *bytes, agent_ranges, head_ranges,
++            }
 +        }
 +        "gridcraft:open" => {
 +            let name = s("name");
@@ -3582,7 +3587,7 @@ index 00000000..ba1b886c
 +        let merge = |capture, hash, range| parse(&msg(&[
 +            ("type", s("gridcraft:adopt-merged")), ("requestId", s("merge-1")), ("captureId", s(capture)),
 +            ("document", s("7")), ("captureRevision", s("3")), ("version", s("9")), ("contentHash", s(hash)),
-+            ("bytes", Field::Bytes(123)), ("agentRanges", Field::List(vec![range])),
++            ("bytes", Field::Bytes(123)), ("agentRanges", Field::List(vec![range])), ("headRanges", Field::List(vec![])),
 +        ]));
 +        let hash = format!("sha256:{}", "f".repeat(64));
 +        assert!(matches!(merge("capture-1", &hash, range.clone()), Ok(Inbound::AdoptMerged { bytes: 123, .. })));
@@ -3618,14 +3623,19 @@ index 00000000..ba1b886c
 +    fn realtime_range_and_activity_limits_match_the_host() {
 +        let range = Field::Object(msg(&[("sheet", s("Sheet1")), ("a1", s("A1"))]));
 +        let agent_ranges = |count| Field::List(vec![range.clone(); count]);
-+        let merge = |count| parse(&msg(&[
++        let merge = |agent_count, head_count| msg(&[
 +            ("type", s("gridcraft:adopt-merged")), ("requestId", s("merge-1")), ("captureId", s("capture-1")),
 +            ("document", s("7")), ("captureRevision", s("3")), ("version", s("9")),
 +            ("contentHash", s(&format!("sha256:{}", "f".repeat(64)))),
-+            ("bytes", Field::Bytes(123)), ("agentRanges", agent_ranges(count)),
-+        ]));
-+        assert!(matches!(merge(256), Ok(Inbound::AdoptMerged { agent_ranges, .. }) if agent_ranges.len() == 256));
-+        assert!(merge(257).is_err());
++            ("bytes", Field::Bytes(123)), ("agentRanges", agent_ranges(agent_count)), ("headRanges", agent_ranges(head_count)),
++        ]);
++        assert!(matches!(parse(&merge(256, 256)), Ok(Inbound::AdoptMerged { agent_ranges, head_ranges, .. })
++            if agent_ranges.len() == 256 && head_ranges.len() == 256));
++        assert!(parse(&merge(0, 257)).is_err());
++        assert!(parse(&merge(257, 0)).is_err());
++        let mut missing_head = merge(0, 0);
++        missing_head.retain(|(key, _)| key != "headRanges");
++        assert!(parse(&missing_head).is_err());
 +
 +        let presence = |activities, ranges, truncated| parse(&msg(&[
 +            ("type", s("gridcraft:presence")), ("document", s("7")), ("reducedMotion", Field::Bool(true)),
@@ -3691,10 +3701,10 @@ index 00000000..ba1b886c
 +}
 diff --git a/apps/gridcraft-web/src/port_session.rs b/apps/gridcraft-web/src/port_session.rs
 new file mode 100644
-index 00000000..92ac145a
+index 00000000..0b45a9e0
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_session.rs
-@@ -0,0 +1,1326 @@
+@@ -0,0 +1,1385 @@
 +//! The editor's side of mooring protocol 2 on the private port, apart from JavaScript: what
 +//! each host message does to the app and what the editor answers. `port_host` only moves these
 +//! messages across the `MessagePort`.
@@ -3783,7 +3793,7 @@ index 00000000..92ac145a
 +enum Queued {
 +    Adopt {
 +        request_id: String, capture_id: String, document: String, capture_revision: String,
-+        version: String, content_hash: String, bytes: Vec<u8>, agent_ranges: Vec<port_protocol::SheetRange>,
++        version: String, content_hash: String, bytes: Vec<u8>, agent_ranges: Vec<port_protocol::SheetRange>, head_ranges: Vec<port_protocol::SheetRange>,
 +    },
 +    ExecuteAgent { request_id: String, commands: String, base_revision: String, capture_revision: Option<u64> },
 +    Open { request_id: String, name: String, bytes: Vec<u8>, calculate: bool, auto_fit: bool },
@@ -3838,7 +3848,10 @@ index 00000000..92ac145a
 +    pub fn ready(&self) -> Out {
 +        let mut fields =
 +            vec![("version", s(env!("CARGO_PKG_VERSION"))), ("accessProtocol", Value::Num(1.0)), ("readOnly", Value::Bool(self.access.read_only()))];
-+        fields.push(("capabilities", Value::Addresses(vec!["merge-capture-v1".into(), "agent-wins-v1".into(), "presence-v1".into(), "agent-capture-fence-v1".into()])));
++        fields.push(("capabilities", Value::Addresses(vec![
++            "merge-capture-v1".into(), "agent-wins-v1".into(), "presence-v1".into(),
++            "agent-capture-fence-v1".into(), "head-ranges-v1".into(),
++        ])));
 +        if let Some(build) = build_identity(option_env!("CRAFT_SOURCE_COMMIT"), option_env!("CRAFT_PATCH_SHA256")) {
 +            fields.push(("build", s(&build)));
 +        }
@@ -3850,7 +3863,7 @@ index 00000000..92ac145a
 +    pub fn receive(&mut self, message: Inbound, bytes: impl FnOnce() -> Vec<u8>) -> Vec<Out> {
 +        let full = self.queue.len() >= MAX_QUEUED;
 +        match message {
-+            Inbound::AdoptMerged { request_id, capture_id, document, capture_revision, version, content_hash, bytes: size, agent_ranges } => {
++            Inbound::AdoptMerged { request_id, capture_id, document, capture_revision, version, content_hash, bytes: size, agent_ranges, head_ranges } => {
 +                if full || self.queue.iter().any(|event| matches!(event, Queued::Adopt { .. })) {
 +                    return vec![Out::error("merged-adopted", &request_id, "busy", "A merged workbook already awaits adoption.")];
 +                }
@@ -3858,7 +3871,7 @@ index 00000000..92ac145a
 +                    return vec![Out::error("merged-adopted", &request_id, "too_large", "The merged workbook exceeds the host file limit.")];
 +                }
 +                self.queue.push_back(Queued::Adopt {
-+                    request_id, capture_id, document, capture_revision, version, content_hash, bytes: bytes(), agent_ranges,
++                    request_id, capture_id, document, capture_revision, version, content_hash, bytes: bytes(), agent_ranges, head_ranges,
 +                });
 +            }
 +            Inbound::ExecuteAgent { request_id, commands, base_revision, capture_revision } => {
@@ -3950,8 +3963,8 @@ index 00000000..92ac145a
 +                    out.push(self.open(app, &request_id, &name, &bytes, calculate, auto_fit))
 +                }
 +                Queued::Save { request_id, announce } => out.extend(self.save(app, &request_id, announce)),
-+                Queued::Adopt { request_id, capture_id, document, capture_revision, version, content_hash, bytes, agent_ranges } => {
-+                    out.push(self.adopt(app, &request_id, &capture_id, &document, &capture_revision, &version, &content_hash, bytes, &agent_ranges));
++                Queued::Adopt { request_id, capture_id, document, capture_revision, version, content_hash, bytes, agent_ranges, head_ranges } => {
++                    out.push(self.adopt(app, &request_id, &capture_id, &document, &capture_revision, &version, &content_hash, bytes, &agent_ranges, &head_ranges));
 +                }
 +                Queued::ExecuteAgent { request_id, commands, base_revision, capture_revision } => {
 +                    out.push(self.execute_agent(app, &request_id, &commands, &base_revision, capture_revision));
@@ -4185,7 +4198,8 @@ index 00000000..92ac145a
 +
 +    fn adopt(
 +        &mut self, app: &mut SheetApp, request_id: &str, capture_id: &str, document: &str,
-+        capture_revision: &str, version: &str, content_hash: &str, bytes: Vec<u8>, agent_ranges: &[port_protocol::SheetRange],
++        capture_revision: &str, version: &str, content_hash: &str, bytes: Vec<u8>,
++        agent_ranges: &[port_protocol::SheetRange], head_ranges: &[port_protocol::SheetRange],
 +    ) -> Out {
 +        let refuse = |code| Out::error("merged-adopted", request_id, code, "The merged workbook could not be adopted safely.");
 +        let Some(bound) = self.bound.as_ref().filter(|b| b.document.to_string() == document && !b.needs_reload) else {
@@ -4210,7 +4224,7 @@ index 00000000..92ac145a
 +        if self.held.replaying() {
 +            return refuse("busy");
 +        }
-+        let update = match crate::realtime::adopt(app, &bound.name, bytes, &capture.package, agent_ranges) {
++        let update = match crate::realtime::adopt(app, &bound.name, bytes, &capture.package, agent_ranges, head_ranges) {
 +            Ok(update) => update,
 +            Err(code) => return refuse(code),
 +        };
@@ -4960,6 +4974,7 @@ index 00000000..92ac145a
 +        let capture = port.saves.capture("capture-1", document, revision).unwrap();
 +        let mut merged = (*capture.package.model).clone();
 +        merged.sheet_mut(0).unwrap().set_value(CellRef::parse("C2").unwrap(), CellValue::text("agent"));
++        merged.sheet_mut(0).unwrap().set_value(CellRef::parse("B3").unwrap(), CellValue::text("other tab"));
 +        let bytes = gridcraft_engine::package_edit::write_package_cells(
 +            &capture.package.bytes, &capture.package.model, &merged, "xlsx",
 +        ).unwrap();
@@ -4967,11 +4982,11 @@ index 00000000..92ac145a
 +        app.run("cell.set", json!({"cell":"D2","input":"'007"})).unwrap();
 +        app.run("selection.set", json!({"range":"E2"})).unwrap();
 +        app.begin_edit(Some("typing".into()), false);
-+        let adopt = |port: &mut PortSession, app: &mut SheetApp, id: &str, doc: &str, hash: &str| {
++        let adopt = |port: &mut PortSession, app: &mut SheetApp, id: &str, doc: &str, hash: &str, head_ranges| {
 +            port.receive(Inbound::AdoptMerged {
 +                request_id: "merge-1".into(), capture_id: id.into(), document: doc.into(),
 +                capture_revision: revision.into(), version: "2".into(), content_hash: hash.into(),
-+                bytes: bytes.len(), agent_ranges: vec![range("C2")],
++                bytes: bytes.len(), agent_ranges: vec![range("C2")], head_ranges,
 +            }, || bytes.clone());
 +            port.sync(app).into_iter().find(|o| o.kind == "merged-adopted").unwrap()
 +        };
@@ -4980,16 +4995,70 @@ index 00000000..92ac145a
 +            ("capture-1", "999999", hash.as_str(), "stale_base"),
 +            ("capture-1", document, "sha256:bad", "invalid"),
 +        ] {
-+            assert_eq!(adopt(&mut port, &mut app, ticket, doc, hash).get("code"), Some(&s(code)));
++            assert_eq!(adopt(&mut port, &mut app, ticket, doc, hash, vec![range("B3")]).get("code"), Some(&s(code)));
 +            assert_eq!(typed_cell(&app, "C2"), CellValue::text("captured"));
 +        }
-+        let out = adopt(&mut port, &mut app, "capture-1", document, &hash);
++        let undeclared = adopt(&mut port, &mut app, "capture-1", document, &hash, Vec::new());
++        assert_eq!(undeclared.get("code"), Some(&s("stale_base")));
++        assert_eq!(typed_cell(&app, "C2"), CellValue::text("captured"));
++        assert_eq!(typed_cell(&app, "D2"), CellValue::text("007"));
++        assert_eq!(app.cell_draft().unwrap().text, "typing");
++
++        let out = adopt(&mut port, &mut app, "capture-1", document, &hash, vec![range("B3")]);
 +        assert!(out.get("code").is_none(), "{out:?}");
 +        assert_eq!(out.get("dirty"), Some(&Value::Bool(true)));
 +        assert_eq!(typed_cell(&app, "C2"), CellValue::text("agent"));
++        assert_eq!(typed_cell(&app, "B3"), CellValue::text("other tab"));
 +        assert_eq!(typed_cell(&app, "D2"), CellValue::text("007"));
 +        assert_eq!(app.cell_draft().unwrap().text, "typing");
-+        assert_eq!(adopt(&mut port, &mut app, "capture-1", document, &hash).get("code"), Some(&s("stale_base")));
++        assert_eq!(adopt(&mut port, &mut app, "capture-1", document, &hash, vec![range("B3")]).get("code"), Some(&s("stale_base")));
++    }
++
++    #[test]
++    fn head_only_undo_never_overwrites_input_entered_after_capture() {
++        use gridcraft_engine::core::{CellRef, Value as CellValue};
++        for open_editor in [false, true] {
++            let (mut port, mut app) = (PortSession::default(), app());
++            let opened = open(&mut port, &mut app, "Plan.xlsx", stale_xlsx(), false);
++            let document = str_of(&opened, "document");
++            let base_revision = str_of(&opened, "revision");
++            app.set_read_only(false);
++            app.run("cell.set", json!({"cell":"B2","input":"captured"})).unwrap();
++            let saved = save_now(&mut port, &mut app, "capture");
++            let revision = str_of(&saved, "revision");
++            let capture = port.saves.capture("capture", document, revision).unwrap();
++            let mut merged = (*capture.package.model).clone();
++            merged.sheet_mut(0).unwrap().set_value(CellRef::parse("C2").unwrap(), CellValue::text("restored by Undo"));
++            let bytes = gridcraft_engine::package_edit::write_package_cells(
++                &capture.package.bytes, &capture.package.model, &merged, "xlsx",
++            ).unwrap();
++
++            if open_editor {
++                app.run("selection.set", json!({"range":"C2"})).unwrap();
++                app.begin_edit(Some("keep typing".into()), false);
++            } else {
++                app.run("cell.set", json!({"cell":"C2","input":"keep typing"})).unwrap();
++            }
++            let before = app.session.active().unwrap().wb.clone();
++            port.receive(Inbound::AdoptMerged {
++                request_id: "merge".into(), capture_id: "capture".into(), document: document.into(),
++                capture_revision: revision.into(), version: "2".into(), content_hash: workbook_hash(&bytes),
++                bytes: bytes.len(), agent_ranges: Vec::new(), head_ranges: vec![range("C2")],
++            }, || bytes);
++            let out = port.sync(&mut app).into_iter().find(|out| out.kind == "merged-adopted").unwrap();
++            assert_eq!(out.get("code"), Some(&s("head_range_conflict")));
++            assert_eq!(str_of(&out, "requestId"), "merge");
++            assert_eq!(out.get("savedRevision"), None);
++            assert_eq!(port.bound.as_ref().unwrap().saved_revision, base_revision);
++            assert!(port.saves.capture("capture", document, revision).is_some());
++            assert!(Arc::ptr_eq(&before, &app.session.active().unwrap().wb));
++            assert_eq!(typed_cell(&app, "B2"), CellValue::text("captured"));
++            if open_editor {
++                assert_eq!(app.cell_draft().unwrap().text, "keep typing");
++            } else {
++                assert_eq!(typed_cell(&app, "C2"), CellValue::text("keep typing"));
++            }
++        }
 +    }
 +
 +    #[test]
@@ -5023,10 +5092,10 @@ index 00000000..92ac145a
 +}
 diff --git a/apps/gridcraft-web/src/realtime.rs b/apps/gridcraft-web/src/realtime.rs
 new file mode 100644
-index 00000000..18844555
+index 00000000..1193f2fb
 --- /dev/null
 +++ b/apps/gridcraft-web/src/realtime.rs
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,283 @@
 +//! Staged updates of a hosted workbook. Workbook identities and typed cell
 +//! changes are verified before publishing any of the new state into the app.
 +
@@ -5045,6 +5114,17 @@ index 00000000..18844555
 +const MAX_HISTORY: usize = 64;
 +const MAX_CHANGES: usize = 50_000;
 +type Target = (usize, RangeRef);
++
++struct RangeScopes<'a> {
++    agent: &'a [Target],
++    head: &'a [Target],
++}
++
++impl RangeScopes<'_> {
++    fn head_only(&self, sheet: usize, cell: CellRef) -> bool {
++        intersects(self.head, sheet, cell) && !intersects(self.agent, sheet, cell)
++    }
++}
 +
 +#[derive(Clone, Debug, PartialEq)]
 +pub struct ConflictAddress {
@@ -5098,14 +5178,17 @@ index 00000000..18844555
 +    targets.iter().any(|(si, range)| sheet == *si && range.contains(cell))
 +}
 +
-+fn protect_draft(app: &SheetApp, doc: &DocState, targets: &[Target]) -> Result<(), &'static str> {
++fn protect_draft(app: &SheetApp, doc: &DocState, scopes: &RangeScopes<'_>) -> Result<(), &'static str> {
 +    if app.text_box_draft().is_some() {
 +        return Err("busy");
 +    }
 +    if let Some(draft) = app.cell_draft() {
 +        let sheet = doc.wb.sheets.iter().position(|sheet| sheet.uid.get() == draft.sheet_uid).ok_or("busy")?;
-+        if draft.doc != doc.uid || intersects(targets, sheet, draft.cell) {
++        if draft.doc != doc.uid || intersects(scopes.agent, sheet, draft.cell) {
 +            return Err("busy");
++        }
++        if scopes.head_only(sheet, draft.cell) {
++            return Err("head_range_conflict");
 +        }
 +    } else if app.has_pending_drafts() {
 +        return Err("busy");
@@ -5165,7 +5248,7 @@ index 00000000..18844555
 +/// An evicted/missing anchor cannot safely reorder later input.
 +fn stage_local(
 +    doc: &DocState, captured: &Arc<Workbook>, baseline: Arc<Workbook>, bytes: Arc<[u8]>,
-+    targets: &[Target], agent_wins: bool, applied: usize,
++    scopes: &RangeScopes<'_>, agent_wins: bool, applied: usize,
 +) -> Result<Update, &'static str> {
 +    let anchor = if Arc::ptr_eq(captured, &doc.wb) {
 +        doc.undo.len()
@@ -5180,14 +5263,17 @@ index 00000000..18844555
 +    let mut rebase = |source: &Workbook| -> Result<(Arc<Workbook>, Calc), &'static str> {
 +        let mut pending = local_edits(captured, source, &mut budget)?;
 +        for edit in &pending {
-+            if intersects(targets, edit.sheet, edit.address) {
++            if scopes.head_only(edit.sheet, edit.address) {
++                return Err("head_range_conflict");
++            }
++            if intersects(scopes.agent, edit.sheet, edit.address) {
 +                if !agent_wins {
 +                    return Err("stale_base");
 +                }
 +                collisions.insert((edit.sheet, edit.address.row, edit.address.col));
 +            }
 +        }
-+        pending.retain(|edit| !intersects(targets, edit.sheet, edit.address));
++        pending.retain(|edit| !intersects(scopes.agent, edit.sheet, edit.address));
 +        let mut calc = Calc::new();
 +        if pending.is_empty() {
 +            calc.rebuild(&baseline);
@@ -5233,15 +5319,21 @@ index 00000000..18844555
 +    }
 +}
 +
++fn resolve_targets(baseline: &Workbook, ranges: &[SheetRange]) -> Result<Vec<Target>, &'static str> {
++    ranges.iter().map(|range| {
++        let si = baseline.sheets.iter().position(|sheet| sheet.name == range.sheet)?;
++        Some((si, range.range))
++    }).collect::<Option<Vec<_>>>().ok_or("stale_base")
++}
++
 +pub(crate) fn adopt(
-+    app: &SheetApp, name: &str, bytes: Vec<u8>, captured: &WorkbookPackage, agent_ranges: &[SheetRange],
++    app: &SheetApp, name: &str, bytes: Vec<u8>, captured: &WorkbookPackage,
++    agent_ranges: &[SheetRange], head_ranges: &[SheetRange],
 +) -> Result<Update, &'static str> {
 +    let doc = active_doc(app)?;
-+    let targets = agent_ranges.iter().map(|range| {
-+        let si = captured.model.sheets.iter().position(|sheet| sheet.name == range.sheet)?;
-+        Some((si, range.range))
-+    }).collect::<Option<Vec<_>>>().ok_or("stale_base")?;
-+    protect_draft(app, doc, &targets)?;
++    let agent = resolve_targets(&captured.model, agent_ranges)?;
++    let head = resolve_targets(&captured.model, head_ranges)?;
++    let scopes = RangeScopes { agent: &agent, head: &head };
 +    let mut staging = Session::new();
 +    staging.import_bytes_with(name, &bytes, false, false).map_err(|_| "open_failed")?;
 +    let imported = staging.active().ok_or("open_failed")?;
@@ -5252,12 +5344,16 @@ index 00000000..18844555
 +    }
 +    let mut baseline = (*imported.wb).clone();
 +    match_view(&mut baseline, &doc.wb);
-+    // A merged result may only overwrite the authorized agent's ranges.
++    // Imported changes need provenance from the agent or the prior host head.
++    // The head scope grants no precedence over post-capture input.
 +    let mut check_budget = MAX_CHANGES;
-+    if local_edits(&captured.model, &baseline, &mut check_budget)?.iter().any(|edit| !intersects(&targets, edit.sheet, edit.address)) {
++    if local_edits(&captured.model, &baseline, &mut check_budget)?.iter().any(|edit| {
++        !intersects(&agent, edit.sheet, edit.address) && !intersects(&head, edit.sheet, edit.address)
++    }) {
 +        return Err("stale_base");
 +    }
-+    stage_local(doc, &captured.model, Arc::new(baseline), bytes.into(), &targets, false, 0)
++    protect_draft(app, doc, &scopes)?;
++    stage_local(doc, &captured.model, Arc::new(baseline), bytes.into(), &scopes, false, 0)
 +}
 +
 +pub(crate) fn execute_agent(app: &SheetApp, commands: &str, format: &str) -> Result<Update, &'static str> {
@@ -5266,7 +5362,8 @@ index 00000000..18844555
 +    let list = native_execute::parse_from(commands, native_execute::REPLAYABLE).map_err(|_| "not_replayable")?;
 +    native_execute::replayable(&list, &doc.saved).map_err(|_| "not_replayable")?;
 +    let targets = native_execute::written(&list, &doc.saved).ok_or("not_replayable")?;
-+    protect_draft(app, doc, &targets)?;
++    let scopes = RangeScopes { agent: &targets, head: &[] };
++    protect_draft(app, doc, &scopes)?;
 +    let mut staging = Session::new();
 +    staging.add_document(DocState::from_saved((*doc.saved).clone(), None, doc.title.clone(), Trust::FromFile));
 +    let applied = list.len();
@@ -5280,7 +5377,7 @@ index 00000000..18844555
 +    match_view(&mut baseline, &doc.wb);
 +    let bytes = gridcraft_engine::package_edit::write_package_cells(&source.bytes, &source.model, &baseline, format)
 +        .map_err(|_| "fidelity_loss")?;
-+    stage_local(doc, &doc.saved, Arc::new(baseline), bytes.into(), &targets, true, applied)
++    stage_local(doc, &doc.saved, Arc::new(baseline), bytes.into(), &scopes, true, applied)
 +}
 diff --git a/apps/gridcraft-web/src/web.rs b/apps/gridcraft-web/src/web.rs
 index 428772f3..4734976f 100644
