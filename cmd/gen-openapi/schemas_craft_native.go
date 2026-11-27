@@ -110,7 +110,15 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	add("POST", "/lease/handoff", "NativeCraftHandoffRequest", "NativeCraftLease", "200", true)
 	add("GET", "/events", "", "NativeCraftLease", "200", true)
 	d := routes["GET "+prefix+"/events"]
-	d.Response = map[string]any{"type": "string", "description": "SSE event: lease with NativeCraftLease JSON for ordinary sessions. Real-time chat workbook sessions receive sheet_agent_presence_snapshot (NativeCraftSheetPresenceSnapshot) and sheet_agent_presence (NativeCraftSheetPresence). Either mode can receive session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge."}
+	d.Response = map[string]any{
+		"type":        "string",
+		"description": "SSE event: lease with NativeCraftLease JSON for ordinary sessions. Real-time chat workbook sessions receive sheet_agent_presence_snapshot (NativeCraftSheetPresenceSnapshot) and sheet_agent_presence (NativeCraftSheetPresence). Either mode can receive session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge.",
+		"x-crewship-sse-event-data-schemas": map[string]any{
+			"lease":                         ref("NativeCraftLease"),
+			"sheet_agent_presence":          ref("NativeCraftSheetPresence"),
+			"sheet_agent_presence_snapshot": ref("NativeCraftSheetPresenceSnapshot"),
+		},
+	}
 	d.ResponseMedia = []string{"text/event-stream"}
 	routes["GET "+prefix+"/events"] = d
 	agentRoutes, agentSchemas := craftNativeAgentSchemaCatalog()
