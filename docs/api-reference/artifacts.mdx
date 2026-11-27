@@ -274,6 +274,10 @@ documented in [`crewship craft`](/cli/craft).
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | Ask the holder to hand over |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | Hand the lease to the requester |
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Create the first version of an empty document |
+| POST | `/api/v1/pages/{slug}/craft/import` | Authentication requires the empty Page's owner with `pages:write`. The request body is a raw .xlsx file up to 64 MiB (`application/octet-stream`). Response 202 contains the job ID and `converting` state. Status 413 means the upload is oversized, and 503 means the converter is busy or unavailable. |
+| GET | `/api/v1/pages/{slug}/craft/import/{id}` | Authentication requires the original uploader who still owns the Page in the same workspace and has `pages:write`. Response 200 contains the job state and, when ready, cell count, document size and archive report. A failed job includes the failure code and any lost-cell details. Status 404 covers missing or expired jobs and inaccessible Pages. |
+| GET | `/api/v1/pages/{slug}/craft/import/{id}/document` | Authentication requires the original uploader who still owns the Page in the same workspace and has `pages:write`. Response 200 is the engine's native Sheet JSON with a `sheets` array. Status 404 means the job is unavailable, and 409 means it is not ready. |
+| POST | `/api/v1/pages/{slug}/craft/import/{id}/initialize` | Authentication requires the original uploader who still owns the empty Page and has `pages:write`. The request has no body. Optional `X-Craft-Chat` attaches the Sheet to a chat owned by the caller. Response 201 contains the first version and private editing admission. Status 404 means the job is unavailable, and 409 applies when the import is not ready or the Page is already initialized. |
 | GET | `/api/v1/pages/{slug}/craft/preview` | Read-only preview of the shared version |
 | GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
 | GET | `/api/v1/pages/{slug}/craft/document/versions` | Version history, newest first (needs the `craft_version_history` workspace flag) |
@@ -288,7 +292,9 @@ documented in [`crewship craft`](/cli/craft).
 | GET | `/api/v1/pages/{slug}/craft/tasks/{workID}` | Agent task status |
 | POST | `/api/v1/pages/{slug}/craft/tasks/cancel` | Stop the agent task |
 
-There is no separate export route: `GET .../craft/document` returns the bytes.
+On servers that store Sheets as workbook files, the four `/craft/import` job
+routes return 404 with code `use_initialize`. Send the file through
+`POST /api/v1/pages/{slug}/craft/initialize` instead.
 
 ### Agent guides
 

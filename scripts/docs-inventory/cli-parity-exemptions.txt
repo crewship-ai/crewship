@@ -33,6 +33,7 @@ PUT /api/v1/crews/{crewId}                         alias of PATCH on the same ha
 GET /api/v1/pages/{slug}/artifact/versions         alias of GET /api/v1/pages/{slug}/artifact on the same handler (GetArtifactProject), which `crewship page artifact versions` reads
 GET /api/v1/crews/{crewId}/issues/{identifier}     redundant with GET /api/v1/issues/{identifier} (identifiers are workspace-unique), which `crewship issue get` reads
 
+POST /api/v1/pages/{slug}/craft/import/{id}/initialize  browser publishes the converted document held by the server; craft import retrieves it and uses the ordinary initialize command path
 GET /api/v1/pages/{slug}/craft/document/operations  editor replays the saved operations over its local draft
 POST /api/v1/pages/{slug}/craft/document/undo        the edit-lease holder reverses an operation from the agent change card
 GET /api/v1/pages/{slug}/craft/document/export.xlsx editor download; the CLI reads workbook bytes through craft version
