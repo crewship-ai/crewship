@@ -128,7 +128,7 @@ func (t craftUndoTouched) has(sheet string, col, row int) bool {
 	if t.all {
 		return true
 	}
-	for _, a := range t.areas[sheet] {
+	for _, a := range t.areas[strings.ToLower(sheet)] {
 		if col >= a.col1 && col <= a.col2 && row >= a.row1 && row <= a.row2 {
 			return true
 		}
@@ -157,7 +157,7 @@ func (t *craftUndoTouched) add(ops json.RawMessage) {
 		if t.areas == nil {
 			t.areas = map[string][]nativeAgentEngineArea{}
 		}
-		t.areas[sheet] = append(t.areas[sheet], area)
+		t.areas[strings.ToLower(sheet)] = append(t.areas[strings.ToLower(sheet)], area)
 	}
 }
 
@@ -343,9 +343,19 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 		return
 	}
 	ctx, db, scope := r.Context(), d.human.pages.db, entry.scope
-	// A fenced write: the caller's live lease of this generation, checked before the engine runs
-	// (the save checks it again in its transaction).
-	if held, e := d.human.leases.Read(ctx, scope, craftNativePrincipal(entry)); e != nil || held.Generation != generation || held.Holder != craftNativePrincipal(entry) {
+	realtime := entry.chatID != ""
+	lease := mooring.EditLease{Scope: scope, Holder: craftNativePrincipal(entry), Generation: generation}
+	if realtime {
+		if r.Header.Get("X-Craft-Generation") != craftRealtimeGeneration || !entry.realtimeWrite {
+			craftNativeDocumentError(w, errCraftNativeAccess)
+			return
+		}
+		ctx = context.WithValue(ctx, craftRealtimeWriteKey{}, true)
+		if err = s.WithConcurrentWorkbookAuthority(ctx, lease, func(*sql.Tx) error { return nil }); err != nil {
+			craftNativeDocumentError(w, err)
+			return
+		}
+	} else if held, e := d.human.leases.Read(ctx, scope, craftNativePrincipal(entry)); e != nil || held.Generation != generation || held.Holder != craftNativePrincipal(entry) {
 		craftNativeDocumentError(w, mooring.ErrEditLeaseStale)
 		return
 	}
@@ -437,7 +447,7 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	touched, err := craftUndoTouchedSince(ctx, db, scope, agentVersion)
+	touched, err := craftUndoTouchedSince(ctx, db, scope, agentVersion, state.LatestVersion, realtime)
 	if err != nil {
 		craftNativeDocumentError(w, err)
 		return
@@ -447,7 +457,29 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 		replyCode(w, 409, "not_undoable", "the change cannot be undone")
 		return
 	}
+	user, operation := entry.source.UserID, body.OperationID
+	recordUndo := func(ctx context.Context, tx *sql.Tx, version int64) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO craft_version_undos(workspace_id,page_id,operation_id,version,skipped,restored,user_id,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+			scope.WorkspaceID, scope.ArtifactID, operation, version, skipped, restored, user, tsformat.Format(time.Now().UTC()))
+		return err
+	}
 	if len(commands) == 0 {
+		if realtime {
+			err = s.WithConcurrentWorkbookAuthority(ctx, lease, func(tx *sql.Tx) error {
+				var head int64
+				if err := tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, scope.WorkspaceID, scope.ArtifactID).Scan(&head); err != nil {
+					return err
+				}
+				if head != state.LatestVersion {
+					return artifacts.ErrVersionConflict
+				}
+				return recordUndo(ctx, tx, head)
+			})
+			if err != nil {
+				craftNativeDocumentError(w, err)
+				return
+			}
+		}
 		writeJSON(w, 200, craftUndoReceipt{Version: strconv.FormatInt(state.LatestVersion, 10), Restored: 0, Skipped: int64(skipped)})
 		return
 	}
@@ -474,8 +506,6 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 		return
 	}
 	defer upload.Close()
-	lease := mooring.EditLease{Scope: scope, Holder: craftNativePrincipal(entry), Generation: generation}
-	user, operation := entry.source.UserID, body.OperationID
 	sheetRecord := craftSheetRecord(scope, app.Store.Application, user, craftSheetSavedByUndo)
 	sent, _ := json.Marshal(commands)
 	undoOps, replayable := craftNativeAgentResolvedOps(sent)
@@ -497,11 +527,17 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 			ActorKind: "human", ActorID: user, ActorName: name, OperationID: "undo:" + operation, EnginePin: s.EnginePin(), Calculate: "calculated", Replayable: replayable, Ops: undoOps}); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO craft_version_undos(workspace_id,page_id,operation_id,version,skipped,restored,user_id,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-			scope.WorkspaceID, scope.ArtifactID, operation, rc.Version, skipped, restored, user, tsformat.Format(time.Now().UTC()))
-		return err
+		return recordUndo(ctx, tx, rc.Version)
 	}
-	receipt, err := s.SaveAttemptRecorded(upload.Context(ctx), lease, state.LatestVersion, "undo:"+operation, craftContentHash(candidate), candidate, "", record)
+	var receipt mooring.NativeSaveReceipt
+	if realtime {
+		receipt, err = s.SaveConcurrentWorkbook(upload.Context(ctx), lease, state.LatestVersion, "undo:"+operation, craftContentHash(candidate), candidate, record,
+			func(ctx context.Context, tx *sql.Tx, rc artifacts.VersionReceipt, _ []byte) error {
+				return recordUndo(ctx, tx, rc.Version)
+			})
+	} else {
+		receipt, err = s.SaveAttemptRecorded(upload.Context(ctx), lease, state.LatestVersion, "undo:"+operation, craftContentHash(candidate), candidate, "", record)
+	}
 	if err != nil {
 		if errors.Is(err, artifacts.ErrVersionConflict) && d.craftWorkbookMoved(w, r, s, entry, state.LatestVersion) {
 			return
@@ -527,19 +563,29 @@ func craftNativeUndo(ctx context.Context) bool {
 }
 
 // craftUndoTouchedSince reads the logged operations of every version after the agent's.
-func craftUndoTouchedSince(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, version int64) (craftUndoTouched, error) {
+func craftUndoTouchedSince(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, version, head int64, requireComplete bool) (craftUndoTouched, error) {
 	var t craftUndoTouched
-	rows, err := db.QueryContext(ctx, `SELECT ops FROM craft_version_ops WHERE workspace_id=? AND page_id=? AND version>? ORDER BY version`, scope.WorkspaceID, scope.ArtifactID, version)
+	rows, err := db.QueryContext(ctx, `SELECT v.version, o.ops FROM artifact_versions v LEFT JOIN craft_version_ops o ON o.workspace_id=v.workspace_id AND o.page_id=v.page_id AND o.version=v.version
+		WHERE v.workspace_id=? AND v.page_id=? AND v.version>? AND v.version<=? ORDER BY v.version`, scope.WorkspaceID, scope.ArtifactID, version, head)
 	if err != nil {
 		return t, err
 	}
 	defer rows.Close()
+	next := version
 	for rows.Next() {
-		var ops string
-		if err := rows.Scan(&ops); err != nil {
+		var v int64
+		var ops sql.NullString
+		if err := rows.Scan(&v, &ops); err != nil {
 			return t, err
 		}
-		t.add(json.RawMessage(ops))
+		if requireComplete && (!ops.Valid || v != next+1 || !json.Valid([]byte(ops.String))) {
+			t.all = true
+		}
+		next = v
+		t.add(json.RawMessage(ops.String))
+	}
+	if requireComplete && next != head {
+		t.all = true
 	}
 	return t, rows.Err()
 }

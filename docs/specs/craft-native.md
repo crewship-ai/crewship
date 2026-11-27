@@ -112,7 +112,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 |---|---|---|---|
 | GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean, applications?: {wordcraft, gridcraft: "open" \| "draining" \| "closed"}, application?: "wordcraft" \| "gridcraft", edit_refusal?: "app_draining" \| "app_disabled"}`, 200. `can_edit` is false while the document's application is not `open`. |
 | GET | `/api/v1/pages/{slug}/craft/agent-access?chat_id=` | No Craft admission. | `{allowed: boolean, reason?: "feature_off" \| "agent_policy" \| "not_attached" \| "holder_human" \| "engine_failed", message?: string, detail?: string, holder?: {kind: "human" \| "agent", mine: boolean}, max_sheets: 1}`, 200. Human only; an unreadable page is 403 like a missing one. `reason` is what the agent of this chat would be told if the Sheet were attached to the next message; it is advice and grants nothing. |
-| POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
+| POST | `/api/v1/pages/{slug}/craft/sessions` | `{}` or `{chat_id}` for a workbook attached to the caller's private chat. | `session_token`, public `session_id`, `application_id`, `page_id`, `realtime_sheet`, `can_write` and a `generation` for a writable chat workbook, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease` | `{}`; acquire when free. | Lease status, 200. |
@@ -121,14 +121,14 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/release` | `{generation: "1"}`. | Released lease status, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
-| GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
+| GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream` with `lease`, chat workbook presence or `session_retired` events, 200. |
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header; private read (see Shared previews). | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/migrate-workbook` | Craft admission and Edit authority. | `{version: "2"}`, 200, or 422 when fidelity cannot be confirmed. |
 | GET | `/api/v1/pages/{slug}/craft/document/original-workbook` | Craft admission and private read authority. | Exact original Sheet JSON as an attachment, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/save` | Bound JSON snapshot. For workbook Sheets, optional `X-Craft-Touched` and `X-Craft-Rebase` headers. | Exact committed snapshot receipt, 200. A moved workbook head answers 409 with `code: "moved"`, the head version and operations URL. |
+| POST | `/api/v1/pages/{slug}/craft/document/save` | Bound JSON snapshot. Workbook Sheets accept `X-Craft-Touched` and `X-Craft-Rebase` headers. | Exact snapshot receipt or a real-time chat merge receipt, 200. Ordinary workbook sessions receive 409 `moved` with the head version and operations URL when their base moved. |
 | GET | `/api/v1/pages/{slug}/craft/document/operations?from=` | Craft admission and private read of a workbook Sheet. | Versions after `from` through the head, and replayable operations where available, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/undo` | Craft admission, current edit lease in `X-Craft-Generation`, and JSON `{operation_id}`. | New version and restored and skipped cell counts, 201. A repeat returns the saved result, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/undo` | Craft admission, the current edit lease or writable chat admission generation in `X-Craft-Generation`, and JSON `{operation_id}`. | New version and restored and skipped cell counts, 201. A repeat returns the saved result, 200. |
 | GET | `/api/v1/pages/{slug}/craft/document/export.xlsx` | Craft admission and private read. Optional historical `version` requires version history. | Saved workbook bytes as an attachment, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
@@ -609,6 +609,50 @@ can warn before saving fails. Quota exhaustion returns 413;
 conflict or stale custody 409; invalid native data 422. Existing versions remain
 available. Generic denied writes retain the local draft; only proven read loss
 requires its erasure.
+
+## Real-time chat workbooks
+
+An authenticated browser can include `chat_id` when opening a workbook in its
+owner's private chat. The server checks that the chat references that Page and
+that the original credential has private read access. A writable admission
+returns `realtime_sheet: true`, `can_write: true` and `generation: "1"`.
+The opaque session ID scopes that generation to the original credential,
+Page and captured authority epochs. `GET /craft/lease` reports the
+admission's current edit authority with `holder: null`. Write access and the
+chat reference are checked again when publishing and reconciling.
+
+Every save and reconcile in this mode carries an `attemptId`. For a save over
+its current base, the server returns the existing exact snapshot receipt. If
+an agent has changed the head, the server verifies the submitted cell changes
+against the original base and walks the journal through the current head. It
+keeps independent cell edits and the agent's input in overlapping cells. A
+new edit after the agent's version is displayed can change those cells again.
+The server checks the resulting workbook against the head's preserved parts
+and compares the head again in the publication transaction. Unproved changes
+leave the local draft available for recovery.
+
+A merge answers 200 with `kind: "merged"`, the original `submitted`
+attempt ID, base, editor revision and content hash, the actual `receipt`,
+`head_content_hash`, canonical base64 `bytes`, `overlap` and `agent_ranges`.
+The two range lists contain `{sheet, a1}` pairs. `receipt.contentHash`,
+`receipt.candidateHash` and `head_content_hash` all hash the canonical bytes.
+If all submitted changes overlapped, `receipt.unchanged` is true and its
+base and version both identify the confirmed head. Reconcile of the same
+attempt returns the original answer even after the head advances. An absent
+attempt retired by reconcile can no longer publish.
+
+An agent write in the chat needs complete Undo evidence from the version it
+actually changes. The workbook, the operations journal, the inverse and the
+audit commit together. If a typed inverse cannot be captured or stored, the
+agent's request leaves the head unchanged. Undo retains later changes to each
+cell, including cells whose inputs were changed and later put back.
+
+The existing SSE stream sends `sheet_agent_presence_snapshot` with
+`{operations: [...]}` at connection time and `sheet_agent_presence` as
+operations start, refresh or end. Events identify an operation, a run and its
+agent, and include the current ranges and a TTL. Delivery requires fresh
+private read authority for the referenced Page and chat. Session retirement
+ends the stream and leaves recovery to the existing draft policy.
 
 ## Native agent tasks
 

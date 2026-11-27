@@ -19,6 +19,9 @@ type craftNativeSession struct {
 	scope                 mooring.EditLeaseScope
 	application, memberID string
 	memberRevision        int64
+	chatID                string
+	realtimeWrite         bool
+	realtimeDeadline      time.Duration
 	// Author-relevant user/Page generations, not the broad workspace epoch.
 	generations craftNativeGenerations
 	boot        string
@@ -40,6 +43,7 @@ type craftNativeHTTP struct {
 	sessionsByID   map[string]*craftNativeSession
 	requests       map[string]craftNativeRequest
 	live           map[string]bool
+	sheetPresence  craftSheetPresence
 }
 
 func newCraftNativeHTTP(pages *PageHandler, enabled bool, clock mooring.OwnerClock) *craftNativeHTTP {

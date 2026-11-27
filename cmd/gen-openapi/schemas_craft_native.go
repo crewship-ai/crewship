@@ -21,6 +21,8 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	request := obj(map[string]any{"request_id": str(), "actor_id": str(), "display_name": str(), "kind": map[string]any{"type": "string", "enum": []string{"human"}}}, "request_id", "actor_id", "display_name", "kind")
 	empty := obj(map[string]any{})
 	empty["additionalProperties"] = false
+	sessionRequest := obj(map[string]any{"chat_id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$", "description": "The caller's private chat linked to this workbook. Omit for ordinary native admission."}})
+	sessionRequest["additionalProperties"] = false
 	generationRequest := obj(map[string]any{"generation": generation(false)}, "generation")
 	generationRequest["additionalProperties"] = false
 	handoffRequest := obj(map[string]any{"generation": generation(false), "request_id": str()}, "generation", "request_id")
@@ -29,13 +31,14 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"NativeCraftHolder":            holder,
 		"NativeCraftRequest":           request,
 		"NativeCraftEmptyRequest":      empty,
+		"NativeCraftSessionRequest":    sessionRequest,
 		"NativeCraftGenerationRequest": generationRequest,
 		"NativeCraftHandoffRequest":    handoffRequest,
 		"NativeCraftAvailability":      obj(map[string]any{"enabled": boolean(), "can_edit": boolean(), "preview_enabled": boolean(), "agents_enabled": boolean(), "applications": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string", "enum": []string{"open", "draining", "closed"}}}, "application": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}, "description": "This document's application, present when the caller may open it."}, "edit_refusal": map[string]any{"type": "string", "enum": []string{"app_draining", "app_disabled"}, "description": "Present when the caller has Edit but the instance administrator turned the application off or it is draining; can_edit is then false. The same reason lease acquire answers with."}}, "enabled", "can_edit", "preview_enabled", "agents_enabled"),
-		"NativeCraftSession":           obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private mounted host admission bearer; never deliver to an iframe or local draft."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "page_id": str()}, "session_token", "session_id", "application_id", "page_id"),
+		"NativeCraftSession":           obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private mounted host admission bearer; never deliver to an iframe or local draft."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "page_id": str(), "realtime_sheet": boolean(), "can_write": boolean(), "generation": generation(false)}, "session_token", "session_id", "application_id", "page_id", "realtime_sheet", "can_write"),
 		"NativeCraftRenewal":           obj(map[string]any{"renewed": boolean()}, "renewed"),
 		"NativeCraftHandoffReceipt":    obj(map[string]any{"request_id": str(), "generation": generation(false)}, "request_id", "generation"),
-		"NativeCraftLease":             obj(map[string]any{"can_stop_agent": boolean(), "holder": nullableHolder, "mine": boolean(), "generation": generation(true), "expires_at": map[string]any{"type": "string", "format": "date-time", "nullable": true}, "can_write": boolean(), "can_share": boolean(), "can_edit": boolean(), "acquired_at": map[string]any{"type": "string", "nullable": true, "description": "Currently always null: acquisition wall time is not persisted."}, "handoff_requested_kind": map[string]any{"type": "string", "nullable": true, "enum": []any{"human", nil}}, "handoff_requested_by": map[string]any{"type": "array", "items": ref("NativeCraftRequest")}}, "holder", "mine", "generation", "expires_at", "can_stop_agent", "can_write", "can_edit", "acquired_at", "handoff_requested_kind", "handoff_requested_by", "can_share"),
+		"NativeCraftLease":             obj(map[string]any{"realtime_sheet": boolean(), "can_stop_agent": boolean(), "holder": nullableHolder, "mine": boolean(), "generation": generation(true), "expires_at": map[string]any{"type": "string", "format": "date-time", "nullable": true}, "can_write": boolean(), "can_share": boolean(), "can_edit": boolean(), "acquired_at": map[string]any{"type": "string", "nullable": true, "description": "Currently always null: acquisition wall time is not persisted."}, "handoff_requested_kind": map[string]any{"type": "string", "nullable": true, "enum": []any{"human", nil}}, "handoff_requested_by": map[string]any{"type": "array", "items": ref("NativeCraftRequest")}}, "holder", "mine", "generation", "expires_at", "can_stop_agent", "can_write", "can_edit", "acquired_at", "handoff_requested_kind", "handoff_requested_by", "can_share"),
 	}
 
 	schemas["NativeCraftPreview"] = obj(map[string]any{"version": generation(false), "bytes": map[string]any{"type": "string", "format": "byte"}, "applicationId": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "enginePin": str(), "editorBundle": str(), "editorURL": str(), "format": map[string]any{"type": "string", "enum": []string{"xlsx", "xlsm", "native"}}}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL")
@@ -94,7 +97,7 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	routes["GET "+prefix+"/agent-access"] = access
 	add("GET", "/preview", "", "NativeCraftPreview", "200", false)
 	add("POST", "/document/share", "NativeCraftShareRequest", "NativeCraftShareReceipt", "200", true)
-	add("POST", "/sessions", "NativeCraftEmptyRequest", "NativeCraftSession", "201", false)
+	add("POST", "/sessions", "NativeCraftSessionRequest", "NativeCraftSession", "201", false)
 	add("POST", "/sessions/reauthorize", "", "NativeCraftRenewal", "200", true)
 	add("GET", "/lease", "", "NativeCraftLease", "200", true)
 	for _, suffix := range []string{"/lease", "/lease/acquire"} {
@@ -107,7 +110,7 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	add("POST", "/lease/handoff", "NativeCraftHandoffRequest", "NativeCraftLease", "200", true)
 	add("GET", "/events", "", "NativeCraftLease", "200", true)
 	d := routes["GET "+prefix+"/events"]
-	d.Response = map[string]any{"type": "string", "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge."}
+	d.Response = map[string]any{"type": "string", "description": "SSE event: lease with NativeCraftLease JSON for ordinary sessions. Real-time chat workbook sessions receive sheet_agent_presence_snapshot (NativeCraftSheetPresenceSnapshot) and sheet_agent_presence (NativeCraftSheetPresence). Either mode can receive session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge."}
 	d.ResponseMedia = []string{"text/event-stream"}
 	routes["GET "+prefix+"/events"] = d
 	agentRoutes, agentSchemas := craftNativeAgentSchemaCatalog()

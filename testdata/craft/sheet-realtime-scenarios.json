@@ -1,0 +1,36 @@
+{
+  "initial": {
+    "L": {"B2": "open", "B3": "open", "B4": "open", "B5": "open", "C2": "open"},
+    "Other": {"B3": "open"}
+  },
+  "concurrent": {
+    "orders": [["human", "agent"], ["agent", "human"]],
+    "human": [
+      {"sheet": "L", "range": "B2:B4", "values": [["human B2"], ["human B3"], ["human B4"]]},
+      {"sheet": "Other", "range": "B3", "values": [["human Other!B3"]]}
+    ],
+    "agent": [
+      {"sheet": "L", "range": "B3:B5", "values": [["agent B3"], ["agent B4"], ["agent B5"]]}
+    ],
+    "persisted": {
+      "L": {"B2": "human B2", "B3": "agent B3", "B4": "agent B4", "B5": "agent B5", "C2": "open"},
+      "Other": {"B3": "human Other!B3"}
+    }
+  },
+  "after_visible_agent_write": {
+    "later_human": [
+      [{"sheet": "L", "range": "B3", "values": [["later B3"]]}, {"sheet": "L", "range": "C2", "values": [["later C2"]]}],
+      [{"sheet": "L", "range": "B3", "values": [["agent B3"]]}]
+    ],
+    "undo_persisted_by_commit_order": {
+      "human_first": {
+        "L": {"B2": "human B2", "B3": "agent B3", "B4": "human B4", "B5": "open", "C2": "later C2"},
+        "Other": {"B3": "human Other!B3"}
+      },
+      "agent_first": {
+        "L": {"B2": "human B2", "B3": "agent B3", "B4": "open", "B5": "open", "C2": "later C2"},
+        "Other": {"B3": "human Other!B3"}
+      }
+    }
+  }
+}

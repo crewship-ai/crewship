@@ -33,8 +33,8 @@ var ErrNativeRetirementLimit = errors.New("native save attempt retirement limit 
 // lease generation. An editor has at most one unconfirmed save at a time.
 const nativeRetiredAttemptsPerPage = 8
 
-// validNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
-func validNativeAttemptID(id string) bool {
+// ValidNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
+func ValidNativeAttemptID(id string) bool {
 	if len(id) < 8 || len(id) > 64 {
 		return false
 	}
@@ -136,7 +136,7 @@ func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	if attemptID != "" && !validNativeAttemptID(attemptID) {
+	if attemptID != "" && !ValidNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
 	message, err := s.attemptMessage(l, base, editorRevision, contentHash, attemptID)
@@ -161,21 +161,7 @@ func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base
 			return actor, nil
 		}
 	}
-	if _, err = s.versions.Quota(ctx, nativeVersionKey(l.Scope), a); err != nil {
-		return NativeSaveReceipt{}, err
-	}
-	b, err := s.candidate(ctx, raw)
-	if err != nil {
-		return NativeSaveReceipt{}, err
-	}
-	hash := sha256.Sum256(b)
-	if "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
-		return NativeSaveReceipt{}, ErrInvalid
-	}
-	request := s.manifest(base, b)
-	request.Message = message
-	request.Record = record.of(b)
-	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
+	receipt, unchanged, err := s.publishSnapshot(ctx, l.Scope, base, contentHash, raw, message, a, record, nil)
 	if errors.Is(err, artifacts.ErrVersionConflict) {
 		// Attempt idempotence: this same identified attempt already committed.
 		// Another attempt with the same revision and bytes is not a repeat, and
@@ -201,6 +187,69 @@ func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base
 	return saved, nil
 }
 
+// SaveConcurrentWorkbook publishes against one exact head with the configured
+// authorization and original principal checked inside the writer transaction.
+// The caller must admit the principal for a concurrent Workbook session or run.
+func (s *NativeStore) SaveConcurrentWorkbook(ctx context.Context, l EditLease, base int64, revision, hash string, raw []byte, record, unchangedRecord NativeRecord) (NativeSaveReceipt, error) {
+	if err := s.ready(); err != nil {
+		return NativeSaveReceipt{}, err
+	}
+	if !s.Workbook() {
+		return NativeSaveReceipt{}, ErrNativeProfile
+	}
+	message, err := s.snapshotMessage(l, base, revision, hash)
+	if err != nil {
+		return NativeSaveReceipt{}, err
+	}
+	r, unchanged, err := s.publishSnapshot(ctx, l.Scope, base, hash, raw, message, s.holderAuthority(l, "write"), record, unchangedRecord)
+	if err != nil {
+		return NativeSaveReceipt{}, err
+	}
+	receipt := s.snapshotReceipt(l, base, revision, hash, r.Version)
+	receipt.Unchanged = unchanged
+	return receipt, nil
+}
+
+func (s *NativeStore) publishSnapshot(ctx context.Context, scope EditLeaseScope, base int64, contentHash string, raw []byte, message string, authorize artifacts.VersionAuthorize, record, unchangedRecord NativeRecord) (artifacts.VersionReceipt, bool, error) {
+	key := nativeVersionKey(scope)
+	if _, err := s.versions.Quota(ctx, key, authorize); err != nil {
+		return artifacts.VersionReceipt{}, false, err
+	}
+	b, err := s.candidate(ctx, raw)
+	if err != nil {
+		return artifacts.VersionReceipt{}, false, err
+	}
+	hash := sha256.Sum256(b)
+	if "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
+		return artifacts.VersionReceipt{}, false, ErrInvalid
+	}
+	request := s.manifest(base, b)
+	request.Message = message
+	request.Record = record.of(b)
+	request.RecordUnchanged = unchangedRecord.of(b)
+	return s.versions.ApplyChanged(ctx, key, request, authorize)
+}
+
+// ConcurrentWorkbookReceipt reconstructs a receipt from its fenced operation
+// record, which may describe an unchanged saved head.
+func (s *NativeStore) ConcurrentWorkbookReceipt(l EditLease, base, version int64, revision, hash string) NativeSaveReceipt {
+	out := s.snapshotReceipt(l, base, revision, hash, version)
+	out.Unchanged = version == base
+	return out
+}
+
+// WithConcurrentWorkbookAuthority fences a receipt lookup or attempt
+// retirement with the same authority as a concurrent workbook save.
+func (s *NativeStore) WithConcurrentWorkbookAuthority(ctx context.Context, l EditLease, fn func(*sql.Tx) error) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	if !s.Workbook() {
+		return ErrNativeProfile
+	}
+	return s.versions.WithWriteFence(ctx, nativeVersionKey(l.Scope), s.holderAuthority(l, "write"), fn)
+}
+
 // ReconcileSnapshot proves only the exact attempted successor, including when
 // the head has since advanced. It never retries a mutation or confirms a later
 // matching document. Current write rights and the original admission are
@@ -220,7 +269,7 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	if attemptID != "" && !validNativeAttemptID(attemptID) {
+	if attemptID != "" && !ValidNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
 	anonymous, err := s.snapshotMessage(l, base, editorRevision, contentHash)

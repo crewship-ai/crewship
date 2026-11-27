@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -165,4 +169,62 @@ func TestSheetITUndoByTheCellsRawInputNotItsValue(t *testing.T) {
 		t.Errorf("the undo's answer does not say how many cells came back and how many stayed: %s", w.Body)
 	}
 	t.Logf("gap (c): L!B6 retyped by the person as the agent's input, after undo %q; answer %s", got["L"]["B6"], w.Body)
+}
+
+func TestSheetITAgentWriteRollsBackWhenUndoJournalCannotBeStored(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/craft/sheet-realtime-scenarios.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Initial    map[string]sitCells
+		Concurrent struct {
+			Agent []struct {
+				Sheet  string
+				Range  string
+				Values [][]string
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Concurrent.Agent) == 0 {
+		t.Fatal("workbook fixture needs agent writes")
+	}
+	commands := make([]map[string]any, 0, len(fixture.Concurrent.Agent))
+	for _, edit := range fixture.Concurrent.Agent {
+		commands = append(commands, sitCmd("range.setValues", map[string]any{"sheet": edit.Sheet, "range": edit.Range, "values": edit.Values}))
+	}
+	s := newSheetITScenario(t, sitWorkbook(fixture.Initial["L"], fixture.Initial["Other"]))
+	engineApply := s.m.config.AgentApply
+	var candidates atomic.Int32
+	s.m.config.AgentApply = func(ctx context.Context, p CraftNativeDocumentProfile, base []byte, commands json.RawMessage) ([]byte, error) {
+		candidate, err := engineApply(ctx, p, base, commands)
+		if err == nil {
+			candidates.Add(1)
+		}
+		return candidate, err
+	}
+	s.send("Update the status cells", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	// The editor is closed. Fail the mandatory inverse insert after the
+	// engine and audit callbacks have run, inside the publication transaction.
+	mustExec(t, s.f.rig.db, `CREATE TRIGGER sit_reject_agent_undo_journal BEFORE INSERT ON craft_version_ops
+			WHEN NEW.actor_kind='agent' BEGIN SELECT RAISE(ABORT,'test inverse insert failure'); END`)
+	applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "sit-inverse-insert", "commands": sitCommands(commands...)})
+	if candidates.Load() != 1 || !refused || s.head() != 1 || len(s.opsRows()) != 0 {
+		t.Fatalf("failed inverse insert: candidates=%d refused=%v head=%d ops=%d response=%s", candidates.Load(), refused, s.head(), len(s.opsRows()), applied)
+	}
+	var audit int
+	if err := s.f.rig.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.sheet_saved' AND json_extract(metadata,'$.source')='agent'`).Scan(&audit); err != nil || audit != 0 {
+		t.Fatalf("failed inverse insert left %d save audit rows: %v", audit, err)
+	}
+	got := s.headSheets(s.humanSession())
+	for sheet, cells := range fixture.Initial {
+		if !reflect.DeepEqual(got[sheet], cells) {
+			t.Errorf("persisted %s = %v, want %v", sheet, got[sheet], cells)
+		}
+	}
 }

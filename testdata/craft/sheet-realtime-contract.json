@@ -1,0 +1,151 @@
+{
+  "session": {
+    "session_token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "session_id": "session-1",
+    "page_id": "sheet-1",
+    "application_id": "gridcraft",
+    "realtime_sheet": true,
+    "can_write": true,
+    "generation": "1"
+  },
+  "lease": {
+    "realtime_sheet": true,
+    "can_edit": true,
+    "can_write": true,
+    "generation": "1",
+    "holder": null,
+    "can_stop_agent": false,
+    "mine": false,
+    "expires_at": null,
+    "can_share": false,
+    "acquired_at": null,
+    "handoff_requested_kind": null,
+    "handoff_requested_by": []
+  },
+  "merged": {
+    "kind": "merged",
+    "submitted": {
+      "attempt_id": "attempt-1",
+      "base_version": "1",
+      "editor_revision": "revision-1",
+      "content_hash": "sha256:0d43ccf1c201228662c40b923284aa289dcd87f64749699190ad5dd5fe96b60f"
+    },
+    "receipt": {
+      "workspaceId": "workspace-1",
+      "pageId": "sheet-1",
+      "applicationId": "gridcraft",
+      "enginePin": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseVersion": "2",
+      "generation": "1",
+      "sessionId": "session-1",
+      "editorRevision": "revision-1",
+      "contentHash": "sha256:026816160f68e3a453e06f9c45235898f836d689ea81887f234d70f55a910897",
+      "candidateHash": "sha256:026816160f68e3a453e06f9c45235898f836d689ea81887f234d70f55a910897",
+      "version": "3",
+      "durability": "node",
+      "issuedBy": "crewship",
+      "phase": "committed"
+    },
+    "head_content_hash": "sha256:026816160f68e3a453e06f9c45235898f836d689ea81887f234d70f55a910897",
+    "bytes": "UEsDBBQAAAAIAAAAIQAcdPw42AAAAPYBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbK2RvU4DMQzHX+WUtWpcGDqgXhfKCgy8gJvz9aLLl2K3XN++uVAYUIGFyUr+Hz9L3rydE3EzeRe4VYNIegBgM5BH1jFRKEofs0cpz3yAhGbEA8H9arUGE4NQkKXMHWq72VGPRyfN01S+2cbQqkyOVfP4YZxZrcKUnDUoRYdT6L5RlleCLsnq4cEmXhSDgpuEWfkZcM29nChn21Hzilme0RcXTA7eYx73MY7695IbW8a+t4a6aI6+RDSnTNjxQCTe6Tq1RxsWf/OrmaGOu39e5Kv/cw+o595eAFBLAwQUAAAACAAAACEA/luGcooAAADwAAAACwAAAF9yZWxzLy5yZWxzjc8xDsIwDAXQq1Q+QF0YGFDaiaUr4gImddqqTRw5QZTbk7EgBkbrf70vmyuvlGcJaZpjqja/htTClHM8IyY7sadUS+RQEifqKZdTR4xkFxoZj01zQt0b0Jm9WfVDC9oPB6hur8j/2OLcbPki9uE55B8TX40ik46cW9hWfIoud5GlLihgZ/Djwe4NUEsDBBQAAAAIAAAAIQCFoXJbjgAAAN8AAAAPAAAAeGwvd29ya2Jvb2sueG1sjY9BDoJADEWvMukBLLhwQYCVGxMvMUJxJtDppB2jx5eA7F21Lz//NW3fovNDZHYfXpJ1EErJDaINgdjbSTKlNZlE2ZcV9YmWlfxogajwguequiD7mGA3NPqPQ6YpDnSV4cWUyi5RWnyJkizEbNC32wX7TZc8Uwd3cBvexg5qcNrEddHbWAP2LR4NPJ7qv1BLAwQUAAAACAAAACEAtlSqz44AAADxAAAAGgAAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzjc89DsIwDAXgq1Q5QN0yMKAmE0tXxAWi1G2iNj+yjYDbEzGgIjEwWX6WvicPF9yshJzYh8LNI26JtfIi5QTAzmO03OaCqV7mTNFKXWmBYt1qF4RD1x2B9oYyw95sxkkrGqdeNddnwX/sPM/B4Tm7W8QkPyrgnmlljygVtbSgaPWJGN6jb6uqwAzw9aF5AVBLAwQUAAAACAAAACEA1ubp9ZgAAAD6AAAAGAAAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbHWPwQrCMAyGX6X0AczowIN0PQzfwCcINa7FtR1pZD6+3Q7Dgx4CyRf+j8SuhZ81EIl6pznXQQeR5QJQfaCE9VQWym3zKJxQ2sgT1IUJ73sozWC67gwJY9bO7uyKgs5yWRUP2jTqt2Y0WsmgY55jpptw47E6Ky68EmY1GgviLGwMfKuWPyT9Ien/SHCiLGrsf0ng6yo43nUfUEsBAhQDFAAAAAgAAAAhABx0/DjYAAAA9gEAABMAAAAAAAAAAAAAAIABAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAMUAAAACAAAACEA/luGcooAAADwAAAACwAAAAAAAAAAAAAAgAEJAQAAX3JlbHMvLnJlbHNQSwECFAMUAAAACAAAACEAhaFyW44AAADfAAAADwAAAAAAAAAAAAAAgAG8AQAAeGwvd29ya2Jvb2sueG1sUEsBAhQDFAAAAAgAAAAhALZUqs+OAAAA8QAAABoAAAAAAAAAAAAAAIABdwIAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzUEsBAhQDFAAAAAgAAAAhANbm6fWYAAAA+gAAABgAAAAAAAAAAAAAAIABPQMAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbFBLBQYAAAAABQAFAEUBAAALBAAAAAA=",
+    "overlap": [
+      {
+        "sheet": "L",
+        "a1": "B3"
+      }
+    ],
+    "agent_ranges": [
+      {
+        "sheet": "L",
+        "a1": "B3:B5"
+      }
+    ]
+  },
+  "merged_unchanged": {
+    "kind": "merged",
+    "submitted": {
+      "attempt_id": "attempt-2",
+      "base_version": "1",
+      "editor_revision": "revision-2",
+      "content_hash": "sha256:a06629141c1f0f722b18bfd98835e99889459919560728554f75f4e8579a1b70"
+    },
+    "receipt": {
+      "workspaceId": "workspace-1",
+      "pageId": "sheet-1",
+      "applicationId": "gridcraft",
+      "enginePin": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseVersion": "2",
+      "generation": "1",
+      "sessionId": "session-1",
+      "editorRevision": "revision-2",
+      "contentHash": "sha256:d8664327c410c349c9b1cfe67270d02190668975dfe3610afa86acc4cb823257",
+      "candidateHash": "sha256:d8664327c410c349c9b1cfe67270d02190668975dfe3610afa86acc4cb823257",
+      "version": "2",
+      "durability": "node",
+      "issuedBy": "crewship",
+      "phase": "committed",
+      "unchanged": true
+    },
+    "head_content_hash": "sha256:d8664327c410c349c9b1cfe67270d02190668975dfe3610afa86acc4cb823257",
+    "bytes": "UEsDBBQAAAAIAAAAIQAcdPw42AAAAPYBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbK2RvU4DMQzHX+WUtWpcGDqgXhfKCgy8gJvz9aLLl2K3XN++uVAYUIGFyUr+Hz9L3rydE3EzeRe4VYNIegBgM5BH1jFRKEofs0cpz3yAhGbEA8H9arUGE4NQkKXMHWq72VGPRyfN01S+2cbQqkyOVfP4YZxZrcKUnDUoRYdT6L5RlleCLsnq4cEmXhSDgpuEWfkZcM29nChn21Hzilme0RcXTA7eYx73MY7695IbW8a+t4a6aI6+RDSnTNjxQCTe6Tq1RxsWf/OrmaGOu39e5Kv/cw+o595eAFBLAwQUAAAACAAAACEA/luGcooAAADwAAAACwAAAF9yZWxzLy5yZWxzjc8xDsIwDAXQq1Q+QF0YGFDaiaUr4gImddqqTRw5QZTbk7EgBkbrf70vmyuvlGcJaZpjqja/htTClHM8IyY7sadUS+RQEifqKZdTR4xkFxoZj01zQt0b0Jm9WfVDC9oPB6hur8j/2OLcbPki9uE55B8TX40ik46cW9hWfIoud5GlLihgZ/Djwe4NUEsDBBQAAAAIAAAAIQCFoXJbjgAAAN8AAAAPAAAAeGwvd29ya2Jvb2sueG1sjY9BDoJADEWvMukBLLhwQYCVGxMvMUJxJtDppB2jx5eA7F21Lz//NW3fovNDZHYfXpJ1EErJDaINgdjbSTKlNZlE2ZcV9YmWlfxogajwguequiD7mGA3NPqPQ6YpDnSV4cWUyi5RWnyJkizEbNC32wX7TZc8Uwd3cBvexg5qcNrEddHbWAP2LR4NPJ7qv1BLAwQUAAAACAAAACEAtlSqz44AAADxAAAAGgAAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzjc89DsIwDAXgq1Q5QN0yMKAmE0tXxAWi1G2iNj+yjYDbEzGgIjEwWX6WvicPF9yshJzYh8LNI26JtfIi5QTAzmO03OaCqV7mTNFKXWmBYt1qF4RD1x2B9oYyw95sxkkrGqdeNddnwX/sPM/B4Tm7W8QkPyrgnmlljygVtbSgaPWJGN6jb6uqwAzw9aF5AVBLAwQUAAAACAAAACEAlTkHe5UAAAD2AAAAGAAAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbHWPMQrDMAxFr2J8gCok0KHYHkJv0BMIV41NYzvIguT4dTKEDu0g0P/iP0lmLfyugUjUluZcrQ4iyw2g+kAJ66UslNvkVTihNMkT1IUJn0cozdB33RUSxqydObw7CjrDZVVsdd9cvzdjr5VYHfMcMz2Emx+rM+L2BQbEGdg1+FYtewKGEzD8AeBEWdQ4/ILA10Vwvuo+UEsBAhQDFAAAAAgAAAAhABx0/DjYAAAA9gEAABMAAAAAAAAAAAAAAIABAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAMUAAAACAAAACEA/luGcooAAADwAAAACwAAAAAAAAAAAAAAgAEJAQAAX3JlbHMvLnJlbHNQSwECFAMUAAAACAAAACEAhaFyW44AAADfAAAADwAAAAAAAAAAAAAAgAG8AQAAeGwvd29ya2Jvb2sueG1sUEsBAhQDFAAAAAgAAAAhALZUqs+OAAAA8QAAABoAAAAAAAAAAAAAAIABdwIAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzUEsBAhQDFAAAAAgAAAAhAJU5B3uVAAAA9gAAABgAAAAAAAAAAAAAAIABPQMAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbFBLBQYAAAAABQAFAEUBAAAIBAAAAAA=",
+    "overlap": [
+      {
+        "sheet": "L",
+        "a1": "B3"
+      }
+    ],
+    "agent_ranges": [
+      {
+        "sheet": "L",
+        "a1": "B3:B5"
+      }
+    ]
+  },
+  "presence_snapshot": {
+    "operations": [
+      {
+        "op_id": "operation-1",
+        "run_id": "run-1",
+        "agent": {
+          "id": "agent-1",
+          "name": "Agent One"
+        },
+        "phase": "started",
+        "ranges": [
+          {
+            "sheet": "L",
+            "a1": "B3:B5"
+          }
+        ],
+        "ttl_ms": 12000
+      }
+    ]
+  },
+  "presence_started": {
+    "op_id": "operation-1",
+    "run_id": "run-1",
+    "agent": {
+      "id": "agent-1",
+      "name": "Agent One"
+    },
+    "phase": "started",
+    "ranges": [
+      {
+        "sheet": "L",
+        "a1": "B3:B5"
+      }
+    ],
+    "ttl_ms": 12000
+  },
+  "presence_ended": {
+    "op_id": "operation-1",
+    "run_id": "run-1",
+    "agent": {
+      "id": "agent-1",
+      "name": "Agent One"
+    },
+    "phase": "ended",
+    "ranges": [],
+    "ttl_ms": 0
+  }
+}

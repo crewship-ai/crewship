@@ -30,10 +30,16 @@ func TestCraftNativeDocumentsHaveConcreteNativeBindingsAndStringVersions(t *test
 	if props["bytes"].(map[string]any)["maxLength"] != 44739244 {
 		t.Fatal("native32MiB base64 bound missing")
 	}
+	plain := map[string]any{"$ref": "#/components/schemas/NativeCraftSnapshotReceipt"}
+	merged := map[string]any{"$ref": "#/components/schemas/NativeCraftMergedSheetSave"}
 	for _, suffix := range []string{"/save", "/import", "/reconcile"} {
 		op := paths[prefix+suffix].(map[string]any)["post"].(map[string]any)
-		if responseSchemaFromOperation(t, op)["$ref"] != "#/components/schemas/NativeCraftSnapshotReceipt" {
-			t.Fatalf("receipt schema missing for %s", suffix)
+		want := plain
+		if suffix != "/import" {
+			want = map[string]any{"oneOf": []any{plain, merged}}
+		}
+		if got := responseSchemaFromOperation(t, op); !reflect.DeepEqual(got, want) {
+			t.Fatalf("receipt schema for %s = %v, want %v", suffix, got, want)
 		}
 	}
 }

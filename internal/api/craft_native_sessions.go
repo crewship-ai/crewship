@@ -63,6 +63,15 @@ func (m *craftNativeHTTP) checkEntry(ctx context.Context, tx *sql.Tx, entry *cra
 	if err = craftNativeGenerationsCurrent(ctx, tx, entry); err != nil {
 		return proof, err
 	}
+	if entry.chatID != "" {
+		linked, err := craftRealtimeChatLinked(ctx, tx, entry.scope, entry.chatID, entry.source.UserID)
+		if err != nil {
+			return proof, err
+		}
+		if !linked || !proof.privateRead {
+			return proof, errCraftNativeAccess
+		}
+	}
 	boot, now, err := m.clock.Now()
 	if err != nil || boot != entry.boot || now < 0 || now >= entry.deadline {
 		return proof, errCraftNativeAccess

@@ -301,10 +301,8 @@ func (s *sitScenario) sitLargeAgent(l sitCells, own bool) (call func(string, any
 
 // Co-write, a large change of replayable commands: three range.clear over L!C2:E28, 81 cells of
 // 32 000 characters, each range read for its inverse under the read's 1 MiB answer, together more
-// than 2 MiB of operations and inverse, so the change is not replayable. Beside the person's lease it
-// is refused as holder_human (head, ops unchanged); with the agent's own lease it is stored, its
-// operations row not replayable.
-func TestSheetITCoWriteRefusesALargeChange(t *testing.T) {
+// than 2 MiB of operations and inverse. Publication requires the complete journal in either case.
+func TestSheetITRefusesOversizedUndoJournal(t *testing.T) {
 	clears := sitCommands(
 		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C28"}),
 		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "D2:D28"}),
@@ -317,74 +315,31 @@ func TestSheetITCoWriteRefusesALargeChange(t *testing.T) {
 			call, _, _, generation := s.sitLargeAgent(sitLargeCells([]int{3, 4, 5}, 28), own)
 			rowsBefore := len(s.opsRows())
 			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-large-clear", "commands": clears})
-			if !own {
-				if !refused || !strings.Contains(applied, "holder_human") || s.head() != 2 || len(s.opsRows()) != rowsBefore {
-					t.Errorf("a large change beside the person's lease: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
-				}
-				return
-			}
-			if refused || s.head() != 3 {
-				t.Fatalf("a large change with the agent's own lease: head %d %.200s", s.head(), applied)
-			}
-			if strings.Contains(applied, "\"undoable\":true") {
-				t.Errorf("the card offers Undo for an inverse that exceeds the storage limit: %.300s", applied)
-			}
-			rows := s.opsRows()
-			if last := rows[len(rows)-1]; last.Kind != "agent" || last.Version != 3 || last.Replayable || last.Inverse != "[]" {
-				t.Errorf("the large change's ops row is replayable (ops %d B, inverse %d B): %+v", len(last.Ops), len(last.Inverse), last.OperationID)
+			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore {
+				t.Errorf("a large change: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
 			}
 		})
 	}
 }
 
-// A change whose inverse cannot be read (one range.clear over L!C2:C81: its read for the inverse
-// answers more than the read's 1 MiB) is never presented as undoable: it is refused, or it is stored
-// without "undoable":true; an undo of it never answers 2xx as if it had put the values back, and the
-// cells stay cleared only when the person was told.
-func TestSheetITAChangeWithoutAnInverseIsNotUndoable(t *testing.T) {
-	s := newSheetITScenario(t)
-	call, human, _, generation := s.sitLargeAgent(sitLargeCells([]int{3}, 81), true)
-	applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-no-inverse", "commands": sitCommands(
-		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C81"}))})
-	if refused {
-		if s.head() != 2 {
-			t.Errorf("refused, yet head %d", s.head())
-		}
-		t.Logf("refused: %.200s", applied)
-		return
-	}
-	t.Logf("apply: %.400s", applied)
-	if strings.Contains(applied, `"undoable":true`) {
-		t.Errorf("a change without an inverse is answered undoable: %.300s", applied)
-	}
-	var result struct {
-		OperationID string `json:"operation_id"`
-	}
-	_ = json.Unmarshal([]byte(applied), &result)
-	rows := s.opsRows()
-	last := rows[len(rows)-1]
-	t.Logf("stored v%d: replayable %v, ops %d B, inverse %d B", last.Version, last.Replayable, len(last.Ops), len(last.Inverse))
-	s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
-	generationH := s.humanLease(human)
-	w := s.undo(human, generationH, result.OperationID)
-	got := s.headSheets(human)["L"]
-	restored := strings.HasPrefix(got["C2"], "3-02")
-	if w.Code < 300 && !restored {
-		t.Errorf("undo of a change without an inverse answers %d without putting the values back: %s", w.Code, w.Body)
-	}
-	t.Logf("undo: %d %s; L!C2 back %v", w.Code, w.Body, restored)
-}
-
-// Beside the person's lease a change without an inverse is refused as holder_human before the
-// engine runs: the person could not undo it (ce86b4832). Head and operations unchanged.
-func TestSheetITCoWriteRefusesAChangeWithoutAnInverse(t *testing.T) {
-	s := newSheetITScenario(t)
-	call, _, _, generation := s.sitLargeAgent(sitLargeCells([]int{3}, 81), false)
-	rowsBefore := len(s.opsRows())
-	applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-no-inverse-cowrite", "commands": sitCommands(
-		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C81"}))})
-	if !refused || !strings.Contains(applied, "holder_human") || s.head() != 2 || len(s.opsRows()) != rowsBefore {
-		t.Errorf("a change without an inverse beside the person's lease: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
+// The inverse of L!C2:C81 exceeds the engine's read limit. The agent cannot
+// publish the change even when it is the only editor.
+func TestSheetITRefusesAChangeWithoutAnInverse(t *testing.T) {
+	for _, own := range []bool{false, true} {
+		name := map[bool]string{false: "beside the person's lease", true: "own lease"}[own]
+		t.Run(name, func(t *testing.T) {
+			s := newSheetITScenario(t)
+			call, human, _, generation := s.sitLargeAgent(sitLargeCells([]int{3}, 81), own)
+			rowsBefore := len(s.opsRows())
+			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-no-inverse", "commands": sitCommands(
+				sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C81"}))})
+			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore {
+				t.Fatalf("a change without an inverse: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
+			}
+			if got := s.headSheets(human)["L"]["C2"]; !strings.HasPrefix(got, "3-02") {
+				t.Errorf("original cell changed: %.100q", got)
+			}
+		})
 	}
 }
 

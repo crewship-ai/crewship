@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -21,10 +24,14 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "native Craft access denied")
 		return
 	}
-	var body struct{}
+	var body struct {
+		ChatID string `json:"chat_id"`
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&body); err != nil {
+	var trailing any
+	if err = decoder.Decode(&body); err != nil || decoder.Decode(&trailing) != io.EOF ||
+		body.ChatID != "" && !craftChatID.MatchString(body.ChatID) {
 		replyError(w, 400, "invalid native session request")
 		return
 	}
@@ -84,6 +91,23 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "native Craft access denied")
 		return
 	}
+	canWrite := false
+	if body.ChatID != "" && source.Kind == AuthKindSession && proof.privateRead && proof.application == craftapps.Sheet && m.agents != nil {
+		if app, ok := m.agents.documents.application(proof.application); ok && app.Store.Format == mooring.NativeFormatWorkbook {
+			linked, linkErr := craftRealtimeChatLinked(ctx, tx, scope, body.ChatID, source.UserID)
+			if linkErr != nil {
+				replyError(w, 503, "native Craft unavailable")
+				return
+			}
+			if linked && now <= time.Duration(math.MaxInt64)-24*time.Hour {
+				entry.chatID = body.ChatID
+				entry.realtimeDeadline = now + 24*time.Hour
+				_, writeErr := m.checkEntry(ctx, tx, entry, true)
+				canWrite = writeErr == nil && craftNativePersonalSpace(proof.record, source.UserID) && m.apps.allows(ctx, entry.application, craftapps.OpStartEdit)
+				entry.realtimeWrite = canWrite
+			}
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		replyError(w, 503, "native Craft unavailable")
 		return
@@ -109,5 +133,39 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 	m.sessionsByID[id] = entry
 	m.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, map[string]any{"session_token": token, "session_id": id, "application_id": proof.application, "page_id": scope.ArtifactID})
+	out := craftNativeSessionResponse{
+		SessionToken: token, SessionID: id, ApplicationID: proof.application, PageID: scope.ArtifactID,
+		RealtimeSheet: entry.chatID != "", CanWrite: canWrite,
+	}
+	if canWrite {
+		out.Generation = craftRealtimeGeneration
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+// An admission has one generation. The opaque session ID and the original
+// authority epochs fence it across revocation, reauthorization and reissue.
+const craftRealtimeGeneration = "1"
+
+type craftNativeSessionResponse struct {
+	SessionToken  string `json:"session_token"`
+	SessionID     string `json:"session_id"`
+	ApplicationID string `json:"application_id"`
+	PageID        string `json:"page_id"`
+	RealtimeSheet bool   `json:"realtime_sheet"`
+	CanWrite      bool   `json:"can_write"`
+	Generation    string `json:"generation,omitempty"`
+}
+
+func craftRealtimeChatLinked(ctx context.Context, tx *sql.Tx, scope mooring.EditLeaseScope, chat, user string) (bool, error) {
+	var linked bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM chats c
+		WHERE c.id=?1 AND c.workspace_id=?2 AND c.created_by=?3 AND c.visibility='private'
+		AND (
+			EXISTS(SELECT 1 FROM artifact_chat_refs r WHERE r.chat_id=c.id AND r.workspace_id=c.workspace_id AND r.human_user_id=c.created_by AND r.page_id=?4)
+			OR EXISTS(SELECT 1 FROM artifact_message_refs r WHERE r.chat_id=c.id AND r.workspace_id=c.workspace_id AND r.human_user_id=c.created_by AND r.page_id=?4)
+		)
+	)`, chat, scope.WorkspaceID, user, scope.ArtifactID).Scan(&linked)
+	return linked, err
 }

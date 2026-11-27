@@ -16923,6 +16923,9 @@
           },
           "mine": {
             "type": "boolean"
+          },
+          "realtime_sheet": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -16937,6 +16940,84 @@
           "handoff_requested_kind",
           "handoff_requested_by",
           "can_share"
+        ],
+        "type": "object"
+      },
+      "NativeCraftMergedSheetSave": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_ranges": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftSheetRange"
+            },
+            "type": "array"
+          },
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "head_content_hash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "merged"
+            ],
+            "type": "string"
+          },
+          "overlap": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftSheetRange"
+            },
+            "type": "array"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+          },
+          "submitted": {
+            "additionalProperties": false,
+            "properties": {
+              "attempt_id": {
+                "pattern": "^[A-Za-z0-9_-]{8,64}$",
+                "type": "string"
+              },
+              "base_version": {
+                "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]{0,18}$",
+                "type": "string"
+              },
+              "content_hash": {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "editor_revision": {
+                "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes.",
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "attempt_id",
+              "base_version",
+              "editor_revision",
+              "content_hash"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "submitted",
+          "receipt",
+          "head_content_hash",
+          "bytes",
+          "overlap",
+          "agent_ranges"
         ],
         "type": "object"
       },
@@ -17253,7 +17334,7 @@
             "type": "string"
           },
           "attemptId": {
-            "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed).",
+            "description": "Client nonce of one save attempt. Required for real-time chat workbook saves and reconciliation. An exact committed attempt returns its original receipt even if the head advanced. A proved absent attempt is retired and answered with 410; a late save of it is refused with 409.",
             "pattern": "^[A-Za-z0-9_-]{8,64}$",
             "type": "string"
           },
@@ -17470,8 +17551,21 @@
             ],
             "type": "string"
           },
+          "can_write": {
+            "type": "boolean"
+          },
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
           "page_id": {
             "type": "string"
+          },
+          "realtime_sheet": {
+            "type": "boolean"
           },
           "session_id": {
             "type": "string"
@@ -17486,8 +17580,21 @@
           "session_token",
           "session_id",
           "application_id",
-          "page_id"
+          "page_id",
+          "realtime_sheet",
+          "can_write"
         ],
+        "type": "object"
+      },
+      "NativeCraftSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "chat_id": {
+            "description": "The caller's private chat linked to this workbook. Omit for ordinary native admission.",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "NativeCraftShareReceipt": {
@@ -17575,6 +17682,92 @@
           "generation",
           "baseVersion",
           "targetVersion"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSheetPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "started",
+              "updated",
+              "ended"
+            ],
+            "type": "string"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftSheetRange"
+            },
+            "type": "array"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "ttl_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op_id",
+          "run_id",
+          "agent",
+          "phase",
+          "ranges",
+          "ttl_ms"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSheetPresenceSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftSheetPresence"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "type": "object"
+      },
+      "NativeCraftSheetRange": {
+        "additionalProperties": false,
+        "properties": {
+          "a1": {
+            "type": "string"
+          },
+          "sheet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheet",
+          "a1"
         ],
         "type": "object"
       },
@@ -17692,7 +17885,7 @@
             "type": "string"
           },
           "attemptId": {
-            "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed).",
+            "description": "Client nonce of one save attempt. Required for real-time chat workbook saves and reconciliation. An exact committed attempt returns its original receipt even if the head advanced. A proved absent attempt is retired and answered with 410; a late save of it is refused with 409.",
             "pattern": "^[A-Za-z0-9_-]{8,64}$",
             "type": "string"
           },
@@ -148806,7 +148999,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeCraftMergedSheetSave"
+                    }
+                  ]
                 }
               }
             },
@@ -149213,7 +149413,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeCraftMergedSheetSave"
+                    }
+                  ]
                 }
               }
             },
@@ -149578,7 +149785,7 @@
             }
           },
           {
-            "description": "The edit lease generation the caller holds.",
+            "description": "The edit lease generation the caller holds, or the generation of a writable real-time chat Sheet admission.",
             "in": "header",
             "name": "X-Craft-Generation",
             "required": true,
@@ -150224,7 +150431,7 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge.",
+                  "description": "SSE event: lease with NativeCraftLease JSON for ordinary sessions. Real-time chat workbook sessions receive sheet_agent_presence_snapshot (NativeCraftSheetPresenceSnapshot) and sheet_agent_presence (NativeCraftSheetPresence). Either mode can receive session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge.",
                   "type": "string"
                 }
               }
@@ -153177,7 +153384,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
+                "$ref": "#/components/schemas/NativeCraftSessionRequest"
               }
             }
           },

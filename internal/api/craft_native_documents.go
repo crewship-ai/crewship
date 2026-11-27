@@ -255,6 +255,11 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshotFrom(w http.ResponseWriter, r *
 	}
 	if operation == "save" {
 		bytes := reserve
+		if entry.chatID != "" && source == craftSheetSavedByEditor {
+			// A merge may keep more bytes from the head than were uploaded.
+			bytes = max(bytes, 32<<20)
+			r = r.WithContext(context.WithValue(r.Context(), craftRealtimeWriteKey{}, true))
+		}
 		bytes += 256 << 10
 		upload, e := s.ReserveUpload(r.Context(), entry.scope, bytes)
 		if e != nil {
@@ -300,6 +305,10 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshotFrom(w http.ResponseWriter, r *
 	}
 	lease := mooring.EditLease{Scope: entry.scope, Holder: craftNativePrincipal(entry), Generation: generation}
 	w.Header().Set("Cache-Control", "no-store")
+	if entry.chatID != "" && (operation == "reconcile" || operation == "save" && source == craftSheetSavedByEditor) {
+		d.mutateRealtimeWorkbook(w, r, entry, s, lease, base, body, operation)
+		return
+	}
 	switch operation {
 	case "save":
 		if s.Workbook() {

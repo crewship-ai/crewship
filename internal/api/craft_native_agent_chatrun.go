@@ -59,10 +59,12 @@ const (
 	CraftSheetReasonFidelityLoss    = "fidelity_loss"
 	CraftSheetReasonBusy            = "busy"
 	CraftSheetReasonConsentStale    = "consent_stale"
+	CraftSheetReasonNotUndoable     = "not_undoable"
 	craftSheetReasonUnavailableText = "Native Craft agents are not available."
 )
 
 var craftSheetReasonText = map[string]string{
+	CraftSheetReasonNotUndoable:  "The Sheet change could not be made undoable, so nothing was changed. Try a smaller range or leave those cells unchanged.",
 	CraftSheetReasonFeatureOff:   "Agent access to Sheets is not turned on for this workspace.",
 	CraftSheetReasonAgentPolicy:  "This workspace does not let this agent's crew change artifacts.",
 	CraftSheetReasonNotAttached:  "No Sheet you may use is attached to this message, so nothing was read or changed. Do not work on a copy of the file with Python or another tool, and do not create a new workbook: tell the person, and ask them to attach the Sheet to their message with agent edits turned on, then send it again.",
@@ -375,8 +377,8 @@ func craftNativeChatReason(status int, body []byte, input craftNativeAgentToolRe
 		return CraftSheetReasonHolderHuman
 	case status == http.StatusConflict && answer.Reason == "proposal_required":
 		return CraftSheetReasonProposal
-	case status == http.StatusConflict && answer.Reason == CraftSheetReasonConsentStale:
-		return CraftSheetReasonConsentStale
+	case status == http.StatusConflict && (answer.Reason == CraftSheetReasonConsentStale || answer.Reason == CraftSheetReasonNotUndoable):
+		return answer.Reason
 	case status == http.StatusConflict && answer.Code == CraftSheetReasonLeaseExpired:
 		return CraftSheetReasonLeaseExpired
 	case status == http.StatusConflict:
@@ -887,7 +889,29 @@ func (m *craftNativeAgentManager) chatRunConsentStale(ctx context.Context, e *cr
 	if err != nil {
 		return false, err
 	}
-	return head != want, nil
+	return m.chatRunConsentMoved(ctx, e, want, head)
+}
+
+// A live run may advance over journaled changes made by its original
+// consenting human in the same chat. An unrelated save requires new consent.
+func (m *craftNativeAgentManager) chatRunConsentMoved(ctx context.Context, e *craftNativeAgentEntry, from, head int64) (bool, error) {
+	if from < 1 || head < from {
+		return true, nil
+	}
+	if head == from {
+		return false, nil
+	}
+	app, ok := m.documents.application(e.grant.Application)
+	if !ok || app.Store.Format != mooring.NativeFormatWorkbook {
+		return true, nil
+	}
+	a := e.chat.authority
+	pin := mooring.NewNativeStore(m.human.pages.db, app.Store).EnginePin()
+	history, err := craftReadRealtimeChanges(ctx, m.human.pages.db, e.grant.Scope, a.HumanUserID, a.AgentID, a.ChatID, pin, from, head)
+	if errors.Is(err, errCraftRealtimeUnproved) {
+		return true, nil
+	}
+	return len(history.agentRanges) > 0, err
 }
 
 type craftNativeChangeSummary struct {

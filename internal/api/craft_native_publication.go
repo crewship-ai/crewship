@@ -10,6 +10,7 @@ import (
 
 // The native publication binding is separate from human session/lease routing.
 type craftNativeContextKey struct{}
+type craftRealtimeWriteKey struct{}
 
 // authorizeNative is the single binding for the native manifest publication
 // callback. Only a successfully bound HTTP request may install this context.
@@ -47,6 +48,10 @@ func (m *craftNativeHTTP) authorizeNative(ctx context.Context, tx *sql.Tx, scope
 	proof, err := m.checkEntry(ctx, tx, entry, intent == "write")
 	if err != nil {
 		return mooring.EditLeasePrincipal{}, err
+	}
+	if intent == "write" && ctx.Value(craftRealtimeWriteKey{}) != nil &&
+		(!entry.realtimeWrite || entry.chatID == "" || !craftNativePersonalSpace(proof.record, entry.source.UserID)) {
+		return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 	}
 	if intent == "read" && !proof.privateRead {
 		return mooring.EditLeasePrincipal{}, errCraftNativeAccess

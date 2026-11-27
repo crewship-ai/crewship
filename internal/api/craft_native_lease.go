@@ -48,6 +48,7 @@ type craftNativeRequestResponse struct {
 	Kind        string `json:"kind"`
 }
 type craftNativeLeaseResponse struct {
+	RealtimeSheet        bool                         `json:"realtime_sheet,omitempty"`
 	CanStopAgent         bool                         `json:"can_stop_agent"`
 	Draft                string                       `json:"draft,omitempty"`
 	Holder               *craftNativeHolderResponse   `json:"holder"`
@@ -209,6 +210,11 @@ func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 		craftNativeHTTPError(w, err)
 		return
 	}
+	if entry.chatID != "" {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, m.realtimeLeaseView(r, entry))
+		return
+	}
 	l, err := m.leases.Read(r.Context(), entry.scope, craftNativePrincipal(entry))
 	if err != nil {
 		craftNativeHTTPError(w, err)
@@ -217,6 +223,24 @@ func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, m.leaseView(r, entry, l))
 }
+func (m *craftNativeHTTP) realtimeLeaseView(r *http.Request, entry *craftNativeSession) craftNativeLeaseResponse {
+	view := craftNativeLeaseResponse{RealtimeSheet: true, HandoffRequestedBy: []craftNativeRequestResponse{}}
+	if !entry.realtimeWrite || !m.apps.allows(r.Context(), entry.application, craftapps.OpContinue) {
+		return view
+	}
+	tx, err := m.pages.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		return view
+	}
+	defer tx.Rollback()
+	proof, err := m.checkEntry(r.Context(), tx, entry, true)
+	if err == nil && craftNativePersonalSpace(proof.record, entry.source.UserID) {
+		generation := craftRealtimeGeneration
+		view.Generation, view.CanEdit, view.CanWrite = &generation, true, true
+	}
+	return view
+}
+
 func (m *craftNativeHTTP) mutateLease(w http.ResponseWriter, r *http.Request, operation string) {
 	if !m.enabled {
 		replyError(w, 503, "native Craft unavailable")
@@ -225,6 +249,10 @@ func (m *craftNativeHTTP) mutateLease(w http.ResponseWriter, r *http.Request, op
 	entry, err := m.bound(r)
 	if err != nil {
 		craftNativeHTTPError(w, err)
+		return
+	}
+	if entry.chatID != "" {
+		replyCode(w, http.StatusConflict, "realtime_session", "this Sheet session uses concurrent editing")
 		return
 	}
 	if !m.apps.allows(r.Context(), entry.application, craftLeaseOperation(operation)) {
