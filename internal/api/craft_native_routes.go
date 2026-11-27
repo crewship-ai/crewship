@@ -17,6 +17,13 @@ type CraftNativeHTTPConfig struct {
 	AgentsEnabled bool
 	AgentApply    CraftNativeAgentApply
 	AgentInspect  CraftNativeAgentInspect
+	// SheetComputed records a Sheet document the server's own engine wrote
+	// with every value recalculated (a finished import), so the engine session
+	// that later opens exactly those bytes keeps their values. Nil does nothing.
+	SheetComputed func(CraftNativeDocumentProfile, []byte)
+	// SheetTrusted reports whether a Sheet document's bytes are exactly ones
+	// the server's own engine wrote with every value computed. Nil trusts none.
+	SheetTrusted func(CraftNativeDocumentProfile, []byte) bool
 	// Policy applies the instance administrator's Word, Sheet and agent
 	// settings. Nil allows everything the profiles allow (package tests).
 	Policy *craftapps.Policy
@@ -86,6 +93,8 @@ func (r *Router) registerCraftNativeRoutes() {
 	for app, p := range r.craftNativeHTTPConfig.Profiles {
 		d.profiles[app] = p
 	}
+	d.computed = r.craftNativeHTTPConfig.SheetComputed
+	d.trusted = r.craftNativeHTTPConfig.SheetTrusted
 	r.craftNativeDocuments = d
 	m.agents = newCraftNativeAgentManager(m, d, r.craftNativeHTTPConfig)
 	_ = m.agents.start(r.webhookHandler)
@@ -93,6 +102,14 @@ func (r *Router) registerCraftNativeRoutes() {
 	// Availability is Page-scoped and never treats an old profile as native.
 	// openapi: responses 200,401,403
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/availability", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.availability)))))
+	// Whether an agent may change this Sheet if it is attached to the next
+	// message of the caller's chat, and the reason when not. Advice only.
+	// openapi: responses 200,400,401,403,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/agent-access", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.agentAccess)))))
+	// The artifacts a person attached to the messages of a chat they may read,
+	// each shown only while they may see it. Read-only, metadata only.
+	// openapi: responses 200,400,401,403,404,503
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-refs", authed(wsCtx(r.providerAccountPolicy(r.chatArtifactRefs(m)))))
 	// Every mutation declares its per-object authority gate; the handler checks
 	// original credentials and Page rights, including CLI read/write scopes.
 	// openapi: responses 201,400,401,403,503
@@ -123,6 +140,14 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/lease/handoff", roleSelf, m.handoff)
 	// openapi: responses 201,400,401,403,409,413,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/initialize", roleSelf, d.initialize)
+	// openapi: responses 202,400,401,403,404,409,413,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/import", roleSelf, d.importStart)
+	// openapi: responses 200,401,403,404,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/import/{id}", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.importStatus)))))
+	// openapi: responses 201,401,403,404,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/import/{id}/initialize", roleSelf, d.importInitialize)
+	// openapi: responses 200,401,403,404,409,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/import/{id}/document", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.importDocument)))))
 	// openapi: responses 200,401,403,404,422,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/preview", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.preview)))))
 	// openapi: responses 200,400,401,403,409,422,500,503
@@ -137,9 +162,16 @@ func (r *Router) registerCraftNativeRoutes() {
 	// the document read; the craft_version_history workspace flag keeps it off.
 	// openapi: responses 200,401,403,404,409,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document/versions", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.listVersions)))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/undo", roleSelf, d.undoOperation)
+	// openapi: responses 200,400,401,403,404,409,413,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document/operations", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.listOperations)))))
 	// One historical version's bytes, read-only, same authority, audit and flag.
 	// openapi: responses 200,400,401,403,404,409,422,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document/versions/{version}", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.readVersion)))))
+	// The Sheet as an xlsx download: the document read's authority, audited (craft_native_export.go).
+	// openapi: responses 200,400,401,403,404,409,413,422,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document/export.xlsx", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.exportXLSX)))))
 	// openapi: responses 200,400,401,403,409,413,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/save", roleSelf, d.saveSnapshot)
 	// openapi: responses 200,400,401,403,409,413,422,503
@@ -188,12 +220,12 @@ func (r *Router) qualifyStartupProfiles() (map[string]craftNativeApplication, ma
 			operator[app] = p
 		}
 	}
-	applications, profiles, err := qualifyCraftNativeProfiles(operator)
+	applications, profiles, err := qualifyCraftNativeProfiles(operator, r.craftNativeHTTPConfig.SheetTrusted)
 	if err != nil {
 		return nil, nil, err
 	}
 	for app, p := range release {
-		a, q, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{app: p})
+		a, q, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{app: p}, r.craftNativeHTTPConfig.SheetTrusted)
 		if err != nil {
 			r.logger.Error("installed Craft application cannot run", "application", app, "error", err)
 			c := r.craftNativeHTTPConfig.Components[app]

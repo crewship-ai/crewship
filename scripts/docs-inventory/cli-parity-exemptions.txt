@@ -33,6 +33,10 @@ PUT /api/v1/crews/{crewId}                         alias of PATCH on the same ha
 GET /api/v1/pages/{slug}/artifact/versions         alias of GET /api/v1/pages/{slug}/artifact on the same handler (GetArtifactProject), which `crewship page artifact versions` reads
 GET /api/v1/crews/{crewId}/issues/{identifier}     redundant with GET /api/v1/issues/{identifier} (identifiers are workspace-unique), which `crewship issue get` reads
 
+GET /api/v1/pages/{slug}/craft/document/operations  editor replays the saved operations over its local draft
+POST /api/v1/pages/{slug}/craft/document/undo        the edit-lease holder reverses an operation from the agent change card
+GET /api/v1/pages/{slug}/craft/document/export.xlsx editor download; the CLI reads workbook bytes through craft version
+GET /api/v1/chats/{chatId}/artifact-refs             private chat composer attachment list
 POST /api/v1/pages/{slug}/craft/document/migrate-workbook  editor startup calls this automatically on first open; the CLI exposes the original through craft original-workbook
 
 # --- Pre-existing gaps: authenticated routes with no command when this gate was

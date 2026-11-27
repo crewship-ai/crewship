@@ -40,6 +40,10 @@ type craftNativeVersionResponse struct {
 	RestoredFrom string                              `json:"restoredFrom,omitempty"`
 	Proposal     *craftNativeVersionProposalResponse `json:"proposal,omitempty"`
 	Current      bool                                `json:"current"`
+	// A workbook Sheet's version file: xlsx, xlsm, or native for a version from before workbook files.
+	Format      string `json:"format,omitempty"`
+	ContentHash string `json:"contentHash,omitempty"`
+	Size        string `json:"size,omitempty"`
 }
 
 // craftNativeVersionDocumentResponse is one historical native version with
@@ -114,8 +118,11 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 	}
 	for i, v := range versions {
 		item := craftNativeVersionResponse{Version: strconv.FormatInt(v.Version, 10), CreatedAt: v.CreatedAt, Author: name(v.Actor), Current: i == 0}
-		if s.Workbook() && v.EntryPoint == "document.json" {
-			item.Format = "native"
+		if s.Workbook() {
+			item.Format = mooring.WorkbookFormatOf(v.EntryPoint)
+			if v.EntryHash != "" {
+				item.ContentHash, item.Size = "sha256:"+v.EntryHash, strconv.FormatInt(v.EntrySize, 10)
+			}
 		}
 		if v.RestoredFrom > 0 {
 			item.RestoredFrom = strconv.FormatInt(v.RestoredFrom, 10)
@@ -135,6 +142,12 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 // craftVersionHistoryReadable refuses a person without private read authority
 // before the flag answers. The store repeats the check in its read transaction.
 func (d *craftNativeDocumentsHTTP) craftVersionHistoryReadable(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
+	return d.craftNativeHistoryReadable(w, r, entry) && craftVersionHistoryEnabled(w, r, d, entry)
+}
+
+// craftNativeHistoryReadable is the read rule of craftVersionHistoryReadable without the history
+// feature flag: an editor replaying agent operations needs them whether or not the history is shown.
+func (d *craftNativeDocumentsHTTP) craftNativeHistoryReadable(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
 	tx, err := d.human.pages.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		craftNativeDocumentError(w, err)
@@ -149,7 +162,7 @@ func (d *craftNativeDocumentsHTTP) craftVersionHistoryReadable(w http.ResponseWr
 		craftNativeDocumentError(w, err)
 		return false
 	}
-	return craftVersionHistoryEnabled(w, r, d, entry)
+	return true
 }
 
 func craftVersionHistoryEnabled(w http.ResponseWriter, r *http.Request, d *craftNativeDocumentsHTTP, entry *craftNativeSession) bool {

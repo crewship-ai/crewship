@@ -18,6 +18,7 @@ crewship craft preview <page>
 crewship craft versions <page>
 crewship craft version <page> <version> [--output FILE]
 crewship craft original-workbook <page> [--output FILE]
+crewship craft agent-access <page> --chat <chat-id>
 crewship craft connect <page>
 crewship craft initialize <page> [--application word|sheet] --file <native.json>
 crewship craft task instruction|start|status|stop ...
@@ -32,6 +33,10 @@ JSON of a legacy Sheet. It reads
 `GET /api/v1/pages/{slug}/craft/document/original-workbook` under a read-only
 admission, without a lease. The server requires private Page read access.
 The default is raw stdout. `--output FILE` writes a private file atomically.
+
+`agent-access` reads `GET /api/v1/pages/{slug}/craft/agent-access`: whether the
+agent of your private chat may change this Sheet if you attach it to your next
+message, and the reason when not. It changes nothing.
 
 `availability` reads `GET /api/v1/pages/{slug}/craft/availability`. While an
 administrator has Word or Sheet draining or off, it reports `can_edit: false`

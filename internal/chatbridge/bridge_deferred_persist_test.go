@@ -31,9 +31,9 @@ func TestDeferredSendIsPersistedOnceBeforeTheBuild(t *testing.T) {
 	}{
 		{name: "queued then resumed", wantSaved: 1, wantAcks: 1, wantResume: true},
 		{name: "queued, deferred again, resumed", redefers: true, wantSaved: 1, wantAcks: 1, wantResume: true},
-		// The build never started: nothing will run the message, so it is
-		// not recorded and the sender gets the error instead.
-		{name: "build could not be queued", enqueueErr: errors.New("rate limited"), wantSaved: 0, wantAcks: 0},
+		// The build never started: nothing will run the message, so it is kept
+		// as not run and the sender gets the error.
+		{name: "build could not be queued", enqueueErr: errors.New("rate limited"), wantSaved: 1, wantAcks: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

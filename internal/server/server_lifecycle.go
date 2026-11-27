@@ -661,6 +661,11 @@ func (s *Server) Shutdown() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 	defer cancel()
+	// Engine workers of persistent Sheet sessions end here: each is asked to
+	// stop and killed after two seconds, and the whole step is bounded.
+	if s.sheetSessions != nil && !s.sheetSessions.closeWithin(s.cfg.Server.ShutdownTimeout) {
+		s.logger.Warn("Sheet engine sessions did not close in time")
+	}
 
 	var firstErr error
 	if err := s.httpServer.Shutdown(ctx); err != nil {

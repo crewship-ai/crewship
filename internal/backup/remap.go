@@ -509,6 +509,20 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	// Replay actor_id is a typed soft reference to the author of the version.
+	for _, row := range dump.Tables["craft_version_ops"] {
+		actor, _ := row["actor_id"].(string)
+		switch row["actor_kind"] {
+		case "agent":
+			if next := idMap["agents"][actor]; next != "" {
+				row["actor_id"] = next
+			}
+		case "human":
+			if next := idMap["users"][actor]; next != "" {
+				row["actor_id"] = next
+			}
+		}
+	}
 	// The profile's primary key is page_id, so the generic id map has no
 	// craft_native_documents entry. Follow its Page anchor explicitly.
 	for _, table := range []string{"craft_native_proposals", "craft_workbook_migrations"} {

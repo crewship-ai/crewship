@@ -138,13 +138,14 @@ func TestHandleChatMessageBlocksWhenDevcontainerNotProvisioned(t *testing.T) {
 	if !hasErr {
 		t.Errorf("expected error event mentioning provision, got %+v", events)
 	}
-	// User message must NOT have been persisted (fail-fast before append).
+	// The run is refused, the message is kept as not run: the user
+	// turn and its not-run note.
 	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("read conversation: %v", err)
 	}
-	if len(msgs) != 0 {
-		t.Errorf("expected no persisted messages on fail-fast, got %d", len(msgs))
+	if len(msgs) != 2 || msgs[0].Role != "user" || !strings.HasPrefix(msgs[1].ID, "notrun-") {
+		t.Errorf("expected the user turn and its not-run note, got %+v", msgs)
 	}
 }
 

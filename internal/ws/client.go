@@ -425,6 +425,9 @@ const CrewProvisioningEventType = "crew_provisioning"
 // agentBusyNotice is the user-facing text of the sender-only busy rejection.
 const agentBusyNotice = "The agent is busy with another run right now. Please wait for it to finish."
 
+// agentBusySavedNotice answers a send that was saved and marked not run.
+const agentBusySavedNotice = "Your message is saved. The agent is busy with another run, so it did not run yet. Send it again once the agent is free."
+
 type sendMessagePayload struct {
 	ChatID  string `json:"session_id"`
 	Content string `json:"content"`
@@ -872,13 +875,21 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			if errors.Is(err, ErrAgentBusy) {
 				c.hub.logger.Info("send rejected: agent busy",
 					"session_id", payload.ChatID, "user_id", c.userID)
+				meta := map[string]any{"chat_id": payload.ChatID}
+				notice := agentBusyNotice
+				var saved *MessageNotRun
+				if errors.As(err, &saved) {
+					// The message is saved as not run; the client offers "Send again" for it.
+					meta["message_id"], meta["status"] = saved.MessageID, "not_run"
+					notice = agentBusySavedNotice
+				}
 				busy, merr := json.Marshal(ServerMessage{
 					Type:    "chat_event",
 					Channel: channel,
 					Payload: ChatEvent{
 						Type:     AgentBusyEventType,
-						Content:  agentBusyNotice,
-						Metadata: map[string]any{"chat_id": payload.ChatID},
+						Content:  notice,
+						Metadata: meta,
 					},
 				})
 				if merr == nil {

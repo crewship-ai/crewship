@@ -61,7 +61,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	var data map[string]interface{}
 	if json.NewDecoder(resp.Body).Decode(&data) == nil {
-		if files, ok := data["files"]; ok {
+		if files, ok := data["files"]; ok && files != nil {
 			writeJSON(w, http.StatusOK, files)
 			return
 		}
@@ -564,7 +564,7 @@ func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Reques
 
 	var data map[string]interface{}
 	if json.NewDecoder(resp.Body).Decode(&data) == nil {
-		if files, ok := data["files"]; ok {
+		if files, ok := data["files"]; ok && files != nil {
 			writeJSON(w, http.StatusOK, files)
 			return
 		}

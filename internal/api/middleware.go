@@ -243,7 +243,28 @@ func BodyCap(max int64) func(http.Handler) http.Handler {
 // limit while reading — never buffering — the body. The encrypted backup
 // upload accepts archives up to 64 GiB, a Word or Sheet package 512 MiB.
 func bodyCapExempt(r *http.Request) bool {
-	return r.Method == http.MethodPost && (r.URL.Path == instanceBackupUploadPath || craftPackageUploadPath(r.URL.Path))
+	return r.Method == http.MethodPost && (r.URL.Path == instanceBackupUploadPath || craftPackageUploadPath(r.URL.Path) || craftNativeLargeBodyPath(r.URL.Path))
+}
+
+// craftNativeLargeBodyPath names the three POST routes of a native Sheet that carry a whole
+// document: the xlsx import (own limit 64 MiB), initialize and the document save (own limit
+// 45 MiB; a 30 MB workbook is about 40 MB as base64 JSON). Reconcile carries no document. Each reads its body
+// through its own MaxBytesReader after authentication and authorization; no other route is
+// widened, and the 16 MiB cap still covers everything else.
+func craftNativeLargeBodyPath(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/v1/pages/")
+	if !ok {
+		return false
+	}
+	slug, tail, ok := strings.Cut(rest, "/craft/")
+	if !ok || slug == "" || strings.Contains(slug, "/") {
+		return false
+	}
+	switch tail {
+	case "import", "initialize", "document/save":
+		return true
+	}
+	return false
 }
 
 // AuthMiddleware provides HTTP middleware for JWT and CLI token authentication.

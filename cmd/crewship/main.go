@@ -168,6 +168,9 @@ func init() {
 }
 
 func main() {
+	if handled, code := runCraftEngineWorker(os.Args, os.Stdin, os.Stdout, os.Stderr); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--internal-run-capture" {
 		os.Exit(runHostCapture(os.Stdin, os.Stderr))
 	}

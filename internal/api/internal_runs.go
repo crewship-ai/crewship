@@ -559,7 +559,14 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// (a user-aborted run has no goal outcome to assess) and whenever
 	// the run_summary aux slot has no buildable provider (SetRunVerdict
 	// wired nil) or the workspace has the feature flag off.
-	if body.Status != "CANCELLED" && h.runVerdict != nil {
+	// A run bound to attached artifacts feeds no learning (verdict summaries
+	// and consolidation read it later); an unanswerable lookup feeds none either.
+	scoped, scopeErr := artifactScopedRun(r.Context(), h.db, runID)
+	learns := scopeErr == nil && !scoped
+	if scopeErr != nil {
+		h.logger.Warn("run artifact scope lookup failed; no verdict or consolidation for this run", "run_id", runID, "error", scopeErr)
+	}
+	if learns && body.Status != "CANCELLED" && h.runVerdict != nil {
 		h.verdictWG.Add(1)
 		finish := beginBackgroundWork()
 		go func() {
@@ -626,7 +633,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// fires the consolidation pass asynchronously, so this call
 	// never blocks the response. agentID → crew_id lookup is a tiny
 	// extra SELECT, but only happens once per run completion.
-	if body.Status == "COMPLETED" && h.postRunTrigger != nil && agentID != "" {
+	if learns && body.Status == "COMPLETED" && h.postRunTrigger != nil && agentID != "" {
 		var crewID, crewSlug sql.NullString
 		if err := h.db.QueryRowContext(r.Context(), `
 			SELECT c.id, c.slug

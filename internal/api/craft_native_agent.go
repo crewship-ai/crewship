@@ -114,6 +114,9 @@ type craftNativeAgentGrant struct {
 }
 
 type craftNativeAgentEntry struct {
+	// chat is set for the entry of an ordinary chat run's attached Sheet; the
+	// entry of a native Craft task leaves it nil.
+	chat              *craftNativeChatRun
 	tool              *craftNativeAgentToolState
 	callMu            sync.Mutex
 	grant             craftNativeAgentGrant
@@ -143,6 +146,9 @@ type craftNativeAgentManager struct {
 	done       chan struct{}
 	runtime    *craftNativeAgentRuntime
 	dispatcher *dispatch.Dispatcher
+	// prewarmChats remembers when each conversation last started a Sheet prewarm.
+	prewarmMu    sync.Mutex
+	prewarmChats map[string]time.Time
 }
 
 func newCraftNativeAgentManager(h *craftNativeHTTP, d *craftNativeDocumentsHTTP, cfg CraftNativeHTTPConfig) *craftNativeAgentManager {

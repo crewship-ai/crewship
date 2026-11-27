@@ -153,7 +153,7 @@ func nativeCraftPositive(raw json.RawMessage) bool {
 func nativeCraftToolDescription(op string) string {
 	switch op {
 	case "read":
-		return "Read this confirmed task's native document version and bounded original-engine query. Word query {command:text,params:{}}; Sheet query {command:cell.get,params:{cell:A1}}. Read never acquires a lease."
+		return "Read this confirmed task's native document version and bounded original-engine query. Word query {command:text,params:{}}; Sheet queries: {command:cell.get,params:{cell:A1,sheet?}}, {command:sheet.read,params:{range:A1:D10,sheet?,formulas?,formatted?}} (at most 10000 cells) and {command:document.inspect,params:{}} for the sheet list. Read never acquires a lease."
 	case "acquire":
 		return "Acquire the same document lease under this agent's own identity. A human holder is refused. Retain the returned generation; never borrow a human session."
 	case "renew":
@@ -163,7 +163,7 @@ func nativeCraftToolDescription(op string) string {
 	case "propose":
 		return "When acquire is refused because a human holds the document, prepare a separate proposal instead: the same allowlisted commands over the exact base_version you read, a new request_id and a short summary. The document stays unchanged; the human reviews, accepts or rejects it, and acceptance re-checks rights, the lease and the current version. Report the proposal_id; never claim the edit was saved."
 	default:
-		return "Apply allowlisted original-engine commands using exact generation, base_version and a new request_id. Word caret.docStart/docEnd params{} and text.insert params{text}; Sheet cell.set params{cell,input} accepts scalar literals; formulas are unavailable in this initial tool. Only a committed Node receipt proves Saved. Retain the exact original request for uncertain reconciliation; never blindly retry or change its base."
+		return "Apply allowlisted original-engine commands using exact generation, base_version and a new request_id. Word caret.docStart/docEnd params{} and text.insert params{text}; Sheet cell.set params{cell,input,sheet?} and range.setValues params{range,values:[[...]],sheet?} (at most 1000 rows by 200 columns) accept numbers, booleans, null and literal text; formulas are unavailable in this tool. Only a committed Node receipt proves Saved. Retain the exact original request for uncertain reconciliation; never blindly retry or change its base."
 	}
 }
 func nativeCraftToolSchema(op string) json.RawMessage {
@@ -174,7 +174,7 @@ func nativeCraftToolSchema(op string) json.RawMessage {
 		props["generation"] = positive
 		required = append(required, "generation")
 	}
-	command := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"command", "params"}, "properties": map[string]any{"command": map[string]any{"type": "string", "enum": []string{"caret.docStart", "caret.docEnd", "text.insert", "cell.set", "text", "cell.get"}}, "params": map[string]any{"type": "object"}}}
+	command := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"command", "params"}, "properties": map[string]any{"command": map[string]any{"type": "string", "enum": []string{"caret.docStart", "caret.docEnd", "text.insert", "cell.set", "range.setValues", "text", "cell.get", "sheet.read", "document.inspect"}}, "params": map[string]any{"type": "object"}}}
 	if op == "read" {
 		props["query"] = command
 	}

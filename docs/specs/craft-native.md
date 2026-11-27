@@ -111,6 +111,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
 | GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean, applications?: {wordcraft, gridcraft: "open" \| "draining" \| "closed"}, application?: "wordcraft" \| "gridcraft", edit_refusal?: "app_draining" \| "app_disabled"}`, 200. `can_edit` is false while the document's application is not `open`. |
+| GET | `/api/v1/pages/{slug}/craft/agent-access?chat_id=` | No Craft admission. | `{allowed: boolean, reason?: "feature_off" \| "agent_policy" \| "not_attached" \| "holder_human" \| "engine_failed", message?: string, detail?: string, holder?: {kind: "human" \| "agent", mine: boolean}, max_sheets: 1}`, 200. Human only; an unreadable page is 403 like a missing one. `reason` is what the agent of this chat would be told if the Sheet were attached to the next message; it is advice and grants nothing. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |
@@ -745,12 +746,23 @@ last confirmed version.
 
 The initial command surface is deliberately narrow: Word supports
 `caret.docStart`, `caret.docEnd` and plaintext `text.insert`; Sheet supports
-scalar/literal `cell.set`. Word `text` and Sheet `cell.get` provide bounded
-original-engine reads. File/system commands and formulas supplied through this
+scalar/literal `cell.set` and `range.setValues` (both take an optional `sheet`
+name; a bulk write is at most 1000 rows by 200 columns and never runs past the
+last cell). Word `text` and Sheet `cell.get`, `sheet.read` (at most 10,000 cells
+per call; optional `sheet`, `formulas`, `formatted`) and `document.inspect` (the
+sheet list) provide bounded original-engine reads. File/system commands and formulas supplied through this
 initial agent tool are refused. This does not restrict the human editor's
 original feature surface. Executables are operator-pinned and rehashed before
 executing the same file descriptor; document paths are private host-generated
 files, with no shell interpretation or inherited host credentials.
+
+Pivot tables are not refreshed by an agent change. A change to the data a pivot
+table (or a `GETPIVOTDATA` formula) reads leaves the pivot's saved values as
+they were, the way a spreadsheet does until its pivot tables are refreshed. The
+engine has a refresh command, but on the reference workbook a refresh followed
+by restoring the data did not return every cell to its original value, so the
+agent is not offered it. The agent tool says so, and the agent tells the person
+that pivot tables are not refreshed after it changes such data.
 
 The normal fifteen-second lease is unchanged. A live authenticated apply renews
 its exact lease every five seconds only while that bounded request remains

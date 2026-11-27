@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/craftengine"
+	"github.com/crewship-ai/crewship/internal/craftsession"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -32,6 +34,9 @@ var encKeyOnce sync.Once
 // Tests that need encryption to be *unavailable* still override it with
 // t.Setenv("ENCRYPTION_KEY", ""), which restores this value afterwards.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == craftsession.WorkerFlag {
+		os.Exit(craftengine.WorkerMain(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	apiTestOriginalHome = os.Getenv("HOME")
 	installTestEncryptionKey()
 	lowerBcryptCostForTests()

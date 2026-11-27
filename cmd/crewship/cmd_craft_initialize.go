@@ -48,7 +48,12 @@ func craftInitialize(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	c = c.WithContext(cmd.Context())
+	return craftInitializeBytes(cmd, args, c.WithContext(cmd.Context()), application, native)
+}
+
+// craftInitializeBytes publishes native document bytes into an empty owned
+// Page and runs the admission, as `craft initialize` and `craft import` do.
+func craftInitializeBytes(cmd *cobra.Command, args []string, c *cli.Client, application string, native []byte) error {
 	body := struct {
 		Application string `json:"application_id" yaml:"application_id"`
 		Bytes       []byte `json:"bytes" yaml:"bytes"`
