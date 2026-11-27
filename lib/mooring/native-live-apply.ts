@@ -4,6 +4,7 @@ import type { NativeExecuteCommand, NativeExecuteResult } from "./native-editor-
 export interface LiveApplyTargets {
   port: { execute(commands: NativeExecuteCommand[], options: { baseRevision?: string }, signal: AbortSignal): Promise<NativeExecuteResult> }
   save: { adoptVersion(version: string, contentHash: string): boolean }
+  isCurrent?(): boolean
   beginReplay?(): (() => void) | undefined
   replayed?(result: NativeExecuteResult, version: string, adopted: boolean): void
 }

@@ -332,7 +332,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    targets:()=>{
     const r=current
     if(!r||!r.writable||r.blocked||!r.coordinator)return undefined
-    return {port:r.port,save:r.coordinator,beginReplay:r.coordinator.beginReplay,replayed(result,version,adopted){
+    return {port:r.port,save:r.coordinator,isCurrent:()=>live(r)&&r.writable&&!r.blocked,beginReplay:r.coordinator.beginReplay,replayed(result,version,adopted){
      if(!live(r))return
      r.savedRevision=result.savedRevision??result.revision
      r.revision=result.revision
