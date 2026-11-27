@@ -24,7 +24,7 @@
       "commit": "59f6b6c14a37b47ed58c2457b54cad25d1b8c9c5",
       "patch": "patches/gridcraft-wasi.patch",
       "document_format": "workbook",
-      "patch_sha256": "8d0077ac5ce5d08b987fc63143f1ae6a8ed12b5b652a2cced63291a850cca222",
+      "patch_sha256": "26b721a75814bda7595e6241ce46603e8c5093ee9534ccee202d272fc7cfd155",
       "cli_package": "gridcraft-cli",
       "web_package": "gridcraft-web",
       "license": {"name": "GridCraft", "spdx": "MIT OR Apache-2.0"},
