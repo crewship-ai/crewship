@@ -6,7 +6,7 @@ import type { PageFolderView } from "@/hooks/use-page-folders"
 import type { ArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 
 const m = vi.hoisted(() => ({
-  fetch: vi.fn(), push: vi.fn(), addPage: vi.fn(), wordCreate: vi.fn(), createWorkbook: vi.fn(),
+  fetch: vi.fn(), push: vi.fn(), addPage: vi.fn(), wordCreate: vi.fn(), upload: vi.fn(), createWorkbook: vi.fn(), discard: vi.fn(), emptyPage: null as { id: string; slug: string } | null,
   caps: {} as ArtifactCapabilities, gridcraft: true, docData: true, commands: false, wordFormat: "native" as string, pages: [] as PageView[], folders: [] as PageFolderView[],
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: m.fetch, broadcastSessionExpired: vi.fn() }))
@@ -19,9 +19,10 @@ vi.mock("@/hooks/use-page-folders", async importOriginal => ({
   usePageFolderMutations: () => ({ addPage: { mutateAsync: m.addPage } }),
 }))
 vi.mock("@/components/features/pages/use-word-document-creation", () => ({
-  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: m.wordFormat, wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft, data: m.docData, wordcraftCommands: m.commands }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
+  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: m.wordFormat, wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft, data: m.docData, wordcraftCommands: m.commands }, frozen: false, retrying: false, emptyPage: m.emptyPage, discardEmptyPage: m.discard, create: { mutateAsync: m.wordCreate, isPending: false } }),
 }))
 vi.mock("@/lib/workbooks/create", () => ({ createWorkbook: m.createWorkbook }))
+vi.mock("@/lib/mooring/native-document-client", async () => ({ ...await vi.importActual("@/lib/mooring/native-document-client"), initializeNativeWorkbook: m.upload }))
 
 import { NewArtifactDialog } from "../new-artifact-dialog"
 
@@ -40,7 +41,8 @@ beforeEach(() => {
   m.wordFormat = "native"
   m.pages = []
   m.folders = [folder("sales", "Sales"), folder("board", "Board", { canAcceptPages: false })]
-  for (const f of [m.fetch, m.push, m.addPage, m.wordCreate, m.createWorkbook]) f.mockReset()
+  m.emptyPage = null
+  for (const f of [m.fetch, m.push, m.addPage, m.wordCreate, m.createWorkbook, m.discard]) f.mockReset()
 })
 afterEach(cleanup)
 
@@ -221,6 +223,62 @@ it("seeds the chat draft from an agent template", () => {
   fireEvent.click(screen.getByRole("button", { name: "Support SLA" }))
   fireEvent.click(screen.getByRole("button", { name: "Continue in chat" }))
   expect(new URL(m.push.mock.calls[0][0], "http://x").searchParams.get("prompt")).toBe("Create a dashboard from the Support SLA template")
+})
+
+it("offers .xlsx upload for a Sheet, asks for the file, and keeps the button off without one", () => {
+  mount({ defaultKind: "sheet" })
+  const upload = screen.getByRole("radio", { name: /Upload \.xlsx/ })
+  expect(upload).toBeEnabled()
+  fireEvent.click(upload)
+  expect(screen.getByLabelText("Workbook")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Upload and open" })).toBeDisabled()
+})
+
+it("after a refused import it offers to delete the empty Sheet, and only then", async () => {
+  m.wordCreate.mockRejectedValue(new Error("This file is not a readable .xlsx workbook."))
+  m.discard.mockResolvedValue(undefined)
+  mount({ defaultKind: "sheet" })
+  fireEvent.click(screen.getByRole("radio", { name: /Upload \.xlsx/ }))
+  // Nothing was created yet: no offer.
+  expect(screen.queryByRole("button", { name: "Delete the empty Sheet" })).toBeNull()
+  const file = new File([new Uint8Array([1, 2, 3])], "plan.xlsx")
+  fireEvent.change(screen.getByLabelText("Workbook"), { target: { files: [file] } })
+  expect(screen.getByLabelText(/^Name/)).toHaveValue("plan")
+  m.emptyPage = { id: "pg_1", slug: "plan" }
+  fireEvent.click(screen.getByRole("button", { name: "Upload and open" }))
+  await waitFor(() => expect(screen.getByText(/not a readable \.xlsx/)).toBeTruthy())
+  const remove = await screen.findByRole("button", { name: "Delete the empty Sheet" })
+  fireEvent.click(remove)
+  await waitFor(() => expect(m.discard).toHaveBeenCalledTimes(1))
+  // A Sheet that was initialized is not empty: no offer.
+  m.emptyPage = null
+  cleanup()
+  m.wordCreate.mockRejectedValue(new Error("boom"))
+  mount({ defaultKind: "sheet" })
+  fireEvent.click(screen.getByRole("radio", { name: /Upload \.xlsx/ }))
+  fireEvent.change(screen.getByLabelText("Workbook"), { target: { files: [file] } })
+  fireEvent.click(screen.getByRole("button", { name: "Upload and open" }))
+  await waitFor(() => expect(screen.getByText("boom")).toBeTruthy())
+  expect(screen.queryByRole("button", { name: "Delete the empty Sheet" })).toBeNull()
+})
+
+it("uploads the workbook itself as the Sheet's first version, says so, and converts nothing", async () => {
+  let release!: (r: Response) => void
+  m.upload.mockImplementation(() => new Promise<Response>(resolve => { release = resolve }))
+  m.wordCreate.mockImplementation(async (input: { prepareImport: (id: string) => Promise<() => Promise<Response>> }) => { await (await input.prepareImport("pg_1"))(); return { slug: "plan", nativePageId: "pg_1", pagesVersion: 0 } })
+  mount({ defaultKind: "sheet" })
+  fireEvent.click(screen.getByRole("radio", { name: /Upload \.xlsx/ }))
+  expect(screen.getByText(/becomes the Sheet's first version as it is/)).toBeTruthy()
+  const file = new File([new Uint8Array([0x50, 0x4b, 3, 4])], "Model.xlsm")
+  fireEvent.change(screen.getByLabelText("Workbook"), { target: { files: [file] } })
+  expect(screen.getByLabelText(/^Name/)).toHaveValue("Model")
+  fireEvent.click(screen.getByRole("button", { name: "Upload and open" }))
+  await waitFor(() => expect(screen.getByText("Uploading the workbook…")).toBeTruthy())
+  expect(m.upload).toHaveBeenCalledWith(expect.objectContaining({ pageId: "pg_1", file, fileName: "Model.xlsm", signal: expect.any(AbortSignal) }))
+  expect(screen.queryByText(/Converting/)).toBeNull()
+  release(new Response("{}"))
+  await waitFor(() => expect(screen.queryByText("Uploading the workbook…")).toBeNull())
+  expect(screen.queryByText(/Not everything came across/)).toBeNull()
 })
 
 it("marks templates and upload for Crafts as coming", () => {

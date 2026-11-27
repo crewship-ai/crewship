@@ -602,7 +602,7 @@ describe("OnboardingSetupChat — a deferred send must never look like silence",
     render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
     await waitFor(() => expect(useChatMock).toHaveBeenCalled())
     // The CrewProvisioningCard TurnRenderer renders for this event.
-    expect(await screen.findByText(/Building Seznam Listing Scraper/i)).toBeTruthy()
+    expect(await screen.findByText("Preparing the workspace…")).toBeTruthy()
   })
 
   // The SERVER now owns the resume (internal/api/crew_provisioning_jobs.go's

@@ -118,7 +118,7 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
   {
     key: "sheet", drafted: false, family: "document", accent: "green", label: "Sheet", plural: "Sheets", icon: Sheet,
     description: "Workbook with formulas in GridCraft", viewer: "Read-only preview · Edit in GridCraft", make: "edit",
-    placeholder: "Price model", templates: ["Quote", "Budget", "Invoice batch", "Hiring plan"], uploadExtensions: [".xlsx", ".csv"],
+    placeholder: "Price model", templates: ["Quote", "Budget", "Invoice batch", "Hiring plan"], uploadExtensions: [".xlsx", ".xlsm", ".csv"],
     starterPrompts: ["Price model with seats and MRR", "Hiring plan for 2027"],
     live: caps => caps.pages && caps.sheets,
   },

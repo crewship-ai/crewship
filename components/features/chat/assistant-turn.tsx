@@ -32,16 +32,19 @@ import { useChatAgent } from "./chat-agent-context"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { reasoningSeconds, safeThinking } from "@/lib/chat-event-contract"
-import { groupTurnParts, type ToolNode } from "./turn-grouping"
+import { groupTurnParts } from "./turn-grouping"
 import { useArtifactToolCardsEnabled } from "./artifact-context/projects/artifact-viewer-context"
-import { ArtifactToolCard, liftArtifactToolNodes, type ArtifactRenderNode } from "./artifact-context/projects/artifact-tool-card"
+import { useSheetCardsWorkspace } from "./artifact-context/sheet/sheet-panel-context"
+import { ArtifactToolCard, liftArtifactToolNodes } from "./artifact-context/projects/artifact-tool-card"
 import {
   ACTIVITY_STATE_LABEL,
-  flattenSteps,
-  summarizeGroup,
+  plainToolName,
+  redactSensitiveKeys,
+  stepPhrase,
   toolState,
   type ActivityState,
 } from "@/lib/chat-activity"
+import { TurnActivity } from "./turn-activity"
 import { thinkingHeadline } from "@/lib/chat-thinking"
 import { cn } from "@/lib/utils"
 import { visibleAgentText } from "@/lib/chat-text"
@@ -279,20 +282,6 @@ function TaskCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   )
 }
 
-const SENSITIVE_KEY_RE = /(?:api[_-]?key|token|secret|password|authorization|auth|cookie|private[_-]?key|credential)/i
-
-function redactSensitiveKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactSensitiveKeys)
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k, SENSITIVE_KEY_RE.test(k) ? "[REDACTED]" : redactSensitiveKeys(v),
-      ])
-    )
-  }
-  return value
-}
-
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
 
 function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: string; state?: ActivityState }) {
@@ -305,18 +294,24 @@ function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: s
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
   const openArtifact = useArtifactStore((s) => s.openFile)
 
+  // An MCP tool (mcp__<server>__<tool>) is named by what it did, from its
+  // input; a subtitle is only ever a string field, never an object as text.
+  const plain = plainToolName(toolName)
+  const named = plain !== toolName || plain.startsWith("craft_sheet_")
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined)
   let subtitle = ""
   let filePath: string | null = null
-  if (input) {
-    if (input.file_path) {
-      subtitle = String(input.file_path)
-      filePath = String(input.file_path)
+  if (input && !named) {
+    if (str(input.file_path)) {
+      subtitle = str(input.file_path)!
+      filePath = subtitle
     }
-    else if (input.command) subtitle = `$ ${String(input.command).slice(0, 60)}${String(input.command).length > 60 ? "..." : ""}`
-    else if (input.url) subtitle = String(input.url)
-    else if (input.query) subtitle = String(input.query)
-    else if (input.pattern) subtitle = String(input.pattern)
+    else if (str(input.command)) subtitle = `$ ${str(input.command)!.slice(0, 60)}${str(input.command)!.length > 60 ? "..." : ""}`
+    else if (str(input.url)) subtitle = str(input.url)!
+    else if (str(input.query)) subtitle = str(input.query)!
+    else if (str(input.pattern)) subtitle = str(input.pattern)!
   }
+  const title = named ? stepPhrase({ call: part }, resolved === "succeeded" ? "done" : "doing") : subtitle ? `${toolName}  ${subtitle}` : toolName
 
   // Reject absolute paths and traversal segments before exposing the
   // "Open in Artifact" affordance — a crafted tool payload could
@@ -343,7 +338,7 @@ function DefaultToolCall({ part, agentId, state }: { part: TurnPart; agentId?: s
     <div className="flex flex-col gap-1.5">
       <Tool defaultOpen={false}>
         <ToolHeader
-          title={subtitle ? `${toolName}  ${subtitle}` : toolName}
+          title={title}
           type="tool-invocation"
           state={resolved === "denied" ? "output-denied"
             : resolved === "failed" || resolved === "interrupted" || resolved === "unknown" ? "output-error"
@@ -449,98 +444,6 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
-/** Compact summary of the tools in an activity group, e.g. "Bash ×4" or
- *  "Bash ×2, Read". */
-function summarizeTools(tools: ToolNode[]): string {
-  const counts = new Map<string, number>()
-  for (const t of tools) {
-    const name = (t.call.metadata?.tool_name as string) || t.call.content || "tool"
-    counts.set(name, (counts.get(name) ?? 0) + 1)
-  }
-  return Array.from(counts.entries())
-    .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
-    .join(", ")
-}
-
-/** One tool invocation inside an activity group: the call card carrying its
- *  resolved state, any non-empty legacy result body, and correlated children
- *  (subagent steps) indented under it. */
-function ActivityToolCard({ node, agentId, turnStreaming }: { node: ToolNode; agentId?: string; turnStreaming: boolean }) {
-  const isLegacySubagent = node.call.metadata?.subagent === true
-  const state = toolState(node, turnStreaming)
-  const callPart: TurnPart = state === "succeeded"
-    ? { ...node.call, metadata: { ...(node.call.metadata ?? {}), completed: true } }
-    : node.call
-  return (
-    <div className={`flex flex-col gap-1.5${isLegacySubagent ? " ml-3 border-l-2 border-border/60 pl-2.5" : ""}`}>
-      {isLegacySubagent && (
-        <span className="text-micro text-muted-foreground">↳ subagent</span>
-      )}
-      <DefaultToolCall part={callPart} agentId={agentId} state={state} />
-      {!node.call.activity && node.result && node.result.content ? <InlineToolResult part={node.result} /> : null}
-      {node.children?.map((child) => (
-        <div key={child.call.id} className="ml-3 border-l-2 border-border/60 pl-3" data-testid="nested-activity">
-          <ActivityToolCard node={child} agentId={agentId} turnStreaming={turnStreaming} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/** A run of consecutive tool calls. A single tool renders as a plain card; two
- *  or more collapse into one disclosure whose summary reads as successful only
- *  when every step (nested ones included) succeeded. */
-function ActivityGroup({ tools, agentId, turnStreaming }: { tools: ToolNode[]; agentId?: string; turnStreaming: boolean }) {
-  if (tools.length === 0) return null
-  if (tools.length === 1 && !tools[0].children?.length) {
-    return <ActivityToolCard node={tools[0]} agentId={agentId} turnStreaming={turnStreaming} />
-  }
-  return <ActivityDisclosure tools={tools} agentId={agentId} turnStreaming={turnStreaming} />
-}
-
-function ActivityDisclosure({ tools, agentId, turnStreaming }: { tools: ToolNode[]; agentId?: string; turnStreaming: boolean }) {
-  const steps = flattenSteps(tools)
-  const summary = summarizeGroup(steps.map((t) => toolState(t, turnStreaming)))
-  const needsAttention = summary.tone === "attention"
-  // Anything that needs attention opens by itself, once; after that the
-  // reader's own toggle wins, so a later tone change never closes it.
-  const [open, setOpen] = useState(needsAttention)
-  useEffect(() => { if (needsAttention) setOpen(true) }, [needsAttention])
-  return (
-    <details
-      className="rounded-xl border border-border bg-muted/20 overflow-hidden"
-      open={open}
-      onToggle={(e) => setOpen(e.currentTarget.open)}
-      data-activity-tone={summary.tone}
-    >
-      <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-label text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <Zap className="h-3.5 w-3.5" />
-        <span className="font-medium text-foreground">{summary.title}</span>
-        <span>
-          · {steps.length} steps · {summarizeTools(steps)}
-          {summary.detail ? ` · ${summary.detail}` : ""}
-        </span>
-        <span className="ml-auto inline-flex items-center">
-          {summary.tone === "attention" ? (
-            <AlertTriangle className="h-3.5 w-3.5 text-warn" role="img" aria-label={summary.detail || summary.title} />
-          ) : summary.tone === "ok" ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-          ) : summary.tone === "neutral" ? (
-            <CircleDot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          ) : (
-            <Clock className="h-3.5 w-3.5 animate-spin text-warn" />
-          )}
-        </span>
-      </summary>
-      <div className="flex flex-col gap-2 p-2 border-t border-border">
-        {tools.map((t, i) => (
-          <ActivityToolCard key={t.call.id ?? i} node={t} agentId={agentId} turnStreaming={turnStreaming} />
-        ))}
-      </div>
-    </details>
-  )
-}
-
 /** Streamed prose bubble. useSmoothText decouples bursty WS chunk arrival
  *  from the visual reveal (constant-rate, backlog-adaptive) so text flows
  *  in smoothly instead of popping in sentence-sized jumps. The trailing
@@ -624,9 +527,13 @@ function TurnEndNote({ turn }: { turn: ChatTurn }) {
 
 export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, workspaceId }: AssistantTurnProps) {
   const artifactCards = useArtifactToolCardsEnabled()
+  // Sheet cards come with the chat that shows Sheets, whatever the artifact projects flag says.
+  const sheetCards = useSheetCardsWorkspace() !== null
   const visibleParts = turn.parts
     .map((part) => part.type === "text" ? { ...part, content: visibleAgentText(part.content) } : part)
     .filter((part) => part.type !== "text" || part.content !== "")
+  const partOrder = new Map(visibleParts.map((part, index) => [part.id, index] as const))
+  const orderOf = (part: TurnPart) => partOrder.get(part.id)
   // Collect all text content for copy action
   const fullText = visibleParts
     .filter((p) => p.type === "text")
@@ -648,16 +555,25 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
     !fileMatchRaw[1].includes("..") &&
     !fileMatchRaw[1].startsWith("/") ? fileMatchRaw : null
 
+  const grouped = groupTurnParts(visibleParts)
+  // Every tool step, the ones lifted into cards included, counts in the line
+  // and is listed in its dialog; questions and approvals are their own parts.
+  const turnTools = grouped.flatMap((node) => node.kind === "activity" ? node.tools : [])
+  const nodes = liftArtifactToolNodes(grouped, { projects: artifactCards, sheets: sheetCards || artifactCards })
+  const activityAt = turnTools.length > 0 ? nodes.findIndex((node) => node.kind === "activity" || node.kind === "artifact") : -1
+
   return (
     <Message from="assistant">
       {turn.streamIncomplete && <p role="status" className="text-sm text-muted-foreground">Partial response — stream recovery pending</p>}
-      {(artifactCards ? liftArtifactToolNodes(groupTurnParts(visibleParts)) : groupTurnParts(visibleParts) as ArtifactRenderNode[]).map((node) => {
+      {nodes.map((node, index) => {
+        // The turn's tool steps are one activity line, at the place of the
+        // first of them; the steps themselves open in its dialog. A Sheet or
+        // artifact card is a result the person needs and stays in place.
+        const activity = index === activityAt ? <TurnActivity key="turn-activity" tools={turnTools} turn={turn} order={orderOf} onCopy={onCopy} /> : null
         if (node.kind === "artifact") {
-          return <ArtifactToolCard key={`art-${node.tool.call.id}`} call={node.tool.call} result={node.tool.result} turnStreaming={turn.isStreaming} />
+          return [activity, <ArtifactToolCard key={`art-${node.tool.call.id}`} call={node.tool.call} result={node.tool.result} turnStreaming={turn.isStreaming} />]
         }
-        if (node.kind === "activity") {
-          return <ActivityGroup key={`act-${node.tools[0].call.id}`} tools={node.tools} agentId={agentId} turnStreaming={turn.isStreaming} />
-        }
+        if (node.kind === "activity") return activity
         const part = node.part
         switch (part.type) {
           case "status":

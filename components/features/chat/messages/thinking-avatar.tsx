@@ -8,7 +8,8 @@ import type { ChatAgent } from "../chat-agent-context"
 /**
  * The agent's face, doing double duty as the transcript's only spinner.
  *
- * While the agent is working the face breathes and a ring turns around it;
+ * While the agent is working the face breathes, a soft glow swells behind it
+ * and a ring turns slowly around it;
  * when the stream ends both stop. That is the whole loading affordance for a
  * reply — there is no second spinner, no shimmer bar, no "Morgan is typing"
  * row. The reason to spend the animation on the face rather than on a neutral
@@ -46,6 +47,7 @@ export function ThinkingAvatar({
       data-testid="thinking-avatar"
       data-active={active ? "true" : "false"}
     >
+      {active && <span aria-hidden="true" className="thinking-glow" />}
       {active && <span aria-hidden="true" className="thinking-ring" />}
       <AgentAvatar
         seed={agent.avatarSeed || agent.id}

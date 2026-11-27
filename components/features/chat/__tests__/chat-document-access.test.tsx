@@ -32,9 +32,26 @@ it("opens the existing document and distinguishes its grant from a task and orig
   render(<ChatDocumentAccess {...props} />)
   await settle()
   expect(screen.getByRole("link", { name: "Shared budget" })).toHaveAttribute("href", "/pages/%40stable-page-id")
-  expect(screen.getByText("Document grant: read and write")).toBeInTheDocument()
-  expect(screen.getByText("No verified active task in this chat.")).toBeInTheDocument()
-  expect(screen.getByText("Origin: unknown")).toBeInTheDocument()
+  expect(screen.getByText("Agent access: read and write")).toBeInTheDocument()
+  expect(screen.getByText("The agent is not working on it in this chat now.")).toBeInTheDocument()
+  expect(screen.getByText("Who created it: not recorded")).toBeInTheDocument()
+})
+
+it("says what the panel shows in plain words, and that Sheet changes are cards in the chat", async () => {
+  apiFetch.mockResolvedValue(response())
+  render(<ChatDocumentAccess {...props} />)
+  await settle()
+  expect(screen.getByRole("heading", { name: "Documents the agent can open" })).toBeInTheDocument()
+  expect(screen.getByText("No document edits by the agent are recorded in this chat. Changes to a Sheet show as cards in the conversation.")).toBeInTheDocument()
+  expect(screen.getByText("Change what the agent may open in the document's Share menu.")).toBeInTheDocument()
+  for (const jargon of [/authorized recorded/, /grants?\b/i, /shown separately/, /verified active task/, /Origin: unknown/]) expect(screen.queryByText(jargon)).toBeNull()
+})
+
+it("says plainly when a page has no recorded agent edit", async () => {
+  apiFetch.mockResolvedValue({ ok: true, json: async () => ({ artifacts: [] }) })
+  render(<NativeDocumentProvenance workspaceId="workspace" pageId="edited-page" viewerId="owner" />)
+  await settle()
+  expect(screen.getByText("No agent edits are recorded for this document.")).toBeInTheDocument()
 })
 
 it("removes document names and rights when refresh is denied", async () => {
@@ -65,7 +82,7 @@ it("expires previous metadata while the next request hangs", async () => {
   await settle()
   await act(async () => { await vi.advanceTimersByTimeAsync(3001) })
   expect(screen.queryByText("Shared budget")).toBeNull()
-  expect(screen.queryByText("Document grant: read and write")).toBeNull()
+  expect(screen.queryByText("Agent access: read and write")).toBeNull()
 })
 
 it("counts freshness from sending the request and discards a delayed reply", async () => {
@@ -100,7 +117,7 @@ it("shows recorded edits separately from standing grants and never calls them cr
   expect(screen.getByRole("link", { name: "Recorded native Doc" })).toHaveAttribute("href", "/pages/%40edited-page")
   expect(screen.getByText("Edited by agent in this chat")).toBeInTheDocument()
   expect(screen.getByRole("link", { name: "Open source message" })).toHaveAttribute("href", "/chat/native-agent?session=source-chat&message=original-message")
-  expect(screen.getByText("No document grants visible to you.")).toBeInTheDocument()
+  expect(screen.getByText("The agent cannot open any document you can see.")).toBeInTheDocument()
   expect(screen.queryByText(/Created by agent/)).toBeNull()
 })
 

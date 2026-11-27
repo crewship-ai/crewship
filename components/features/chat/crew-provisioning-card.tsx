@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import { Loader2, Package, AlertTriangle, Check, X } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { AlertTriangle, Check, X } from "lucide-react"
+import { WorkingMark } from "./messages/working-mark"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import {
@@ -87,16 +87,16 @@ export function CrewProvisioningCard({
     }
 
     // Otherwise: warm-up state — a build was kicked off but the WS hasn't
-    // replayed the plan yet. Show a placeholder spinner.
+    // replayed the plan yet. The server holds the message and runs it once the
+    // workspace is ready (chatbridge AttachPendingMessage), so nothing here asks
+    // the person to act.
     return (
-      <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex items-start gap-3">
-        <Spinner className="h-4 w-4 text-warn shrink-0 mt-0.5" />
+      <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 flex items-start gap-3">
+        <WorkingMark className="mt-2" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-foreground mb-0.5">
-            {crewSlug ? `Building ${crewSlug}…` : "Building crew image…"}
-          </div>
+          <div className="text-sm font-medium text-foreground mb-0.5">Preparing the workspace…</div>
           <div className="text-xs text-muted-foreground">
-            {message || "Provisioning kicked off — your message will run once the image is ready."}
+            {message || "Your message is sent as soon as the workspace is ready."}
           </div>
         </div>
       </div>
@@ -108,44 +108,40 @@ export function CrewProvisioningCard({
   // flipping straight back to idle.
   const recentCompleted = crew.status !== "failed" && crew.recent?.outcome === "completed"
 
-  const Icon = crew.status === "failed"
-    ? AlertTriangle
-    : crew.status === "completed" || recentCompleted
-      ? Check
-      : crew.status === "running"
-        ? Loader2
-        : Package
+  const failed = crew.status === "failed"
+  const ready = !failed && (crew.status === "completed" || recentCompleted)
 
-  const tone = crew.status === "failed"
-    ? "border-destructive/30 bg-destructive/5"
-    : crew.status === "completed" || recentCompleted
-      ? "border-success/30 bg-success/5"
-      : "border-warn/30 bg-warn/5"
+  const tone = failed ? "border-destructive/30 bg-destructive/5" : "border-border bg-muted/20"
 
-  const iconTone = crew.status === "failed"
-    ? "text-destructive"
-    : crew.status === "completed" || recentCompleted
-      ? "text-success"
-      : "text-warn"
-
-  const label = crew.status === "failed"
+  // The message sent while the workspace was built runs by itself once it is
+  // ready: the server attached it to the build and replays it, so "ready" is
+  // the whole news and never a request to send it again.
+  const label = failed
     ? `Build failed for ${crew.name}`
     : recentCompleted && crew.recent
-      ? `${crew.name} ready — built ${formatProvisionAgo(crew.recent.at)}`
-      : crew.status === "completed"
-        ? `${crew.name} ready — re-send your message`
-        : crew.activeFeature
-          ? `Building ${crew.name} · installing ${crew.activeFeature}`
-          : `Building ${crew.name}…`
+      ? `Workspace ready — built ${formatProvisionAgo(crew.recent.at)}`
+      : ready
+        ? "Workspace ready — sending your message"
+        : "Preparing the workspace…"
+  const detailLine = !failed && !ready && crew.activeFeature ? `Installing ${crew.activeFeature}` : undefined
 
-  const dismissable = crew.status === "failed" || recentCompleted
+  const dismissable = failed || recentCompleted
 
   return (
     <div className={`rounded-lg border ${tone} px-4 py-3 flex items-start gap-3`}>
-      <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${iconTone} ${crew.status === "running" ? "animate-spin" : ""}`} />
+      {failed ? (
+        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
+      ) : ready ? (
+        <Check className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+      ) : (
+        <WorkingMark className="mt-2" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2">
-          <div className="text-sm font-medium text-foreground mb-1 flex-1 min-w-0">{label}</div>
+          <div className="text-sm font-medium text-foreground mb-1 flex-1 min-w-0">
+            <span>{label}</span>
+            {detailLine && <span className="ml-1 font-normal text-muted-foreground">· {detailLine}</span>}
+          </div>
           {dismissable && (
             <button
               type="button"

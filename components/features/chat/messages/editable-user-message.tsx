@@ -8,6 +8,8 @@ import { Action, Actions } from "@/components/ai-elements/actions"
 import { Button } from "@/components/ui/button"
 import { spring } from "@/lib/motion"
 import { cn } from "@/lib/utils"
+import { splitAttachmentBlock } from "@/lib/attachment-message"
+import { MessageFiles } from "./message-files"
 
 interface EditableUserMessageProps {
   text: string
@@ -22,11 +24,15 @@ export function EditableUserMessage({
   onSave,
   className,
 }: EditableUserMessageProps) {
+  // The person edits their own words; the files sent with them stay with the message.
+  const parts = splitAttachmentBlock(text)
+  const own = parts.files.length ? parts.text : text
+  const tail = text.slice(own.length)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(text)
+  const [draft, setDraft] = useState(own)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => setDraft(text), [text])
+  useEffect(() => setDraft(own), [own])
 
   useEffect(() => {
     if (editing) {
@@ -55,12 +61,12 @@ export function EditableUserMessage({
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault()
               if (draft.trim()) {
-                onSave(draft.trim())
+                onSave(draft.trim() + tail)
                 setEditing(false)
               }
             } else if (e.key === "Escape") {
               setEditing(false)
-              setDraft(text)
+              setDraft(own)
             }
           }}
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
@@ -75,7 +81,7 @@ export function EditableUserMessage({
             variant="ghost"
             onClick={() => {
               setEditing(false)
-              setDraft(text)
+              setDraft(own)
             }}
             className="h-7 gap-1"
           >
@@ -86,11 +92,11 @@ export function EditableUserMessage({
             size="sm"
             onClick={() => {
               if (draft.trim()) {
-                onSave(draft.trim())
+                onSave(draft.trim() + tail)
                 setEditing(false)
               }
             }}
-            disabled={!draft.trim() || draft === text}
+            disabled={!draft.trim() || draft === own}
             className="h-7 gap-1"
           >
             <Check className="h-3 w-3" />
@@ -108,8 +114,9 @@ export function EditableUserMessage({
           keeps the attachment block of a message sent with a file readable
           (lib/attachment-message.ts) instead of running it onto one line. */}
       <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 text-sm">
-        {text}
+        {own}
       </div>
+      <MessageFiles files={parts.files} />
       {/* Edit & resend: hover, keyboard focus, and always on touch (#3874). */}
       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
         <span className="font-mono text-[10px] text-muted-foreground">

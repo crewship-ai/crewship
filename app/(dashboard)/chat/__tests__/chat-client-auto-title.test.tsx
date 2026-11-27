@@ -57,16 +57,21 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
   ChatPanel: ({
     sessionId,
     onSend,
+    onSheetFromFile,
   }: {
     sessionId: string
     onSend?: (sid: string, text: string) => void
+    onSheetFromFile?: (sid: string, fileName: string) => void
   }) => (
-    <button
-      data-testid="send"
-      onClick={() => onSend?.(sessionId, "Summarise the Q3 revenue report for me")}
-    >
-      send
-    </button>
+    <>
+      <button
+        data-testid="send"
+        onClick={() => onSend?.(sessionId, "Summarise the Q3 revenue report for me")}
+      >
+        send
+      </button>
+      <button data-testid="sheet-from-file" onClick={() => onSheetFromFile?.(sessionId, "Loan_plan.xlsx")}>sheet</button>
+    </>
   ),
 }))
 
@@ -175,6 +180,22 @@ describe("<ChatClient> — a conversation is named after its first message", () 
         source: "auto",
       }),
     )
+  })
+
+  // A chat started by opening a workbook as a Sheet stayed "Untitled session".
+  it("names an untitled conversation after the workbook opened as a Sheet in it", async () => {
+    mountWith([thread()])
+    await sendButton()
+    fireEvent.click(screen.getByTestId("sheet-from-file"))
+    await waitFor(() => expect(patches()).toHaveLength(1))
+    expect(patches()[0].body.title).toBe("Loan_plan.xlsx")
+  })
+  it("never renames a conversation that has a title for a workbook opened in it", async () => {
+    mountWith([thread({ title: "A name the user typed" })])
+    await sendButton()
+    fireEvent.click(screen.getByTestId("sheet-from-file"))
+    await new Promise(r => setTimeout(r, 20))
+    expect(patches()).toHaveLength(0)
   })
 
   it("does not rename a conversation that already has a title", async () => {
