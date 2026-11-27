@@ -68,6 +68,7 @@ export interface SingleEditorSaveOptions {
   }
   onState(state: NativeSaveState): void
   onReceipt?(receipt: NativeSaveReceipt, captureId?: string): void | Promise<unknown>
+  onTransportSettled?(): void
   idleMs?: number
   /** A workbook Sheet (the file is the document): its format as opened. */
   format?: NativeFileFormat
@@ -110,6 +111,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let preparingCount = 0
   // rebaseBase calls so far: a snapshot asked for before one holds the editor without the other author's change.
   let rebases = 0
+  let replaying = false
   // Keep mine: the first save on top of this version says so (X-Craft-Rebase: keep-local).
   let keepLocalFor: string | undefined
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
@@ -167,7 +169,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   function schedule() {
     clearTimeout(timer)
     const token = ++nextAutosave
-    if (active && !held) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, largeDocument ? Math.max(idleMs, LARGE_DOCUMENT_IDLE_MS) : idleMs)
+    if (active && !held && !replaying) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, largeDocument ? Math.max(idleMs, LARGE_DOCUMENT_IDLE_MS) : idleMs)
   }
   // A local storage fence is retried: the next capture either persists (which
   // lifts it) or fails visibly again. Server and authority fences never are.
@@ -315,6 +317,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       scheduleReconcile()
       scheduleIfNeeded()
       notifyStateWaiters()
+      try { options.onTransportSettled?.() } catch { /* A display observer cannot change a save result. */ }
     }
   }
   // Preserve the newest durable recovery row when an older queued manual
@@ -422,7 +425,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // content already committed), so a press stopped by a hold or another
       // fence leaves autosave refused. Autosave never retries a quota refusal.
       const fence = () => explicit && refusedForSize(blocked) ? undefined : blocked
-      const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : fence() ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : replaying ? "rebasing" : fence() ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
       const refused = (reason: string) => reason === "read_revoked" ? new NativeSaveError("read_revoked") : new Error(reason)
       let lookedUp = false
       for (;;) {
@@ -664,6 +667,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       else scheduleIfNeeded()
     },
     save: (requestId?: string) => save(requestId),
+    /** Hold transmission while a replay moves both the editor and the save base. */
+    beginReplay(): (() => void) | undefined {
+      if (!active || !writable || replaying || held || unconfirmed || pending || blocked && blocked !== "moved") return undefined
+      replaying = true
+      clearTimeout(timer)
+      return () => { replaying = false; scheduleIfNeeded() }
+    },
     /** The server holds version `version` (hash `contentHash`, as sent by whoever stored it, for
      * example an agent) and the editor has just been brought to exactly that state without
      * reloading (a replayed command list). The next save is measured against it: the same

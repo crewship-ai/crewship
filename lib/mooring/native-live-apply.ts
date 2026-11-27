@@ -1,9 +1,11 @@
-import type { NativeExecuteCommand } from "./native-editor-port"
+import type { NativeExecuteCommand, NativeExecuteResult } from "./native-editor-port"
 
 /** What the host needs from the editor port and the save controller to show an agent's saved version. */
 export interface LiveApplyTargets {
-  port: { execute(commands: NativeExecuteCommand[], options: { baseRevision?: string }, signal: AbortSignal): Promise<{ documentId: string; revision: string; applied: number }> }
+  port: { execute(commands: NativeExecuteCommand[], options: { baseRevision?: string }, signal: AbortSignal): Promise<NativeExecuteResult> }
   save: { adoptVersion(version: string, contentHash: string): boolean }
+  beginReplay?(): (() => void) | undefined
+  replayed?(result: NativeExecuteResult, version: string, adopted: boolean): void
 }
 
 export interface LiveApplyInput {
@@ -32,15 +34,19 @@ export type LiveApplyMode = "replayed" | "reopened"
 export async function applyAgentVersion(targets: LiveApplyTargets, input: LiveApplyInput): Promise<{ mode: LiveApplyMode; reason?: string }> {
   const { commands } = input
   if (!commands || commands.length === 0) { await input.reopen(); return { mode: "reopened", reason: "no_commands" } }
+  const release = targets.beginReplay?.()
+  if (targets.beginReplay && !release) { await input.reopen(); return { mode: "reopened", reason: "save_unsettled" } }
   let reason: string
   try {
-    await targets.port.execute(commands, input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }, input.signal)
-    if (targets.save.adoptVersion(input.version, input.contentHash)) return { mode: "replayed" }
+    const result = await targets.port.execute(commands, input.baseRevision === undefined ? {} : { baseRevision: input.baseRevision }, input.signal)
+    const adopted = targets.save.adoptVersion(input.version, input.contentHash)
+    targets.replayed?.(result, input.version, adopted)
+    if (adopted) return { mode: "replayed" }
     reason = "baseline_refused"
   } catch (error) {
     if (input.signal.aborted) throw error
     reason = error instanceof Error && error.message ? error.message.slice(0, 120) : "execute_failed"
-  }
+  } finally { release?.() }
   await input.reopen()
   return { mode: "reopened", reason }
 }

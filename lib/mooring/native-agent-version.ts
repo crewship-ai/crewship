@@ -120,6 +120,19 @@ export function createAgentVersionQueue(host: AgentVersionHost) {
       return
     }
     const reload = async () => { host.notice(AGENT_CHANGED_RELOAD) }
+    const wait = () => { waiting = event; host.notice(AGENT_CHANGED_FINISH) }
+    const rebase = async () => {
+      if (!host.rebase || host.state().mode !== "writable") return
+      const outcome = await host.rebase(event, abort.signal)
+      if (disposed) return
+      if (outcome.kind === "reload") {
+        if (host.state().clean) await reload()
+        else wait()
+        return
+      }
+      host.notice(undefined)
+      host.rebased?.(event, outcome)
+    }
     // The agent's commands as it sent them (e.g. range.clear) are replayed only when the editor takes each as it is;
     // otherwise the operations log, in the editor's own names, brings the version in.
     const commandsGiven = !event.commandsOmitted && (event.commands?.length ?? 0) > 0 && event.contentHash !== undefined
@@ -131,32 +144,35 @@ export function createAgentVersionQueue(host: AgentVersionHost) {
       try {
         await nextPaint()
         if (disposed) return
-        const outcome = await host.rebase(event, abort.signal)
-        if (disposed) return
-        // Not replayed for any reason: a person with unsaved work is never told to reload (they could lose it). The change
-        // waits for their save and is handled again then; only a clean editor is told to reload.
-        if (outcome.kind === "reload") {
-          if (!state.clean) { waiting = event; host.notice(AGENT_CHANGED_FINISH) } else await reload()
-          return
-        }
-        host.notice(undefined)
-        host.rebased?.(event, outcome)
+        await rebase()
       } finally { host.working?.(false) }
       return
     }
-    if (!state.clean) { waiting = event; host.notice(AGENT_CHANGED_FINISH); return }
+    if (!state.clean) { wait(); return }
     const targets = host.targets()
     const base = state.confirmedVersion
     if (!targets || base === undefined || BigInt(event.version) !== BigInt(base) + 1n || (event.baseVersion !== undefined && event.baseVersion !== base)) { await reload(); return }
     const commands = event.commandsOmitted ? undefined : event.commands
     if (event.contentHash === undefined) { await reload(); return }
+    // Keep the revision that we saw while the editor was clean. GridCraft
+    // checks it after processing input in the frame that executes the batch.
+    const revision = host.baseRevision?.()
     host.notice(undefined)
     host.working?.(true)
     try {
       await nextPaint()
       if (disposed) return
-      const revision = host.baseRevision?.()
-      await applyAgentVersion(targets, { version: event.version, contentHash: event.contentHash, commands, ...(revision === undefined ? {} : { baseRevision: revision }), reopen: reload, signal: abort.signal })
+      const latest = host.state()
+      if (latest.mode !== "writable") return
+      const now = host.targets()
+      if (now?.port !== targets.port || now.save !== targets.save) return
+      const collect = async () => {
+        if (host.rebase) await rebase()
+        else if (host.state().clean) await reload()
+        else wait()
+      }
+      if (!latest.clean || latest.confirmedVersion !== base) { await collect(); return }
+      await applyAgentVersion(targets, { version: event.version, contentHash: event.contentHash, commands, ...(revision === undefined ? {} : { baseRevision: revision }), reopen: collect, signal: abort.signal })
     } finally { host.working?.(false) }
   }
 

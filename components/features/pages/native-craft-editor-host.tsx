@@ -325,7 +325,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     const confirmed=r.coordinator?.confirmedVersion()
     return{mode:'writable',clean:Boolean(confirmed)&&!r.blocked&&r.phase?.phase==='saved'&&!r.phase.dirty,confirmedVersion:confirmed}
    },
-   targets:()=>{const r=current;return r&&r.writable&&!r.blocked&&r.coordinator?{port:r.port,save:r.coordinator}:undefined},
+   targets:()=>{
+    const r=current
+    if(!r||!r.writable||r.blocked||!r.coordinator)return undefined
+    return {port:r.port,save:r.coordinator,beginReplay:r.coordinator.beginReplay,replayed(result,version,adopted){
+     if(!live(r))return
+     r.savedRevision=result.savedRevision??result.revision
+     r.revision=result.revision
+     if(adopted){r.ackedVersion=version;display(r)}
+    }}
+   },
    refreshReader:()=>refreshReader(),
    replayReader:async(commands,version,signal)=>{
     // A refresh that is already running decides what the editor shows; replay only onto what it ends with.
@@ -349,11 +358,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     // Not a writable Sheet here: today's path (unsaved work waits, a reader opens the version).
     if(dead||!r||!r.writable||r.blocked||!r.coordinator||sessionApplication!=='gridcraft')return{kind:'reload',reason:'operations_404'}
     const coordinator=r.coordinator
-    return rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',signal,
+    const release=coordinator.beginReplay()
+    if(!release)return{kind:'reload',reason:'save_unsettled'}
+    try{return await rebaseOverLocal({base:coordinator.currentBase(),enginePin:r.enginePin,replay:GRIDCRAFT_REPLAY,savedRevision:r.savedRevision,sameBuild:sameEngineBuild(r.editorBuild,r.engineBuild),label:'Agent: change',signal,
      operations:async(from,s)=>{let res:Response;try{res=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/document/operations?${new URLSearchParams({workspace_id:workspaceId,from})}`,{signal:s,cache:'no-store',redirect:'error'})}catch(error){if(s.aborted)throw error;return{status:0,body:null}}return{status:res.status,body:await res.json().catch(()=>null)}},
      // The saved version a replay over unsaved work reports is the base of the next one.
      execute:(commands,options,s)=>r.port.execute(commands,options,s).then(result=>{if(result.savedRevision&&live(r))r.savedRevision=result.savedRevision;return result}),
-     rebaseBase:(version,hash)=>live(r)&&coordinator.rebaseBase(version,hash)})
+     rebaseBase:(version,hash)=>live(r)&&coordinator.rebaseBase(version,hash)})}
+    finally{release()}
    },
    retryMoved:()=>{const r=current;if(r&&live(r))r.coordinator?.retryMoved()},
    rebased:(_event,outcome)=>{
@@ -361,7 +373,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     const r=current;keepMine.current=r&&r.coordinator?(version,hash)=>live(r)&&r.coordinator!.rebaseBase(version,hash,{keepLocal:true}):undefined
     if(!dead)setRebaseNote(outcome.kind==='current'||outcome.kind==='reload'||outcome.kind==='rebased'&&outcome.conflicts.length===0?undefined:outcome)},
    working:on=>{if(!dead)setAgentWorking(on)},
-   baseRevision:()=>current?.revision,
+   baseRevision:()=>current?.savedRevision??current?.revision,
   }
   const agentQueue=createAgentVersionQueue(agentHost)
   const unsubscribeAgent=subscribeAgentVersions(pageId,event=>agentQueue.push(event))
@@ -608,7 +620,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      if(!r||!liveMount()||!r.ready||r.blocked||!readable||offerStale||networkRetired)return
      try{downloadNativeExport(file)}catch{setError('The export could not be downloaded. The document stays open.')}
     },
-    onChanged(revision){if(r&&liveMount())r.revision=revision;if(r&&liveMount()&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited(revision);display(r)}},
+    onChanged(revision){if(!r||!liveMount()||sessionApplication==='gridcraft'&&r.revision===revision)return;r.revision=revision;if(r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited(revision);display(r)}},
     onSaveRequest(request){if(r&&liveMount()&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Saving was not confirmed.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&liveMount())failNative(r,'The connection to the editor ended. The last changes are not confirmed; the original editor stays locked.')},
     onReady(_version?:string,build?:string){if(!r||!liveMount())return;r.editorBuild=build;clearTimeout(timer);void(async()=>{
@@ -1045,6 +1057,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    // A workbook file saves as its format, 10 s after the last change: each save is the whole file.
    const workbook=workbookFile(snapshot)
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,...(workbook?{format:workbook.format,idleMs:WORKBOOK_IDLE_MS}:{}),enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+    onTransportSettled(){agentQueue.settled()},
     onState(state){r.phase=state;display(r);
      // Refused because the Sheet moved on: replay what was saved meanwhile and save on top, at most 3 times in a row (then the conflict shows).
      if(state.phase==='draft'&&state.reason==='moved'&&r.writable&&(r.movedTries??0)<3){r.movedTries=(r.movedTries??0)+1;agentQueue.moved()}
