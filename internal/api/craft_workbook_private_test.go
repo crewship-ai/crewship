@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -25,10 +24,9 @@ func TestWorkbookFromAPrivateChatIsPrivateToItsPerson(t *testing.T) {
 		if old {
 			mustExec(t, f.db, `UPDATE pages SET created_at='2026-01-01 00:00:00' WHERE id=?`, page)
 		}
-		req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", bytes.NewReader(craftTestWorkbook(t, "xlsx", page))).WithContext(ctx)
+		req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", workbookInitializeReader(craftTestWorkbook(t, "xlsx", page))).WithContext(ctx)
 		req.SetPathValue("slug", "@"+page)
-		req.Header.Set("Content-Type", mooring.WorkbookMediaTypeXLSX)
-		req.Header.Set("X-Craft-File-Name", page+".xlsx")
+		req.Header.Set("Content-Type", "application/json")
 		if chat != "" {
 			req.Header.Set("X-Craft-Chat", chat)
 		}
@@ -77,10 +75,9 @@ func TestWorkbookFromAPrivateChatReleasesItsLeaseInTheBrowsersOrder(t *testing.T
 	if err := f.db.QueryRow(`SELECT authority_revision FROM workspaces WHERE id=?`, f.wsID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("POST", "/api/v1/pages/@wb-view/craft/initialize", bytes.NewReader(craftTestWorkbook(t, "xlsx", "wb-view"))).WithContext(ctx)
+	req := httptest.NewRequest("POST", "/api/v1/pages/@wb-view/craft/initialize", workbookInitializeReader(craftTestWorkbook(t, "xlsx", "wb-view"))).WithContext(ctx)
 	req.SetPathValue("slug", "@wb-view")
-	req.Header.Set("Content-Type", mooring.WorkbookMediaTypeXLSX)
-	req.Header.Set("X-Craft-File-Name", "wb-view.xlsx")
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Craft-Chat", "chat-own")
 	w := httptest.NewRecorder()
 	d.initialize(w, req)
