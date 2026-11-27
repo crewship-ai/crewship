@@ -337,10 +337,10 @@ it("updates a merged capture only through a correlated adoption and replays agen
         generation: "1", sessionId: "session", editorRevision: "doc-1:4", baseVersion: "2", version: "3",
         contentHash, candidateHash: contentHash, durability: "node" as const, issuedBy: "crewship" as const, phase: "committed" as const,
       },
-      contentHash, bytes: new Uint8Array(workbook()), agentRanges: [{ sheet: "L", a1: "B3:B5" }], overlap: [],
+      contentHash, bytes: new Uint8Array(workbook()), agentRanges: [{ sheet: "L", a1: "B3:B5" }], headRanges: [{ sheet: "L", a1: "C2" }], overlap: [],
     }
     const adoption = r.adapter.adoptMerged(merged, capture.requestId, signal())
-    expect(latest(r)).toMatchObject({ type: "gridcraft:adopt-merged", document: "doc-1", captureId: capture.requestId, captureRevision: "4", version: "3", agentRanges: merged.agentRanges })
+    expect(latest(r)).toMatchObject({ type: "gridcraft:adopt-merged", document: "doc-1", captureId: capture.requestId, captureRevision: "4", version: "3", agentRanges: merged.agentRanges, headRanges: merged.headRanges })
     r.receive({ type: "gridcraft:merged-adopted", requestId: latest(r).requestId, document: "doc-1", captureId: capture.requestId, revision: "6", savedRevision: "saved-5", version: "3", dirty: true })
     await expect(adoption).resolves.toEqual({ revision: "doc-1:6", savedRevision: "doc-1:saved-5", dirty: true })
     expect(r.adapter.ack(capture.requestId, "3")).toBe(false)

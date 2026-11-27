@@ -9,7 +9,7 @@ import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import type {GridcraftNativePortOptions} from '@/lib/mooring/gridcraft-native-port'
 import type {NativeEditorPort,NativeStructuredPort} from '@/lib/mooring/native-editor-port'
-import {SHEET_REALTIME_CAPABILITIES} from '@/lib/mooring/sheet-realtime'
+import {SHEET_HEAD_RANGES_CAPABILITY,SHEET_REALTIME_CAPABILITIES,type SheetRealtimeCapability} from '@/lib/mooring/sheet-realtime'
 import {publishAgentVersion} from '@/lib/mooring/native-agent-version'
 import {suspendOtherDocumentDrafts} from '@/lib/document-queue'
 import {PendingSheetDraftCapture} from '@/lib/local-draft-seal'
@@ -43,7 +43,8 @@ function makeClient(format:'xlsx'|'xlsm'){
   exportXlsx:vi.fn(async(_signal:AbortSignal,version?:string)=>({blob:new Blob(['PK']),filename:`Plan.${format}`,version:version??'3'})),
  }
 }
-let realtimeCapabilities: boolean
+let realtimeCapabilities: boolean | readonly SheetRealtimeCapability[]
+let adoptRefusal: "head_range_conflict" | undefined
 let executed:Record<string,unknown>|null=null
 let client:ReturnType<typeof makeClient>
 // Fake timers, as in native-craft-startup: the host's deadlines and polls advance with the test, and hashes it started settle in between.
@@ -70,7 +71,7 @@ beforeEach(()=>{
  vi.spyOn(webcrypto.subtle,'digest').mockImplementation((algorithm,data)=>{const hash=digest(algorithm,data);hashes.push(hash);return hash})
  // No network here: a draft key the journal might ask for is simply not given.
  network=vi.fn(async()=>new Response(null,{status:404}));vi.stubGlobal('fetch',network)
- refuse=null;refuseFile=false;realtimeCapabilities=false;executed=null;wires=[];revision='1';sent=[];adapters=[];seen=[];opened={calculated:false,warnings:[]}
+ refuse=null;refuseFile=false;realtimeCapabilities=false;adoptRefusal=undefined;executed=null;wires=[];revision='1';sent=[];adapters=[];seen=[];opened={calculated:false,warnings:[]}
  mock.journal.mockResolvedValue({persist:vi.fn(),confirm:vi.fn(),discardRecovered:vi.fn(),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn(),revokeRead:vi.fn(),eraseOwnRow:vi.fn()})
  mock.legacy.mockImplementation(()=>{throw Error('a workbook file never opens through the native JSON port')})
  mock.gridcraft.mockImplementation((options:GridcraftNativePortOptions)=>{
@@ -79,6 +80,11 @@ beforeEach(()=>{
    const m=raw as Record<string,unknown>;sent.push(m)
    setTimeout(()=>{
     if(m.type==='gridcraft:set-access')wire.onmessage?.({data:{type:'gridcraft:access',requestId:m.requestId,readOnly:m.readOnly}})
+    else if(m.type==='gridcraft:adopt-merged'&&adoptRefusal){
+     revision='3'
+     wire.onmessage?.({data:{type:'gridcraft:changed',document:'doc',revision,dirty:true}})
+     wire.onmessage?.({data:{type:'gridcraft:merged-adopted',requestId:m.requestId,code:adoptRefusal,error:'late edit'}})
+    }
     else if(m.type==='gridcraft:adopt-merged')wire.onmessage?.({data:{type:'gridcraft:merged-adopted',requestId:m.requestId,captureId:m.captureId,document:'doc',revision:'4',savedRevision:'saved-4',version:m.version,dirty:false}})
     else if(m.type==='gridcraft:execute'&&executed)wire.onmessage?.({data:{type:'gridcraft:executed',requestId:m.requestId,...executed}})
     else if(m.type==='gridcraft:save-request'&&refuse)wire.onmessage?.({data:{type:'gridcraft:save',requestId:m.requestId,code:'fidelity_loss',error:"would drop charts in 'Q3'",parts:refuse,...(refuseFile?{bytes:new Uint8Array([0x50,0x4b,9,9]).buffer}:{})}})
@@ -87,7 +93,7 @@ beforeEach(()=>{
    },0)
   }}
   wires.push(wire)
-  const frame={postMessage(){queueMicrotask(()=>wire.onmessage?.({data:{type:'gridcraft:ready',version:'diagnostic',accessProtocol:1,readOnly:true,build:ENGINE_BUILD,...(realtimeCapabilities?{capabilities:SHEET_REALTIME_CAPABILITIES}:{})}}))}}
+  const frame={postMessage(){queueMicrotask(()=>wire.onmessage?.({data:{type:'gridcraft:ready',version:'diagnostic',accessProtocol:1,readOnly:true,build:ENGINE_BUILD,...(realtimeCapabilities?{capabilities:realtimeCapabilities===true?SHEET_REALTIME_CAPABILITIES:realtimeCapabilities}:{})}}))}}
   const port=createGridcraftNativePort({...options,frame,createChannel:()=>({port1:wire,port2:{}})})
   adapters.push(port)
   queueMicrotask(()=>port.handleWindowMessage({source:frame,origin:'null',data:{type:'gridcraft:hello',protocol:2,bundle:options.bundle}}))
@@ -141,6 +147,7 @@ describe('a Sheet stored as its workbook file',()=>{
   { generation:'1', capabilities:true, writable:true },
   { generation:'2', capabilities:true, writable:false },
   { generation:'1', capabilities:false, writable:false },
+  { generation:'1', capabilities:SHEET_REALTIME_CAPABILITIES.filter(capability=>capability!==SHEET_HEAD_RANGES_CAPABILITY), writable:false },
  ])('admits automatic chat editing only with the matching server generation and editor capabilities ($generation, $capabilities)',async({generation,capabilities,writable})=>{
   realtimeCapabilities=capabilities
   await mount('xlsx',undefined,'chat-1',generation)
@@ -161,7 +168,7 @@ describe('a Sheet stored as its workbook file',()=>{
    const {bytes: _bytes,attemptId,...scope}=request
    return {kind:'merged',submitted:{attempt_id:attemptId,base_version:'3',editor_revision:request.editorRevision,content_hash:request.contentHash},
     receipt:{...scope,baseVersion:'4',version:'4',unchanged:true,contentHash:hash,candidateHash:hash,durability:'node',phase:'committed',issuedBy:'crewship'},
-    head_content_hash:hash,bytes:canonical.toString('base64'),overlap:ranges,agent_ranges:ranges}
+    head_content_hash:hash,bytes:canonical.toString('base64'),overlap:ranges,agent_ranges:ranges,head_ranges:[]}
   })
   revision='2'
   act(()=>wires[0].onmessage?.({data:{type:'gridcraft:changed',document:'doc',revision,dirty:true}}))
@@ -173,6 +180,31 @@ describe('a Sheet stored as its workbook file',()=>{
   expect(sent.some(message=>message.type==='gridcraft:execute')).toBe(false)
   expect(screen.getByText('Agent edited Data!B2:B258. Your copy is saved in this browser.')).toBeVisible()
   expect(screen.getByRole('button',{name:'Download my copy'})).toBeEnabled()
+ })
+ it('keeps a late head-only edit, never marks it saved, and offers recovery',async()=>{
+  realtimeCapabilities=true
+  adoptRefusal='head_range_conflict'
+  const persist=vi.fn()
+  const confirm=vi.fn()
+  mock.journal.mockResolvedValueOnce({persist,confirm,discardRecovered:vi.fn(),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn(),revokeRead:vi.fn()})
+  await mount('xlsx',undefined,'chat-1','1')
+  const canonical=Buffer.from([80,75,3,4,99])
+  const hash='sha256:'+createHash('sha256').update(canonical).digest('hex')
+  client.save.mockImplementation(async(request:NativeSaveRequest)=>{
+   const {bytes: _bytes,attemptId,...scope}=request
+   return {kind:'merged',submitted:{attempt_id:attemptId,base_version:'3',editor_revision:request.editorRevision,content_hash:request.contentHash},
+    receipt:{...scope,baseVersion:'4',version:'4',unchanged:true,contentHash:hash,candidateHash:hash,durability:'node',phase:'committed',issuedBy:'crewship'},
+    head_content_hash:hash,bytes:canonical.toString('base64'),overlap:[],agent_ranges:[],head_ranges:[{sheet:'Data',a1:'C2'}]}
+  })
+  act(()=>publishAgentVersion({pageId:'diagnostic-page',version:'4'}))
+  await settle(1500)
+  expect(sent.find(message=>message.type==='gridcraft:adopt-merged')).toMatchObject({agentRanges:[],headRanges:[{sheet:'Data',a1:'C2'}]})
+  expect(persist).toHaveBeenLastCalledWith(expect.objectContaining({editorRevision:'doc:3',bytes:Uint8Array.of(80,75,3,4,3)}),false)
+  expect(confirm).not.toHaveBeenCalled()
+  expect(screen.getByRole('alert')).toHaveTextContent('The same cell changed elsewhere. Your edit is still here.')
+  expect(screen.getByRole('button',{name:'Load the latest version'})).toBeEnabled()
+  expect(screen.getByRole('button',{name:'Download my changes'})).toBeEnabled()
+  expect(document.querySelector('[data-save-phase]')).toHaveAttribute('data-save-phase','draft')
  })
  it('asks before the first edit what saving here would change, and takes over only when the person says so',async()=>{
   opened.warnings=[{code:'vba_preserved',count:1},{code:'unsupported_function_held',count:12}];await mount('xlsm')

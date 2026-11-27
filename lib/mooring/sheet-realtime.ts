@@ -6,7 +6,8 @@ export const SHEET_MERGE_RANGE_LIMIT = 256
 export const SHEET_PRESENCE_RANGE_LIMIT = 32
 export const SHEET_PRESENCE_OPERATION_LIMIT = 128
 
-export const SHEET_REALTIME_CAPABILITIES = ["merge-capture-v1", "agent-wins-v1", "presence-v1"] as const
+export const SHEET_HEAD_RANGES_CAPABILITY = "head-ranges-v1"
+export const SHEET_REALTIME_CAPABILITIES = ["merge-capture-v1", "agent-wins-v1", "presence-v1", SHEET_HEAD_RANGES_CAPABILITY] as const
 export const SHEET_PRESENCE_TRUNCATED_CAPABILITY = "agent-capture-fence-v1"
 export const SHEET_SUPPORTED_CAPABILITIES = [...SHEET_REALTIME_CAPABILITIES, SHEET_PRESENCE_TRUNCATED_CAPABILITY] as const
 export type SheetRealtimeCapability = typeof SHEET_SUPPORTED_CAPABILITIES[number]
@@ -47,7 +48,7 @@ export function readSheetPresence(value: unknown): { phase: "started" | "updated
   return { phase, ...(truncated === true ? { truncated } : {}), presence: { actorId: value.agent.id, label: value.agent.name, activityId: value.op_id, ranges, ttlMs: ttl } }
 }
 
-export type MergedSheetSave = { receipt: NativeSaveReceipt; contentHash: string; bytes: Uint8Array; agentRanges: SheetRange[]; overlap: SheetRange[] }
+export type MergedSheetSave = { receipt: NativeSaveReceipt; contentHash: string; bytes: Uint8Array; agentRanges: SheetRange[]; headRanges: SheetRange[]; overlap: SheetRange[] }
 
 export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveRequest): Promise<MergedSheetSave | undefined> {
   if (submitted.applicationId !== "gridcraft" || !sheetRecord(raw) || raw.kind !== "merged" || !sheetRecord(raw.submitted) || !sheetRecord(raw.receipt)) return
@@ -65,7 +66,8 @@ export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveReq
     || receipt.editorRevision !== submitted.editorRevision || receipt.issuedBy !== "crewship" || receipt.durability !== "node" || receipt.phase !== "committed") return
   const agentRanges = sheetRanges(raw.agent_ranges, SHEET_MERGE_RANGE_LIMIT)
   const overlap = sheetRanges(raw.overlap, SHEET_MERGE_RANGE_LIMIT)
-  if (!agentRanges || !overlap || typeof raw.bytes !== "string" || raw.bytes.length > Math.ceil(MAX_WORKBOOK_BYTES / 3) * 4) return
+  const headRanges = sheetRanges(raw.head_ranges, SHEET_MERGE_RANGE_LIMIT)
+  if (!agentRanges || !headRanges || !overlap || typeof raw.bytes !== "string" || raw.bytes.length > Math.ceil(MAX_WORKBOOK_BYTES / 3) * 4) return
   try {
     const decoded = atob(raw.bytes)
     if (!decoded.length || decoded.length > MAX_WORKBOOK_BYTES) return
@@ -73,6 +75,6 @@ export async function readMergedSheetSave(raw: unknown, submitted: NativeSaveReq
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
     const actual = "sha256:" + Array.from(digest, b => b.toString(16).padStart(2, "0")).join("")
     if (actual !== contentHash) return
-    return { receipt: receipt as unknown as NativeSaveReceipt, contentHash, bytes, agentRanges, overlap }
+    return { receipt: receipt as unknown as NativeSaveReceipt, contentHash, bytes, agentRanges, headRanges, overlap }
   } catch { return }
 }

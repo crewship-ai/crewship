@@ -253,7 +253,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{if(!view.holder||view.mine)setTakeNotice(notice=>notice==='held'?undefined:notice)},[view.holder,view.mine])
  const statusSink=React.useRef(onStatus);statusSink.current=onStatus
  const openProposals=proposals.filter(proposal=>proposal.state==='open').length
- const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='merge_adoption'||saveTrace.reason==='too_many_ranges'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
+ const conflictShown=saveTrace?.phase==='draft'&&(saveTrace.reason==='conflict'||saveTrace.reason==='merge_adoption'||saveTrace.reason==='head_range_conflict'||saveTrace.reason==='too_many_ranges'||saveTrace.reason==='moved'&&movedGaveUp&&rebaseNote?.kind!=='layout')&&!connectionRetired
  React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:!realtimeSheet&&view.mine,openProposals,recoveredDrafts:recoveries.length,version:savedVersion??openedVersion,...(conflictShown?{conflict:true}:{})})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,openedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,realtimeSheet,openProposals,recoveries.length,conflictShown])
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -1158,7 +1158,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,...(workbook?{format:workbook.format,idleMs:WORKBOOK_IDLE_MS}:{}),enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     ...(realtimeOpen?{async adoptMerged(save,captureId){
      if(!live(r)||!r.writable||!r.port.adoptMerged)throw Error('native_merge_unavailable')
-     const adopted=await r.port.adoptMerged(save,captureId,r.abort.signal)
+     const adopted=await r.port.adoptMerged(save,captureId,r.abort.signal).catch((error:unknown)=>{
+      if(live(r)&&error instanceof Error&&(error.message==='head_range_conflict'||error.message==='stale_base'))r.port.saveFailed(captureId,'The updated Sheet could not be opened.')
+      throw error
+     })
      if(!live(r)||!r.writable)throw Error('native_merge_retired')
      r.savedRevision=adopted.savedRevision;r.revision=adopted.revision;r.version=save.receipt.version
      r.ackedVersion=save.receipt.version;setOpenedVersion(save.receipt.version)
@@ -1519,9 +1522,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {saveTrace?.reason==='document_too_large'&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>This workbook is larger than the 32 MiB a Sheet can save, so it is NOT saved on the server.</b> Your changes stay in this editor. Do not close the tab; remove data or split the workbook, or download it as a file.</p></div>}
   {/* One sentence and two actions; the detail folded, so the grid keeps its room. */}
   {conflictShown&&<div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-sm">
-   <p className="min-w-0 flex-1 basis-56">{saveTrace?.reason==='too_many_ranges'?'This change covers too many ranges. Try a smaller area.':realtimeSheet?'Review changes':'Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.'}</p>
-   <div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" onClick={()=>{if(saveTrace?.reason==='too_many_ranges')void prepareLeave.current().then(ok=>{if(ok)setReopened(n=>n+1)});else setReopened(n=>n+1)}}>Load the latest version</Button><Button size="sm" variant="outline" onClick={()=>downloadDraft.current()}>Download my changes</Button></div>
-   <details className="basis-full text-xs text-muted-foreground"><summary className="cursor-pointer">What happens</summary>Your changes stay in this editor and in this browser. Load the latest version to see what changed; your changes are offered beside it to compare or keep as a copy. Saving again here would be refused, because the server already holds a newer version.</details>
+   <p className="min-w-0 flex-1 basis-56">{saveTrace?.reason==='too_many_ranges'?'This change covers too many ranges. Try a smaller area.':saveTrace?.reason==='head_range_conflict'?'The same cell changed elsewhere. Your edit is still here.':realtimeSheet?'Review changes':'Not saved: this Sheet changed on the server meanwhile. Your changes are kept here.'}</p>
+   <div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" onClick={()=>{if(realtimeSheet)void prepareLeave.current().then(ok=>{if(ok)setReopened(n=>n+1)});else setReopened(n=>n+1)}}>Load the latest version</Button><Button size="sm" variant="outline" onClick={()=>downloadDraft.current()}>Download my changes</Button></div>
+   <details className="basis-full text-xs text-muted-foreground"><summary className="cursor-pointer">What happens</summary>Your changes stay in this editor. Loading the latest version keeps a local draft for comparison or download.</details>
   </div>}
   {fidelityLoss&&!connectionRetired&&<div role="alert" data-craft-banner="fidelity-loss" className="space-y-1 border-y px-3 py-2"><p><b>Saving here would drop parts of this workbook ({fidelityPartsText(fidelityLoss)}). Your changes stay in the editor.</b> {fidelityKept?'Nothing was saved on the server. This browser keeps a copy of the file without those parts, to download only.':'Nothing was saved, on the server or in this browser: leaving or reloading this page loses them.'}</p><p className="text-sm text-muted-foreground">The stored version and the original file (version 1) keep every part. Saving is tried again after your next change.</p></div>}
   {saveTrace?.phase==='draft'&&saveTrace.reason==='fidelity_loss'&&!connectionRetired&&<p role="alert" className="border-y px-3 py-2 text-sm">This save would drop macros or signatures, so it was not saved. Your work is kept.</p>}

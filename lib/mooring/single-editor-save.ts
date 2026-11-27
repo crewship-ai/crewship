@@ -228,14 +228,23 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         retirementRetried = false
         dirty = adopted.dirty || edits !== epoch
         emit(dirty ? "dirty" : "saved")
-      } catch {
+      } catch (error) {
         if (!active || !writable) return
         // The server committed. Keep the draft and stop automatic publication
         // when the editor or local journal cannot confirm the new checkpoint.
         unconfirmed = undefined
-        blocked = "merge_adoption"
+        const code = error instanceof Error ? error.message : undefined
+        const headConflict = code === "head_range_conflict"
+        blocked = headConflict ? "head_range_conflict" : "merge_adoption"
         dirty = true
         emit("draft", blocked)
+        // The conflict can be a cell typed after the submitted capture. The
+        // rejected RPC leaves it in the editor, so protect its current bytes.
+        if (headConflict || code === "stale_base") {
+          const reason = blocked
+          await save(undefined, undefined, false, true).catch(() => {})
+          if (active && writable && blocked === reason) emit("draft", reason)
+        }
       }
       return
     }
@@ -707,7 +716,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (held) firstHeldRevision ??= revision
       lastRevision = revision
       edits++; dirty = true
-      if (writable && blocked === "too_many_ranges") emit("draft", blocked)
+      if (writable && (blocked === "too_many_ranges" || blocked === "head_range_conflict")) emit("draft", blocked)
       else emit(writable ? "dirty" : "read-only")
       schedule()
     },

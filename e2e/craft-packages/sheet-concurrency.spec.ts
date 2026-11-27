@@ -190,8 +190,8 @@ async function openEditor(page: Page) {
   return frame
 }
 
-async function editCell(page: Page, frame: Frame, value: string, cell: "A3" | "B2") {
-  const position = cell === "A3" ? { x: 54, y: 255 } : { x: 104, y: 239 }
+async function editCell(page: Page, frame: Frame, value: string, cell: "A3" | "B2" | "C2") {
+  const position = cell === "A3" ? { x: 54, y: 255 } : { x: cell === "B2" ? 104 : 154, y: 239 }
   await frame.locator("canvas").first().click({ position })
   await page.keyboard.type(value)
   await frame.waitForFunction(() => document.activeElement?.tagName === "INPUT", {}, { timeout: 5_000 })
@@ -265,7 +265,7 @@ async function watchEditor(page: Page) {
 
 const cellSet = (cell: string, input: string) => ({ command: "cell.set", params: { cell, input } })
 
-for (const race of ["saved revision", "same cell", "other cell", "other sheet"] as const) {
+for (const race of ["saved revision", "same cell", "other cell", "other sheet", "head-only change", "late head-only edit", "undeclared head edit"] as const) {
   test(`Sheet adopts canonical bytes for ${race}`, async ({ browser }) => {
     const context = await browser.newContext({ baseURL: origin, storageState: await loginStorageState(origin, account), viewport: native.VIEWPORT, acceptDownloads: true })
     try {
@@ -301,6 +301,11 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       const { version: savedVersion } = await saved.json() as { version: string }
       const base = Number(savedVersion)
       const agentFootprints = new Map<number, { sheet: string; a1: string }>()
+      const headFootprints = new Map<number, { sheet: string; a1: string }>()
+      const headOnly = race === "head-only change" || race === "late head-only edit" || race === "undeclared head edit"
+      let receivedStaleSave!: () => void, releaseStaleSave!: () => void
+      const receivedCapture = new Promise<void>(resolve => { receivedStaleSave = resolve })
+      const holdResponse = new Promise<void>(resolve => { releaseStaleSave = resolve })
       // Seed real versions while stubbing the agent role and the merge response in this browser test.
       // Go integration tests exercise the server's authorization and merge rules with an actual agent grant.
       const send = async (version: number, command: ReturnType<typeof cellSet>) => {
@@ -316,7 +321,8 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         })
         expect(commit.status(), await commit.text()).toBe(200)
         expect(await commit.json()).toMatchObject({ version: String(version), candidateHash: hash })
-        agentFootprints.set(version, { sheet, a1: address })
+        if (headOnly) headFootprints.set(version, { sheet, a1: address })
+        else agentFootprints.set(version, { sheet, a1: address })
         const id = `sheet-change-${version}`
         const emit = (type: string, content: string, metadata: Record<string, unknown> = {}) =>
           socket!.send(JSON.stringify({ type: "chat_event", channel: `session:${chat}`, payload: { type, content, metadata } }))
@@ -326,7 +332,7 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       }
       await expect.poll(() => Boolean(socket), { message: "real chat WebSocket connected" }).toBe(true)
       const adoptions = () => page.evaluate(() => window.sheetTestEvents.filter(event => event.type === "gridcraft:merged-adopted"))
-      const operation = cellSet(race === "other sheet" ? "'Other'!B2" : race === "other cell" ? "'Data'!C2" : "'Data'!B2", "agent")
+      const operation = cellSet(race === "other sheet" ? "'Other'!B2" : race === "other cell" || headOnly ? "'Data'!C2" : "'Data'!B2", "agent")
       await page.route("**/craft/document/save?**", async route => {
         const request = route.request().postDataJSON() as typeof binding & {
           attemptId: string; baseVersion: string; editorRevision: string; contentHash: string; bytes: string
@@ -334,6 +340,8 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         const head = await readWorkbook(context.request, craft)
         if (head.version === request.baseVersion) return route.continue()
         const agentRanges = [...agentFootprints].filter(([version]) => version > Number(request.baseVersion)).map(([, range]) => range)
+        const headRanges = race === "undeclared head edit" ? [] : [...headFootprints].filter(([version]) => version > Number(request.baseVersion)).map(([, range]) => range)
+        if (race === "late head-only edit") { receivedStaleSave(); await holdResponse }
         const captured = await workbookCell(page, Buffer.from(request.bytes, "base64"), "Data", "B2")
         const human = captured.value === "human"
         const overlap = human ? agentRanges.filter(range => range.sheet === "Data" && range.a1 === "B2") : []
@@ -356,10 +364,23 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
           submitted: { attempt_id: attemptId, base_version: request.baseVersion, editor_revision: request.editorRevision, content_hash: request.contentHash },
           receipt: { ...scope, baseVersion: head.version, version, ...(version === head.version ? { unchanged: true } : {}),
             contentHash: hash, candidateHash: hash, durability: "node", issuedBy: "crewship", phase: "committed" },
-          head_content_hash: hash, bytes: canonical.toString("base64"), overlap, agent_ranges: agentRanges,
+          head_content_hash: hash, bytes: canonical.toString("base64"), overlap, agent_ranges: agentRanges, head_ranges: headRanges,
         } })
       })
 
+      if (race === "late head-only edit") {
+        await send(base + 1, operation)
+        await receivedCapture
+        try { await editCell(page, frame, "late local value", "C2") }
+        finally { releaseStaleSave() }
+        await expect.poll(async () => (await adoptions()).at(-1)).toMatchObject({ code: "head_range_conflict" })
+        await expect(panel.getByText("The same cell changed elsewhere. Your edit is still here.")).toBeVisible()
+        const download = page.waitForEvent("download")
+        await panel.getByRole("button", { name: "Download my changes" }).click()
+        const stream = await (await download).createReadStream()
+        expect((await workbookCell(page, Buffer.concat(await stream.toArray()), "Data", "C2")).value).toBe("late local value")
+        return
+      }
       if (race === "saved revision") {
         await send(base + 1, cellSet("'Data'!A2", "first agent change"))
         await expect.poll(async () => (await adoptions()).length).toBe(1)
@@ -372,6 +393,15 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
         await editCell(page, frame, "human", "B2")
         await page.evaluate(() => window.sheetTestReleasePaint())
       }
+      if (race === "undeclared head edit") {
+        await expect.poll(async () => (await adoptions()).at(-1)).toMatchObject({ code: "stale_base" })
+        await expect(panel.getByText("Review changes", { exact: true })).toBeVisible()
+        const download = page.waitForEvent("download")
+        await panel.getByRole("button", { name: "Download my changes" }).click()
+        const stream = await (await download).createReadStream()
+        expect((await workbookCell(page, Buffer.concat(await stream.toArray()), "Data", "B2")).value).toBe("human")
+        return
+      }
       const overlaps = race === "saved revision" || race === "same cell"
       const finalVersion = String(base + (race === "same cell" ? 1 : 2))
       await expect.poll(async () => (await adoptions()).at(-1)).toMatchObject({ version: finalVersion, dirty: false })
@@ -380,6 +410,14 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet"] 
       expect((await workbookCell(page, head.bytes, "Data", "B2")).value).toBe(overlaps ? "agent" : "human")
       const [, sheet, address] = /^'([^']+)'!([A-Z]+\d+)$/.exec(operation.params.cell)!
       expect((await workbookCell(page, head.bytes, sheet, address)).value).toBe("agent")
+      if (headOnly) {
+        await panel.getByRole("button", { name: "Close Sheet" }).click()
+        await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
+        await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", finalVersion)
+        const reopened = await readWorkbook(context.request, craft)
+        expect((await workbookCell(page, reopened.bytes, "Data", "B2")).value).toBe("human")
+        expect((await workbookCell(page, reopened.bytes, "Data", "C2")).value).toBe("agent")
+      }
       if (overlaps) {
         await expect(panel.getByText("Agent edited Data!B2. Your copy is saved in this browser.")).toBeVisible()
         const download = page.waitForEvent("download")

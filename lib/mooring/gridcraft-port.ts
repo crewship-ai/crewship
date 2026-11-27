@@ -1,4 +1,4 @@
-import { SHEET_PRESENCE_TRUNCATED_CAPABILITY, SHEET_SUPPORTED_CAPABILITIES, type MergedSheetSave, type SheetPresence, type SheetRealtimeCapability } from "./sheet-realtime"
+import { SHEET_HEAD_RANGES_CAPABILITY, SHEET_PRESENCE_TRUNCATED_CAPABILITY, SHEET_SUPPORTED_CAPABILITIES, type MergedSheetSave, type SheetPresence, type SheetRealtimeCapability } from "./sheet-realtime"
 import type { SheetMergedAdopted } from "./native-editor-port"
 // GridCraft editor ↔ host, mooring protocol 2: the workbook
 // file (.xlsx or .xlsm) is the source of truth. The host opens the stored file as it is
@@ -331,12 +331,12 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
     },
     async adoptMerged(save, captureId, signal) {
       const file = unanswered.get(captureId)
-      if (!capabilities.includes("merge-capture-v1") || !file || file.document !== bound || confirmedReadOnly
+      if (!capabilities.includes("merge-capture-v1") || !capabilities.includes(SHEET_HEAD_RANGES_CAPABILITY) || !file || file.document !== bound || confirmedReadOnly
         || `${file.document}:${file.revision}` !== save.receipt.editorRevision) throw new Error("native_merge_unavailable")
       const bytes = new Uint8Array(save.bytes).buffer
       return await rpc("adopt", {
         type: "gridcraft:adopt-merged", captureId, document: file.document, captureRevision: file.revision,
-        version: save.receipt.version, contentHash: save.contentHash, bytes, agentRanges: save.agentRanges,
+        version: save.receipt.version, contentHash: save.contentHash, bytes, agentRanges: save.agentRanges, headRanges: save.headRanges,
       }, signal, timeoutMs, [bytes]) as SheetMergedAdopted
     },
     setPresence(actors, reducedMotion, truncated) {

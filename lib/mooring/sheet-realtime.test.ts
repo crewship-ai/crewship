@@ -23,12 +23,15 @@ function merged(request: NativeSaveRequest) {
     kind: "merged", submitted: { attempt_id: attemptId, base_version: request.baseVersion, editor_revision: request.editorRevision, content_hash: request.contentHash },
     receipt: { ...binding, baseVersion: "2", version: "3", issuedBy: "crewship", durability: "node", phase: "committed", contentHash: hash, candidateHash: hash },
     head_content_hash: hash, bytes: bytes.toString("base64"),
-    overlap: [], agent_ranges: [{ sheet: "Other", a1: "B2" }],
+    overlap: [], agent_ranges: [{ sheet: "Other", a1: "B2" }], head_ranges: [{ sheet: "Data", a1: "C2" }],
   }
 }
 
 it("binds the merged reply to the original attempt and verifies the canonical bytes and footprint", async () => {
   const value = merged(submitted)
+  const { head_ranges: _head, ...legacy } = value
+  expect(await readMergedSheetSave(legacy, submitted)).toBeUndefined()
+  expect((await readMergedSheetSave({ ...value, head_ranges: [] }, submitted))?.headRanges).toEqual([])
   expect(await readMergedSheetSave(value, submitted)).toMatchObject({ bytes: Uint8Array.of(80, 75, 4), agentRanges: [{ sheet: "Other", a1: "B2" }] })
   expect(await readMergedSheetSave(value, { ...submitted, attemptId: "another-attempt" })).toBeUndefined()
   expect(await readMergedSheetSave({ ...value, bytes: "AAAA" }, submitted)).toBeUndefined()
@@ -96,6 +99,7 @@ it.each([contract.merged, contract.merged_unchanged])("accepts the canonical mer
   expect(parsed?.receipt).toEqual(receipt)
   expect(parsed?.bytes).toEqual(new Uint8Array(Buffer.from(value.bytes, "base64")))
   expect(parsed?.agentRanges).toEqual(value.agent_ranges)
+  expect(parsed?.headRanges).toEqual(value.head_ranges)
   expect(await readMergedSheetSave({ ...value, receipt: { ...receipt, version: request.baseVersion } }, request)).toBeUndefined()
 })
 
@@ -190,6 +194,7 @@ it("accepts complete bounded server footprints and refuses an oversized footprin
   const ranges = Array.from({ length: 256 }, (_, i) => ({ sheet: "Other", a1: `A${i + 1}` }))
   expect((await readMergedSheetSave({ ...value, agent_ranges: ranges, overlap: ranges }, submitted))?.overlap).toHaveLength(256)
   expect(await readMergedSheetSave({ ...value, agent_ranges: [...ranges, overlap[0]] }, submitted)).toBeUndefined()
+  expect(await readMergedSheetSave({ ...value, head_ranges: [...ranges, overlap[0]] }, submitted)).toBeUndefined()
   const event = { ...contract.presence_started, ranges: ranges.slice(0, 32) }
   expect(readSheetPresence(event)?.presence.ranges).toHaveLength(32)
   expect(readSheetPresence({ ...event, truncated: true })?.truncated).toBe(true)
@@ -212,4 +217,23 @@ it("keeps the draft after too_many_ranges and never retries that base automatica
     expect(r.confirm).not.toHaveBeenCalled()
     expect(r.controller.currentBase()).toBe("1")
   } finally { await r.controller.close(); client.close() }
+})
+
+
+it.each(["head_range_conflict", "stale_base"])("protects edits entered after capture when the editor refuses %s", async code => {
+  const save = vi.fn(async (request: NativeSaveRequest) => merged(request))
+  const r = saveRig({ save })
+  r.adoptMerged.mockImplementationOnce(async () => {
+    r.edit()
+    throw Error(code)
+  })
+  try {
+    expect(await r.controller.catchUp("3")).toBe(false)
+    expect(save).toHaveBeenCalledOnce()
+    expect(r.persist).toHaveBeenLastCalledWith(expect.objectContaining({ editorRevision: "doc:5", bytes: Uint8Array.of(80, 75, 3, 4, 5) }))
+    expect(r.confirm).not.toHaveBeenCalled()
+    expect(r.onReceipt).not.toHaveBeenCalled()
+    expect(r.controller.currentBase()).toBe("1")
+    expect(r.controller.confirmedVersion()).toBeUndefined()
+  } finally { await r.controller.close() }
 })
