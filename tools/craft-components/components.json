@@ -10,7 +10,7 @@
     {
       "application": "wordcraft",
       "repository": "https://github.com/storytold/wordcraft.git",
-      "commit": "72ca96a27c795d6289775f6c12954c2cdbd62908",
+      "commit": "5796c665b9fe9936c9decda2c7ff42930d24b6ad",
       "patch": "patches/wordcraft-wasi.patch",
       "patch_sha256": "284a71ad348f968f073304a157723342edfca23dfdc1517e66035e3ad1e726d7",
       "cli_package": "wordcraft-cli",
