@@ -56,6 +56,36 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	schemas["NativeCraftInitializeRequest"] = obj(map[string]any{"application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "bytes": bytes()}, "application_id", "bytes")
 	schemas["NativeCraftInitializeReceipt"] = obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private process-local human admission, issued only after atomic initialization. Never send to the editor iframe or local journal."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "page_id": str(), "generation": version(false), "version": map[string]any{"type": "string", "enum": []string{"1"}}, "contentHash": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "A workbook Sheet started from an uploaded file: that file's SHA-256, computed by the server."}, "format": map[string]any{"type": "string", "enum": []string{"xlsx", "xlsm"}, "description": "A workbook Sheet started from an uploaded file: the file's format."}, "chatRef": map[string]any{"type": "boolean", "description": "The Sheet was added to the chat named by X-Craft-Chat, in the transaction that stored version 1."}}, "session_token", "session_id", "application_id", "page_id", "generation", "version")
 	integer := func() map[string]any { return map[string]any{"type": "integer", "format": "int64"} }
+	nonnegative := func() map[string]any { return map[string]any{"type": "integer", "format": "int64", "minimum": 0} }
+	enum := func(values ...string) map[string]any { return map[string]any{"type": "string", "enum": values} }
+	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
+	jobID := map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
+	schemas["NativeCraftWorkbookImportUpload"] = map[string]any{"type": "string", "format": "binary", "description": "Raw .xlsx workbook, up to 64 MiB."}
+	schemas["NativeCraftWorkbookImportAccepted"] = obj(map[string]any{"id": jobID, "state": enum("converting")}, "id", "state")
+	schemas["NativeCraftWorkbookImportLostCells"] = obj(map[string]any{
+		"sheet": map[string]any{"type": "integer", "minimum": 1, "description": "One-based position in the source workbook."},
+		"name":  str(), "kind": str(), "count": nonnegative(),
+	}, "sheet", "name", "kind", "count")
+	schemas["NativeCraftWorkbookImportArchive"] = obj(map[string]any{
+		"entries": nonnegative(), "uncompressed_bytes": nonnegative(), "worksheets": nonnegative(),
+		"cells": nonnegative(), "formulas": nonnegative(), "largest_part_elements": nonnegative(),
+		"macros": map[string]any{"type": "boolean"}, "external_links": nonnegative(), "pivot_tables": nonnegative(),
+		"charts": nonnegative(), "notes": array(str()),
+	}, "entries", "uncompressed_bytes", "worksheets", "cells", "formulas", "largest_part_elements", "macros", "external_links", "pivot_tables", "charts")
+	schemas["NativeCraftWorkbookImportStatus"] = obj(map[string]any{
+		"id": jobID, "state": enum("converting", "ready", "failed"), "code": enum("not_xlsx", "too_large", "truncated", "failed"),
+		"lost": array(ref("NativeCraftWorkbookImportLostCells")), "cells": nonnegative(), "document_bytes": nonnegative(),
+		"archive": ref("NativeCraftWorkbookImportArchive"),
+	}, "id", "state")
+	// The response is the engine's workbook JSON itself. Keep the engine's
+	// additional document and sheet fields open.
+	schemas["NativeCraftWorkbookImportDocument"] = map[string]any{
+		"type": "object", "required": []string{"sheets"},
+		"properties": map[string]any{"sheets": array(map[string]any{
+			"type": "object", "required": []string{"name"},
+			"properties": map[string]any{"name": str()},
+		})},
+	}
 	proposalState := map[string]any{"type": "string", "enum": []string{"open", "accepted", "rejected", "stale"}}
 	schemas["NativeCraftDecider"] = obj(map[string]any{"actor_id": map[string]any{"type": "string", "description": "Recorded decider, `user:<id>` or `system:superseded`."}, "display_name": str(), "kind": map[string]any{"type": "string", "enum": []string{"human", "system"}}}, "actor_id", "display_name", "kind")
 	schemas["NativeCraftProposal"] = obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^ncp_[a-f0-9]{24}$"}, "author": ref("NativeCraftHolder"), "base_version": integer(), "summary": map[string]any{"type": "string", "maxLength": 500}, "created_at": str(), "state": proposalState, "result_version": integer(), "decided_by": map[string]any{"allOf": []any{ref("NativeCraftDecider")}, "description": "Who decided a non-open proposal. kind human: the person who accepted or rejected it, or whose accept found the document content changed and recorded it stale. kind system (system:superseded): only when a newer proposal's sweep marked it stale before anyone decided. Absent while open."}, "decided_at": map[string]any{"type": "string", "format": "date-time", "description": "When the proposal was decided. Absent while open."}}, "id", "author", "base_version", "summary", "created_at", "state")
@@ -67,6 +97,22 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	routes["POST /api/v1/pages/{slug}/craft/initialize"] = DomainSchema{Request: ref("NativeCraftInitializeRequest"), Response: ref("NativeCraftInitializeReceipt"), RequestRequired: true, SuccessStatuses: []string{"201"}, Parameters: []map[string]any{
 		{"name": "X-Craft-Chat", "in": "header", "schema": str(), "description": "Optional chat owned by the caller. Attach the new Sheet in the same transaction as version 1."},
 	}}
+	importPath := "/api/v1/pages/{slug}/craft/import"
+	jobPath := importPath + "/{id}"
+	routes["POST "+importPath] = DomainSchema{
+		Request: ref("NativeCraftWorkbookImportUpload"), RequestRequired: true, RequestMedia: []string{"application/octet-stream"},
+		Response: ref("NativeCraftWorkbookImportAccepted"), SuccessStatuses: []string{"202"}, ErrorStatuses: []string{"400", "403", "404", "409", "413", "503"},
+	}
+	routes["GET "+jobPath] = DomainSchema{
+		NoRequest: true, Response: ref("NativeCraftWorkbookImportStatus"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"404"},
+	}
+	routes["GET "+jobPath+"/document"] = DomainSchema{
+		NoRequest: true, Response: ref("NativeCraftWorkbookImportDocument"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"404", "409"},
+	}
+	routes["POST "+jobPath+"/initialize"] = DomainSchema{
+		NoRequest: true, Response: ref("NativeCraftInitializeReceipt"), SuccessStatuses: []string{"201"}, ErrorStatuses: []string{"400", "403", "404", "409", "413", "503"},
+		Parameters: routes["POST /api/v1/pages/{slug}/craft/initialize"].Parameters,
+	}
 	add := func(method, path, req, res string) {
 		d := DomainSchema{Response: ref(res), SuccessStatuses: []string{"200"}, NoRequest: req == "", Parameters: []map[string]any{{"name": "X-Craft-Session", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID."}}}
 		if req != "" {

@@ -21,6 +21,7 @@ crewship craft original-workbook <page> [--output FILE]
 crewship craft agent-access <page> --chat <chat-id>
 crewship craft connect <page>
 crewship craft initialize <page> [--application word|sheet] --file <native.json>
+crewship craft import <page> --file <workbook.xlsx> [--wait 10m]
 crewship craft task instruction|start|status|stop ...
 ```
 
@@ -295,7 +296,7 @@ reacquisition. EOF does not save content or release/reacquire a lease; send an
 explicit `release` when wanted. Reauthorization uses the current CLI credential
 and cannot revive an expired admission or replace its original authority.
 
-## Initialize one owned Word or Sheet Page
+## crewship craft initialize
 
 `crewship craft initialize <page> [--application word|sheet] --file <native.json>`
 calls `POST /api/v1/pages/{slug}/craft/initialize` with native bytes (at most
@@ -312,6 +313,21 @@ second session or lease acquisition. EOF does not release or commit content.
 Use an explicit `release` action when required. `--file -` consumes stdin as
 raw native bytes and ends without subsequent NDJSON actions.
 
+
+## crewship craft import
+
+`crewship craft import <page>` converts an .xlsx workbook into a legacy native
+Sheet on a server configured for native JSON Sheets. The Page must be empty
+and owned by the signed-in user. On a server that stores workbook files directly,
+use `crewship craft initialize <page> --application sheet` with the workbook.
+
+- `--file` specifies the local .xlsx workbook to upload. It is required and the
+  upload limit is 64 MiB.
+- `--wait` sets the conversion polling timeout. It defaults to `10m`. If the
+  timeout expires, the server can still finish the conversion.
+
+The command fetches the converted document after the job is ready and uses
+`craft initialize` to save its first version.
 
 ## crewship craft task
 
