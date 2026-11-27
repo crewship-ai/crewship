@@ -21,9 +21,11 @@ type EngineModuleSource struct{ Load func() ([]byte, error) }
 type CraftNativeDocumentProfile struct {
 	Application    string
 	EngineRevision string
-	CLIPath        string
-	CLISHA256      string
-	EditorBundle   string
+	// EngineBuild identifies the workbook engine build reported by the editor.
+	EngineBuild  string
+	CLIPath      string
+	CLISHA256    string
+	EditorBundle string
 	// CompatEditors lists, comma separated, earlier editor bundles of the same engine whose
 	// documents this editor opens unchanged (a string keeps the profile comparable).
 	CompatEditors string
@@ -87,7 +89,7 @@ func qualifyCraftNativeProfiles(input map[string]CraftNativeDocumentProfile, tru
 		if p.Workbook {
 			store.Format, store.Validate = mooring.NativeFormatWorkbook, mooring.ValidateWorkbook
 		}
-		profiles[key] = craftNativeApplication{Store: store, EditorURL: p.EditorURL}
+		profiles[key] = craftNativeApplication{Store: store, EditorURL: p.EditorURL, EngineBuild: p.EngineBuild}
 		resolved[key] = p
 	}
 	return profiles, resolved, nil

@@ -19,8 +19,9 @@ import (
 // Qualified profiles are host-owned. Requests cannot select executable paths,
 // validator callbacks, compatibility pins, or publication principals.
 type craftNativeApplication struct {
-	Store     mooring.NativeStoreConfig
-	EditorURL string
+	Store       mooring.NativeStoreConfig
+	EditorURL   string
+	EngineBuild string
 }
 type craftNativeDocumentsHTTP struct {
 	human *craftNativeHTTP
@@ -210,7 +211,7 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, Format: craftWorkbookResponseFormat(file), LegacySource: s.HasWorkbookMigration(r.Context(), entry.scope), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
+	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, Format: craftWorkbookResponseFormat(file), LegacySource: s.HasWorkbookMigration(r.Context(), entry.scope), ApplicationID: entry.application, EnginePin: s.EnginePin(), EngineBuild: profile.EngineBuild, EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
 }
 
 // craftSheetRecord writes the audit row of a new revision on its saving
