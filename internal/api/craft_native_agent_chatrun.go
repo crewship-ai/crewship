@@ -342,7 +342,7 @@ func (b *craftNativeChatBuffer) finish(w http.ResponseWriter, m *craftNativeAgen
 			return
 		}
 	}
-	if status != http.StatusOK {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
 		if status == http.StatusForbidden {
 			logChatRunRefusal(context.Background(), "tool", status, b.body.Bytes(), nil)
 		}

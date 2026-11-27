@@ -962,3 +962,15 @@ func TestChatRunSheetWriterRefusesANotDurableDatabase(t *testing.T) {
 	}
 	tx.Rollback()
 }
+
+func TestChatRunSheetKeepsTheProposalReceipt(t *testing.T) {
+	const receipt = `{"proposal_id":"synthetic-proposal","base_version":"1","state":"pending"}`
+	b := &craftNativeChatBuffer{header: http.Header{}}
+	b.WriteHeader(http.StatusCreated)
+	_, _ = b.Write([]byte(receipt))
+	w := httptest.NewRecorder()
+	b.finish(w, nil, nil, craftNativeAgentToolRequest{Operation: "propose"}, true)
+	if w.Code != http.StatusCreated || w.Body.String() != receipt {
+		t.Fatalf("proposal receipt: %d %s", w.Code, w.Body)
+	}
+}
