@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { TableGrid } from "./table-preview"
 import { XLSX_LIMITS } from "./xlsx-limits"
 import type { WorkbookData } from "./xlsx-data"
 
-export function XlsxPreview({ bytes, path, onAskSelection }: { bytes: Uint8Array<ArrayBuffer>; path: string; onAskSelection?: (context: string) => void }) {
+export function XlsxPreview({ bytes, path, onAskSelection, offer }: { bytes: Uint8Array<ArrayBuffer>; path: string; onAskSelection?: (context: string) => void; /** Shown beside a refusal: the workbook as a Sheet instead. */ offer?: ReactNode }) {
   const [result, setResult] = useState<{ source: Uint8Array; path: string; workbook?: WorkbookData; version?: string; error?: string } | null>(null)
   const [selectedSheet, setSelectedSheet] = useState<{ source: Uint8Array; path: string; index: number } | null>(null)
   useEffect(() => {
@@ -32,7 +32,7 @@ export function XlsxPreview({ bytes, path, onAskSelection }: { bytes: Uint8Array
     return () => { active = false; finish() }
   }, [bytes, path])
   const current = result?.source === bytes && result.path === path ? result : null
-  if (current?.error) return <p role="alert" className="p-4 text-sm text-muted-foreground">{current.error}</p>
+  if (current?.error) return <div className="space-y-2 p-4 text-sm"><p role="alert" className="text-muted-foreground">{current.error}</p>{offer}</div>
   if (!current?.workbook) return <p role="status" className="p-4 text-sm text-muted-foreground">Preparing workbook…</p>
   const index = selectedSheet?.source === bytes && selectedSheet.path === path ? selectedSheet.index : 0
   const sheet = current.workbook.sheets[index]

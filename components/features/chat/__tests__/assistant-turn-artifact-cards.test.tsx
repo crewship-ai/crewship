@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
 // AssistantTurn leans on heavy ai-elements components (motion/react inside
@@ -118,24 +118,27 @@ describe("artifact tool cards", () => {
     const { container } = withProvider(turn([bash("a"), result("a", "x"), publish("b"), bash("c"), result("c", "y"), published("b")]))
     const card = screen.getByTestId("artifact-tool-card")
     expect(card.closest("details")).toBeNull()
-    expect(screen.getAllByTestId("tool-header").map(h => h.textContent)).toEqual(["Bash  $ ls", "Result", "Bash  $ ls", "Result"])
+    // The steps are one activity line where the run began; none is drawn in the transcript.
+    expect(screen.queryAllByTestId("tool-header")).toHaveLength(0)
     expect(container.textContent).not.toContain("\"version\":2")
-    // Bash a, card, Bash c — the run is split at the card.
-    const order = Array.from(container.querySelectorAll("[data-testid=artifact-tool-card], [data-testid=tool-header]")).map(e => e.getAttribute("data-testid"))
-    expect(order[2]).toBe("artifact-tool-card")
+    const order = Array.from(container.querySelectorAll("[data-testid=artifact-tool-card], [data-testid=turn-activity]")).map(e => e.getAttribute("data-testid"))
+    expect(order).toEqual(["turn-activity", "artifact-tool-card"])
+    expect(screen.getByTestId("turn-activity").textContent).toContain("3 steps")
   })
 
   it("keeps the default tool UI without the provider", () => {
     render(el(turn([publish("a"), published("a")])))
     expect(screen.queryByTestId("artifact-tool-card")).toBeNull()
-    expect(screen.getAllByTestId("tool-header")[0].textContent).toBe("mcp__crewship__artifact_publish")
+    // An ordinary step: counted in the activity line and named in its steps.
+    fireEvent.click(screen.getByTestId("turn-activity").querySelector("button")!)
+    expect(within(screen.getByRole("dialog")).getByText("Used artifact_publish")).toBeTruthy()
   })
 
   it("keeps the default tool UI when the server reports projects unavailable", () => {
     h.available = false
     withProvider(turn([publish("a"), published("a")]))
     expect(screen.queryByTestId("artifact-tool-card")).toBeNull()
-    expect(screen.getAllByTestId("tool-header").length).toBeGreaterThan(0)
+    expect(screen.getByTestId("turn-activity").textContent).toContain("1 step")
   })
 })
 
@@ -154,7 +157,7 @@ describe("artifact tool card composition", () => {
     expect(screen.getByLabelText("Loading project")).toBeTruthy()
   })
 
-  // A refused create (dev3: "artifact projects are disabled") never made a project:
+  // A refused create never made a project:
   // a card would only fetch a missing project and show "Restricted item".
   const create = (id: string) => part("tool_call", { tool_id: id, tool_name: "mcp__crewship__artifact_create", input: { slug: "pricing-site", name: "Pricing site" } }, "mcp__crewship__artifact_create")
   it("shows no project card for a create the server refused", () => {

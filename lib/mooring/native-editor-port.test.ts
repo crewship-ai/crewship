@@ -94,10 +94,18 @@ it("aborts a pending snapshot and ignores its late response", async () => {
   const request = latest(r); controller.abort(); await expect(snapshot).rejects.toThrow("native_request_aborted")
   reply(r, request); expect(r.options.onError).not.toHaveBeenCalled(); r.adapter.close()
 })
+// A well-formed export past the server's 32 MiB document limit is still refused, now by name: the Sheet or
+// document is too large, the editor is not broken. A malformed payload stays a protocol error (next test).
 it("rejects native payloads above 32MiB", async () => {
   const r = rig(); await bootstrap(r); const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
   reply(r, latest(r), "bound", undefined, new Uint8Array(32 * 1024 * 1024 + 1))
+  await expect(snapshot).rejects.toThrow("native_document_too_large")
+})
+it("keeps a malformed native payload a protocol error", async () => {
+  const r = rig(); await bootstrap(r); const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
+  reply(r, latest(r), "bound", undefined, "not bytes" as unknown as Uint8Array)
   await expect(snapshot).rejects.toThrow("native_port_protocol")
+  expect(r.port.close).toHaveBeenCalled()
 })
 it("closes on repeated hello and iframe reload", () => {
   const r = rig(); r.adapter.loaded(); r.adapter.handleWindowMessage(r.hello)
@@ -350,5 +358,229 @@ it("exposes stable Word native state separately from distinct RPC receipt identi
   expect(second.editorRevision).not.toBe(first.editorRevision)
   const changedPending = r.adapter.snapshot(signal()); reply(r, latest(r), "bound", "changed-wire-revision", new Uint8Array([5])); const changed = await changedPending
   expect(changed.nativeState).not.toBe(first.nativeState)
+  r.adapter.close()
+})
+
+const executed = (r: ReturnType<typeof rig>, request: Record<string, unknown>, extra: Record<string, unknown> = {}) => r.receive({ type: "gridcraft:executed", requestId: request.requestId, document: "bound", revision: "7", applied: 1, ...extra })
+
+it("replays a fixed list of commands on the bound workbook and returns the new revision", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const done = r.adapter.execute([{ command: "cell.set", params: { cell: "A1", input: "5" } }], { baseRevision: "bound:1" }, signal())
+  const sent = latest(r)
+  expect(sent).toMatchObject({ type: "gridcraft:execute", saved: true, baseRevision: "1" })
+  expect(JSON.parse(sent.commands as string)).toEqual([{ command: "cell.set", params: { cell: "A1", input: "5" } }])
+  executed(r, sent)
+  expect(await done).toEqual({ documentId: "bound", revision: "bound:7", applied: 1 })
+  r.adapter.close()
+})
+
+it("refuses commands outside the fixed list, empty or oversized lists, and a wordcraft editor, before posting anything", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const calls = r.port.postMessage.mock.calls.length
+  await expect(r.adapter.execute([{ command: "file.saveAs" as never }], {}, signal())).rejects.toThrow("native_execute_invalid")
+  await expect(r.adapter.execute([], {}, signal())).rejects.toThrow("native_execute_invalid")
+  await expect(r.adapter.execute(Array.from({ length: 65 }, () => ({ command: "formulas.calculateNow" as const })), {}, signal())).rejects.toThrow("native_execute_invalid")
+  await expect(r.adapter.execute([{ command: "cell.set", params: { cell: "A1", input: "x".repeat(70000) } }], {}, signal())).rejects.toThrow("native_execute_invalid")
+  await expect(r.adapter.execute([{ command: "cell.set" }], { baseRevision: "not a revision" }, signal())).rejects.toThrow("native_execute_invalid")
+  expect(r.port.postMessage).toHaveBeenCalledTimes(calls)
+  const word = rig("wordcraft"); await bootstrap(word)
+  await expect(word.adapter.execute([{ command: "cell.set" }], {}, signal())).rejects.toThrow("native_bootstrap_required")
+  r.adapter.close(); word.adapter.close()
+})
+
+it("an editor refusal rejects the call and leaves the port open; a malformed or foreign answer closes it", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const refused = r.adapter.execute([{ command: "cell.set", params: { cell: "A1", input: "1" } }], {}, signal())
+  r.receive({ type: "gridcraft:executed", requestId: latest(r).requestId, error: "A cell or text box is being edited." })
+  await expect(refused).rejects.toThrow("A cell or text box is being edited.")
+  expect(r.options.onError).not.toHaveBeenCalled()
+  const odd = r.adapter.execute([{ command: "cell.set", params: { cell: "A1", input: "1" } }], {}, signal()); void odd.catch(() => {})
+  executed(r, latest(r), { applied: 0 })
+  expect(r.options.onError).toHaveBeenCalledWith("native_port_protocol")
+  const other = rig("gridcraft"); await bootstrap(other)
+  const foreign = other.adapter.execute([{ command: "cell.set", params: { cell: "A1", input: "1" } }], {}, signal()); void foreign.catch(() => {})
+  executed(other, latest(other), { document: "another" })
+  expect(other.options.onError).toHaveBeenCalledWith("native_document_changed")
+})
+
+async function readOnlyGrid() {
+  const r = rig("gridcraft"); r.options.onEditAttempt = vi.fn(); r.options.onHeldInputDropped = vi.fn()
+  const adapter = createNativeEditorPort(r.options)
+  const rebound = { ...r, adapter }
+  await bootstrap(rebound)
+  rebound.receive({ type: "gridcraft:ready", version: "0.12.1", accessProtocol: 1, readOnly: true })
+  rebound.receive({ type: "gridcraft:changed", document: "bound", revision: "1", dirty: false })
+  return rebound
+}
+const newer = { sessionId: "public-tab", generation: "9007199254740994", baseVersion: "1" }
+async function access(r: Awaited<ReturnType<typeof readOnlyGrid>>, readOnly: boolean) {
+  const applying = r.adapter.setReadOnly(readOnly, signal())
+  r.receive({ type: "gridcraft:access", requestId: latest(r).requestId, readOnly })
+  await applying
+}
+
+it("rebinds a clean read-only editor to a newer generation: its saves are acknowledged, the old generation's are not", async () => {
+  const r = await readOnlyGrid()
+  const early = r.adapter.snapshot(signal()); reply(r, latest(r))
+  const old = await receiptFor(r, await early)
+  const posted = r.port.postMessage.mock.calls.length
+  expect(r.adapter.rebind({ ...newer, baseVersion: "4" })).toBe(true)
+  expect(r.port.postMessage).toHaveBeenCalledTimes(posted) // it tells the editor nothing and unlocks nothing
+  expect(await r.adapter.ack(old)).toBe(false)
+  expect(await r.adapter.ack({ ...old, generation: newer.generation, baseVersion: "4", version: "5" })).toBe(false) // a proof of the old generation is gone
+  await access(r, false)
+  const next = r.adapter.snapshot(signal()); reply(r, latest(r))
+  const receipt = { ...await receiptFor(r, await next), generation: newer.generation, baseVersion: "4", version: "5" }
+  expect(await r.adapter.ack({ ...receipt, generation: r.options.scope.generation })).toBe(false)
+  expect(await r.adapter.ack(receipt)).toBe(true)
+  r.adapter.close()
+})
+
+it("refuses to rebind, changing nothing, unless the editor is bound, idle, read-only and clean and the claim is newer", async () => {
+  const unbound = rig("gridcraft"); unbound.adapter.loaded(); unbound.adapter.handleWindowMessage(unbound.hello)
+  expect(unbound.adapter.rebind(newer)).toBe(false); unbound.adapter.close()
+  const r = await readOnlyGrid()
+  for (const bad of [{ ...newer, sessionId: "other-tab" }, { ...newer, generation: "0" }, { ...newer, generation: "x" }, { ...newer, generation: r.options.scope.generation }, { ...newer, generation: "5" }, { ...newer, baseVersion: "0" }, { ...newer, baseVersion: "nope" }, undefined as never]) expect(r.adapter.rebind(bad)).toBe(false)
+  const busy = r.adapter.snapshot(signal())
+  expect(r.adapter.rebind(newer)).toBe(false)
+  reply(r, latest(r)); await busy
+  r.receive({ type: "gridcraft:changed", document: "bound", revision: "2", dirty: true })
+  expect(r.adapter.rebind(newer)).toBe(false)
+  r.receive({ type: "gridcraft:dirty", dirty: false })
+  const acking = r.adapter.ack(await receiptFor(r, await busy)) // an acknowledgement is in flight
+  expect(r.adapter.rebind({ ...newer, baseVersion: "2" })).toBe(false)
+  expect(await acking).toBe(true)
+  expect(r.adapter.rebind(newer)).toBe(false) // version 1 is older than the acknowledged 2
+  await access(r, false)
+  expect(r.adapter.rebind({ ...newer, baseVersion: "2" })).toBe(false)
+  await access(r, true)
+  expect(r.adapter.rebind({ ...newer, baseVersion: "2" })).toBe(true)
+  r.adapter.close()
+  expect(r.adapter.rebind({ ...newer, generation: "9007199254740995", baseVersion: "2" })).toBe(false)
+})
+
+it("reports an attempt to write only for the bound read-only workbook, and why held keys were thrown away", async () => {
+  const r = await readOnlyGrid()
+  r.receive({ type: "gridcraft:edit-attempt", document: "bound", kind: "pointer" })
+  r.receive({ type: "gridcraft:edit-attempt", document: "bound", kind: "key" })
+  r.receive({ type: "gridcraft:edit-attempt", document: "another", kind: "key" })
+  expect(vi.mocked(r.options.onEditAttempt!).mock.calls).toEqual([["pointer"], ["key"]])
+  await access(r, false)
+  r.receive({ type: "gridcraft:edit-attempt", document: "bound", kind: "key" })
+  expect(r.options.onEditAttempt).toHaveBeenCalledTimes(2)
+  for (const reason of ["refused", "timeout", "limit", "pointer", "document", "draft"]) r.receive({ type: "gridcraft:held-input-dropped", document: "bound", reason })
+  expect(vi.mocked(r.options.onHeldInputDropped!).mock.calls.flat()).toEqual(["refused", "timeout", "limit", "pointer", "document", "draft"])
+  expect(r.options.onError).not.toHaveBeenCalled()
+  r.adapter.close()
+})
+
+it.each([
+  { type: "gridcraft:edit-attempt", document: "bound", kind: "wheel" },
+  { type: "gridcraft:edit-attempt", document: "bound", kind: "key", text: "secret" },
+  { type: "gridcraft:edit-attempt", kind: "key" },
+  { type: "gridcraft:held-input-dropped", document: "bound", reason: "because" },
+  { type: "gridcraft:held-input-dropped", document: "bound" },
+])("closes on a malformed write-attempt message %j", async message => {
+  const r = await readOnlyGrid()
+  r.receive(message)
+  expect(r.options.onEditAttempt).not.toHaveBeenCalled()
+  expect(r.options.onError).toHaveBeenCalledWith("native_port_protocol")
+})
+
+it("a Word editor has no write-attempt messages", async () => {
+  const r = rig("wordcraft"); await bootstrap(r)
+  r.receive({ type: "gridcraft:edit-attempt", document: "bound", kind: "key" })
+  expect(r.options.onError).toHaveBeenCalledWith("native_port_protocol")
+})
+
+// Only the deadlines are fake; the snapshot hash (webcrypto) and other real async work still run, so each step
+// waits for the exact message it needs instead of assuming the port answered within a microtask.
+const deadlinesOnly = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+async function posted(r: ReturnType<typeof rig>, type: string, after = 0) {
+  for (let i = 0; i < 1000; i++) {
+    const found = r.port.postMessage.mock.calls.slice(after).map(call => call[0] as Record<string, unknown>).find(message => message.type === type)
+    if (found) return found
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  throw new Error(`the port never posted ${type}`)
+}
+it("gives a large bootstrap its own deadline and keeps every later request on the port's", async () => {
+  const r = rig("gridcraft"); r.adapter.loaded(); r.adapter.handleWindowMessage(r.hello)
+  deadlinesOnly()
+  const boot = r.adapter.bootstrap(bytes, signal(), 60_000); void boot.catch(() => {})
+  const seed = await posted(r, "gridcraft:export-native")
+  await vi.advanceTimersByTimeAsync(10_001)
+  expect(r.port.postMessage.mock.calls.some(call => (call[0] as Record<string, unknown>).type === "gridcraft:open")).toBe(false)
+  let sent = r.port.postMessage.mock.calls.length
+  reply(r, seed, "seed")
+  const open = await posted(r, "gridcraft:open", sent)
+  await vi.advanceTimersByTimeAsync(59_000) // a 30 MB import and recalculation
+  sent = r.port.postMessage.mock.calls.length
+  r.receive({ type: "gridcraft:opened", requestId: open.requestId, document: "bound", revision: "1" })
+  const exported = await posted(r, "gridcraft:export-native", sent)
+  await vi.advanceTimersByTimeAsync(30_000) // the export and its hash
+  reply(r, exported)
+  expect((await boot).documentId).toBe("bound")
+  sent = r.port.postMessage.mock.calls.length
+  const later = r.adapter.snapshot(signal()); void later.catch(() => {})
+  await posted(r, "gridcraft:export-native", sent)
+  await vi.advanceTimersByTimeAsync(10_001)
+  await expect(later).rejects.toThrow("native_request_timeout")
+  r.adapter.close()
+})
+it("ends a bootstrap past its own deadline as a request timeout", async () => {
+  const r = rig("gridcraft"); r.adapter.loaded(); r.adapter.handleWindowMessage(r.hello)
+  deadlinesOnly()
+  const boot = r.adapter.bootstrap(bytes, signal(), 20_000); void boot.catch(() => {})
+  const sent = r.port.postMessage.mock.calls.length
+  reply(r, await posted(r, "gridcraft:export-native"), "seed")
+  await posted(r, "gridcraft:open", sent)
+  await vi.advanceTimersByTimeAsync(20_001)
+  await expect(boot).rejects.toThrow("native_request_timeout")
+})
+it("refuses a bootstrap deadline outside 1 ms to 120 s before asking the editor", async () => {
+  for (const bad of [0, -1, 120_001, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const r = rig("gridcraft"); r.adapter.loaded(); r.adapter.handleWindowMessage(r.hello); r.port.postMessage.mockClear()
+    await expect(r.adapter.bootstrap(bytes, signal(), bad)).rejects.toThrow("invalid_native_deadline")
+    expect(r.port.postMessage).not.toHaveBeenCalled()
+    const ok = r.adapter.bootstrap(bytes, signal(), 120_000); void ok.catch(() => {}); await flush()
+    expect(r.port.postMessage).toHaveBeenCalled()
+    r.adapter.close()
+  }
+})
+it("names a Sheet whose native export outgrows the 32 MiB document limit, without closing the editor", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
+  reply(r, latest(r), "bound", undefined, new Uint8Array(32 * 1024 * 1024 + 1))
+  await expect(snapshot).rejects.toThrow("native_document_too_large")
+  expect(r.port.close).not.toHaveBeenCalled()
+  expect(r.options.onError).not.toHaveBeenCalled()
+  const next = r.adapter.snapshot(signal()); void next.catch(() => {})
+  reply(r, latest(r)); expect((await next).documentId).toBe("bound")
+  r.adapter.close()
+})
+it("names the editor's own 32 MiB refusal of an export as native_document_too_large and keeps the port", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
+  r.receive({ type: "gridcraft:native-exported", requestId: latest(r).requestId, error: "Native validation accepts at most 32 MiB." })
+  await expect(snapshot).rejects.toThrow("native_document_too_large")
+  expect(r.options.onError).not.toHaveBeenCalled(); expect(r.port.close).not.toHaveBeenCalled()
+  r.adapter.close()
+})
+it("ends a bootstrap whose post-import export the editor refuses at 32 MiB as native_document_too_large", async () => {
+  const r = rig("gridcraft"); r.adapter.loaded(); r.adapter.handleWindowMessage(r.hello)
+  const boot = r.adapter.bootstrap(bytes, signal()); void boot.catch(() => {})
+  reply(r, latest(r), "seed"); await vi.waitFor(() => expect(latest(r).type).toBe("gridcraft:open"))
+  r.receive({ type: "gridcraft:opened", requestId: latest(r).requestId, document: "bound", revision: "1" })
+  await vi.waitFor(() => expect(latest(r).type).toBe("gridcraft:export-native"))
+  r.receive({ type: "gridcraft:native-exported", requestId: latest(r).requestId, error: "Native validation accepts at most 32 MiB." })
+  await expect(boot).rejects.toThrow("native_document_too_large")
+  r.adapter.close()
+})
+it("passes any other editor error text through unchanged", async () => {
+  const r = rig("gridcraft"); await bootstrap(r)
+  const snapshot = r.adapter.snapshot(signal()); void snapshot.catch(() => {})
+  r.receive({ type: "gridcraft:native-exported", requestId: latest(r).requestId, error: "No workbook is open." })
+  await expect(snapshot).rejects.toThrow("No workbook is open.")
   r.adapter.close()
 })

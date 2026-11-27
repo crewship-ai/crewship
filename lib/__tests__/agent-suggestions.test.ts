@@ -50,7 +50,8 @@ describe("getSuggestions", () => {
       "Show me your skills",
       "Run a quick task",
     ])
-    expect(pack.followUps).toEqual(["Tell me more", "Give me an example", "What's next?"])
+    // No generic follow-ups ("Tell me more", "What's next?") under a reply.
+    expect(pack).not.toHaveProperty("followUps")
   })
 
   it("still picks the role pack when the agent has no prompts configured", () => {
@@ -73,9 +74,11 @@ describe("getSuggestions", () => {
     expect(pack.empty).toEqual(["Any deliveries today?"])
   })
 
-  it("leaves the follow-ups on the role pack — the column only replaces the empty-state chips", () => {
-    const pack = getSuggestions("engineering", "Only this one")
-    expect(pack.followUps).toEqual(["Open a PR", "Add tests", "Run benchmarks"])
+  it("offers no generic follow-ups for any role, configured or not", () => {
+    for (const role of [undefined, "engineering", "research", "data_analyst", "wharf-master"]) {
+      expect(getSuggestions(role)).not.toHaveProperty("followUps")
+      expect(getSuggestions(role, "Only this one")).not.toHaveProperty("followUps")
+    }
   })
 
   it("renders at most the cap, however many lines the column holds", () => {

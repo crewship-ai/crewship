@@ -1,6 +1,7 @@
+/** The empty-state chips. There are no follow-up chips under a reply: generic
+ *  ones ("Tell me more", "What's next?") were noise after every answer. */
 export interface SuggestionPack {
   empty: string[]
-  followUps: string[]
 }
 
 /** Mirrors maxSuggestedPrompts in internal/api/agents_suggested_prompts.go. */
@@ -16,11 +17,6 @@ const ROLE_PACKS: Record<string, SuggestionPack> = {
       "Find anomalies in last week's metrics",
       "Suggest a cohort analysis",
     ],
-    followUps: [
-      "Visualize the result",
-      "Group by week",
-      "Export to CSV",
-    ],
   },
   research: {
     empty: [
@@ -29,7 +25,6 @@ const ROLE_PACKS: Record<string, SuggestionPack> = {
       "Build an outline",
       "Suggest counter-arguments",
     ],
-    followUps: ["Cite sources", "Expand section 2", "Translate to Czech"],
   },
   engineering: {
     empty: [
@@ -38,7 +33,6 @@ const ROLE_PACKS: Record<string, SuggestionPack> = {
       "Add a missing test",
       "Audit dependencies",
     ],
-    followUps: ["Open a PR", "Add tests", "Run benchmarks"],
   },
   default: {
     empty: [
@@ -47,7 +41,6 @@ const ROLE_PACKS: Record<string, SuggestionPack> = {
       "Show me your skills",
       "Run a quick task",
     ],
-    followUps: ["Tell me more", "Give me an example", "What's next?"],
   },
 }
 
@@ -77,10 +70,8 @@ export function parseSuggestedPrompts(raw?: string | null): string[] {
  * they did before the column existed. That fallback is the requirement, not a
  * nicety: nothing may regress for an agent nobody has touched.
  *
- * Only the empty-state chips are per-agent. Follow-ups stay on the role pack:
- * they are conversational continuations ("Add tests", "Cite sources"), not
- * questions an owner would write for their agent, and one textarea is the
- * whole mechanism here.
+ * There are no follow-up chips: a generic continuation under every reply was
+ * noise, and an agent's ask forms are offered on their own.
  */
 export function getSuggestions(role?: string | null, agentPrompts?: string | null): SuggestionPack {
   const pack = (() => {
@@ -91,5 +82,5 @@ export function getSuggestions(role?: string | null, agentPrompts?: string | nul
 
   const own = parseSuggestedPrompts(agentPrompts)
   if (own.length === 0) return pack
-  return { empty: own, followUps: pack.followUps }
+  return { empty: own }
 }

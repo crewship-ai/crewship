@@ -23,9 +23,12 @@ beforeEach(() => { send.mockReset(); useComposerStore.setState({ attachments: {}
 afterEach(() => { vi.unstubAllEnvs() })
 
 describe("composer + › New artifact", () => {
-  it("is absent while the flag is off", () => {
-    render(<ChatComposer {...props} />)
-    expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
+  // The text toggles beside the paperclip are gone with or without the projects flag.
+  it("replaces the text toggles also while the flag is off", () => {
+    render(<ChatComposer {...props} artifactCreationEnabled />)
+    expect(screen.getByRole("button", { name: "New artifact" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Create artifact project" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
   })
 
   it("is absent when no kind has a backend", () => {

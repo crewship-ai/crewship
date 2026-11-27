@@ -1,4 +1,4 @@
-import {render,screen,fireEvent} from "@testing-library/react"
+import {render,screen,fireEvent,act} from "@testing-library/react"
 import {describe,it,expect,vi} from "vitest"
 import {NativeCraftLeaseBar,type NativeCraftLeaseView} from "../native-craft-lease-bar"
 const view:NativeCraftLeaseView={holder:{actor_id:"user:private-id",display_name:"Pavel",kind:"human"},mine:false,generation:"9007199254740995",can_write:false,acquired_at:null,handoff_requested_by:[]}
@@ -51,5 +51,16 @@ describe("native Craft lease controls",()=>{
   render(<NativeCraftLeaseBar view={{...view,holder:null,generation:null}} mayEdit={false} onAction={vi.fn()}/>)
   expect(screen.getByText("Read-only")).toBeInTheDocument()
   expect(screen.queryByRole("button")).not.toBeInTheDocument()
+ })
+ // Each editing control says in one sentence what it does, on hover and on keyboard focus.
+ it("explains Take over editing in one sentence, on keyboard focus",()=>{
+  render(<NativeCraftLeaseBar variant="inline" view={{...view,holder:null,generation:null}} mayEdit onAction={vi.fn()}/>)
+  act(()=>screen.getByRole("button",{name:"Take over editing"}).focus())
+  expect(screen.getByRole("tooltip")).toHaveTextContent("You start editing the workbook; the agent does not write to it meanwhile.")
+ })
+ it("explains Hand back in one sentence, on keyboard focus",()=>{
+  render(<NativeCraftLeaseBar variant="inline" view={{...view,mine:true,can_write:true}} mayEdit onAction={vi.fn()}/>)
+  act(()=>screen.getByRole("button",{name:"Hand back"}).focus())
+  expect(screen.getByRole("tooltip")).toHaveTextContent("You stop editing and the agent may change the workbook again.")
  })
 })

@@ -10,7 +10,9 @@ import {validNativeVersion} from "./native-draft"
 export const CRAFT_VERSION_HISTORY_FLAG = "craft_version_history"
 
 export interface NativeVersionAuthor {actorId:string;kind:"human"|"agent"|"system";displayName:string}
-export interface NativeVersion {version:string;createdAt:string;author:NativeVersionAuthor;restoredFrom?:string;current:boolean}
+export interface NativeVersion {version:string;createdAt:string;author:NativeVersionAuthor;restoredFrom?:string;current:boolean
+ /** A workbook Sheet: the version file's format (native: from before workbook files, not restorable), SHA-256 and size. */
+ format?:"xlsx"|"xlsm"|"native";contentHash?:string;size?:string}
 export interface NativeVersionList {currentVersion:string;versions:NativeVersion[];truncated:boolean}
 /** The fenced restore binding, identical to a save's: holder session, generation and base version. */
 export interface NativeRestoreRequest {
@@ -39,7 +41,11 @@ export function parseNativeVersionList(raw:unknown):NativeVersionList|null {
   const a=item.author
   if(!text(a.actorId)||!text(a.displayName)||a.kind!=="human"&&a.kind!=="agent"&&a.kind!=="system")return null
   if(item.restoredFrom!==undefined&&!positive(item.restoredFrom))return null
-  versions.push({version:item.version,createdAt:item.createdAt,author:{actorId:a.actorId,kind:a.kind,displayName:a.displayName},current:item.current,...(item.restoredFrom?{restoredFrom:item.restoredFrom as string}:{})})
+  versions.push({version:item.version,createdAt:item.createdAt,author:{actorId:a.actorId,kind:a.kind,displayName:a.displayName},current:item.current,...(item.restoredFrom?{restoredFrom:item.restoredFrom as string}:{}),
+   // A workbook Sheet names each version's file; a malformed value is left out, never trusted.
+   ...(item.format==="xlsx"||item.format==="xlsm"||item.format==="native"?{format:item.format}:{}),
+   ...(typeof item.contentHash==="string"&&/^sha256:[a-f0-9]{64}$/.test(item.contentHash)?{contentHash:item.contentHash}:{}),
+   ...(typeof item.size==="string"&&/^(0|[1-9][0-9]{0,15})$/.test(item.size)?{size:item.size}:{})})
  }
  // Newest first, exactly one current entry and it is the newest.
  if(versions[0].version!==raw.currentVersion||versions.some((v,i)=>v.current!==(i===0)))return null
@@ -56,6 +62,8 @@ export function parseNativeRestoreReceipt(raw:unknown):NativeRestoreReceipt|null
 export interface NativeVersionDocument {
  version:string;currentVersion:string;current:boolean;createdAt:string;author:NativeVersionAuthor;restoredFrom?:string
  applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string;bytes:Uint8Array
+ /** A workbook Sheet's version: its file's format, SHA-256 and download name. */
+ format?:"xlsx"|"xlsm";contentHash?:string;fileName?:string
 }
 const pinned=(v:unknown):v is string=>typeof v==="string"&&/^[a-f0-9]{64}$/.test(v)
 

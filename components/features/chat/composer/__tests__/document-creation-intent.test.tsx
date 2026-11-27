@@ -24,19 +24,23 @@ function submit(text: string) {
   fireEvent.change(textarea, { target: { value: text } })
   fireEvent.submit(textarea.closest("form")!)
 }
-function selectCreation() { fireEvent.click(screen.getByRole("button", { name: "Create document" })) }
+// The composer has no text toggle any more; a kind is picked from + › New artifact.
+async function selectCreation() {
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  fireEvent.click(await screen.findByRole("button", { name: /A partner brief from this chat/ }))
+}
 
 beforeEach(() => { send.mockReset(); identity.id = "human-a"; useComposerStore.setState({ attachments: {}, drafts: {} }) })
 describe("explicit document creation consent", () => {
   it.each(["desktop", "mobile"] as const)("sends English or Czech prose unchanged with explicit metadata on %s", async variant => {
     render(<ChatComposer {...props} variant={variant} />)
-    selectCreation()
+    await selectCreation()
     submit(variant === "desktop" ? "Write a garden plan. Include 3 sections!" : "Napiš mi plán zahrady.\nPřidej tři části!")
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     const [text, metadata] = send.mock.calls[0]
     expect(text).toContain(variant === "desktop" ? "Write a garden plan." : "Napiš mi plán zahrady.")
     expect(metadata).toEqual({ document_creation_intent: { submission_id: expect.stringMatching(/^[A-Za-z0-9_-]{1,128}$/), drafting: true } })
-    await waitFor(() => expect(screen.getByRole("button", { name: "Create document" })).toHaveAttribute("aria-pressed", "false"))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove New Word" })).toBeNull())
     submit("Ordinary follow-up")
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     expect(send.mock.calls[1][1]).toBeUndefined()
@@ -47,7 +51,7 @@ describe("explicit document creation consent", () => {
   })
   it("retains the same consent ID after a refused send", async () => {
     send.mockReturnValueOnce(false)
-    render(<ChatComposer {...props} />); selectCreation(); submit("Please create a plan.")
+    render(<ChatComposer {...props} />); await selectCreation(); submit("Please create a plan.")
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     expect(screen.getByRole("textbox")).toHaveValue("Please create a plan.")
     fireEvent.submit(screen.getByRole("textbox").closest("form")!)
@@ -56,36 +60,36 @@ describe("explicit document creation consent", () => {
   })
   it("uses a fresh consent ID if a refused message is edited", async () => {
     send.mockReturnValue(false)
-    render(<ChatComposer {...props} />); selectCreation(); submit("First request.")
+    render(<ChatComposer {...props} />); await selectCreation(); submit("First request.")
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     submit("Changed request!")
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     expect(send.mock.calls[1][1].document_creation_intent.submission_id).not.toBe(send.mock.calls[0][1].document_creation_intent.submission_id)
   })
-  it("does not carry consent across identity, conversation, or availability changes", () => {
-    const view = render(<ChatComposer {...props} />); selectCreation()
+  it("does not carry consent across identity, conversation, or availability changes", async () => {
+    const view = render(<ChatComposer {...props} />); await selectCreation()
     identity.id = "human-b"; view.rerender(<ChatComposer {...props} />)
-    expect(screen.getByRole("button", { name: "Create document" })).toHaveAttribute("aria-pressed", "false")
-    selectCreation(); view.rerender(<ChatComposer {...props} sessionId="chat-b" />)
-    expect(screen.getByRole("button", { name: "Create document" })).toHaveAttribute("aria-pressed", "false")
-    selectCreation(); view.rerender(<ChatComposer {...props} sessionId="chat-b" documentCreationEnabled={false} />)
-    expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Remove New Word" })).toBeNull()
+    await selectCreation(); view.rerender(<ChatComposer {...props} sessionId="chat-b" />)
+    expect(screen.queryByRole("button", { name: "Remove New Word" })).toBeNull()
+    await selectCreation(); view.rerender(<ChatComposer {...props} sessionId="chat-b" documentCreationEnabled={false} />)
+    expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
     view.rerender(<ChatComposer {...props} sessionId="chat-b" />)
-    expect(screen.getByRole("button", { name: "Create document" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.queryByRole("button", { name: "Remove New Word" })).toBeNull()
   })
   it("offers no control when support is disabled or the user is anonymous", () => {
     const view = render(<ChatComposer {...props} documentCreationEnabled={false} />)
-    expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
     identity.id = null; view.rerender(<ChatComposer {...props} />)
-    expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
   })
 })
 
-it.each(["desktop", "mobile"] as const)("shows the actual selected personal audience on %s", variant => {
+it.each(["desktop", "mobile"] as const)("shows the actual selected personal audience on %s", async variant => {
  render(<ChatComposer {...props} variant={variant} />)
  expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
- selectCreation()
+ await selectCreation()
  expect(screen.getByText("My space · You and workspace OWNER (audited access)")).toBeTruthy()
- selectCreation()
+ fireEvent.click(screen.getByRole("button", { name: "Remove New Word" }))
  expect(screen.queryByText(/My space · You and workspace OWNER/)).toBeNull()
 })

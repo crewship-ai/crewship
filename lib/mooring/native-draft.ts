@@ -1,4 +1,5 @@
 import { openProtectedDocumentDrafts as openDocumentDrafts } from "../protected-document-drafts"
+import { GRIDCRAFT_DRAFT_FILE, GRIDCRAFT_MAX_FILE_BYTES } from "./gridcraft-draft-file"
 import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter, removeDocumentDraftRow } from "../document-queue"
 
 export interface NativeDraft {
@@ -9,8 +10,14 @@ export interface NativeDraft {
   sessionId: string
   editorRevision: string
   bytes: Uint8Array
+  /** A workbook Sheet keeps its xlsx or xlsm file itself; absent for a native document. */
+  format?: NativeFileFormat
+  /** The file of a save the editor refused for fidelity_loss, lacking these parts. Offered only for
+   * download, never compared, copied into an editor or saved). */
+  lossy?: Array<{ code: string; count: number }>
 }
-export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
+export type NativeFileFormat = "xlsx" | "xlsm"
+export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] | readonly ["download"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
 export interface NativeDraftJournal {
   /** `final`: the capture of a retiring editor. It may repeat what is stored. */
   persist(draft: NativeDraft, final?: boolean): Promise<void>
@@ -28,8 +35,20 @@ export interface NativeDraftJournal {
   eraseOwnRow?(): Promise<void>
 }
 // Raw native payload matches the server limit; base64 and journal metadata use a larger encoded budget.
-const MAX_NATIVE_BYTES = 32 * 1024 * 1024
-const MAX_ENCODED_BYTES = 64 * 1024 * 1024
+export const MAX_NATIVE_BYTES = 32 * 1024 * 1024
+/** A workbook Sheet's file, compressed as the editor wrote it: the server's limit. */
+export const MAX_WORKBOOK_BYTES = GRIDCRAFT_MAX_FILE_BYTES
+/**
+ * How an application keeps a draft as a file: its formats, their limit and the signature the bytes
+ * start with. An application without one keeps only its native document.
+ */
+export interface DraftFileAdapter { formats: readonly string[]; maxBytes: number; signature(bytes: Uint8Array): boolean }
+const DRAFT_FILES: Record<string, DraftFileAdapter> = { gridcraft: GRIDCRAFT_DRAFT_FILE }
+export const draftFileAdapter = (applicationId: string): DraftFileAdapter | undefined => Object.prototype.hasOwnProperty.call(DRAFT_FILES, applicationId) ? DRAFT_FILES[applicationId] : undefined
+// A journal row: a 64 MiB workbook as base64 (about 85.4 MiB) with its metadata. The protected
+// store seals it within the draft store's 128 MiB (MAX_DRAFT_STORE_BYTES).
+const MAX_ENCODED_BYTES = 96 * 1024 * 1024
+export const validWorkbookFormat = (format: unknown): format is NativeFileFormat => format === "xlsx" || format === "xlsm"
 const fail = () => new DocumentStorageError("Private native draft storage is unavailable; keep a recovery copy.")
 const identifier = (s: unknown): s is string => typeof s === "string" && s.length > 0 && s.length <= 256 && !s.includes("\0")
 export function validNativeVersion(value: unknown): value is string {
@@ -40,13 +59,26 @@ export function validNativeDraft(d: NativeDraft): boolean {
     && validNativeVersion(d.baseVersion)
     && validNativeVersion(d.generation) && d.generation !== "0"
     && identifier(d.editorRevision)
-    && d.bytes instanceof Uint8Array && d.bytes.byteLength <= MAX_NATIVE_BYTES
+    && d.bytes instanceof Uint8Array
+    && (d.format === undefined ? d.bytes.byteLength <= MAX_NATIVE_BYTES : validDraftFile(d))
+    && (d.lossy === undefined || validLossy(d))
+}
+// A file draft as its application's adapter describes it. The empty probe of a session passes.
+function validDraftFile(d: NativeDraft): boolean {
+  const file = draftFileAdapter(d.applicationId)
+  return file !== undefined && file.formats.includes(d.format as string) && d.bytes.byteLength <= file.maxBytes && (d.bytes.byteLength === 0 || file.signature(d.bytes))
+}
+const MAX_LOSSY_PARTS = 32
+function validLossy(d: NativeDraft): boolean {
+  const parts = d.lossy
+  return d.format !== undefined && d.bytes.byteLength > 0 && Array.isArray(parts) && parts.length >= 1 && parts.length <= MAX_LOSSY_PARTS
+    && parts.every(p => p !== null && typeof p === "object" && Object.keys(p).length === 2 && typeof p.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(p.code) && Number.isSafeInteger(p.count) && p.count > 0)
 }
 function encode(draft: NativeDraft): string {
   if (!validNativeDraft(draft)) throw fail()
   let binary = ""
   for (let i = 0; i < draft.bytes.length; i += 32768) binary += String.fromCharCode(...draft.bytes.subarray(i, i + 32768))
-  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, nativeBase64: btoa(binary) })
+  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, ...(draft.format ? { format: draft.format } : {}), ...(draft.lossy ? { lossy: draft.lossy.map(p => ({ code: p.code, count: p.count })) } : {}), nativeBase64: btoa(binary) })
 }
 function decode(snapshot: string): NativeDraft | null {
   try {
@@ -54,7 +86,7 @@ function decode(snapshot: string): NativeDraft | null {
     const value = JSON.parse(snapshot)
     if (value?.kind !== "native-whole-document-v1" || typeof value.nativeBase64 !== "string") return null
     const binary = atob(value.nativeBase64)
-    const draft: NativeDraft = { applicationId: value.applicationId, enginePin: value.enginePin, sessionId: value.sessionId, baseVersion: value.baseVersion, generation: value.generation, editorRevision: value.editorRevision, bytes: Uint8Array.from(binary, c => c.charCodeAt(0)) }
+    const draft: NativeDraft = { applicationId: value.applicationId, enginePin: value.enginePin, sessionId: value.sessionId, baseVersion: value.baseVersion, generation: value.generation, editorRevision: value.editorRevision, ...(value.format !== undefined ? { format: value.format } : {}), ...(value.lossy !== undefined ? { lossy: value.lossy } : {}), bytes: Uint8Array.from(binary, c => c.charCodeAt(0)) }
     return validNativeDraft(draft) ? draft : null
   } catch { return null }
 }
@@ -131,7 +163,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
         for (const row of await journal.load()) {
           if (row.id === id || row.schema !== 1 || row.epoch !== "native-v1") continue
           const draft = decode(row.snapshot)
-          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
+          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: draft.lossy ? ["download"] : ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
         }
         return recovered
       })

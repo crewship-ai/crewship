@@ -20,7 +20,7 @@ let requests:string[],received:string[],engineReady:boolean,delay:number,stallAt
 let closed=vi.fn<()=>void>()
 let hashes:Promise<ArrayBuffer>[]
 let stream:Parameters<NativeDocumentClient['events']>[1]|undefined
-let adapters:NativeEditorPort[],optionsSeen:NativeEditorPortOptions[],hangBootstrap:boolean,readyDelay:number,hangDigest:boolean
+let adapters:NativeEditorPort[],optionsSeen:NativeEditorPortOptions[],hangBootstrap:boolean,readyDelay:number,hangDigest:boolean,openError:string|undefined,exportSize:number|undefined,exportError:string|undefined
 const vacant={can_edit:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const holder={actor_id:'diagnostic-human',display_name:'QA',kind:'human'}
 function owned(){return {...vacant,holder,mine:true,generation:'1',can_write:true,expires_at:new Date(Date.now()+15000).toISOString()}}
@@ -44,7 +44,7 @@ async function mount(applicationId:'wordcraft'|'gridcraft'){
 beforeEach(()=>{
  vi.useFakeTimers();vi.stubGlobal('crypto',webcrypto);hashes=[]
  vi.spyOn(webcrypto.subtle,'digest').mockImplementation((algorithm,data)=>{if(hangDigest)return new Promise<ArrayBuffer>(()=>{});const hash=digest(algorithm,data);hashes.push(hash);return hash})
- requests=[];received=[];closed=vi.fn<()=>void>();engineReady=true;delay=8000;stallAt=undefined;stream=undefined;adapters=[];optionsSeen=[];hangBootstrap=false;readyDelay=0;hangDigest=false;mock.journal.mockResolvedValue(journal())
+ requests=[];received=[];closed=vi.fn<()=>void>();engineReady=true;delay=8000;stallAt=undefined;stream=undefined;adapters=[];optionsSeen=[];hangBootstrap=false;readyDelay=0;hangDigest=false;openError=undefined;exportSize=undefined;exportError=undefined;mock.journal.mockResolvedValue(journal())
  mock.port.mockImplementation((options:NativeEditorPortOptions)=>{
   const app=options.applicationId;optionsSeen.push(options)
   let document='welcome'
@@ -53,15 +53,17 @@ beforeEach(()=>{
    setTimeout(()=>{
     received.push(request.type as string)
     if(request.type===`${app}:set-access`){wire.onmessage?.({data:{type:`${app}:access`,requestId:request.requestId,readOnly:request.readOnly}})}
+    else if(request.type===`${app}:open`&&openError!==undefined){wire.onmessage?.({data:{type:`${app}:opened`,requestId:request.requestId,error:openError}})}
     else if(request.type===`${app}:open`){document='imported';wire.onmessage?.({data:{type:`${app}:opened`,requestId:request.requestId,document,revision:'1'}})}
-    else wire.onmessage?.({data:{type:app==='wordcraft'?'wordcraft:snapshot-result':'gridcraft:native-exported',requestId:request.requestId,document,revision:'1',bytes:bytes.slice().buffer}})
+    else if(document==='imported'&&exportError!==undefined)wire.onmessage?.({data:{type:app==='wordcraft'?'wordcraft:snapshot-result':'gridcraft:native-exported',requestId:request.requestId,error:exportError}})
+    else wire.onmessage?.({data:{type:app==='wordcraft'?'wordcraft:snapshot-result':'gridcraft:native-exported',requestId:request.requestId,document,revision:'1',bytes:document==='imported'&&exportSize!==undefined?new ArrayBuffer(exportSize):bytes.slice().buffer}})
    },requests.length===stallAt?10001:delay)
   }}
   // Synthetic engine transport; real adapter, RPC deadlines, import barrier,
   // document identity verification and host lifecycle run without modification.
   const frame={postMessage(){if(engineReady){const ready=()=>wire.onmessage?.({data:{type:`${app}:ready`,version:'diagnostic',accessProtocol:1,readOnly:true}});if(readyDelay)setTimeout(ready,readyDelay);else queueMicrotask(ready)}}}
   const port=createNativeEditorPort({...options,frame,createChannel:()=>({port1:wire,port2:{}})})
-  adapters.push(port);vi.spyOn(port,'setReadOnly');if(hangBootstrap)vi.spyOn(port,'bootstrap').mockReturnValue(new Promise(()=>{}))
+  adapters.push(port);vi.spyOn(port,'setReadOnly');if(hangBootstrap)vi.spyOn(port,'bootstrap').mockReturnValue(new Promise(()=>{}));else vi.spyOn(port,'bootstrap')
   queueMicrotask(()=>port.handleWindowMessage({source:frame,origin:'null',data:{type:`${app}:hello`,protocol:1,bundle:options.bundle}}))
   return port
  })
@@ -95,7 +97,7 @@ describe('native startup budgets with the real capability adapter',()=>{
   stallAt=stage;await mount(app)
   for(let n=1;n<stage;n++)await tick(8000)
   await tick(10000)
-  expect(screen.getByRole('alert')).toHaveTextContent('The document cannot be opened safely')
+  expect(screen.getByRole('alert')).toHaveTextContent(`This ${app==='gridcraft'?'workbook':'document'} took too long to open in the editor`)
   expect(document.querySelector('iframe')).toBeNull();expect(client.save).not.toHaveBeenCalled()
  })
  it('closes monitoring and never grants custody after unmount during import',async()=>{
@@ -186,7 +188,7 @@ describe('startup limits and fail-closed admission',()=>{
  })
  it('keeps a hung snapshot hash inside the existing 10s RPC deadline',async()=>{
   hangDigest=true;await mount('wordcraft');await tick(10000)
-  expect(screen.getByRole('alert')).toHaveTextContent('The document cannot be opened safely');expect(document.querySelector('iframe')).toBeNull()
+  expect(screen.getByRole('alert')).toHaveTextContent('This document took too long to open in the editor');expect(document.querySelector('iframe')).toBeNull()
   expect(requests).toEqual(['wordcraft:snapshot']);expect(client.save).not.toHaveBeenCalled()
  })
  it('bounds final authority checking even when its response never arrives',async()=>{
@@ -252,4 +254,74 @@ it('bounds an acquisition that never answers without reviving the prior read-onl
  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}));await tick(60000)
  expect(document.querySelector('iframe')).toBeNull();expect(client.close).toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(mock.journal).not.toHaveBeenCalled()
  expect(screen.getByRole('alert')).toHaveTextContent('The document cannot be opened safely')
+})
+
+describe('opening a large workbook',()=>{
+ const MiB=1024*1024
+ async function mountLarge(size:number){
+  client=makeClient('gridcraft');const read=await client.read();client.read.mockResolvedValue({...read,bytes:new Uint8Array(size).fill(32)});mock.client.mockReturnValue(client)
+  render(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="diagnostic-page" humanId="diagnostic-human" enabled />)
+  await tick(0)
+ }
+ it('names an open that ran out of time and logs that cause as a code',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+  stallAt=2;await mount('gridcraft');await tick(8000);await tick(10000)
+  expect(screen.getByRole('alert')).toHaveTextContent('This workbook took too long to open in the editor')
+  expect(warn).toHaveBeenCalledWith('native_bootstrap_failed cause=native_request_timeout')
+  expect(document.querySelector('iframe')).toBeNull();expect(client.save).not.toHaveBeenCalled()
+ })
+ it('logs an editor refusal as a code, never its text',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+  openError="Sheet 'Synthetic' cell B2: value not accepted";await mount('gridcraft');await tick(8000);await tick(8000)
+  expect(screen.getByRole('alert')).toHaveTextContent('The document cannot be opened safely')
+  expect(screen.getByRole('alert')).not.toHaveTextContent('took too long')
+  // The sentence, shortened and without what it quotes: a quote may be document content.
+  expect(warn).toHaveBeenCalledWith('native_bootstrap_failed cause=editor_error text="Sheet … cell B2: value not accepted"')
+  expect(warn.mock.calls.flat().join(' ')).not.toContain('Synthetic')
+ })
+ it('says when the opened workbook is larger than a Sheet can hold',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+  exportSize=32*MiB+1;await mount('gridcraft');await tick(8000);await tick(8000);await tick(8000)
+  expect(screen.getByRole('alert')).toHaveTextContent('This workbook is larger than the 32 MiB a Sheet can hold')
+  expect(warn).toHaveBeenCalledWith('native_bootstrap_failed cause=native_document_too_large')
+  expect(document.querySelector('iframe')).toBeNull();expect(client.save).not.toHaveBeenCalled()
+ })
+ it('names the editor refusing the opened workbook at 32 MiB',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+  exportError='Native validation accepts at most 32 MiB.';await mount('gridcraft');await tick(8000);await tick(8000);await tick(8000)
+  expect(screen.getByRole('alert')).toHaveTextContent('This workbook is larger than the 32 MiB a Sheet can hold')
+  expect(warn).toHaveBeenCalledWith('native_bootstrap_failed cause=native_document_too_large')
+ })
+ it('shortens a long editor sentence in the log',async()=>{
+  const warn=vi.spyOn(console,'warn').mockImplementation(()=>{})
+  openError='x'.repeat(300);await mount('gridcraft');await tick(8000);await tick(8000)
+  const line=warn.mock.calls.flat().find(v=>String(v).startsWith('native_bootstrap_failed'))!
+  expect(line).toBe(`native_bootstrap_failed cause=editor_error text="${'x'.repeat(80)}…"`)
+ })
+ it('keeps the usual 10s import deadline for a small workbook, without a large-workbook note',async()=>{
+  await mount('gridcraft');await tick(0)
+  expect(adapters[0].bootstrap).toHaveBeenCalledWith(expect.any(Uint8Array),expect.any(AbortSignal),10000)
+  expect(screen.queryByText(/Opening a large workbook/)).not.toBeInTheDocument()
+ })
+ it('says a large workbook is opening until it is ready',async()=>{
+  await mountLarge(20*MiB)
+  expect(screen.getByText('Opening a large workbook… this can take a few minutes.')).toBeInTheDocument()
+  await tick(8000);await tick(8000);await tick(8000)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(document.querySelector('iframe')).not.toHaveStyle({opacity:'0'})
+  expect(screen.queryByText(/Opening a large workbook/)).not.toBeInTheDocument()
+ })
+ it('drops the large-workbook note when the open fails',async()=>{
+  hangBootstrap=true;await mountLarge(20*MiB);await tick(170000)
+  expect(screen.getByRole('alert')).toHaveTextContent('Opening timed out')
+  expect(screen.queryByText(/Opening a large workbook/)).not.toBeInTheDocument()
+ })
+ it('gives each import step 2s more per MiB, and stretches the startup caps to match',async()=>{
+  hangBootstrap=true;await mountLarge(20*MiB)
+  expect(adapters[0].bootstrap).toHaveBeenCalledWith(expect.any(Uint8Array),expect.any(AbortSignal),50000)
+  // 20s for the frame plus three import steps of 50s: past both the 50s cap and the 60s admission deadline.
+  await tick(169000)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(document.querySelector('iframe')).not.toBeNull()
+  await tick(1000)
+  expect(screen.getByRole('alert')).toHaveTextContent('Opening timed out');expect(document.querySelector('iframe')).toBeNull()
+ })
 })

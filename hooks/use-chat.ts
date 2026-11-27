@@ -12,7 +12,9 @@ import { projectInputVersionIds } from "@/components/features/chat/files/project
 import { isNativeCraftInstruction, NATIVE_CRAFT_INSTRUCTION_REFUSAL } from "@/lib/native-craft-instruction"
 import { AskSubmissionError, askSubmissionError } from "@/lib/ask-submission-error"
 import { ASK_SUBMISSION_METADATA_KEY } from "@/components/features/chat/asks/ask-envelope"
-import { ARTIFACT_CREW_NOT_ALLOWED } from "@/lib/artifact-refusal"
+import { ARTIFACT_CREW_NOT_ALLOWED, SEND_REFUSED, SEND_REFUSED_BUSY } from "@/lib/artifact-refusal"
+import { NOT_RUN_FALLBACK, NOT_RUN_PREFIX, notRunMessage } from "@/lib/chat-not-run"
+export { resendableNotRun } from "@/lib/chat-not-run"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
@@ -252,7 +254,8 @@ interface UseChatOptions {
   /** The server echoed our persisted user message; a rejected send has no echo. */
   onOwnMessageSaved?: (content: string, metadata?: Record<string, unknown>) => void
   /** The server refused this chat's in-flight send (busy agent or denied send). */
-  onSendRefused?: (reason: string) => void
+  /** A send the server refused: the reason, and for one it did not save, its words (the composer gives the message back). */
+  onSendRefused?: (reason: string, message?: string) => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -386,6 +389,9 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   const ownMessageSavedRef = useRef(onOwnMessageSaved)
   ownMessageSavedRef.current = onOwnMessageSaved
   const sendRefusedRef = useRef(onSendRefused)
+  // True from our send until the server confirms it saved the message (its echo to us): an error before that refused
+  // a message the server did not keep, so the composer gets it back.
+  const awaitingOwnEchoRef = useRef(false)
   sendRefusedRef.current = onSendRefused
   const replySoundSinceRef = useRef(Date.now())
   const replyHasTextRef = useRef(false)
@@ -724,6 +730,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       // rendered it optimistically in sendMessage. Without this guard the
       // sender sees their message twice.
       if (authorUserId && currentUserIdRef.current && authorUserId === currentUserIdRef.current) {
+        awaitingOwnEchoRef.current = false
         ownMessageSavedRef.current?.(content, metadata)
         return
       }
@@ -1182,6 +1189,17 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [],
   )
 
+  // The busy agent did not run a message the server saved: the chat shows the note the history holds, once per message.
+  const handleNotRunEvent = useCallback((messageId: string, content: string) => {
+    replyHasTextRef.current = false
+    const id = NOT_RUN_PREFIX + messageId
+    const at = new Date()
+    setTurns(prev => [...prev.filter(turn => turn.id !== id), { id, role: "system", parts: [{ id: uuid(), type: "error", content, timestamp: at }], isStreaming: false, timestamp: at }])
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
+    setIsStreaming(false)
+  }, [])
+
   const handleErrorEvent = useCallback((content: string) => {
     replyHasTextRef.current = false
     setTurns((prev) => {
@@ -1269,18 +1287,40 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         case "image": handleImageEvent(content, metadata); break
         case "result": handleResultEvent(content, metadata); break
         case "system": handleSystemEvent(content, metadata); break
-        case "done": handleDoneEvent(metadata); break
-        case "crew_provisioning": handleCrewProvisioningEvent(content, metadata); break
-        case "user_message": handleUserMessageEvent(content, metadata); break
-        case "error":
-          handleErrorEvent(content)
-          // A typed refusal tells the composer to give the typed message back.
-          if (metadata?.code === ARTIFACT_CREW_NOT_ALLOWED) sendRefusedRef.current?.(ARTIFACT_CREW_NOT_ALLOWED)
+        case "done": awaitingOwnEchoRef.current = false; handleDoneEvent(metadata); break
+        case "crew_provisioning": {
+          handleCrewProvisioningEvent(content, metadata)
+          // A build that could not start leaves the saved message not run.
+          const saved = notRunMessage(metadata)
+          if (saved) { awaitingOwnEchoRef.current = false; handleNotRunEvent(saved, content || NOT_RUN_FALLBACK) }
           break
+        }
+        case "user_message": handleUserMessageEvent(content, metadata); break
+        case "error": {
+          const saved = notRunMessage(metadata)
+          const unsaved = awaitingOwnEchoRef.current
+          awaitingOwnEchoRef.current = false
+          // The server saved the message and did not run it: its note and Send again.
+          if (saved) { handleNotRunEvent(saved, content || NOT_RUN_FALLBACK); break }
+          handleErrorEvent(content)
+          // A typed refusal tells the composer to give the typed message back; so does any error before the server
+          // saved the message, with its words. An error during a run of a saved message leaves the composer alone.
+          if (metadata?.code === ARTIFACT_CREW_NOT_ALLOWED) sendRefusedRef.current?.(ARTIFACT_CREW_NOT_ALLOWED)
+          else if (unsaved) sendRefusedRef.current?.(SEND_REFUSED, content || undefined)
+          break
+        }
         // Cross-user run exclusivity (backend: chatbridge.HandleChatMessage):
         // another sender's message is already being processed for this chat.
         // Reuses the error rendering shape — additive case only, no new UI.
-        case "agent_busy": handleErrorEvent(content); sendRefusedRef.current?.("busy"); break
+        // The server saved the message as not run (message_id): its note and Send again, the composer stays as it is.
+        // Without one it was not saved, the old refusal: the composer gets the message back.
+        case "agent_busy": {
+          const saved = notRunMessage(metadata)
+          awaitingOwnEchoRef.current = false
+          if (saved) { handleNotRunEvent(saved, content || NOT_RUN_FALLBACK); sendRefusedRef.current?.("busy_saved") }
+          else { handleErrorEvent(content); sendRefusedRef.current?.(SEND_REFUSED_BUSY) }
+          break
+        }
       }
       if (activeRunIdRef.current) {
         const runId = activeRunIdRef.current
@@ -1293,7 +1333,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     [
       scheduleTextFlush, flushPendingText, handleStatusEvent, handleThinkingEvent,
       handleToolCallEvent, handleToolResultEvent, handleImageEvent, handleResultEvent,
-      handleSystemEvent, handleDoneEvent, handleCrewProvisioningEvent, handleUserMessageEvent,
+      handleSystemEvent, handleDoneEvent, handleCrewProvisioningEvent, handleUserMessageEvent, handleNotRunEvent,
       handleErrorEvent,
     ],
   )
@@ -1528,7 +1568,8 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         }
         flushPendingText()
         handleErrorEvent(reason)
-        sendRefusedRef.current?.(/already being processed/i.test(reason) ? "busy" : "refused")
+        awaitingOwnEchoRef.current = false
+        sendRefusedRef.current?.(/already being processed/i.test(reason) ? SEND_REFUSED_BUSY : SEND_REFUSED, reason || undefined)
         return
       }
 
@@ -1770,6 +1811,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         if (submissionId) settleAsk(submissionId, new AskSubmissionError("Not connected — your answers are still here."))
         return confirmation ?? false
       }
+      awaitingOwnEchoRef.current = true
 
       const userTurn: ChatTurn = {
         id: optimisticId,
@@ -1794,6 +1836,39 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     },
     [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent, isCurrentAuthority, settleAsk],
   )
+
+  /**
+   * Send again: the server runs the saved message once more (resend_of) with its Sheet, which it checks
+   * again; no second message is made. False when the note is gone, the chat is busy or the send did not leave.
+   */
+  const resendNotRun = useCallback((messageId: string) => {
+    if (!canSend || !isCurrentAuthority() || isStreaming) return false
+    // Restricted chats do not run over the socket, and a pending profile is not decided yet.
+    const profile = getExecutionProfile?.() ?? executionProfile
+    if (profile === "restricted" || profile === "pending") return false
+    const at = turns.findIndex(turn => turn.id === NOT_RUN_PREFIX + messageId)
+    if (at < 0) return false
+    const original = turns.slice(0, at).reverse().find(turn => turn.role === "user")
+    const content = original?.parts.find(part => part.type === "text")?.content?.trim()
+    if (!content) return false
+    const refs = original?.metadata?.artifact_refs
+    const sent = send({
+      type: "send_message",
+      channel: "session:" + sessionId,
+      payload: JSON.stringify({ session_id: sessionId, content, metadata: { resend_of: messageId, ...(Array.isArray(refs) ? { artifact_refs: refs } : {}) } }),
+    })
+    if (sent === false) return false
+    setTurns(prev => prev.filter(turn => turn.id !== NOT_RUN_PREFIX + messageId))
+    isStreamingRef.current = true
+    setIsStreaming(true)
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
+    cancelledRef.current = false
+    stopPendingRef.current = false
+    setStopPending(false)
+    replyHasTextRef.current = false
+    return true
+  }, [canSend, isCurrentAuthority, isStreaming, getExecutionProfile, executionProfile, turns, send, sessionId])
 
   const stopGeneration = useCallback(() => {
     if (!isCurrentAuthority()) return
@@ -2112,6 +2187,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     /** Stop was requested and the server has not confirmed a terminal state yet. */
     stopping: isStreaming && stopPending,
     regenerateLastTurn,
+    resendNotRun,
     editAndResend,
     loadHistory,
     markHistoryUnavailable,

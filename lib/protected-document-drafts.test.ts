@@ -22,3 +22,12 @@ it.each(["admission", "recovery"])("holds exclusive custody through a %s read-re
   } finally { release(); await pending.catch(() => {}) }
   expect(raw.close).toHaveBeenCalledOnce()
 })
+
+it("opens the raw store large enough to seal a 64 MiB workbook journal, never past the store's 128 MiB", async () => {
+  const raw = { exclusive: true, close: vi.fn(), load: vi.fn(async () => []), put: vi.fn(), remove: vi.fn() }
+  m.open.mockResolvedValue(raw); m.cipher.mockResolvedValue({ close: vi.fn(), seal: vi.fn(), open: vi.fn() })
+  ;(await openProtectedDocumentDrafts("alice", "w", "p", { maxDraftBytes: 96 * 1024 * 1024, requireExclusive: true })).close()
+  expect(m.open.mock.calls[0][3]).toMatchObject({ maxDraftBytes: 128 * 1024 * 1024 })
+  ;(await openProtectedDocumentDrafts("alice", "w", "p", { maxDraftBytes: 4 * 1024 * 1024, requireExclusive: true })).close()
+  expect(m.open.mock.calls[1][3]).toMatchObject({ maxDraftBytes: Math.ceil(4 * 1024 * 1024 * 4 / 3) + 8192 })
+})

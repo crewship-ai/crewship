@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   File as FileIcon,
   FileImage,
+  FileSpreadsheet,
   FileText,
   Paperclip,
   X,
@@ -98,9 +99,13 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
   const waiting = attachment.status === "validating";
   const uploading = attachment.status === "uploading";
   const inFlight = uploading || waiting;
+  // A workbook reads as Excel everywhere: its icon in the Sheet colour.
+  const workbook = !failed && /\.xls[xm]$/i.test(attachment.name)
   const Icon = failed
     ? AlertTriangle
-    : attachment.type.startsWith("image/")
+    : workbook
+      ? FileSpreadsheet
+      : attachment.type.startsWith("image/")
       ? FileImage
       : attachment.type.startsWith("text/") || attachment.type === "application/json"
         ? FileText
@@ -123,7 +128,7 @@ export const AttachmentChip = ({ attachment, onRemove, onRetry, onCancel }: Atta
       )}
     >
       <Icon
-        className={cn("h-3 w-3", failed ? "text-destructive" : "text-muted-foreground")}
+        className={cn("h-3 w-3", failed ? "text-destructive" : workbook ? "text-sheet" : "text-muted-foreground")}
       />
       <span className="max-w-32 truncate">{attachment.name}</span>
       {failed ? (

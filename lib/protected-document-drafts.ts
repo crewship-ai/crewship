@@ -1,4 +1,4 @@
-import { openDocumentDrafts, purgeDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts, type DocumentDraft, type DocumentDraftStore } from "./document-queue"
+import { MAX_DRAFT_STORE_BYTES, openDocumentDrafts, purgeDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts, type DocumentDraft, type DocumentDraftStore } from "./document-queue"
 import { createLocalDraftCipher, isSealedLocalDraft, LocalDraftProtectionError, LocalDraftReadRevoked } from "./local-draft-seal"
 
 /** The raw IDB layer keeps its locking and strict transactions; only encrypted
@@ -8,7 +8,7 @@ export async function openProtectedDocumentDrafts(human: string, workspace: stri
   const limit = options?.maxDraftBytes ?? 4 * 1024 * 1024
   // Acquire custody before checking/erasing recovery data. No content leaves
   // the store until the separate current-human read admission succeeds.
-  const raw = await openDocumentDrafts(human, workspace, page, { ...options, maxDraftBytes: Math.min(64 * 1024 * 1024, Math.ceil(limit * 4 / 3) + 8192) })
+  const raw = await openDocumentDrafts(human, workspace, page, { ...options, maxDraftBytes: Math.min(MAX_DRAFT_STORE_BYTES, Math.ceil(limit * 4 / 3) + 8192) })
   let rawClosed = false
   const closeRaw = () => { if (!rawClosed) { rawClosed = true; raw.close() } }
   const captured = raw.exclusive ? undefined : await captureDocumentDrafts(human, workspace, page).catch(error => { closeRaw(); throw error })

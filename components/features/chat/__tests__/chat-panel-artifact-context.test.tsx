@@ -191,7 +191,7 @@ it("flag on: an item the server answers 404 for is dropped from the composer", a
   expect(screen.queryByText("Quarterly plan", { selector: "li *" })).toBeNull()
 })
 
-it("flag on: a suggestion chip is not the composer's send; it spends no intent and keeps the draft", async () => {
+it("flag on: no generic follow-up chip sits under a reply; the composer's send carries the intent once", async () => {
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", "true")
   mount()
   fireEvent.click(await screen.findByRole("button", { name: "Open" }))
@@ -199,13 +199,14 @@ it("flag on: a suggestion chip is not the composer's send; it spends no intent a
   const strip = await screen.findByRole("region", { name: "Artifact context" })
   fireEvent.click(screen.getByLabelText("Update attached"))
   await waitFor(() => expect(strip).toHaveTextContent("Saved to My space"))
-  fireEvent.click(await screen.findByRole("button", { name: "Tell me more" }))
-  await waitFor(() => expect(chat.sendMessage).toHaveBeenCalled())
-  expect(chat.sendMessage.mock.calls[0]).toEqual(["Tell me more"])
+  for (const generic of ["Tell me more", "Give me an example", "What's next?"]) {
+    expect(screen.queryByRole("button", { name: generic })).toBeNull()
+  }
   expect(screen.getByRole("region", { name: "Artifact context" })).toHaveTextContent("Saved to My space")
-  // The composer's own send still carries it, once.
+  // The composer's own send carries it, once.
   fireEvent.click(screen.getByRole("button", { name: "Send message" }))
-  expect(chat.sendMessage.mock.calls[1][1].document_iteration_intent.page_id).toBe("page-a")
+  expect(chat.sendMessage).toHaveBeenCalledTimes(1)
+  expect(chat.sendMessage.mock.calls[0][1].document_iteration_intent.page_id).toBe("page-a")
 })
 
 it("flag on: a denied or missing pinned revision shows neither the title nor the saved revision, and cannot be attached", async () => {
