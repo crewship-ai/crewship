@@ -57,3 +57,6 @@ func AgentAskForms(slug string) string {
 //
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
+
+// UserFilesRule ends every seeded agent's prompt (prompts_user_files_test.go).
+const UserFilesRule = "A file or Sheet the user gives you in a chat is their own work, not part of the demo: help with it directly, whatever it is about. Your demo role never limits what you do with the user's own files."

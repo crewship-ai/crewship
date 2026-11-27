@@ -75,6 +75,18 @@ type ChatHandler interface {
 // to a private, sender-only agent_busy frame instead.
 var ErrAgentBusy = errors.New("agent already has a live run")
 
+// MessageNotRun answers a send of a private chat whose run was refused (agent busy, environment
+// unavailable, hire awaiting approval): the person's message was saved and marked not run with
+// Code, and "Send again" replays MessageID. errors.Is against the refusal (ErrAgentBusy) holds.
+type MessageNotRun struct {
+	MessageID string
+	Code      string
+	Err       error
+}
+
+func (e *MessageNotRun) Error() string { return e.Err.Error() }
+func (e *MessageNotRun) Unwrap() error { return e.Err }
+
 // ErrRunCancelled reports a confirmed execution stop with recorded terminal
 // cancellation. Ambient context cancellation or observer detachment is insufficient.
 var ErrRunCancelled = errors.New("agent run cancellation confirmed")

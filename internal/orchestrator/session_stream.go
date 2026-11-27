@@ -97,6 +97,7 @@ var errRunPanicked = errors.New("agent run crashed")
 // See the file comment for why the publication lives here rather than at each
 // dispatch site.
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
+	ctx = req.memoryContext(ctx)
 	if req.strictContentPrivacy {
 		req = req.WithStrictContentPrivacy()
 		defer func() {

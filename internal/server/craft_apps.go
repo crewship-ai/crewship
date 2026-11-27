@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -14,8 +15,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/craftassets"
 	"github.com/crewship-ai/crewship/internal/craftengine"
+	"github.com/crewship-ai/crewship/internal/craftsession"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/editororigin"
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 // craftApps is the server's view of the Word and Sheet applications (#5315):
@@ -73,6 +76,16 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 			a.store.Root = filepath.Join(root, "craft-components")
 		} else {
 			logger.Error("no directory for Craft components", "error", err)
+		}
+	}
+	// Engine workers load the compiled engine module from the server's private compilation
+	// cache instead of compiling it on every start (5 to 7.6 s). CREWSHIP_CRAFT_COMPILE_CACHE=0
+	// turns it off; without it workers compile as before.
+	if os.Getenv("CREWSHIP_CRAFT_COMPILE_CACHE") != "0" {
+		if root, err := database.ResolveDataDirRoot(""); err == nil {
+			if err = craftengine.EnableCompileCache(filepath.Join(root, "craft-compile-cache")); err != nil {
+				logger.Warn("Craft engine compilation cache is off", "error", err)
+			}
 		}
 	}
 	if err := a.store.Sweep(); err != nil {
@@ -164,9 +177,45 @@ func (a *craftApps) policy() *craftapps.Policy {
 // compiled when it is first used.
 func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Installed) (goapi.CraftNativeDocumentProfile, craftapps.Component, error) {
 	c := inst.Component
-	engine, err := craftengine.NewLazyWASM(c.Application, c.Engine.SHA256, inst.EngineLoader(), craftengine.Limits{})
+	// Limits: Sheet needs more linear memory than Word for a large workbook (the guest memory
+	// cap; the process RSS is higher, see the artifacts configuration). The run limit is the
+	// ceiling of every caller's own deadline (a validation may take up to 5 minutes).
+	limits := craftengine.Limits{MemoryMiB: 1024, Timeout: mooring.MaxValidationTime}
+	if c.Application == "gridcraft" {
+		limits.MemoryMiB = 2048
+	}
+	wasm, err := craftengine.NewLazyWASM(c.Application, c.Engine.SHA256, inst.EngineLoader(), limits)
 	if err != nil {
 		return goapi.CraftNativeDocumentProfile{}, craftapps.Component{}, err
+	}
+	var engine craftengine.Engine = wasm
+	// The engine runs in a worker process that can be killed (the in-process runtime has to
+	// poll its context, which made a real 235 000 cell workbook open in 122 s instead of 26 s).
+	// Where no worker can start, the in-process engine serves and says so: one WARN here and in
+	// the application's diagnostics (runtime, degraded, reason). CREWSHIP_CRAFT_ENGINE_INPROCESS=1
+	// chooses it on purpose and is not reported as degraded.
+	warn := func(reason string) {
+		slog.Warn("Craft engine runs in-process: slower, and a stuck run cannot be killed", "application", c.Application, "reason", reason)
+	}
+	if os.Getenv("CREWSHIP_CRAFT_ENGINE_INPROCESS") != "1" {
+		reason := ""
+		exe, exeErr := os.Executable()
+		switch {
+		case exeErr != nil:
+			reason = "the server binary path is unknown"
+		case craftengine.ProbeProcess(context.Background(), exe, []string{craftsession.WorkerFlag}) != nil:
+			reason = "this binary does not run as an engine worker"
+		}
+		if reason == "" {
+			proc, procErr := craftengine.NewProcess(c.Application, c.Engine.SHA256, exe, []string{craftsession.WorkerFlag}, inst.EngineLoader(), limits)
+			if procErr != nil {
+				reason = "the worker engine could not be prepared"
+			} else if fb, fbErr := craftengine.NewFallback(proc, wasm, warn); fbErr == nil {
+				engine = fb
+			}
+		} else if fb, fbErr := craftengine.NewDegraded(wasm, reason, warn); fbErr == nil {
+			engine = fb
+		}
 	}
 	if editor == nil {
 		return goapi.CraftNativeDocumentProfile{}, craftapps.Component{}, errors.New("the editor origin is disabled")
@@ -180,8 +229,11 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 			return goapi.CraftNativeDocumentProfile{}, craftapps.Component{}, fmt.Errorf("editor refused: %w", err)
 		}
 	}
+	comp := a.componentOf(inst)
+	comp.Runtime = engine.Runtime()
 	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, Engine: engine,
-		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), Bundled: true}, a.componentOf(inst), nil
+		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), EngineModule: &goapi.EngineModuleSource{Load: inst.EngineLoader()}, CompatEditors: craftCompatEditors[c.Application], Bundled: true,
+		Workbook: c.DocumentFormat == craftassets.DocumentFormatWorkbook}, comp, nil
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the
@@ -204,4 +256,14 @@ func (a *craftApps) installer(editor *editororigin.Handler) goapi.CraftComponent
 		}
 		return a.activate(editor, inst)
 	}
+}
+
+// craftCompatEditors names, per application, earlier editor bundles whose
+// documents a newer editor of the same engine opens unchanged (the editor
+// gained a host message; the engine module and the document format did not
+// change). The store still requires the engine revision and module digest of a
+// document to match, so an entry cannot widen access to a different engine.
+var craftCompatEditors = map[string]string{
+	// gridcraft 0.12.1 (engine e68d192), editor of the v0.1.0-rc.2 package
+	"gridcraft": "07c5dae419ffff802dd951eeeaa4640a5ee5c76c4afa089c5b61e65c93b6d7ad",
 }

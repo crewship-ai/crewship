@@ -163,6 +163,7 @@ type AgentRunRequest struct {
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
 	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
+	withoutMemory         bool              // Host-only: no memory read, no memory tools (WithoutMemory).
 	mooringDocumentTools  bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.
 	nativeCraftTools      bool              // Host-only confirmed whole-native-document task.
 	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
@@ -561,6 +562,7 @@ type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 type Orchestrator struct {
 	agentInboxEnabled        func(string) bool
 	gridCraftEnabled         bool // startup-only, experimental offline workbook tools
+	craftSheetEnabled        bool // startup-only, native Sheet tools for chat runs
 	hostOutputRoot           string
 	hostOutputCapacityBytes  int64
 	hostOutputCapacityRuns   int
@@ -1748,6 +1750,10 @@ func (o *Orchestrator) SetFeedbackPreferenceReader(reader func(context.Context, 
 
 // SetGridCraftEnabled is called only during server construction, before runs.
 func (o *Orchestrator) SetGridCraftEnabled(enabled bool) { o.gridCraftEnabled = enabled }
+
+// SetCraftSheetEnabled is called only during server construction, before runs:
+// it makes the sidecar list the native Sheet tools of a chat run.
+func (o *Orchestrator) SetCraftSheetEnabled(enabled bool) { o.craftSheetEnabled = enabled }
 
 // SetAgentInboxEnabled is wired during host construction. Sidecar discovery
 // receives a snapshot when constructing the run's IPC configuration.

@@ -387,6 +387,10 @@ func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, r *http.Requ
 		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), gridcraftMCPCatalog()...)
 		tools = append(tools, mooringMCPCatalog()...)
 	}
+	if s.ipc != nil && s.ipc.CraftSheetEnabled {
+		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), craftSheetMCPCatalog()...)
+		s.prewarmCraftSheet(r)
+	}
 	result, _ := json.Marshal(map[string]any{"tools": tools})
 	writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 		JSONRPC: "2.0",
@@ -424,6 +428,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.respondGridCraftMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondCraftSheetMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
 	if s.respondDocumentDraftMCPToolCall(w, r, req, params.Name, params.Arguments) {

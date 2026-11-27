@@ -126,6 +126,13 @@ func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64,
 // transaction, after the writer fence, so validation that was still running
 // when the reconcile answered cannot publish afterwards.
 func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte, attemptID string) (NativeSaveReceipt, error) {
+	return s.SaveAttemptRecorded(ctx, l, base, editorRevision, contentHash, raw, attemptID, nil)
+}
+
+// SaveAttemptRecorded is SaveAttempt with a record that runs on the saving
+// transaction of a new version (never for an unchanged repeat or a refusal);
+// its error rolls the version back.
+func (s *NativeStore) SaveAttemptRecorded(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte, attemptID string, record NativeRecord) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
 	}
@@ -165,8 +172,9 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	if "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
-	request := nativeManifest(base, b)
+	request := s.manifest(base, b)
 	request.Message = message
+	request.Record = record.of(b)
 	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
 	if errors.Is(err, artifacts.ErrVersionConflict) {
 		// Attempt idempotence: this same identified attempt already committed.
@@ -257,9 +265,9 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, proven func(string) bool, notProven func(tx *sql.Tx, stored string) error, receipt *NativeSaveReceipt) error {
 	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
 		if readErr == nil {
-			file, ok := m.Files["document.json"]
+			file, fileErr := s.DocumentFile(m)
 			hash := sha256.Sum256(file.Content)
-			if proven(m.Message) && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
+			if proven(m.Message) && m.Actor == l.Holder.ActorID && fileErr == nil && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
 				*receipt = s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version)
 				return nil
 			}

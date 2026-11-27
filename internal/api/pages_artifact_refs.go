@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -30,12 +31,31 @@ var errArtifactRefUnavailable = errors.New("an attached artifact is not availabl
 
 var artifactRefID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// errArtifactConsentStale refuses a message whose Sheet is no longer at the
+// revision the person saw when they allowed the agent to change it. Only the
+// sender's own readable Sheet gets here, so it tells nothing new.
+var errArtifactConsentStale = chatbridge.ErrArtifactConsentStale
+
 // CheckArtifactRefs is the read-only pre-check the chat bridge runs before it
 // persists the human message: the same rules as RecordArtifactRefs. Access
 // lost between this check and the record still refuses the record; the
 // stored message then has no references and starts no run.
 func (h *PageHandler) CheckArtifactRefs(ctx context.Context, receipt *chataudience.Receipt, pageIDs []string) error {
-	return h.admitArtifactRefs(ctx, receipt, "", pageIDs)
+	return h.admitArtifactRefs(ctx, receipt, "", pageIDs, nil)
+}
+
+// CheckArtifactRefVersions is CheckArtifactRefs with the revision the person
+// saw for each Sheet: a Sheet that moved on since is refused as consent_stale.
+func (h *PageHandler) CheckArtifactRefVersions(ctx context.Context, receipt *chataudience.Receipt, pageIDs []string, versions map[string]int64) error {
+	return h.admitArtifactRefs(ctx, receipt, "", pageIDs, versions)
+}
+
+// RecordArtifactRefVersions is RecordArtifactRefs with those revisions.
+func (h *PageHandler) RecordArtifactRefVersions(ctx context.Context, receipt *chataudience.Receipt, message string, pageIDs []string, versions map[string]int64) error {
+	if message == "" {
+		return errArtifactRefUnavailable
+	}
+	return h.admitArtifactRefs(ctx, receipt, message, pageIDs, versions)
 }
 
 // RecordArtifactRefs is the trusted recorder. It runs in the human's own
@@ -48,12 +68,15 @@ func (h *PageHandler) RecordArtifactRefs(ctx context.Context, receipt *chataudie
 	if message == "" {
 		return errArtifactRefUnavailable
 	}
-	return h.admitArtifactRefs(ctx, receipt, message, pageIDs)
+	return h.admitArtifactRefs(ctx, receipt, message, pageIDs, nil)
 }
 
 // admitArtifactRefs checks every reference against the sending human and,
-// when message is set, records them in one transaction.
-func (h *PageHandler) admitArtifactRefs(ctx context.Context, receipt *chataudience.Receipt, message string, pageIDs []string) error {
+// when message is set, records them in one transaction. A native Sheet's
+// consent is the revision the person saw (versions); without one (the CLI,
+// which shows nothing) it is the Sheet's latest revision in this same
+// transaction. Either way it is one exact revision, never a time.
+func (h *PageHandler) admitArtifactRefs(ctx context.Context, receipt *chataudience.Receipt, message string, pageIDs []string, versions map[string]int64) error {
 	if receipt == nil || len(pageIDs) == 0 || len(pageIDs) > MaxArtifactRefs ||
 		InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
 		return errArtifactRefUnavailable
@@ -120,11 +143,30 @@ func (h *PageHandler) admitArtifactRefs(ctx context.Context, receipt *chataudien
 		if !ok {
 			return errArtifactRefUnavailable
 		}
+		var consent sql.NullInt64
+		var head int64
+		switch err = tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=? AND content_type='gridcraft'`, receipt.WorkspaceID, id).Scan(&head); {
+		case errors.Is(err, sql.ErrNoRows):
+			// Not a native Sheet: no consent revision.
+		case err != nil:
+			return err
+		default:
+			if seen, given := versions[id]; given && seen != head {
+				return errArtifactConsentStale
+			}
+			consent = sql.NullInt64{Int64: head, Valid: true}
+		}
 		if message == "" {
 			continue
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_message_refs(message_id,workspace_id,human_user_id,chat_id,page_id,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(message_id,page_id) DO NOTHING`,
-			message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, id, now); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_message_refs(message_id,workspace_id,human_user_id,chat_id,page_id,created_at,consent_version) VALUES(?,?,?,?,?,?,?) ON CONFLICT(message_id,page_id) DO NOTHING`,
+			message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, id, now, consent); err != nil {
+			return err
+		}
+		// The page stays with the agent for later chats (agent_files grants nothing by itself).
+		if _, err = tx.ExecContext(ctx, `INSERT INTO agent_files(agent_id,page_id,workspace_id,added_by,added_at) VALUES(?,?,?,?,?)
+ ON CONFLICT(agent_id,page_id) DO UPDATE SET removed_at=NULL,removed_by=NULL,added_by=excluded.added_by,added_at=excluded.added_at WHERE agent_files.removed_at IS NOT NULL`,
+			receipt.AgentID, id, receipt.WorkspaceID, receipt.UserID, now); err != nil {
 			return err
 		}
 	}

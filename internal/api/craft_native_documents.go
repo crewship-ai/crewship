@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,12 @@ type craftNativeDocumentsHTTP struct {
 	mu           sync.RWMutex
 	applications map[string]craftNativeApplication
 	profiles     map[string]CraftNativeDocumentProfile
+	// imports holds the xlsx conversions in flight (craft_native_import.go).
+	imports *craftNativeImports
+	// computed records a document the server's engine computed (CraftNativeHTTPConfig.SheetComputed).
+	computed func(CraftNativeDocumentProfile, []byte)
+	// trusted vouches for a Sheet the server computed (CraftNativeHTTPConfig.SheetTrusted).
+	trusted func(CraftNativeDocumentProfile, []byte) bool
 }
 
 func newCraftNativeDocumentsHTTP(h *craftNativeHTTP, applications map[string]craftNativeApplication) *craftNativeDocumentsHTTP {
@@ -64,7 +72,7 @@ func (d *craftNativeDocumentsHTTP) activate(p CraftNativeDocumentProfile) error 
 	if d == nil || d.human == nil || !d.human.enabled {
 		return errors.New("native Craft documents are not available on this server")
 	}
-	applications, profiles, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{p.Application: p})
+	applications, profiles, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{p.Application: p}, d.trusted)
 	if err != nil {
 		return err
 	}
@@ -129,6 +137,9 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {
 		return
 	}
+	if craftWorkbookError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, mooring.ErrNativeDisabled):
 		replyError(w, 503, "native documents unavailable")
@@ -137,7 +148,7 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 	case errors.Is(err, mooring.ErrNativeAttemptAbsent):
 		replyError(w, 410, "native save attempt did not commit and never will; save the current draft again")
 	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed), errors.Is(err, mooring.ErrNativeAttemptRetired), errors.Is(err, mooring.ErrNativeRetirementLimit):
-		replyError(w, 409, "native document or lease changed; keep the local draft")
+		replyCode(w, 409, "conflict", "native document or lease changed; keep the local draft")
 	case errors.Is(err, mooring.ErrNativeValidation), errors.Is(err, mooring.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 422, "invalid native document")
 	default:
@@ -182,15 +193,50 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 	if !d.auditRead(w, r, entry) {
 		return
 	}
+	if s.Workbook() {
+		d.readWorkbook(w, r, entry, s, profile, state)
+		return
+	}
 	file, ok := state.Manifest.Files["document.json"]
 	if !ok || len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != "document.json" || file.MediaType != "application/json" {
 		craftNativeDocumentError(w, mooring.ErrNativeProfile)
 		return
 	}
+	doc := craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}}
+	if wantsCraftNativeBinary(r) {
+		writeCraftNativeBinary(w, r, doc)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
+	w.Header().Add("Vary", "Accept")
+	writeJSON(w, 200, doc)
 }
+
+// craftSheetRecord writes the audit row of a new revision on its saving
+// transaction: artifact.sheet_saved for a Sheet, artifact.document_saved for a
+// Document.
+func craftSheetRecord(scope mooring.EditLeaseScope, application, userID, source string) mooring.NativeRecord {
+	return func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt, native []byte) error {
+		return recordCraftSheetSaved(ctx, tx, craftSheetSaved{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version, Source: source, UserID: userID, Application: application, Native: native})
+	}
+}
+
+// craftProposalRecord is craftSheetRecord for a person accepting an agent's proposal.
+func craftProposalRecord(scope mooring.EditLeaseScope, application, userID string) func(mooring.NativeProposal) mooring.NativeRecord {
+	return func(p mooring.NativeProposal) mooring.NativeRecord {
+		return func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt, native []byte) error {
+			return recordCraftSheetSaved(ctx, tx, craftSheetSaved{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version, Source: craftSheetSavedByAcceptedProposal, UserID: userID,
+				AgentID: strings.TrimPrefix(p.AuthorActorID, "agent:"), RequestID: p.RequestID, Application: application, Native: native})
+		}
+	}
+}
+
 func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http.Request, operation string) {
+	d.mutateSnapshotFrom(w, r, operation, craftSheetSavedByEditor)
+}
+
+// mutateSnapshotFrom is mutateSnapshot whose new revision is audited as source.
+func (d *craftNativeDocumentsHTTP) mutateSnapshotFrom(w http.ResponseWriter, r *http.Request, operation, source string) {
 	r, entry, s, _, err := d.bind(r)
 	if err != nil {
 		craftNativeDocumentError(w, err)
@@ -200,11 +246,17 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 		d.human.apps.refuse(w, r.Context(), entry.application)
 		return
 	}
+	if s.Workbook() && operation == "save" {
+		d.saveWorkbook(w, r, entry, s, source)
+		return
+	}
+	bodyReader, reserve, bodyErr := craftNativeSnapshotBodyReader(w, r, 45<<20)
+	if bodyErr != nil {
+		replyError(w, 400, "invalid native snapshot request")
+		return
+	}
 	if operation == "save" {
-		bytes := int64(45 << 20)
-		if r.ContentLength >= 0 && r.ContentLength < bytes {
-			bytes = r.ContentLength
-		}
+		bytes := reserve
 		bytes += 256 << 10
 		upload, e := s.ReserveUpload(r.Context(), entry.scope, bytes)
 		if e != nil {
@@ -227,7 +279,7 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 		r = r.WithContext(ctx)
 	}
 	var body craftNativeSnapshotBody
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 45<<20))
+	decoder := json.NewDecoder(bodyReader)
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&body); err != nil {
 		replyError(w, 400, "invalid native snapshot request")
@@ -248,7 +300,7 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	w.Header().Set("Cache-Control", "no-store")
 	switch operation {
 	case "save":
-		receipt, e := s.SaveAttempt(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes, body.AttemptID)
+		receipt, e := s.SaveAttemptRecorded(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes, body.AttemptID, craftSheetRecord(entry.scope, entry.application, entry.source.UserID, source))
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return
@@ -267,7 +319,7 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 			replyError(w, 400, "invalid target version")
 			return
 		}
-		receipt, e := s.Restore(r.Context(), lease, base, target)
+		receipt, e := s.RestoreRecorded(r.Context(), lease, base, target, craftSheetRecord(entry.scope, entry.application, entry.source.UserID, craftSheetSavedByRestore))
 		if errors.Is(e, artifacts.ErrVersionNotFound) {
 			// Write and lease authority ran first, so only the holder learns this.
 			replyError(w, 404, "native version not found")
@@ -284,7 +336,7 @@ func (d *craftNativeDocumentsHTTP) saveSnapshot(w http.ResponseWriter, r *http.R
 	d.mutateSnapshot(w, r, "save")
 }
 func (d *craftNativeDocumentsHTTP) importSnapshot(w http.ResponseWriter, r *http.Request) {
-	d.mutateSnapshot(w, r, "save")
+	d.mutateSnapshotFrom(w, r, "save", craftSheetSavedByImport)
 }
 func (d *craftNativeDocumentsHTTP) reconcileSnapshot(w http.ResponseWriter, r *http.Request) {
 	d.mutateSnapshot(w, r, "reconcile")

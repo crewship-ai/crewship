@@ -3643,6 +3643,64 @@
         },
         "type": "object"
       },
+      "ChatArtifactReference": {
+        "properties": {
+          "application": {
+            "description": "The native Craft application of the page (gridcraft for a Sheet); absent for other pages.",
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "source": {
+            "description": "message: a message of the chat attached the page (message_id names it). upload: a Sheet opened from a file in this chat (initialize with X-Craft-Chat) that no message has attached yet; message_id is empty.",
+            "enum": [
+              "message",
+              "upload"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "page_id",
+          "slug",
+          "name",
+          "created_at",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ChatArtifactReferencePage": {
+        "properties": {
+          "next_cursor": {
+            "description": "Present when more references may follow; pass it back as cursor.",
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/ChatArtifactReference"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "refs"
+        ],
+        "type": "object"
+      },
       "ChatDecisionAnswer": {
         "additionalProperties": false,
         "properties": {
@@ -9303,6 +9361,10 @@
             "type": "boolean"
           },
           "gridcraft_native": {
+            "type": "boolean"
+          },
+          "gridcraft_workbook": {
+            "description": "A new Sheet is kept as its xlsx or xlsm file (the package manifest says document_format workbook), so an uploaded workbook opens as a Sheet as it is. Only with gridcraft_native.",
             "type": "boolean"
           },
           "wordcraft_native": {
@@ -16177,6 +16239,79 @@
         ],
         "type": "object"
       },
+      "NativeCraftAgentAccess": {
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "default_allowed": {
+            "description": "Start the consent switch on: allowed, and the Sheet came into this very chat (uploaded or attached here). It permits nothing; consent is still the sent message.",
+            "type": "boolean"
+          },
+          "detail": {
+            "description": "A finer code for the caller, who may read the Sheet: workspace_flag_off, chat_not_private, not_a_sheet, not_owner, not_in_personal_space, no_write_access, agent_unavailable, agents_app_disabled, or an application status reason. New codes may be added.",
+            "type": "string"
+          },
+          "head_version": {
+            "description": "The Sheet's latest confirmed revision, the one an agent would start from, allowed or not. Only for a caller who may read it (not Read or Comment grantees); absent before the first revision.",
+            "pattern": "^[1-9][0-9]{0,17}$",
+            "type": "string"
+          },
+          "holder": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "human",
+                  "agent"
+                ],
+                "type": "string"
+              },
+              "mine": {
+                "description": "The caller's own editor holds it.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "mine"
+            ],
+            "type": "object"
+          },
+          "max_sheets": {
+            "description": "How many Sheets one message may attach for the agent to change; with more it may change none.",
+            "type": "integer"
+          },
+          "message": {
+            "description": "The reason as a sentence.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the agent may not change this Sheet: the reason the agent itself would be told. Absent when allowed.",
+            "enum": [
+              "feature_off",
+              "agent_policy",
+              "not_attached",
+              "holder_human",
+              "engine_failed"
+            ],
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When that revision was saved (ISO 8601 UTC).",
+            "type": "string"
+          },
+          "saved_by_name": {
+            "description": "Who saved it, named as in the version history.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed",
+          "max_sheets",
+          "default_allowed"
+        ],
+        "type": "object"
+      },
       "NativeCraftAgentStopReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -16645,6 +16780,23 @@
             ],
             "type": "string"
           },
+          "chatRef": {
+            "description": "The Sheet was added to the chat named by X-Craft-Chat, in the transaction that stored version 1.",
+            "type": "boolean"
+          },
+          "contentHash": {
+            "description": "A workbook Sheet started from an uploaded file: that file's SHA-256, computed by the server.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "format": {
+            "description": "A workbook Sheet started from an uploaded file: the file's format.",
+            "enum": [
+              "xlsx",
+              "xlsm"
+            ],
+            "type": "string"
+          },
           "generation": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -16771,6 +16923,122 @@
           "handoff_requested_kind",
           "handoff_requested_by",
           "can_share"
+        ],
+        "type": "object"
+      },
+      "NativeCraftOperations": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "head": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "head_content_hash": {
+            "description": "SHA-256 of the head's stored bytes, as X-Craft-Content-Hash of Read Craft document.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "replayable": {
+            "description": "Every version after from has its operations, so they replay over the editor's own work.",
+            "type": "boolean"
+          },
+          "to": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Oldest first, from+1 to the head.",
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftOperationsVersion"
+            },
+            "maxItems": 50,
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "head",
+          "head_content_hash",
+          "replayable",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "NativeCraftOperationsVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_kind": {
+            "enum": [
+              "agent",
+              "human",
+              "system"
+            ],
+            "type": "string"
+          },
+          "actor_name": {
+            "description": "The display name of the agent, or of the person who undid an agent change, that saved this version; empty otherwise.",
+            "type": "string"
+          },
+          "base_version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "calculate": {
+            "enum": [
+              "saved",
+              "calculated"
+            ],
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "engine_pin": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "ops": {
+            "description": "The resolved engine commands (addresses and literals) the agent change applied, in order; present only when replayable. Carries cell content.",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "replayable": {
+            "type": "boolean"
+          },
+          "signature_invalidated": {
+            "description": "The workbook's XML package signature was kept byte for byte but no longer matches the changed workbook; absent when it has none.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "base_version",
+          "actor_kind",
+          "actor_name",
+          "replayable"
         ],
         "type": "object"
       },
@@ -17352,6 +17620,10 @@
           "sessionId": {
             "type": "string"
           },
+          "signature_invalidated": {
+            "description": "A workbook Sheet only: its XML package signature was kept byte for byte but no longer matches the changed workbook; absent when it has none.",
+            "type": "boolean"
+          },
           "unchanged": {
             "description": "No version was created: version equals baseVersion, which already holds this snapshot.",
             "enum": [
@@ -17464,11 +17736,62 @@
         ],
         "type": "object"
       },
+      "NativeCraftUndoReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "restored": {
+            "description": "Cells that got their value from before the agent's change back.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "signature_invalidated": {
+            "description": "The workbook's XML package signature was kept byte for byte but no longer matches the changed workbook; absent when it has none.",
+            "type": "boolean"
+          },
+          "skipped": {
+            "description": "Cells kept because they were touched since the agent's change.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "restored",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "NativeCraftUndoRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "operation_id": {
+            "description": "The operation_id of the agent change, as its apply result and the operations listing name it.",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "type": "object"
+      },
       "NativeCraftVersion": {
         "additionalProperties": false,
         "properties": {
           "author": {
             "$ref": "#/components/schemas/NativeCraftVersionAuthor"
+          },
+          "contentHash": {
+            "description": "Workbook Sheets only: SHA-256 of the version's file.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
           },
           "createdAt": {
             "type": "string"
@@ -17476,6 +17799,15 @@
           "current": {
             "description": "True only for the newest version, the one the editor opens.",
             "type": "boolean"
+          },
+          "format": {
+            "description": "Workbook Sheets only: the version's file format; native marks a version from before workbook files (readable, not restorable).",
+            "enum": [
+              "xlsx",
+              "xlsm",
+              "native"
+            ],
+            "type": "string"
           },
           "proposal": {
             "allOf": [
@@ -17489,6 +17821,11 @@
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
             "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "size": {
+            "description": "Workbook Sheets only: the version's file size in bytes.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "version": {
@@ -71728,6 +72065,166 @@
         "summary": "Get chain",
         "tags": [
           "chains"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/chats/{chatId}/artifact-refs": {
+      "get": {
+        "description": "List the artifacts the person attached to messages of this chat, oldest first, each only while the caller may see that page; a hidden one is neither listed nor counted. A chat the caller may not read answers 404 like one that does not exist. Metadata only, never content.",
+        "operationId": "get_api_v1_chats_chatId_artifact-refs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatArtifactReferencePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat artifact references",
+        "tags": [
+          "chats"
         ],
         "x-crewship-read-only": true
       }
@@ -146680,6 +147177,140 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/craft/agent-access": {
+      "get": {
+        "description": "Say whether an agent may change this Sheet if the calling human attaches it to the next message of their own private chat, and the reason when not. Advice for a user interface, never a permission: every agent call checks everything again. A document the caller may not read answers 403 like one that does not exist.",
+        "operationId": "get_api_v1_pages_slug_craft_agent-access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The caller's own private chat the Sheet would be attached in.",
+            "in": "query",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftAgentAccess"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Check Craft agent access",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/craft/availability": {
       "get": {
         "description": "Get page craft availability (GET /api/v1/pages/{slug}/craft/availability).",
@@ -146958,6 +147589,242 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/craft/document/export.xlsx": {
+      "get": {
+        "description": "Download a native Sheet as one Excel workbook (.xlsx) written by the Sheet engine: the confirmed head, or with `version` a saved version. Same private `X-Craft-Session` admission, Edit-or-administrator authority and workspace OWNER/ADMIN read audit as Read Craft document; whoever that read refuses gets the same answer and nothing is converted. Each export is audited as `artifact.sheet_exported` with the version, size and digest prefix, never cell values. The file is named after the Page (Content-Disposition) and X-Craft-Version names the exported version. A Word document answers 422, a workbook over the export limit 413, a busy server 503 with Retry-After.",
+        "operationId": "get_api_v1_pages_slug_craft_document_export.xlsx",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Saved version to export; omitted, the confirmed head. Needs the `craft_version_history` workspace flag, like Read Craft document version.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Export Sheet as xlsx",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/craft/document/import": {
       "post": {
         "description": "Import page craft document (POST /api/v1/pages/{slug}/craft/document/import).",
@@ -147146,6 +148013,195 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/operations": {
+      "get": {
+        "description": "List the versions of a workbook Sheet after a base version up to the head, with the resolved operations of each version an agent change saved, so an editor holding unsaved work replays them over its own state and saves over the head. replayable is false when any version in between has no operations (a person's save of the whole file, a restore). Requires the private `X-Craft-Session` admission and the same read rule as List Craft document versions; operations carry cell content and are never logged. 400 for a from that is not a version, 413 too_many beyond 50 versions (reload), 404 for a Sheet not kept as its workbook file.",
+        "operationId": "get_api_v1_pages_slug_craft_document_operations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftOperations"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List Craft document operations",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/craft/document/reconcile": {
@@ -147908,6 +148964,243 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/craft/document/undo": {
+      "post": {
+        "description": "Undo one agent change of a workbook Sheet as the person's new version. The caller holds the edit lease (X-Craft-Session, X-Craft-Generation). Cells that still hold what the agent wrote get their old values back, formulas included; cells changed since are kept and counted in skipped. 201 for the new version, 200 for a repeat of the same operation_id (the same version) or when no cell was left to put back. 404 not_found for an unknown operation, 409 not_undoable when the server did not keep what the change replaced, 409 moved when the Sheet moved on meanwhile.",
+        "operationId": "post_api_v1_pages_slug_craft_document_undo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The edit lease generation the caller holds.",
+            "in": "header",
+            "name": "X-Craft-Generation",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]{0,18}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftUndoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftUndoReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftUndoReceipt"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Undo Craft agent change",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/craft/document/versions": {
       "get": {
         "description": "List the saved versions of a native Word or Sheet document, newest first, with time, author (person or agent) and the current version marked. Requires the private `X-Craft-Session` admission and current Edit rights or the workspace OWNER/ADMIN read rule, exactly like Read Craft document; Read and Comment grantees get 403 and only the lease holder may restore through Restore Craft document. Answers 404 to permitted callers while the `craft_version_history` workspace feature flag is off.",
@@ -148464,6 +149757,712 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/import": {
+      "post": {
+        "description": "Import page craft (POST /api/v1/pages/{slug}/craft/import).",
+        "operationId": "post_api_v1_pages_slug_craft_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Import page craft",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/import/{id}": {
+      "get": {
+        "description": "Get page craft import (GET /api/v1/pages/{slug}/craft/import/{id}).",
+        "operationId": "get_api_v1_pages_slug_craft_import_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft import",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/import/{id}/document": {
+      "get": {
+        "description": "Get page craft import document (GET /api/v1/pages/{slug}/craft/import/{id}/document).",
+        "operationId": "get_api_v1_pages_slug_craft_import_id_document",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft import document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/import/{id}/initialize": {
+      "post": {
+        "description": "Submit page craft import initialize (POST /api/v1/pages/{slug}/craft/import/{id}/initialize).",
+        "operationId": "post_api_v1_pages_slug_craft_import_id_initialize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page craft import initialize",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/craft/initialize": {

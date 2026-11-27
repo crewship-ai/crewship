@@ -1,0 +1,173 @@
+---
+title: "Set up Sheets with an agent in chat"
+description: "Everything a clean install needs before a person can open an uploaded Excel workbook as a Sheet, edit it by hand, and let an agent change it from chat, in the order to turn it on."
+icon: "list-checks"
+stability: beta
+tag: Beta
+---
+
+A clean install has every switch on this page **off**. This page lists each
+one in the order to turn it on, with the command that turns it on and the
+command that checks it. When the last step shows `allowed: true`, a person
+can upload a workbook, edit it, attach it to a chat message and have the
+agent change it. Each change the agent makes is saved as a new version.
+
+Who does what:
+
+| Step | Who |
+|---|---|
+| 1–2 | the operator of the server |
+| 3–5 | an instance administrator, then a workspace `OWNER` or `ADMIN` |
+| 6–7 | the person who works with the Sheet |
+
+## 1. The server
+
+Install from an official release package. The package trusts one Sheet
+application. Crewship downloads and verifies it when step 3 turns it on, so
+you set nothing else. Native Word and Sheet are also off in the server
+configuration by default. A source build or a development profile is
+configured as described in [Artifacts configuration](/configuration/artifacts).
+
+Two settings in the server environment take a switch out of the
+administrator's hands:
+
+- `CREWSHIP_CRAFT_NATIVE_ENABLED` decides Word and Sheet;
+- `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED` decides agents in them.
+
+Set them only if the administrator must not change them. Step 3 then shows
+`locked`.
+
+The web app is a build. Its Artifacts library needs
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`. The bar that shows who is editing needs
+`NEXT_PUBLIC_CHAT_CRAFT_LEASE=true`, which is `false` in the default
+production build. The editor page needs no build flag.
+
+## 2. The reverse proxy
+
+A large workbook is uploaded, converted and saved in one request. The proxy
+in front of Crewship must allow it:
+
+- a request body of at least **70 MB** (nginx: `client_max_body_size 70m;`);
+- a read timeout of at least **120 seconds** (nginx: `proxy_read_timeout 120s;`);
+- `/_editor/` passed through unchanged. A proxy that rewrites it shows
+  `editor_isolation_failed` in step 3.
+
+Give the server at least **6 GiB** of memory if people will open workbooks
+of tens of MB.
+
+## 3. Turn on Sheet and agents for the instance
+
+An instance administrator:
+
+```bash
+crewship admin instance applications enable sheet
+crewship admin instance applications enable agents
+crewship admin instance applications
+```
+
+The last command must show Sheet `ready` and, for agents, `in a chat: ready`.
+Otherwise it names the reason (for example `component_installing`, or
+`agents_need_application`). The change is audited as
+`instance.craft_application_set`. See
+[`crewship admin instance applications`](/cli/admin#applications).
+
+## 4. Let the crew's agents change artifacts
+
+A workspace `OWNER` or `ADMIN` lists the crews whose agents may change
+artifacts. A crew that is not listed can never change a Sheet, even when one
+is attached. `set` replaces the whole list and needs the version that `show`
+prints:
+
+```bash
+crewship workspace artifact-policy show
+crewship crew get <crew-slug>        # the ID field is the crew ID
+crewship workspace artifact-policy set --base-version <version-from-show> \
+  --enabled=true --crew-id <crew-id>
+```
+
+Changes to the policy are audited. The same policy also sets the run limits
+(see below).
+
+## 5. Turn on the workspace flags
+
+```bash
+crewship feature-flag enable artifact_agent_access_modes
+crewship feature-flag create --key craft_version_history   # once per instance, if `list` does not show it
+crewship feature-flag enable craft_version_history
+crewship feature-flag list
+```
+
+`craft_version_history` turns on the version list and restore in the
+editor.
+
+`artifact_agent_access_modes` is what lets a chat message carry an
+attachment that an agent may use. It does **more than Sheets**. With it on
+in a workspace:
+
+- an agent's chat run reaches an artifact only when the person attached it
+  to the message, the agent created it in that chat, or the agent holds its
+  own grant on it, and the person's own access is rechecked on every use;
+- routines, schedules and webhooks that a person started can reach
+  artifacts their agent holds a grant on;
+- folders can let their crew's agents read (and on Docs, propose);
+- per-run limits apply: 3 artifacts created, 50 distinct reads, and
+  20 pages per crew per hour; page saves count against the chat-run limit;
+- every access is audited as `artifact.agent_run_accessed`, naming the
+  person, the agent, the run and the operation.
+
+Turning the flag off ends every chat run's access at the agent's next call.
+The details are in [Agent access to artifacts from chat](/security/rbac#agent-access-to-artifacts-from-chat).
+
+## 6. Upload the workbook
+
+The person creates an empty artifact and imports the `.xlsx` into it: in the
+Artifacts library, or with
+
+```bash
+crewship craft import <page> --file book.xlsx
+```
+
+Only the owner of an empty page may import into it. An agent may change only
+a Sheet in the person's **own personal space**: private, not in a folder, not
+owned by a crew. A Sheet that is shared or filed in a folder is never changed
+by an agent from chat.
+
+## 7. Ask whether the agent may change it
+
+In the person's own **private** chat with the agent:
+
+```bash
+crewship craft agent-access <page> --chat <chat-id>
+```
+
+`allowed: true` means that if the Sheet is attached to the next message
+(**Upravit Sheet** in the composer), the agent may change it. Otherwise
+`reason` is what the agent would be told, and `detail` says more:
+
+| `reason` | `detail` | What to do |
+|---|---|---|
+| `engine_failed` | an application reason | Step 3 |
+| `feature_off` | `workspace_flag_off` | Step 5 |
+| `agent_policy` | | Step 4 |
+| `not_attached` | `chat_not_private` | Use your own private chat with the agent |
+| `not_attached` | `not_owner`, `not_in_personal_space` | Only your own Sheet in your personal space |
+| `not_attached` | `no_write_access` | You need Edit on the Sheet yourself |
+| `holder_human` | | Someone (`holder.mine`: you) is editing it; release editing |
+
+While the agent works, two more answers can reach it:
+
+| `reason` | What it means |
+|---|---|
+| `consent_stale` | The Sheet was saved again after you attached it. The message is refused before the agent starts: "The Sheet changed after you allowed the agent to change it. Allow it again." Attach it again |
+| `busy` | The server already has as many Sheets open in its engine as it allows (two). The agent's change waits for its turn first; only if no Sheet frees up in time is it answered `busy`, with nothing changed. The agent tells you and tries the same change again |
+
+This answer is advice and grants nothing: every agent call checks everything
+again, and taking a right away stops the agent at its next call. Consent
+covers one message and one Sheet. A message with more than one Sheet
+attached lets the agent change none of them.
+
+## Related
+
+- [Word and Sheet editing](/guides/artifacts/word-and-sheet)
+- [Artifacts in chat](/guides/artifacts/chat)
+- [`crewship craft`](/cli/craft)

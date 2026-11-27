@@ -9,9 +9,13 @@ import (
 // Public Docs wire contracts mirror the versioned managed engine projection.
 // Binary Yjs state is authoritative; these structs do not grant write authority.
 type DocumentAvailability struct {
-	Enabled            bool   `json:"enabled"`
-	WordCraftNative    bool   `json:"wordcraft_native"`
-	GridCraftNative    bool   `json:"gridcraft_native"`
+	Enabled         bool `json:"enabled"`
+	WordCraftNative bool `json:"wordcraft_native"`
+	GridCraftNative bool `json:"gridcraft_native"`
+	// GridCraftWorkbook: a new Sheet is kept as its xlsx or xlsm file (the package's manifest says
+	// document_format workbook), so an uploaded workbook opens as a Sheet as it is. Only with
+	// gridcraft_native.
+	GridCraftWorkbook  bool   `json:"gridcraft_workbook,omitempty"`
 	WordCraftSDKPrefix string `json:"wordcraft_sdk_prefix,omitempty"`
 	WordCraftCommands  bool   `json:"wordcraft_commands,omitempty"`
 	// Applications is the instance administrator's mode for Word and Sheet

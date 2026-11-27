@@ -51,6 +51,13 @@ type VersionRequest struct {
 	EntryPoint  string                 `json:"entry_point"`
 	Files       map[string]VersionFile `json:"files"`
 	Message     string                 `json:"message,omitempty"`
+
+	// Record, when set, runs on the saving transaction after the new version is
+	// inserted and before the commit, with that version's receipt. Its error
+	// rolls the version back, so what it writes (an audit row) commits with the
+	// version or not at all. A request that writes no version (a conflict, an
+	// ApplyChanged repeat, a refusal) never calls it.
+	Record func(ctx context.Context, tx *sql.Tx, r VersionReceipt) error `json:"-"`
 }
 type VersionReceipt struct {
 	Version int64  `json:"version"`
@@ -72,6 +79,10 @@ type VersionInfo struct {
 	Actor        string `json:"actor"`
 	CreatedAt    string `json:"created_at"`
 	RestoredFrom int64  `json:"restored_from,omitempty"`
+	// EntryHash and EntrySize describe the entry point file (hex SHA-256, bytes); listings fill
+	// them from the manifest and the blob's stored length, never by reading the content.
+	EntryHash string `json:"-"`
+	EntrySize int64  `json:"-"`
 }
 type VersionQuota struct {
 	UsedBytes  int64  `json:"used_bytes"`
@@ -449,16 +460,29 @@ func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_versions(workspace_id,page_id,version,manifest_json,message,actor,created_at,restored_from) VALUES(?,?,?,?,?,?,?,?)`, k.WorkspaceID, k.PageID, version, string(raw), r.Message, actor, createdAt, restored); err != nil {
 		return VersionReceipt{}, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,shared_version,content_type) VALUES(?,?,?,0,?) ON CONFLICT(workspace_id,page_id) DO UPDATE SET latest_version=excluded.latest_version`, k.WorkspaceID, k.PageID, version, s.opts.ContentType)
-	return VersionReceipt{version, actor}, err
+	if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version,shared_version,content_type) VALUES(?,?,?,0,?) ON CONFLICT(workspace_id,page_id) DO UPDATE SET latest_version=excluded.latest_version`, k.WorkspaceID, k.PageID, version, s.opts.ContentType); err != nil {
+		return VersionReceipt{}, err
+	}
+	receipt := VersionReceipt{version, actor}
+	if r.Record != nil {
+		if err = r.Record(ctx, tx, receipt); err != nil {
+			return VersionReceipt{}, err
+		}
+	}
+	return receipt, nil
 }
 func (s *VersionStore) Restore(ctx context.Context, k VersionKey, base, target int64, a VersionAuthorize) (out VersionReceipt, err error) {
+	return s.RestoreRecorded(ctx, k, base, target, a, nil)
+}
+
+// RestoreRecorded is Restore with a VersionRequest.Record for the appended version.
+func (s *VersionStore) RestoreRecorded(ctx context.Context, k VersionKey, base, target int64, a VersionAuthorize, record func(context.Context, *sql.Tx, VersionReceipt) error) (out VersionReceipt, err error) {
 	err = s.writeTransaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
 		m, e := readVersion(ctx, tx, k, target)
 		if e != nil {
 			return e
 		}
-		out, e = s.publish(ctx, tx, k, VersionRequest{base, m.EntryPoint, m.Files, fmt.Sprintf("Restore version %d", target)}, actor, target)
+		out, e = s.publish(ctx, tx, k, VersionRequest{BaseVersion: base, EntryPoint: m.EntryPoint, Files: m.Files, Message: fmt.Sprintf("Restore version %d", target), Record: record}, actor, target)
 		return e
 	})
 	if err != nil {
@@ -519,14 +543,17 @@ type versionRowsQuerier interface {
 // only tells the caller that older versions exist.
 func listRecentVersions(ctx context.Context, q versionRowsQuerier, k VersionKey, limit int) (out []VersionInfo, err error) {
 	out = []VersionInfo{}
-	rows, e := q.QueryContext(ctx, `SELECT version,json_extract(manifest_json,'$.entry_point'),message,actor,created_at,restored_from FROM artifact_versions WHERE workspace_id=? AND page_id=? ORDER BY version DESC LIMIT ?`, k.WorkspaceID, k.PageID, limit+1)
+	rows, e := q.QueryContext(ctx, `SELECT v.version,json_extract(v.manifest_json,'$.entry_point'),v.message,v.actor,v.created_at,v.restored_from,
+		COALESCE(json_extract(v.manifest_json,'$.files."'||json_extract(v.manifest_json,'$.entry_point')||'".hash'),''),
+		COALESCE((SELECT length(b.content) FROM artifact_version_blobs b WHERE b.workspace_id=v.workspace_id AND b.page_id=v.page_id AND b.hash=json_extract(v.manifest_json,'$.files."'||json_extract(v.manifest_json,'$.entry_point')||'".hash')),0)
+		FROM artifact_versions v WHERE v.workspace_id=? AND v.page_id=? ORDER BY version DESC LIMIT ?`, k.WorkspaceID, k.PageID, limit+1)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var v VersionInfo
-		if e = rows.Scan(&v.Version, &v.EntryPoint, &v.Message, &v.Actor, &v.CreatedAt, &v.RestoredFrom); e != nil {
+		if e = rows.Scan(&v.Version, &v.EntryPoint, &v.Message, &v.Actor, &v.CreatedAt, &v.RestoredFrom, &v.EntryHash, &v.EntrySize); e != nil {
 			return nil, e
 		}
 		out = append(out, v)

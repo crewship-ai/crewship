@@ -575,9 +575,14 @@ recorded starts their runs the ordinary way, binding nothing. Decided by the
 owner on 2026-11-13.
 
 1. **A reference is a structured chip, never text.** A chat message carries
-   `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
+   `metadata.artifact_refs: [{"page_id": "<id>", "version": "<n>"}]`, 1–10 entries, filled from
    the composer's attachment chips or `crewship run --artifact`. Names, links
-   or ids written in the message body are never references.
+   or ids written in the message body are never references. `version` is optional: for a
+   native Sheet it is the revision the person saw when they attached it
+   (a positive decimal string). The consent is that one revision: a Sheet
+   saved again since is refused as `consent_stale` before the message is
+   stored. Without `version` (the CLI shows nothing) the consent is the
+   Sheet's latest revision when the message is recorded.
 2. **The server resolves references when the message is sent, as the human
    would be as an ordinary member.** Before the message is stored it checks
    each reference against the sending human with their workspace role read as

@@ -1257,6 +1257,11 @@ func (s *Server) sendBoundedHostRequestWithHeaders(r *http.Request, method, path
 		// The workbook lease is 30s; retain time for commit and its receipt.
 		budget = 35 * time.Second
 	}
+	if path == "/api/v1/internal/craft-native/chat-run" {
+		// The first call of a run may wait for the engine to open the Sheet
+		// (27 to 105 s measured for a large one) before the engine itself runs.
+		budget = 180 * time.Second
+	}
 	if path == "/api/v1/internal/craft-native/task" {
 		// A pinned original-engine apply and final native validation each have
 		// a 30s bound. The host renews only this live authorized request's lease.
