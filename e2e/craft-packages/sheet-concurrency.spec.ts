@@ -83,11 +83,12 @@ async function readWorkbook(api: APIRequestContext, craft: (path: string) => str
   }
 }
 
-test("Sheet reconciles a committed save whose reply was lost", async ({ browser }) => {
+test("Sheet reconciles a committed save whose reply was lost", async ({ browser }, info) => {
   const context = await browser.newContext({ baseURL: origin, storageState: await loginStorageState(origin, account), viewport: native.VIEWPORT, acceptDownloads: true })
+  const page = await context.newPage()
   try {
     const { name, craft, url, ref } = await fixture(context.request)
-    const page = await context.newPage()
+    await watchEditor(page)
     let saves = 0
     let lostVersion: string | undefined
     await page.route("**/craft/document/save?**", async route => {
@@ -106,6 +107,7 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
     await page.keyboard.press("Control+s")
     expect((await reconcile).ok()).toBe(true)
     expect(lostVersion).toBe(String(Number(ref.initVersion) + 1))
+    await expect.poll(() => page.evaluate(() => window.sheetTestEvents.find(event => event.type === "gridcraft:save-ack")?.version)).toBe(lostVersion)
     const panel = page.getByTestId("sheet-side-panel")
     await expect(panel.getByTestId("sheet-panel-state")).toHaveText(`Saved · version ${lostVersion}`)
     expect(saves, "the browser asks about the original save without sending it again").toBe(1)
@@ -122,6 +124,8 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
     const exported = await (await downloading).createReadStream()
     expect(hasValue(Buffer.concat(await exported.toArray()), "lost acknowledgement cell")).toBe(true)
   } finally {
+    const events = await page.evaluate(() => window.sheetTestEvents).catch(() => [])
+    await info.attach("editor revisions", { body: JSON.stringify(events ?? [], null, 2), contentType: "application/json" })
     await context.close()
   }
 })
@@ -153,6 +157,7 @@ interface EditorEvent {
   savedRevision?: string
   baseRevision?: string
   code?: string
+  version?: string
   keep?: string
   build?: string
   conflicts?: Array<{ sheet: string; cell: string; kept: string; agent: string }>
@@ -174,7 +179,7 @@ async function watchEditor(page: Page) {
     window.sheetTestFiles = []
     const channel = window.MessageChannel, outgoing = MessagePort.prototype.postMessage
     const remember = (message: EditorEvent & { bytes?: ArrayBuffer | Uint8Array }) => {
-      if (/^gridcraft:(ready|execute|executed|opened|changed)$/.test(message?.type)) window.sheetTestEvents.push(message)
+      if (/^gridcraft:(ready|execute|executed|opened|changed|save-ack)$/.test(message?.type)) window.sheetTestEvents.push(message)
       if (message?.type === "gridcraft:save" && message.bytes) {
         const bytes = message.bytes instanceof Uint8Array ? message.bytes : new Uint8Array(message.bytes)
         window.sheetTestFiles.push(Array.from(bytes))
