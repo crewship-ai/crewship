@@ -110,6 +110,7 @@ type schema struct {
 	OneOf                []*schema          `json:"oneOf"`
 	AnyOf                []*schema          `json:"anyOf"`
 	AllOf                []*schema          `json:"allOf"`
+	SSEEventDataSchemas  map[string]*schema `json:"x-crewship-sse-event-data-schemas"`
 }
 
 // refName returns the component name a "#/components/schemas/X" pointer names,
@@ -351,6 +352,9 @@ func collectRefs(s *schema, out []string) []string {
 	out = collectRefs(s.Items, out)
 	for _, p := range s.Properties {
 		out = collectRefs(p, out)
+	}
+	for _, event := range s.SSEEventDataSchemas {
+		out = collectRefs(event, out)
 	}
 	for _, group := range [][]*schema{s.OneOf, s.AnyOf, s.AllOf} {
 		for _, sub := range group {
