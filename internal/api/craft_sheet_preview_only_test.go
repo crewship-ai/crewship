@@ -10,6 +10,11 @@ import (
 
 func TestSheetITUnqualifiedChatWorkbookRejectsHumanAndAgentWrites(t *testing.T) {
 	s := newSheetITScenario(t)
+	testUnqualifiedChatWorkbook(t, s, func(cells sitCells) []byte { return sitWorkbook(cells, sitInitialOther()) })
+}
+
+func testUnqualifiedChatWorkbook(t *testing.T, s *sitScenario, workbook func(sitCells) []byte) {
+	t.Helper()
 	s.send("Mark item 7 done", true)
 	call := s.agent()
 	oldAgentGeneration := s.acquire(call)
@@ -23,9 +28,7 @@ func TestSheetITUnqualifiedChatWorkbookRejectsHumanAndAgentWrites(t *testing.T) 
 	s.tool(call, "craft_sheet_release", map[string]any{"generation": oldAgentGeneration})
 	legacy := s.humanSession()
 	legacyGeneration := s.humanLease(legacy)
-	s.send("Change the next status cell", true)
-	fallbackAgent := s.agent()
-	agentGeneration := s.acquire(fallbackAgent)
+	agentGeneration := s.acquire(call)
 
 	// Use the release fallback with both kinds of earlier admissions live,
 	// including the legacy editor's lease and the agent's co-write grant.
@@ -52,7 +55,7 @@ func TestSheetITUnqualifiedChatWorkbookRejectsHumanAndAgentWrites(t *testing.T) 
 	}
 	cells := s.headSheets(preview.SessionToken)
 	cells["L"]["B8"] = "must not publish"
-	candidate := sitWorkbook(cells["L"], cells["Other"])
+	candidate := workbook(cells["L"])
 	for _, editor := range []struct {
 		token, generation string
 	}{
@@ -74,7 +77,7 @@ func TestSheetITUnqualifiedChatWorkbookRejectsHumanAndAgentWrites(t *testing.T) 
 			args = sitApply(agentGeneration, "preview-only-agent")
 			args["base_version"] = "2"
 		}
-		if got, refused := s.toolCall(fallbackAgent, action, args); !refused {
+		if got, refused := s.toolCall(call, action, args); !refused {
 			t.Fatalf("%s was admitted in preview-only mode: %s", action, got)
 		}
 	}
