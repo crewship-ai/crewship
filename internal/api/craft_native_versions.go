@@ -57,6 +57,7 @@ type craftNativeVersionDocumentResponse struct {
 	RestoredFrom   string                              `json:"restoredFrom,omitempty"`
 	Proposal       *craftNativeVersionProposalResponse `json:"proposal,omitempty"`
 	ApplicationID  string                              `json:"applicationId"`
+	EngineBuild    string                              `json:"engineBuild,omitempty"`
 	EnginePin      string                              `json:"enginePin"`
 	EditorBundle   string                              `json:"editorBundle"`
 	EditorURL      string                              `json:"editorURL"`
@@ -221,7 +222,7 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 		craftNativeDocumentError(w, err)
 		return
 	}
-	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content, Format: craftWorkbookResponseFormat(file)}
+	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EngineBuild: profile.EngineBuild, EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content, Format: craftWorkbookResponseFormat(file)}
 	if m.RestoredFrom > 0 {
 		out.RestoredFrom = strconv.FormatInt(m.RestoredFrom, 10)
 	}

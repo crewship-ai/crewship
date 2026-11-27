@@ -231,9 +231,14 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 	}
 	comp := a.componentOf(inst)
 	comp.Runtime = engine.Runtime()
-	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, Engine: engine,
+	workbook := c.DocumentFormat == craftassets.DocumentFormatWorkbook
+	var build string
+	if workbook && c.Source.PatchSHA256 != "" {
+		build = c.Version + " patch " + c.Source.PatchSHA256
+	}
+	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, EngineBuild: build, Engine: engine,
 		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), EngineModule: &goapi.EngineModuleSource{Load: inst.EngineLoader()}, CompatEditors: craftCompatEditors[c.Application], Bundled: true,
-		Workbook: c.DocumentFormat == craftassets.DocumentFormatWorkbook}, comp, nil
+		Workbook: workbook}, comp, nil
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the
