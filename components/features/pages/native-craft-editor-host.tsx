@@ -162,6 +162,8 @@ interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolea
  onStatus?:(status:NativeCraftHostStatus)=>void
  /** Filled with the way to give the edit access back; it answers once the server confirmed it, or says why it was kept. */
  handBackRef?:React.MutableRefObject<(()=>Promise<NativeCraftHandBack>)|null>
+ /** Captures the open editor before the chat removes it. */
+ prepareLeaveRef?:React.MutableRefObject<(()=>Promise<boolean>)|null>
  /** Where the lock controls render (who edits since when, take over, request, hand back); inline by default. The Artifacts frame puts them in its status chip. */
  placeLease?:(controls:React.ReactNode)=>React.ReactNode
  /** Hides only the editor surface, never its notices, while the body shows a reflowed read-only view instead (Word on a phone). */
@@ -187,7 +189,7 @@ interface Runtime {/** The engine build the editor named in ready. */editorBuild
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 const READ_ONLY_REFUSED='Edit access was removed. Unsaved changes stay as a local draft. Reload the page to see the shared version.'
 const METADATA_RETRY_MS=5000,METADATA_RETRY_MAX_MS=60000
-export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,placeHistory,placeAgentStart,onStatus,placeLease,editorHidden=false,handBackRef,toolbar,historyHref}:Props){
+export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,placeHistory,placeAgentStart,onStatus,placeLease,editorHidden=false,handBackRef,prepareLeaveRef,toolbar,historyHref}:Props){
  const compact=Boolean(toolbar)
  // Opening the latest version again (after a conflict) is a fresh open of the same page: the unsaved draft stays in this browser and is offered beside it.
  const [reopened,setReopened]=React.useState(0)
@@ -217,6 +219,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const [openedFile,setOpenedFile]=React.useState<GridcraftOpened>(),[fidelityAsk,setFidelityAsk]=React.useState(false),[fidelityLoss,setFidelityLoss]=React.useState<Array<{code:string;count:number}>|null>(null),[fidelityKept,setFidelityKept]=React.useState(false)
  const fidelity=React.useRef({warnings:0,accepted:false})
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string},settled?:(released:boolean)=>void)=>void>(()=>{}),handBack=React.useRef<()=>Promise<NativeCraftHandBack>>(async()=>({state:'not_held'}))
+ const prepareLeave=React.useRef<()=>Promise<boolean>>(async()=>true)
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Connecting…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  // An administrator turned this application off or it is draining (#5381): the label, once the server said so.
  const [appOff,setAppOff]=React.useState<string>()
@@ -239,6 +242,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const shownVersion=React.useRef<string|undefined>(undefined)
  shownVersion.current=savedVersion??openedVersion
  React.useEffect(()=>{if(!handBackRef)return;const ask=()=>handBack.current();handBackRef.current=ask;return()=>{if(handBackRef.current===ask)handBackRef.current=null}},[handBackRef])
+ React.useEffect(()=>{if(!prepareLeaveRef)return;const ask=()=>prepareLeave.current();prepareLeaveRef.current=ask;return()=>{if(prepareLeaveRef.current===ask)prepareLeaveRef.current=null}},[prepareLeaveRef])
  React.useEffect(()=>{if(takeNotice!=='taken'&&takeNotice!=='viewer'&&takeNotice!=='dropped')return;const timer=setTimeout(()=>setTakeNotice(undefined),takeNotice==='taken'?4000:8000);return()=>clearTimeout(timer)},[takeNotice])
  // Who holds it is said from the current lock; once it is free there is nothing to say.
  React.useEffect(()=>{if(!view.holder||view.mine)setTakeNotice(notice=>notice==='held'?undefined:notice)},[view.holder,view.mine])
@@ -776,6 +780,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    // A failed retirement stays closed; its callers end in a disconnected editor.
    void retiring.then(()=>{if(r.retirementFinished)setHostRetiring(false)},()=>{})
    return retiring
+  }
+  prepareLeave.current=async()=>{
+   const r=current
+   if(dead||!r)return true
+   if(acquiring||transition||r.blocked)return false
+   if(!r.coordinator&&!r.retiring)return true
+   transition=true
+   try{
+    if(!await retireWrite(r))return false
+    if(live(r)&&holds(viewNow,r.generation))await releaseUnused(r.generation)
+    return live(r)
+   }catch{
+    if(live(r))setError('The local draft could not be captured. The editor is still open.')
+    return false
+   }finally{transition=false}
   }
   async function suspendForAuth(){
    authSuspended=true;invalidateCheck();clearInterval(keptDraftWatch);readLossAbort.abort();setAuthEnded(true);readAccess(false);endDraftHold()
