@@ -2594,10 +2594,10 @@ index 00000000..55f4931c
 +}
 diff --git a/apps/gridcraft-web/src/port_host.rs b/apps/gridcraft-web/src/port_host.rs
 new file mode 100644
-index 00000000..9f0ad3d3
+index 00000000..a20c44c1
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_host.rs
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,393 @@
 +//! `?host=port&parent_origin=<canonical HTTP(S) origin>`: a sandboxed, opaque editor frame
 +//! bound to its embedding page over one private `MessagePort` (mooring protocol 2).
 +//!
@@ -2614,7 +2614,9 @@ index 00000000..9f0ad3d3
 +//!   bytes}`, the complete workbook file. `save-ack {requestId, document, revision, version}`
 +//!   makes exactly that revision the saved baseline; `save-failed {requestId, code, error}`
 +//!   leaves it unsaved. Other files the editor would download go out as `export {name, bytes}`.
-+//! - `execute {requestId, commands, saved, baseRevision?}` answers `executed`.
++//! - `execute {requestId, commands, saved, baseRevision?, keep?, captureRevision?}` answers
++//!   `executed`. For `keep:"agent"`, `captureRevision` is an optional decimal live revision from
++//!   the archived save. A changed live revision returns `stale_revision` without replay.
 +//! - `changed {document, revision, dirty}`, `dirty {dirty}`, `closed {}`, `edit-attempt`,
 +//!   `held-input-dropped` and `failed {code, error}` report state.
 +//!
@@ -2991,10 +2993,10 @@ index 00000000..9f0ad3d3
 +}
 diff --git a/apps/gridcraft-web/src/port_protocol.rs b/apps/gridcraft-web/src/port_protocol.rs
 new file mode 100644
-index 00000000..eff9c538
+index 00000000..af72f5f0
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_protocol.rs
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,686 @@
 +//! Mooring protocol 2 on the private port: the exact shape of every message a host sends,
 +//! checked before anything acts on it, and the editor's ledger of saves awaiting the host.
 +//!
@@ -3036,7 +3038,7 @@ index 00000000..eff9c538
 +        request_id: String, capture_id: String, document: String, capture_revision: String,
 +        version: String, content_hash: String, bytes: usize, agent_ranges: Vec<SheetRange>,
 +    },
-+    ExecuteAgent { request_id: String, commands: String, base_revision: String },
++    ExecuteAgent { request_id: String, commands: String, base_revision: String, capture_revision: Option<u64> },
 +    Presence { document: String, actors: Vec<PresenceActor>, reduced_motion: bool },
 +    Open { request_id: String, name: String, bytes: usize, calculate: bool, auto_fit: bool },
 +    SetAccess { request_id: String, read_only: bool },
@@ -3063,9 +3065,9 @@ index 00000000..eff9c538
 +    pub range: gridcraft_engine::core::RangeRef,
 +}
 +
-+pub const MAX_AGENT_RANGES: usize = 256;
-+pub const MAX_ACTORS: usize = 32;
-+pub const MAX_ACTOR_RANGES: usize = 32;
++pub const MAX_AGENT_RANGES: usize = 2_000;
++pub const MAX_ACTORS: usize = 128;
++pub const MAX_ACTOR_RANGES: usize = 64;
 +
 +#[derive(Clone, Copy, PartialEq)]
 +enum Kind {
@@ -3097,6 +3099,7 @@ index 00000000..eff9c538
 +            ("commands", Str, true),
 +            ("saved", Bool, true),
 +            ("baseRevision", Str, false),
++            ("captureRevision", Str, false),
 +            ("keep", Str, false),
 +            ("label", Str, false),
 +        ],
@@ -3162,7 +3165,7 @@ index 00000000..eff9c538
 +            {
 +                return Err("adopt-merged: invalid capture, version or hash.".into());
 +            }
-+            let agent_ranges = get("agentRanges").and_then(parse_ranges).ok_or("adopt-merged: invalid agent ranges.")?;
++            let agent_ranges = get("agentRanges").and_then(|ranges| parse_ranges(ranges, MAX_AGENT_RANGES)).ok_or("adopt-merged: invalid agent ranges.")?;
 +            Inbound::AdoptMerged { request_id, capture_id, document, capture_revision, version, content_hash, bytes: *bytes, agent_ranges }
 +        }
 +        "gridcraft:open" => {
@@ -3194,12 +3197,19 @@ index 00000000..eff9c538
 +        }
 +        _ => {
 +            let base_revision = get("baseRevision").map(|_| s("baseRevision"));
++            let capture_revision = get("captureRevision").map(|_| s("captureRevision"));
 +            if s("keep") == "agent" {
++                let capture_revision = capture_revision.as_deref().map(|revision| {
++                    decimal(revision).ok_or("execute: captureRevision must be a decimal live revision.")
++                }).transpose()?;
 +                let base_revision = base_revision.filter(|base| is_saved_revision(base)).ok_or("execute: keep agent requires saved baseRevision.")?;
 +                if !b("saved") || get("label").is_some() && !is_label(&s("label")) {
 +                    return Err("execute: keep agent requires a published version and a valid optional label.".into());
 +                }
-+                return Ok(Inbound::ExecuteAgent { request_id, commands: s("commands"), base_revision });
++                return Ok(Inbound::ExecuteAgent { request_id, commands: s("commands"), base_revision, capture_revision });
++            }
++            if capture_revision.is_some() {
++                return Err("execute: captureRevision requires keep agent.".into());
 +            }
 +            let keep_human = match (get("keep").map(|_| s("keep")), get("label").map(|_| s("label"))) {
 +                (None, None) => None,
@@ -3249,10 +3259,7 @@ index 00000000..eff9c538
 +    if !(0.0..=120_000.0).contains(ttl) || ttl.fract() != 0.0 {
 +        return None;
 +    }
-+    let ranges = parse_ranges(value(fields, "ranges")?)?;
-+    if ranges.len() > MAX_ACTOR_RANGES {
-+        return None;
-+    }
++    let ranges = parse_ranges(value(fields, "ranges")?, MAX_ACTOR_RANGES)?;
 +    Some(PresenceActor { actor_id: actor_id.into(), activity_id: activity_id.into(), label: label.into(), ranges, ttl_ms: *ttl as u32 })
 +}
 +
@@ -3260,9 +3267,9 @@ index 00000000..eff9c538
 +    !value.is_empty() && value.len() <= max && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.'))
 +}
 +
-+fn parse_ranges(field: &Field) -> Option<Vec<SheetRange>> {
++fn parse_ranges(field: &Field, limit: usize) -> Option<Vec<SheetRange>> {
 +    let Field::List(entries) = field else { return None };
-+    if entries.len() > MAX_AGENT_RANGES {
++    if entries.len() > limit {
 +        return None;
 +    }
 +    entries.iter().map(|entry| {
@@ -3294,7 +3301,14 @@ index 00000000..eff9c538
 +}
 +
 +fn is_decimal(value: &str) -> bool {
-+    (1..=20).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit()) && value.parse::<u64>().is_ok()
++    decimal(value).is_some()
++}
++
++fn decimal(value: &str) -> Option<u64> {
++    if !(1..=20).contains(&value.len()) || !value.bytes().all(|b| b.is_ascii_digit()) {
++        return None;
++    }
++    value.parse().ok()
 +}
 +
 +fn is_code(code: &str) -> bool {
@@ -3579,8 +3593,46 @@ index 00000000..eff9c538
 +        assert!(parse(&execute).is_err());
 +        execute.push(("baseRevision".into(), s("saved-8")));
 +        assert!(matches!(parse(&execute), Ok(Inbound::ExecuteAgent { base_revision, .. }) if base_revision == "saved-8"));
++        execute.push(("captureRevision".into(), s("18446744073709551615")));
++        assert!(matches!(parse(&execute), Ok(Inbound::ExecuteAgent { capture_revision: Some(u64::MAX), .. })));
++        let capture_field = execute.len() - 1;
++        for bad in [s("saved-8"), s("+8"), s("18446744073709551616"), Field::Num(8.0)] {
++            execute[capture_field].1 = bad;
++            assert!(parse(&execute).is_err());
++        }
++        execute[capture_field].1 = s("8");
++        execute[4].1 = s("human");
++        execute.push(("label".into(), s("Review")));
++        assert!(parse(&execute).is_err());
++        execute.pop();
++        execute[4].1 = s("agent");
 +        execute[3].1 = Field::Bool(false);
 +        assert!(parse(&execute).is_err());
++    }
++
++    #[test]
++    fn realtime_range_and_activity_limits_match_the_host() {
++        let range = Field::Object(msg(&[("sheet", s("Sheet1")), ("a1", s("A1"))]));
++        let agent_ranges = |count| Field::List(vec![range.clone(); count]);
++        let merge = |count| parse(&msg(&[
++            ("type", s("gridcraft:adopt-merged")), ("requestId", s("merge-1")), ("captureId", s("capture-1")),
++            ("document", s("7")), ("captureRevision", s("3")), ("version", s("9")),
++            ("contentHash", s(&format!("sha256:{}", "f".repeat(64)))),
++            ("bytes", Field::Bytes(123)), ("agentRanges", agent_ranges(count)),
++        ]));
++        assert!(matches!(merge(2_000), Ok(Inbound::AdoptMerged { agent_ranges, .. }) if agent_ranges.len() == 2_000));
++        assert!(merge(2_001).is_err());
++
++        let presence = |activities, ranges| parse(&msg(&[
++            ("type", s("gridcraft:presence")), ("document", s("7")), ("reducedMotion", Field::Bool(true)),
++            ("actors", Field::List((0..activities).map(|i| Field::Object(msg(&[
++                ("actorId", s("agent-1")), ("activityId", s(&format!("run-{i}"))), ("label", s("Morgan")),
++                ("ranges", agent_ranges(ranges)), ("ttlMs", Field::Num(1_000.0)),
++            ]))).collect())),
++        ]));
++        assert!(matches!(presence(128, 64), Ok(Inbound::Presence { actors, .. }) if actors.len() == 128 && actors.iter().all(|actor| actor.ranges.len() == 64)));
++        assert!(presence(129, 1).is_err());
++        assert!(presence(1, 65).is_err());
 +    }
 +
 +    #[test]
@@ -3633,10 +3685,10 @@ index 00000000..eff9c538
 +}
 diff --git a/apps/gridcraft-web/src/port_session.rs b/apps/gridcraft-web/src/port_session.rs
 new file mode 100644
-index 00000000..57876416
+index 00000000..92ac145a
 --- /dev/null
 +++ b/apps/gridcraft-web/src/port_session.rs
-@@ -0,0 +1,1285 @@
+@@ -0,0 +1,1326 @@
 +//! The editor's side of mooring protocol 2 on the private port, apart from JavaScript: what
 +//! each host message does to the app and what the editor answers. `port_host` only moves these
 +//! messages across the `MessagePort`.
@@ -3727,7 +3779,7 @@ index 00000000..57876416
 +        request_id: String, capture_id: String, document: String, capture_revision: String,
 +        version: String, content_hash: String, bytes: Vec<u8>, agent_ranges: Vec<port_protocol::SheetRange>,
 +    },
-+    ExecuteAgent { request_id: String, commands: String, base_revision: String },
++    ExecuteAgent { request_id: String, commands: String, base_revision: String, capture_revision: Option<u64> },
 +    Open { request_id: String, name: String, bytes: Vec<u8>, calculate: bool, auto_fit: bool },
 +    Save { request_id: String, announce: bool },
 +    Ack { request_id: String, document: String, revision: String, version: String },
@@ -3780,7 +3832,7 @@ index 00000000..57876416
 +    pub fn ready(&self) -> Out {
 +        let mut fields =
 +            vec![("version", s(env!("CARGO_PKG_VERSION"))), ("accessProtocol", Value::Num(1.0)), ("readOnly", Value::Bool(self.access.read_only()))];
-+        fields.push(("capabilities", Value::Addresses(vec!["merge-capture-v1".into(), "agent-wins-v1".into(), "presence-v1".into()])));
++        fields.push(("capabilities", Value::Addresses(vec!["merge-capture-v1".into(), "agent-wins-v1".into(), "presence-v1".into(), "agent-capture-fence-v1".into()])));
 +        if let Some(build) = build_identity(option_env!("CRAFT_SOURCE_COMMIT"), option_env!("CRAFT_PATCH_SHA256")) {
 +            fields.push(("build", s(&build)));
 +        }
@@ -3803,14 +3855,14 @@ index 00000000..57876416
 +                    request_id, capture_id, document, capture_revision, version, content_hash, bytes: bytes(), agent_ranges,
 +                });
 +            }
-+            Inbound::ExecuteAgent { request_id, commands, base_revision } => {
++            Inbound::ExecuteAgent { request_id, commands, base_revision, capture_revision } => {
 +                if full {
 +                    return vec![Out::error("executed", &request_id, "busy", "The request queue is full.")];
 +                }
 +                if commands.is_empty() || commands.len() > crate::native_execute::MAX_BYTES {
 +                    return vec![Out::error("executed", &request_id, "invalid", "Commands must be a JSON string of at most 64 KiB.")];
 +                }
-+                self.queue.push_back(Queued::ExecuteAgent { request_id, commands, base_revision });
++                self.queue.push_back(Queued::ExecuteAgent { request_id, commands, base_revision, capture_revision });
 +            }
 +            Inbound::Presence { document, actors, reduced_motion } => {
 +                self.pending_presence = Some((document, actors, reduced_motion));
@@ -3895,8 +3947,8 @@ index 00000000..57876416
 +                Queued::Adopt { request_id, capture_id, document, capture_revision, version, content_hash, bytes, agent_ranges } => {
 +                    out.push(self.adopt(app, &request_id, &capture_id, &document, &capture_revision, &version, &content_hash, bytes, &agent_ranges));
 +                }
-+                Queued::ExecuteAgent { request_id, commands, base_revision } => {
-+                    out.push(self.execute_agent(app, &request_id, &commands, &base_revision));
++                Queued::ExecuteAgent { request_id, commands, base_revision, capture_revision } => {
++                    out.push(self.execute_agent(app, &request_id, &commands, &base_revision, capture_revision));
 +                }
 +                Queued::Ack { request_id, document, revision, version } => {
 +                    if let Some(save) = self.saves.acknowledge(&request_id, &document, &revision)
@@ -4174,7 +4226,7 @@ index 00000000..57876416
 +        ])
 +    }
 +
-+    fn execute_agent(&mut self, app: &mut SheetApp, request_id: &str, commands: &str, base_revision: &str) -> Out {
++    fn execute_agent(&mut self, app: &mut SheetApp, request_id: &str, commands: &str, base_revision: &str, capture_revision: Option<u64>) -> Out {
 +        let refuse = |code| Out::error("executed", request_id, code, "The published edit could not be replayed safely.");
 +        let Some(bound) = self.bound.as_ref().filter(|b| {
 +            b.saved_revision == base_revision && !b.needs_reload && app.session.active().is_some_and(|d| d.uid == b.document)
@@ -4183,6 +4235,13 @@ index 00000000..57876416
 +        };
 +        if self.held.replaying() || self.saves.len() != 0 {
 +            return refuse("busy");
++        }
++        if let Some(capture_revision) = capture_revision {
++            // The queue can run after a new input frame or after another command in this frame.
++            self.revisions.observe(app);
++            if capture_revision != self.revisions.sequence() {
++                return refuse("stale_revision");
++            }
 +        }
 +        let mut update = match crate::realtime::execute_agent(app, commands, bound.format) {
 +            Ok(update) => update,
@@ -4827,7 +4886,7 @@ index 00000000..57876416
 +        app.begin_edit(Some("typing".into()), false);
 +        let commands = r#"[{"command":"cell.set","params":{"cell":"'Sheet1'!C2","input":"agent"}}]"#;
 +        let message = |base_revision: &str| Inbound::ExecuteAgent {
-+            request_id: "execute-1".into(), commands: commands.into(), base_revision: base_revision.into(),
++            request_id: "execute-1".into(), commands: commands.into(), base_revision: base_revision.into(), capture_revision: None,
 +        };
 +        port.receive(message("999"), Vec::new);
 +        let out = port.sync(&mut app);
@@ -4846,6 +4905,40 @@ index 00000000..57876416
 +        assert_eq!(app.cell_draft().unwrap().text, "typing");
 +        assert_eq!(app.cell_draft().unwrap().cell.a1(), "E2");
 +        assert_ne!(str_of(reply, "savedRevision"), base);
++    }
++
++    #[test]
++    fn agent_wins_checks_the_capture_revision_when_the_queued_command_runs() {
++        use gridcraft_engine::core::Value as CellValue;
++        let (mut port, mut app) = (PortSession::default(), app());
++        let opened = open(&mut port, &mut app, "Plan.xlsx", stale_xlsx(), false);
++        let base_revision = str_of(&opened, "revision");
++        app.set_read_only(false);
++        app.run("cell.set", json!({"cell":"C2","input":"archived"})).unwrap();
++        let saved = save_now(&mut port, &mut app, "capture");
++        let capture_revision = str_of(&saved, "revision").parse().unwrap();
++        port.receive(Inbound::SaveFailed { request_id: "capture".into(), code: "archived".into() }, Vec::new);
++        let replay = |capture_revision| Inbound::ExecuteAgent {
++            request_id: "replay".into(),
++            commands: r#"[{"command":"cell.set","params":{"cell":"'Sheet1'!C2","input":"agent"}}]"#.into(),
++            base_revision: base_revision.into(),
++            capture_revision: Some(capture_revision),
++        };
++        port.receive(replay(capture_revision), Vec::new);
++        app.run("cell.set", json!({"cell":"C2","input":"newer"})).unwrap();
++        let out = port.sync(&mut app);
++        let reply = out.iter().find(|out| out.kind == "executed").unwrap();
++        assert_eq!(reply.get("code"), Some(&s("stale_revision")));
++        assert_eq!(typed_cell(&app, "C2"), CellValue::text("newer"));
++        assert_eq!(port.bound.as_ref().unwrap().saved_revision, base_revision);
++
++        let saved = save_now(&mut port, &mut app, "capture-2");
++        port.receive(Inbound::SaveFailed { request_id: "capture-2".into(), code: "archived".into() }, Vec::new);
++        port.receive(replay(str_of(&saved, "revision").parse().unwrap()), Vec::new);
++        let out = port.sync(&mut app);
++        let reply = out.iter().find(|out| out.kind == "executed").unwrap();
++        assert_eq!(reply.get("code"), None);
++        assert_eq!(typed_cell(&app, "C2"), CellValue::text("agent"));
 +    }
 +
 +    #[test]
