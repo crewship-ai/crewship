@@ -919,7 +919,7 @@ func (m *craftNativeAgentManager) chatRunConsentMoved(ctx context.Context, e *cr
 	if errors.Is(err, errCraftRealtimeUnproved) {
 		return true, nil
 	}
-	return len(history.agentRanges) > 0, err
+	return history.hasAgent, err
 }
 
 type craftNativeChangeSummary struct {

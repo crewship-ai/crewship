@@ -17,6 +17,11 @@ var errCraftRealtimeTooManyRanges = errors.New("chat workbook response exceeds t
 
 type craftSheetColumns struct{ first, last int }
 
+type craftSheetRowEvent struct {
+	row, index int
+	start      bool
+}
+
 // Compact the exact union within each sheet, without visiting individual
 // cells. Within a band of rows the coverage is constant. Join adjacent
 // columns there, then join vertically only when both column bounds match.
@@ -37,25 +42,36 @@ func craftCompactSheetRanges(ranges []craftSheetRange) ([]craftSheetRange, error
 	out := make([]craftSheetRange, 0, min(len(ranges), craftRealtimeRangeLimit))
 	for _, name := range names {
 		areas := sheets[name]
-		rows := make([]int, 0, 2*len(areas))
-		for _, a := range areas {
-			rows = append(rows, a.row1, a.row2+1)
+		events := make([]craftSheetRowEvent, 0, 2*len(areas))
+		for i, a := range areas {
+			events = append(events, craftSheetRowEvent{a.row1, i, true}, craftSheetRowEvent{a.row2 + 1, i, false})
 		}
-		slices.Sort(rows)
-		rows = slices.Compact(rows)
-		rectangles := make([]nativeAgentEngineArea, 0, len(areas))
-		previous := make(map[craftSheetColumns]int)
-		columns := make([]craftSheetColumns, 0, len(areas))
-		for i := 0; i+1 < len(rows); i++ {
-			first, last := rows[i], rows[i+1]-1
-			columns = columns[:0]
-			for _, a := range areas {
-				if a.row1 <= first && first <= a.row2 {
-					columns = append(columns, craftSheetColumns{a.col1, a.col2})
+		sort.Slice(events, func(i, j int) bool { return events[i].row < events[j].row })
+		rectangles := make([]nativeAgentEngineArea, 0, min(len(areas), craftRealtimeRangeLimit))
+		previous, next := make(map[craftSheetColumns]int), make(map[craftSheetColumns]int)
+		active := make(map[int]nativeAgentEngineArea)
+		var columns []craftSheetColumns
+		for i := 0; i < len(events); {
+			first := events[i].row
+			for i < len(events) && events[i].row == first {
+				event := events[i]
+				if event.start {
+					active[event.index] = areas[event.index]
+				} else {
+					delete(active, event.index)
 				}
+				i++
+			}
+			if i == len(events) {
+				break
+			}
+			last := events[i].row - 1
+			columns = columns[:0]
+			for _, a := range active {
+				columns = append(columns, craftSheetColumns{a.col1, a.col2})
 			}
 			sort.Slice(columns, func(i, j int) bool { return columns[i].first < columns[j].first })
-			next := make(map[craftSheetColumns]int)
+			clear(next)
 			for j := 0; j < len(columns); {
 				c := columns[j]
 				j++
@@ -74,7 +90,7 @@ func craftCompactSheetRanges(ranges []craftSheetRange) ([]craftSheetRange, error
 				next[c] = len(rectangles)
 				rectangles = append(rectangles, nativeAgentEngineArea{col1: c.first, row1: first, col2: c.last, row2: last})
 			}
-			previous = next
+			previous, next = next, previous
 		}
 		for _, a := range rectangles {
 			start, end := craftUndoA1(a.col1, a.row1), craftUndoA1(a.col2, a.row2)
@@ -97,4 +113,34 @@ func craftWireSheetRange(r craftSheetRange) (nativeAgentEngineArea, bool) {
 		}
 	}
 	return nativeAgentEngineRange(json.RawMessage(strconv.Quote(r.A1)))
+}
+
+// Input effects are observed from populated XML cells, never expanded from a
+// rectangle. Group adjacent observations before compacting vertical bands.
+func craftRealtimeRowRanges(cells []craftRealtimeCell) []craftSheetRange {
+	sort.Slice(cells, func(i, j int) bool {
+		a, b := cells[i], cells[j]
+		if a.sheet != b.sheet {
+			return a.sheet < b.sheet
+		}
+		if a.row != b.row {
+			return a.row < b.row
+		}
+		return a.col < b.col
+	})
+	out := make([]craftSheetRange, 0, len(cells))
+	for i := 0; i < len(cells); {
+		first, last := cells[i], cells[i]
+		i++
+		for i < len(cells) && cells[i].sheet == last.sheet && cells[i].row == last.row && cells[i].col == last.col+1 {
+			last = cells[i]
+			i++
+		}
+		r := first.wireRange()
+		if first != last {
+			r.A1 += ":" + craftUndoA1(last.col, last.row)
+		}
+		out = append(out, r)
+	}
+	return out
 }

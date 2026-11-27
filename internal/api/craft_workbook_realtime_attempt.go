@@ -46,7 +46,7 @@ func (m craftRealtimeAttemptMetadata) validate(candidate []byte) error {
 		return artifacts.ErrVersionQuota
 	}
 	if m.Merged {
-		for _, ranges := range [][]craftSheetRange{m.Overlap, m.AgentRanges} {
+		for _, ranges := range [][]craftSheetRange{m.Overlap, m.AgentRanges, m.HeadRanges} {
 			if len(ranges) > craftRealtimeRangeLimit {
 				return errCraftRealtimeTooManyRanges
 			}

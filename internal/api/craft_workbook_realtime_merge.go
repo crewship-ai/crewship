@@ -32,7 +32,7 @@ func (c craftRealtimeCell) wireRange() craftSheetRange {
 
 // craftRealtimeInputs extracts only cells in the declared edit scope. The
 // caller separately verifies the projection of everything outside that scope.
-func craftRealtimeInputs(raw []byte, edits craftWorkbookEdits) (map[craftRealtimeCell][32]byte, error) {
+func craftRealtimeInputs(raw []byte, edits craftWorkbookEdits, limit int) (map[craftRealtimeCell][32]byte, error) {
 	z, parts, ok := craftWorkbookPartFiles(raw)
 	if !ok {
 		return nil, errCraftRealtimeUnproved
@@ -46,7 +46,7 @@ func craftRealtimeInputs(raw []byte, edits craftWorkbookEdits) (map[craftRealtim
 		if input == ([32]byte{}) {
 			return nil
 		}
-		if len(inputs) >= craftRealtimeCellLimit {
+		if len(inputs) >= limit {
 			return errCraftRealtimeUnproved
 		}
 		inputs[craftRealtimeCell{sheet, col, row}] = input
@@ -70,11 +70,11 @@ func craftRealtimeChangedCells(base, submitted []byte, edits craftWorkbookEdits)
 	if edits.allowScalarValues {
 		return nil, errCraftRealtimeUnproved
 	}
-	original, err := craftRealtimeInputs(base, edits)
+	original, err := craftRealtimeInputs(base, edits, craftRealtimeCellLimit)
 	if err != nil {
 		return nil, err
 	}
-	candidate, err := craftRealtimeInputs(submitted, edits)
+	candidate, err := craftRealtimeInputs(submitted, edits, craftRealtimeCellLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -121,16 +121,21 @@ func craftRealtimeChangedCells(base, submitted []byte, edits craftWorkbookEdits)
 	return changed, nil
 }
 
+type craftRealtimeVersion struct {
+	version int64
+	agent   bool
+	edits   craftWorkbookEdits
+}
+
 type craftRealtimeChanges struct {
-	agent       craftWorkbookEdits
-	human       craftWorkbookEdits
-	agentRanges []craftSheetRange
+	versions []craftRealtimeVersion
+	hasAgent bool
 }
 
 // Check that the journal covers the whole interval. A missing journal, unknown
 // write, or change by another human cannot establish the authority to rebase.
 func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.EditLeaseScope, user, agent, chat, pin string, base, head int64) (craftRealtimeChanges, error) {
-	out := craftRealtimeChanges{agentRanges: []craftSheetRange{}}
+	var out craftRealtimeChanges
 	rows, err := db.QueryContext(ctx, `SELECT version,base_version,actor_kind,actor_id,engine_pin,COALESCE(chat_id,''),COALESCE(run_id,''),replayable,ops
 		FROM craft_version_ops WHERE workspace_id=? AND page_id=? AND version>? AND version<=? ORDER BY version LIMIT 129`, scope.WorkspaceID, scope.ArtifactID, base, head)
 	if err != nil {
@@ -149,27 +154,27 @@ func craftReadRealtimeChanges(ctx context.Context, db *sql.DB, scope mooring.Edi
 			return out, errCraftRealtimeUnproved
 		}
 		next = version
-		edits := &out.agent
-		if kind == "human" && actor == user && run == "" {
-			edits = &out.human
-		} else if kind != "agent" || actor != agent || run == "" || !replayable {
-			return out, errCraftRealtimeUnproved
-		}
-		if kind == "human" && ops == "[]" {
-			continue
-		}
-		reads, ok := craftUndoReads(json.RawMessage(ops))
-		if !ok {
-			return out, errCraftRealtimeUnproved
-		}
-		for _, read := range reads {
-			if !edits.add(read.address) {
+		entry := craftRealtimeVersion{version: version, agent: kind == "agent"}
+		if entry.agent {
+			if actor != agent || run == "" || !replayable {
 				return out, errCraftRealtimeUnproved
 			}
-			if kind == "agent" {
-				out.agentRanges = append(out.agentRanges, craftSheetRange{Sheet: read.sheet, A1: read.rng})
+			out.hasAgent = true
+		} else if kind != "human" || actor != user || run != "" {
+			return out, errCraftRealtimeUnproved
+		}
+		if ops != "[]" || entry.agent {
+			reads, ok := craftUndoReads(json.RawMessage(ops))
+			if !ok {
+				return out, errCraftRealtimeUnproved
+			}
+			for _, read := range reads {
+				if !entry.edits.add(read.address) {
+					return out, errCraftRealtimeUnproved
+				}
 			}
 		}
+		out.versions = append(out.versions, entry)
 	}
 	if err := rows.Err(); err != nil {
 		return out, err

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/craftsession"
@@ -115,8 +114,7 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 					return nil, err
 				}
 			}
-			meta.HeadRanges = []craftSheetRange{}
-			candidate, ops, meta.Overlap, meta.AgentRanges, err = d.mergeRealtimeWorkbook(ctx, s, a, base, head.Content, submitted, changed)
+			candidate, ops, meta.Overlap, meta.AgentRanges, meta.HeadRanges, err = d.mergeRealtimeWorkbook(ctx, s, a, base, baseFile.Content, head.Content, submitted, changed)
 			if err != nil {
 				return nil, err
 			}
@@ -162,55 +160,58 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 	return nil, errCraftRealtimeUnproved
 }
 
-func (d *craftNativeDocumentsHTTP) mergeRealtimeWorkbook(ctx context.Context, s *mooring.NativeStore, a craftRealtimeAttempt, base int64, head, submitted []byte, changed []craftRealtimeCell) ([]byte, json.RawMessage, []craftSheetRange, []craftSheetRange, error) {
+func (d *craftNativeDocumentsHTTP) mergeRealtimeWorkbook(ctx context.Context, s *mooring.NativeStore, a craftRealtimeAttempt, headVersion int64, base, head, submitted []byte, changed []craftRealtimeCell) ([]byte, json.RawMessage, []craftSheetRange, []craftSheetRange, []craftSheetRange, error) {
 	entry := a.entry
 	db := d.human.pages.db
 	var agent string
 	if err := db.QueryRowContext(ctx, `SELECT agent_id FROM chats WHERE id=? AND workspace_id=? AND created_by=? AND visibility='private'`, entry.chatID, entry.scope.WorkspaceID, entry.source.UserID).Scan(&agent); err != nil {
-		return nil, nil, nil, nil, errCraftRealtimeUnproved
+		return nil, nil, nil, nil, nil, errCraftRealtimeUnproved
 	}
-	history, err := craftReadRealtimeChanges(ctx, db, entry.scope, entry.source.UserID, agent, entry.chatID, s.EnginePin(), a.base, base)
+	history, err := craftReadRealtimeChanges(ctx, db, entry.scope, entry.source.UserID, agent, entry.chatID, s.EnginePin(), a.base, headVersion)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
+	}
+	effects, err := craftProveRealtimeHistory(ctx, s, entry.scope, history.versions, headVersion, base, head)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	agentCells, headCells := make([]craftRealtimeCell, 0), make([]craftRealtimeCell, 0)
+	for cell, effect := range effects {
+		if effect.effectiveAgent() {
+			agentCells = append(agentCells, cell)
+		} else {
+			headCells = append(headCells, cell)
+		}
+	}
+	agentRanges, err := craftCompactSheetRanges(craftRealtimeRowRanges(agentCells))
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	headRanges, err := craftCompactSheetRanges(craftRealtimeRowRanges(headCells))
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	kept, overlapCells := make([]craftRealtimeCell, 0, len(changed)), make([]craftRealtimeCell, 0)
+	for _, cell := range changed {
+		effect := effects[cell]
+		if effect.effectiveAgent() {
+			overlapCells = append(overlapCells, cell)
+			continue
+		}
+		if effect.base != effect.head {
+			return nil, nil, nil, nil, nil, errCraftRealtimeUnproved
+		}
+		kept = append(kept, cell)
+	}
+	overlap, err := craftCompactSheetRanges(craftRealtimeRowRanges(overlapCells))
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 	profile, ok := d.profile(entry.application)
 	agents := d.human.agents
 	if !ok || agents == nil || agents.config.AgentApply == nil || agents.config.AgentInspect == nil {
-		return nil, nil, nil, nil, errCraftRealtimeUnproved
-	}
-	kept := make([]craftRealtimeCell, 0, len(changed))
-	overlap := make([]craftSheetRange, 0, len(changed))
-	for _, cell := range changed {
-		sheet := strings.ToLower(cell.sheet)
-		if history.agent.includes(sheet, cell.col, cell.row) {
-			overlap = append(overlap, cell.wireRange())
-			continue
-		}
-		if history.human.includes(sheet, cell.col, cell.row) {
-			return nil, nil, nil, nil, errCraftRealtimeUnproved
-		}
-		kept = append(kept, cell)
-	}
-	names, ok := craftWorkbookSheetNames(head)
-	if !ok {
-		return nil, nil, nil, nil, errCraftRealtimeUnproved
-	}
-	canonical := make(map[string]string, len(names))
-	for name := range names {
-		canonical[strings.ToLower(name)] = name
-	}
-	for i := range history.agentRanges {
-		ref := &history.agentRanges[i]
-		ref.Sheet = canonical[strings.ToLower(ref.Sheet)]
-	}
-	agentRanges, err := craftCompactSheetRanges(history.agentRanges)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	overlap, err = craftCompactSheetRanges(overlap)
-	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, errCraftRealtimeUnproved
 	}
 	candidate, err := craftRealtimeReplay(ctx, agents, profile, head, submitted, kept)
-	return candidate, craftRealtimeOps(kept), overlap, agentRanges, err
+	return candidate, craftRealtimeOps(kept), overlap, agentRanges, headRanges, err
 }
