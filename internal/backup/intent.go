@@ -96,6 +96,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"craft_native_documents":         IntentInclude,        // immutable native compatibility pins, never runtime authority
 	"craft_native_proposals":         IntentInclude,        // reviewable document DATA; accept re-checks live rights and lease
 	"craft_native_retired_attempts":  IntentExcludeRuntime, // fences in-flight save attempts of live admissions; never portable
+	"craft_realtime_attempts":        IntentExcludeRuntime, // receipts and fences expire with the originating chat editor admission
 
 	// Workbook content and immutable receipts travel; live authority does not.
 	"gridcraft_heads":        IntentInclude,

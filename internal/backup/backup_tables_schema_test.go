@@ -80,6 +80,7 @@ var workspaceTablesNotBundled = map[string]string{
 
 	"mooring_edit_leases":           "editor capabilities belong to their installation; retain target-local generation tombstones",
 	"craft_native_retired_attempts": "fences in-flight save attempts of live editor admissions; those requests never survive a restore",
+	"craft_realtime_attempts":       "reconcile receipts and retirement fences belong to one expiring chat editor admission; saved versions and audit history travel independently",
 	"mooring_edit_lease_workspaces": "target-local issuance fences survive Page deletion; restore must not replace their workspace",
 
 	// --- Migration artefacts / archives (derived, never read by the app) ---

@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -15,7 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 type realtimeTestEdit struct {
@@ -500,6 +506,113 @@ func TestSheetITRealtimeReconcilesPlainUnchangedAndCanSaveAgain(t *testing.T) {
 	}
 	if status, got := s.realtimeReconcile(editor, "1", attempt, s.v1); status != 200 || !bytes.Equal(got, originalReply) {
 		t.Fatalf("original no-op after head advanced: status %d exact %v", status, bytes.Equal(got, originalReply))
+	}
+}
+
+func TestSheetITRealtimeRestoreRejectsOldAttempts(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Look at this sheet", true)
+	editor := s.realtimeAdmission()
+	cells := s.headSheets(editor.SessionToken)
+	cells["L"]["B2"] = "committed before the backup"
+	committed := sitWorkbook(cells["L"], cells["Other"])
+	const committedID = "realtime-restore-committed"
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", committed, committedID, "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	wantCode(t, w, http.StatusOK, "commit with a lost reply")
+	if s.head() != 2 {
+		t.Fatal("save did not publish version 2")
+	}
+
+	cells["L"]["B2"] = "retired before the backup"
+	retired := sitWorkbook(cells["L"], cells["Other"])
+	const retiredID = "realtime-restore-retired"
+	if status, body := s.realtimeReconcile(editor, "2", retiredID, retired); status != http.StatusGone {
+		t.Fatalf("retire pending attempt: %d %s", status, body)
+	}
+	ctx, source := t.Context(), s.f.rig.db
+	workspace := s.f.a.WorkspaceID
+	var committedRows, retiredRows int
+	if err := source.QueryRow(`SELECT count(version), count(*)-count(version) FROM craft_realtime_attempts`).Scan(&committedRows, &retiredRows); err != nil || committedRows != 1 || retiredRows != 1 {
+		t.Fatalf("source attempt rows: committed=%d retired=%d err=%v", committedRows, retiredRows, err)
+	}
+	originalOps := len(s.opsRows())
+	if originalOps == 0 {
+		t.Fatal("save did not record a workbook operation")
+	}
+	dump, err := backup.DumpWorkspace(ctx, source, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dump.Tables["craft_realtime_attempts"]) != 0 || len(dump.Tables["craft_version_ops"]) != originalOps {
+		t.Fatal("workspace backup must carry the saved operations and exclude live attempts")
+	}
+
+	const passphrase = "synthetic-sheet-recovery-passphrase"
+	bundle, err := backup.CreateInstanceBackup(ctx, source, backup.InstanceOptions{
+		OutputDir: t.TempDir(), Passphrase: passphrase, Quiesce: quiesce.New(),
+		Actor: backup.Actor{UserID: s.f.a.HumanUserID, Role: "ADMIN"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if _, err = backup.RecoverInstance(ctx, backup.RecoverOptions{BundlePath: bundle.Path, Passphrase: passphrase, DataDir: dir, Actor: s.f.a.HumanUserID}); err != nil {
+		t.Fatal(err)
+	}
+	target, err := database.Open("file:" + filepath.Join(dir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	// A new server process on the same host boot must require a fresh admission.
+	human := newCraftNativeHTTP(NewPageHandler(target.DB, nil, newTestLogger()), true, s.m.human.clock)
+	docs := newCraftNativeDocumentsHTTP(human, map[string]craftNativeApplication{"gridcraft": {Store: s.store}})
+	for _, attempt := range []struct {
+		id, base string
+		content  []byte
+	}{
+		{committedID, "1", committed},
+		{retiredID, "2", retired},
+	} {
+		t.Run(attempt.id, func(t *testing.T) {
+			body := craftNativeSnapshotBody{
+				WorkspaceID: workspace, PageID: "sheet-own", ApplicationID: "gridcraft",
+				EnginePin: mooring.NewNativeStore(nil, s.store).EnginePin(), SessionID: editor.SessionID,
+				Generation: editor.Generation, BaseVersion: attempt.base, EditorRevision: "sit-doc:" + attempt.base,
+				ContentHash: craftContentHash(attempt.content), AttemptID: attempt.id,
+			}
+			reconcile, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := s.humanRequest(http.MethodPost, string(reconcile), editor.SessionToken, nil, docs.reconcileSnapshot)
+			wantCode(t, w, http.StatusForbidden, "reconcile from the source admission")
+			body.Bytes = attempt.content
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/pages/sheet-own/craft/document/save", workbookSnapshotReader(body)).WithContext(s.human)
+			r.SetPathValue("slug", "sheet-own")
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-Craft-Session", editor.SessionToken)
+			r.Header.Set("X-Craft-Touched", `["'L'!B2"]`)
+			w = httptest.NewRecorder()
+			docs.saveSnapshot(w, r)
+			wantCode(t, w, http.StatusForbidden, "save replay from the source admission")
+		})
+	}
+	var attempts, versions, ops int
+	if err = target.QueryRow(`SELECT
+		(SELECT count(*) FROM craft_realtime_attempts),
+		(SELECT count(*) FROM artifact_versions WHERE page_id='sheet-own'),
+		(SELECT count(*) FROM craft_version_ops WHERE page_id='sheet-own')`).Scan(&attempts, &versions, &ops); err != nil ||
+		attempts != 0 || versions != 2 || ops != originalOps {
+		t.Fatalf("recovered workbook state: attempts=%d versions=%d operations=%d err=%v", attempts, versions, ops, err)
+	}
+	store := artifacts.NewVersionStore(target.DB, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft"})
+	key := artifacts.VersionKey{WorkspaceID: workspace, PageID: "sheet-own"}
+	manifest, err := store.ReadVersion(ctx, key, 2, func(context.Context, *sql.Tx) (string, error) {
+		return "user:" + s.f.a.HumanUserID, nil
+	})
+	if err != nil || !bytes.Equal(manifest.Files[manifest.EntryPoint].Content, committed) {
+		t.Fatalf("committed workbook version was lost during recovery: %v", err)
 	}
 }
 

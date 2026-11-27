@@ -9,13 +9,14 @@ import (
 // principal, including on the same OS boot. Deleting the row would allow a
 // delayed generation to recur after fresh admission. Portable restore never
 // carries these rows and refuses to discard a target's existing tombstones.
+// Realtime attempts also belong to the original in-memory editor admission.
 func resetRecoveredCraftEditLeases(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"mooring_edit_lease_requests", "mooring_edit_leases"} {
+	for _, table := range []string{"craft_realtime_attempts", "mooring_edit_lease_requests", "mooring_edit_leases"} {
 		var exists bool
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil {
 			return err
@@ -23,7 +24,7 @@ func resetRecoveredCraftEditLeases(ctx context.Context, db *sql.DB) error {
 		if !exists {
 			continue
 		}
-		query := `DELETE FROM mooring_edit_lease_requests`
+		query := `DELETE FROM ` + quoteIdent(table)
 		if table == "mooring_edit_leases" {
 			query = `UPDATE mooring_edit_leases SET actor_id='',session_id='',expires_ns=0`
 		}
