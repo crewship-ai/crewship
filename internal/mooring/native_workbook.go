@@ -34,7 +34,7 @@ var (
 	ErrWorkbookUnsupported = errors.New("workbook format not supported (xls, xlsb, ods)")
 	ErrWorkbookTooLarge    = errors.New("the workbook file is larger than 64 MiB")
 	// ErrNativeLegacy: a native JSON version of a Sheet that now keeps workbook files. It stays
-	// listed and readable; it is never restored or served as the document.
+	// listed and readable as an exact historical download.
 	ErrNativeLegacy = errors.New("native JSON version of a workbook Sheet")
 )
 
@@ -141,7 +141,7 @@ func (s *NativeStore) manifest(base int64, b []byte) artifacts.VersionRequest {
 }
 
 // DocumentFile is the document of version manifest m. A workbook Sheet's native JSON version is
-// returned with ErrNativeLegacy, so a caller can list or show it but never serve or restore it.
+// returned with ErrNativeLegacy, so historical reads can offer an exact download while current reads and restores reject it.
 func (s *NativeStore) DocumentFile(m artifacts.VersionManifest) (NativeFile, error) {
 	if len(m.Files) != 1 {
 		return NativeFile{}, ErrNativeProfile

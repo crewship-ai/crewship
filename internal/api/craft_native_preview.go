@@ -99,7 +99,10 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	file, err := store.DocumentFile(state.Manifest)
-	if err != nil {
+	format := craftWorkbookResponseFormat(file)
+	if errors.Is(err, mooring.ErrNativeLegacy) {
+		format = file.Format
+	} else if err != nil {
 		craftNativeDocumentError(w, err)
 		return
 	}
@@ -110,7 +113,7 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 	if !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
 		return
 	}
-	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, Format: craftWorkbookResponseFormat(file), ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})
+	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, Format: format, ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})
 }
 
 type craftNativeShareBody struct {

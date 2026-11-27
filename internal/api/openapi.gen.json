@@ -16813,7 +16813,8 @@
           "format": {
             "enum": [
               "xlsx",
-              "xlsm"
+              "xlsm",
+              "native"
             ],
             "type": "string"
           },
@@ -17498,6 +17499,13 @@
             "description": "True only for the newest version, the one the editor opens.",
             "type": "boolean"
           },
+          "format": {
+            "description": "Historical Sheet JSON available to download.",
+            "enum": [
+              "native"
+            ],
+            "type": "string"
+          },
           "proposal": {
             "allOf": [
               {
@@ -17599,7 +17607,8 @@
           "format": {
             "enum": [
               "xlsx",
-              "xlsm"
+              "xlsm",
+              "native"
             ],
             "type": "string"
           },
@@ -17648,7 +17657,7 @@
             "type": "string"
           },
           "truncated": {
-            "description": "True when older versions exist beyond this listing. They stay stored and restorable.",
+            "description": "True when older versions exist beyond this listing. They stay stored.",
             "type": "boolean"
           },
           "versions": {

@@ -27,7 +27,9 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
  const reader=React.useRef(source);reader.current=source
  const mount=React.useRef<HTMLDivElement>(null)
  const [version,setVersion]=React.useState<string>(),[error,setError]=React.useState<string>()
+ const [legacy,setLegacy]=React.useState(false)
  const recheck=React.useRef<()=>void>(()=>{})
+ const downloadLegacy=React.useRef<()=>void>(()=>{})
  // Push: the server names only this person and this page, or no page ("re-check
  // everything", after a membership or role change).
  // The answer still comes from the ordinary authorised read; 30 s polling stays.
@@ -36,10 +38,11 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
  React.useEffect(()=>{
   const abort=new AbortController()
   let dead=false,reading=false,again=false,port:NativeEditorPort|undefined,frame:HTMLIFrameElement|undefined,current:NativePreviewSnapshot|undefined,deadline:ReturnType<typeof setTimeout>|undefined,readDeadline:ReturnType<typeof setTimeout>|undefined,poll:ReturnType<typeof setInterval>|undefined
+  const load=()=>reader.current?reader.current(abort.signal):readNativePreview({workspaceId,pageId},abort.signal)
   const clearFrame=()=>{clearTimeout(deadline);port?.close();port=undefined;frame?.remove();frame=undefined;current=undefined}
   const fail=(cause?:unknown)=>{
    if(dead)return
-   dead=true;abort.abort();clearTimeout(readDeadline);clearInterval(poll);clearFrame();setVersion(undefined)
+   dead=true;abort.abort();clearTimeout(readDeadline);clearInterval(poll);clearFrame();setVersion(undefined);setLegacy(false)
    setError(!reader.current&&cause instanceof NativePreviewError&&cause.status===404?'The shared preview is not published yet.':`${label} is not available. Access was not confirmed.`)
   }
   const unregister=registerDocumentDraftWriter(humanId,async()=>fail())
@@ -47,7 +50,14 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
    if(dead)return
    // Never repurpose the previously qualified frame for a different engine.
    clearFrame()
-   const src=nativeCraftFrameURL({...snapshot,quota:{usedBytes:'0',limitBytes:'0',warning:false,retention:'shared-version-only'}},window.location.origin)
+   const {format,...documentSnapshot}=snapshot
+   setLegacy(format==='native')
+   if(format==='native'){
+    current=snapshot
+    setVersion(snapshot.version)
+    return
+   }
+   const src=nativeCraftFrameURL({...documentSnapshot,...(format?{format}:{}),quota:{usedBytes:'0',limitBytes:'0',warning:false,retention:'shared-version-only'}},window.location.origin)
    if(!src||!editorFrameSupported())throw Error('isolated_native_preview_unavailable')
    frame=createEditorFrame(document,src,()=>port?.loaded())??undefined
    if(!frame)throw Error('isolated_native_preview_unavailable')
@@ -59,7 +69,7 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
    let ready=false
    // This is only an ephemeral port binding, never a server admission/lease.
    // No draft journal, write transition, save API, or custody callback exists.
-   const ownPort=createNativeEditorPort({applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,baseVersion:snapshot.version,generation:'1',sessionId:`preview:${crypto.randomUUID()}`},requireAccessProtocol:true,
+   const ownPort=createNativeEditorPort({applicationId:snapshot.applicationId,workbookFormat:format,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,baseVersion:snapshot.version,generation:'1',sessionId:`preview:${crypto.randomUUID()}`},requireAccessProtocol:true,
     onChanged(){if(frame===mountedFrame&&ready)fail()},
     onSaveRequest(request){if(frame===mountedFrame&&request.requestId)port?.saveFailed(request.requestId,`${label} is read-only.`)},
     onExport(file){if(!dead&&frame===mountedFrame)try{downloadNativeExport(file)}catch{fail()}},
@@ -82,20 +92,33 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
    reading=true
    readDeadline=setTimeout(()=>fail(),10000)
    try{
-    const snapshot=reader.current?await reader.current(abort.signal):await readNativePreview({workspaceId,pageId},abort.signal)
+    const snapshot=await load()
     if(dead||abort.signal.aborted)return
     // A delivered version is a read of this Page, so older draft proofs are stale.
     confirmNativeRead({human:humanId,workspace:workspaceId,page:pageId})
-    if(!current||snapshot.version!==current.version||snapshot.enginePin!==current.enginePin||snapshot.editorBundle!==current.editorBundle||snapshot.editorURL!==current.editorURL||snapshot.applicationId!==current.applicationId){setVersion(undefined);show(snapshot)}
+    if(!current||snapshot.version!==current.version||snapshot.format!==current.format||snapshot.enginePin!==current.enginePin||snapshot.editorBundle!==current.editorBundle||snapshot.editorURL!==current.editorURL||snapshot.applicationId!==current.applicationId){setVersion(undefined);show(snapshot)}
    }catch(cause){fail(cause)}finally{clearTimeout(readDeadline);reading=false;if(again&&!dead){again=false;void read()}}
   }
+  downloadLegacy.current=()=>{void(async()=>{
+   const selected=current
+   if(dead||selected?.format!=='native')return
+   try{
+    const snapshot=await load()
+    if(dead||current!==selected)return
+    if(snapshot.version!==selected.version||snapshot.format!=='native'){
+     await read()
+     return
+    }
+    downloadNativeExport({name:`sheet-version-${snapshot.version}.json`,bytes:snapshot.bytes})
+   }catch(cause){fail(cause)}
+  })()}
   const message=(event:MessageEvent)=>port?.handleWindowMessage(event)
   recheck.current=()=>{void read()}
   const focus=()=>{void read()}
   window.addEventListener('message',message);window.addEventListener('focus',focus);window.addEventListener('online',focus)
   poll=setInterval(()=>{void read()},30000)
   void read()
-  return()=>{dead=true;recheck.current=()=>{};abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
+  return()=>{dead=true;recheck.current=()=>{};downloadLegacy.current=()=>{};abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
  },[humanId,workspaceId,pageId,label])
- return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`${label} · version ${version}`:(source?`${label} · loading…`:'Loading the shared preview…'))}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Reload the preview</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
+ return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`${label} · version ${version}`:(source?`${label} · loading…`:'Loading the shared preview…'))}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Reload the preview</button>}{legacy?<button type="button" className="mx-3 self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={()=>downloadLegacy.current()}>Download Sheet version as JSON</button>:null}<div ref={mount} className={legacy?"hidden":"relative min-h-80 flex-1"}/></section>
 }

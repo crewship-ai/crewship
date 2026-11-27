@@ -153,9 +153,9 @@ export function NativeCraftVersionHistory({ load, loadVersion, Preview, scope, r
             <span className="block text-muted-foreground">{when(version.createdAt)} · {author(version)}{version.restoredFrom ? ` · restored from version ${version.restoredFrom}` : ""}</span>
           </span>}
           {loadVersion && <Button type="button" size="sm" variant="ghost" aria-label={`Preview of version ${version.version}`} aria-pressed={panel?.kind === "preview" && panel.version === version.version} onClick={event => show("preview", version.version, event)}>Preview</Button>}
-          {loadVersion && !version.current && <Button type="button" size="sm" variant="ghost" aria-label={`Compare version ${version.version} with the current one`} aria-pressed={panel?.kind === "compare" && panel.version === version.version} onClick={event => show("compare", version.version, event)}>Compare</Button>}
-          {!version.current && confirm !== version.version && <Button type="button" size="sm" variant="outline" disabled={!canRestore || pending} onClick={() => setConfirm(version.version)}>Restore</Button>}
-          {!version.current && confirm === version.version && <span role="group" aria-label={`Restore version ${version.version}`} className="flex flex-wrap items-center gap-2">
+          {loadVersion && version.format !== "native" && !version.current && <Button type="button" size="sm" variant="ghost" aria-label={`Compare version ${version.version} with the current one`} aria-pressed={panel?.kind === "compare" && panel.version === version.version} onClick={event => show("compare", version.version, event)}>Compare</Button>}
+          {version.format !== "native" && !version.current && confirm !== version.version && <Button type="button" size="sm" variant="outline" disabled={!canRestore || pending} onClick={() => setConfirm(version.version)}>Restore</Button>}
+          {version.format !== "native" && !version.current && confirm === version.version && <span role="group" aria-label={`Restore version ${version.version}`} className="flex flex-wrap items-center gap-2">
             <span>This adds a new version with the content of version {version.version}. Nothing is deleted.</span>
             <Button type="button" size="sm" disabled={!canRestore || pending} onClick={() => { setConfirm(undefined); onRestore?.(version.version) }}>Restore as a new version</Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => setConfirm(undefined)}>Cancel</Button>

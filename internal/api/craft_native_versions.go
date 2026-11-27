@@ -33,6 +33,7 @@ type craftNativeVersionProposalResponse struct {
 }
 type craftNativeVersionResponse struct {
 	Version      string                              `json:"version"`
+	Format       string                              `json:"format,omitempty"`
 	CreatedAt    string                              `json:"createdAt"`
 	Author       craftNativeVersionAuthorResponse    `json:"author"`
 	RestoredFrom string                              `json:"restoredFrom,omitempty"`
@@ -112,6 +113,9 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 	}
 	for i, v := range versions {
 		item := craftNativeVersionResponse{Version: strconv.FormatInt(v.Version, 10), CreatedAt: v.CreatedAt, Author: name(v.Actor), Current: i == 0}
+		if s.Workbook() && v.EntryPoint == "document.json" {
+			item.Format = "native"
+		}
 		if v.RestoredFrom > 0 {
 			item.RestoredFrom = strconv.FormatInt(v.RestoredFrom, 10)
 		}
@@ -162,7 +166,7 @@ func craftVersionHistoryEnabled(w http.ResponseWriter, r *http.Request, d *craft
 
 // readVersion returns the bytes of one saved native version. It is the
 // authorized read-only diagnostic and the preview/compare source: the same
-// admission, live private read authority, immutable profile check and
+// admission, live private read authority, profile check and
 // administrator audit as the whole document read, behind the same workspace
 // flag as the listing. It never acquires a lease, never writes and never moves the shared
 // pin; restoring stays the fenced POST document/restore.
@@ -200,11 +204,14 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 		return
 	}
 	file, err := s.DocumentFile(m)
-	if err != nil {
+	format := craftWorkbookResponseFormat(file)
+	if errors.Is(err, mooring.ErrNativeLegacy) {
+		format = file.Format
+	} else if err != nil {
 		craftNativeDocumentError(w, err)
 		return
 	}
-	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content, Format: craftWorkbookResponseFormat(file)}
+	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content, Format: format}
 	if m.RestoredFrom > 0 {
 		out.RestoredFrom = strconv.FormatInt(m.RestoredFrom, 10)
 	}
