@@ -8,7 +8,10 @@ import {NativeCraftEditorHost,nativeCraftFrameURL} from "../native-craft-editor-
 const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch,AUTH_EVENT:"unit-native-auth-retired"}))
 vi.mock("../native-craft-agent-start",()=>({NativeCraftAgentStart:(p:{enabled:boolean;holder:string|null;onStarted(id:string):void})=><button data-testid="agent-start" data-enabled={String(p.enabled)} data-holder={String(p.holder)} onClick={()=>p.onStarted("work-7")}/>}))
-vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:m.createClient}))
+vi.mock("@/lib/mooring/native-document-client",async importOriginal=>({
+ ...await importOriginal<typeof import("@/lib/mooring/native-document-client")>(),
+ createNativeDocumentClient:m.createClient,
+}))
 vi.mock("@/lib/mooring/native-editor-port",()=>({createNativeEditorPort:m.createPort}))
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
 // Journal retries without real pauses; deadlines and late-answer handling stay real.
