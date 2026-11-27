@@ -12,8 +12,27 @@ import (
 // the engine and the log as 'L'!B8, and two different sheets in one write are refused.
 func TestAgentWritesNameTheirSheetEitherWay(t *testing.T) {
 	p := CraftNativeDocumentProfile{Application: "gridcraft"}
-	raw := []byte("PK\x03\x04 before")
-	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: []byte("PK\x03\x04 after")}}
+	const (
+		mainSheet = "xl/worksheets/sheet1.xml"
+		loanSheet = "xl/worksheets/sheet2.xml"
+	)
+	base := sitFidelityWorkbook(t, "xlsx")
+	parts := sitParts(t, base)
+	raw := workbookEdited(t, base, "", map[string]string{
+		"xl/workbook.xml": strings.Replace(string(parts["xl/workbook.xml"]), `name="Other"`, `name="Loan book"`, 1),
+	})
+	cells := sitInitialL()
+	cells["C1"] = "a"
+	cells["C8"] = "=L!B8|open"
+	delete(cells, "B8")
+	delete(cells, "B9")
+	loans := sitInitialOther()
+	loans["A1"] = "1"
+	snapshot := workbookEdited(t, raw, "", map[string]string{
+		mainSheet: strings.Replace(sitSheetXML(cells), "</worksheet>", sitFidelityProps+"</worksheet>", 1),
+		loanSheet: sitSheetXML(loans),
+	})
+	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: snapshot}}
 	commands := json.RawMessage(`[{"command":"cell.set","params":{"cell":"'L'!C1","input":"a"}},{"command":"range.clear","params":{"range":"L!B8:B9"}},{"command":"range.setValues","params":{"range":"'Loan book'!A1:A1","values":[[1]],"sheet":"Loan book"}}]`)
 	if _, err := NewCraftNativeSheetAgentAdapter(engine).Apply(context.Background(), p, raw, commands); err != nil {
 		t.Fatal(err)

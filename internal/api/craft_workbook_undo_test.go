@@ -160,9 +160,13 @@ func TestUndoOfAnAgentChangeIsANewVersionOfThePerson(t *testing.T) {
 // The engine adapter takes formulas only for an undo: an agent change still may not write one.
 func TestUndoMayPutBackAFormulaAnAgentMayNotWrite(t *testing.T) {
 	p := CraftNativeDocumentProfile{Application: "gridcraft"}
-	raw := []byte("PK\x03\x04 before")
+	raw := craftTestWorkbook(t, "xlsx", "before")
+	original := string(sitParts(t, raw)["xl/worksheets/sheet1.xml"])
+	snapshot := workbookEdited(t, raw, "", map[string]string{
+		"xl/worksheets/sheet1.xml": strings.Replace(original, "</sheetData>", `<row r="8"><c r="B8"><f>A1*2</f><v>0</v></c></row></sheetData>`, 1),
+	})
 	commands := json.RawMessage(`[{"command":"range.setValues","params":{"range":"B8","sheet":"L","values":[["=A1*2"]]}}]`)
-	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: []byte("PK\x03\x04 after")}}
+	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: snapshot}}
 	if _, err := NewCraftNativeSheetAgentAdapter(engine).Apply(context.Background(), p, raw, commands); err == nil {
 		t.Fatal("an agent change wrote a formula")
 	}
@@ -232,7 +236,9 @@ func TestUndoVersionIsReplayableForTheEditor(t *testing.T) {
 		t.Fatalf("undo version %+v %s", v, v.Ops)
 	}
 	_ = applied
-	next := workbookEdited(t, undone, "", map[string]string{"xl/worksheets/sheet2.xml": `<worksheet><sheetData/></worksheet>`})
+	other := sitInitialOther()
+	other["A2"] = "edited"
+	next := workbookEdited(t, undone, "", map[string]string{"xl/worksheets/sheet2.xml": sitSheetXML(other)})
 	if w := rig.save(next, "3", workbookHash(next)); w.Code != 200 || !strings.Contains(w.Body.String(), `"version":"4"`) {
 		t.Fatalf("the editor's save after replaying the undo: %d %s", w.Code, w.Body)
 	}

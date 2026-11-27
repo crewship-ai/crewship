@@ -69,6 +69,7 @@ func TestUndoOfTwoClearedColumnsWithFormulasPassesTheSessionPolicy(t *testing.T)
 	ops := json.RawMessage(`[{"command":"edit.clearContents","params":{"range":"'L'!B8:B577"}},` +
 		`{"command":"edit.clearContents","params":{"range":"'L'!E8:E577"}}]`)
 	ids, sums, cleared := make([][]any, 570), make([][]any, 570), make([][]any, 570)
+	restoredCells := make(sitCells, 1140)
 	for r := range ids {
 		ids[r] = []any{fmt.Sprintf("L-%04d it's", r)}
 		sums[r] = []any{fmt.Sprintf("=C%d*D%d", r+8, r+8)}
@@ -76,6 +77,12 @@ func TestUndoOfTwoClearedColumnsWithFormulasPassesTheSessionPolicy(t *testing.T)
 			sums[r] = []any{fmt.Sprintf("%d.5", r)}
 		}
 		cleared[r] = []any{nil}
+		restoredCells[sitAddress(2, r+8)] = ids[r][0].(string)
+		sum := sums[r][0].(string)
+		if strings.HasPrefix(sum, "=") {
+			sum += "|0"
+		}
+		restoredCells[sitAddress(5, r+8)] = sum
 	}
 	old := [][][]any{ids, sums}
 	inverse, ok := craftInverseFrom(ops, old)
@@ -88,13 +95,17 @@ func TestUndoOfTwoClearedColumnsWithFormulasPassesTheSessionPolicy(t *testing.T)
 		t.Fatalf("undo commands: ok %v restored %d skipped %d", ok, restored, skipped)
 	}
 	p := CraftNativeDocumentProfile{Application: "gridcraft"}
-	session := &fakeSheetSession{snapshot: []byte("PK\x03\x04 after")}
+	const sheet = "xl/worksheets/sheet1.xml"
+	base := craftTestWorkbook(t, "xlsx", "before")
+	raw := workbookEdited(t, base, "", map[string]string{sheet: sitSheetXML(nil)})
+	snapshot := workbookEdited(t, raw, "", map[string]string{sheet: sitSheetXML(restoredCells)})
+	session := &fakeSheetSession{snapshot: snapshot}
 	adapter := NewCraftNativeSheetAgentAdapter(policedSheetEngine{session})
 	batch, _ := json.Marshal(commands)
-	if _, err := adapter.Apply(context.Background(), p, []byte("PK\x03\x04 before"), batch); err == nil {
+	if _, err := adapter.Apply(context.Background(), p, raw, batch); err == nil {
 		t.Fatal("an agent change wrote the formulas: the session policy no longer guards agents")
 	}
-	if _, err := adapter.Apply(craftNativeUndoContext(context.Background()), p, []byte("PK\x03\x04 before"), batch); err != nil {
+	if _, err := adapter.Apply(craftNativeUndoContext(context.Background()), p, raw, batch); err != nil {
 		t.Fatalf("undo of the two columns: %v", err)
 	}
 	// Text is written cell by cell, the way a person types it; numbers and blanks go in blocks.
