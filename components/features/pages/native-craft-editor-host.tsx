@@ -777,7 +777,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const r=current,own=client,started=checkGeneration;if(!readable||offerStale)return;if(!r||!live(r)||!r.ready)throw Error('native_copy_unavailable')
    const snapshot=await r.port.snapshot(lifetime.signal)
    if(!readable||offerStale||checkGeneration!==started||authSuspended||!live(r)||client!==own)return
-   copy({bytes:snapshot.bytes,applicationId:sessionApplication!} as NativeDraft)
+   copy({bytes:snapshot.bytes,applicationId:sessionApplication!,format:snapshot.format} as NativeDraft)
   })().catch(()=>{if(!dead)setError('The local copy could not be downloaded.')})}
   // A press, like Ctrl+S: asks the server again at the same base. Still full,
   // the alert stays and so does the draft; with space freed it saves (#5124).
