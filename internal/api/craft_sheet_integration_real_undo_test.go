@@ -129,7 +129,8 @@ func seedLegacyUndo(t *testing.T, s *sitScenario, candidate []byte, commands, in
 	return operation
 }
 
-func TestSheetITUndoWithTheRealEngine(t *testing.T) {
+func newRealSheetEngine(t *testing.T) undoTestEngine {
+	t.Helper()
 	enginePath := os.Getenv("GRIDCRAFT_ENGINE_WASM")
 	module, err := os.ReadFile(enginePath)
 	if err != nil {
@@ -141,6 +142,11 @@ func TestSheetITUndoWithTheRealEngine(t *testing.T) {
 		InputPolicy: craftsession.InputPolicy(CraftNativeAgentInputPolicy(false)),
 	})}
 	t.Cleanup(engine.manager.Close)
+	return engine
+}
+
+func TestSheetITUndoWithTheRealEngine(t *testing.T) {
+	engine := newRealSheetEngine(t)
 	adapter := NewCraftNativeSheetAgentAdapter(engine)
 
 	for _, tc := range []struct {
@@ -233,6 +239,78 @@ func TestSheetITUndoWithTheRealEngine(t *testing.T) {
 				if err != nil || got.Formula != "" || got.Value != expected {
 					t.Errorf("%s: value=%#v formula=%q error=%v, want literal %q", cells[i], got.Value, got.Formula, err, expected)
 				}
+			}
+		})
+	}
+}
+
+func TestSheetITCalcChainClearWithTheRealEngine(t *testing.T) {
+	for _, operation := range []string{"apply", "propose"} {
+		t.Run(operation, func(t *testing.T) {
+			engine := newRealSheetEngine(t)
+			adapter := NewCraftNativeSheetAgentAdapter(engine)
+			base, expected := sitCalcChainWorkbook(t)
+			s := newSheetITScenarioWithWorkbook(t, base, "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
+			candidates := make(chan []byte, 1)
+			s.m.config.AgentInspect = adapter.Inspect
+			s.m.config.AgentApply = func(ctx context.Context, p CraftNativeDocumentProfile, raw []byte, commands json.RawMessage) ([]byte, error) {
+				candidate, err := adapter.Apply(ctx, p, raw, commands)
+				if err == nil {
+					candidates <- candidate
+				}
+				return candidate, err
+			}
+			s.send("Clear the formulas from B8 to B577", true)
+			call := s.agent()
+			args := map[string]any{
+				"base_version": "1", "request_id": "real-calc-chain-" + operation,
+				"commands": sitCommands(sitCmd("range.clear", map[string]any{"sheet": "L", "range": "B8:B577"})),
+			}
+			wantHead := int64(1)
+			if operation == "apply" {
+				args["generation"] = s.acquire(call)
+				wantHead = 2
+			} else {
+				args["summary"] = "Clear the selected formulas"
+			}
+			message, failed := s.toolCall(call, "craft_sheet_"+operation, args)
+			if head := s.head(); failed || head != wantHead {
+				t.Fatalf("%s: %s (refused %v, head %d want %d)", operation, message, failed, head, wantHead)
+			}
+			if operation == "propose" {
+				var proposal struct {
+					ID string `json:"proposal_id"`
+				}
+				if json.Unmarshal([]byte(message), &proposal) != nil || proposal.ID == "" {
+					t.Fatalf("proposal receipt: %s", message)
+				}
+			}
+			var candidate []byte
+			select {
+			case candidate = <-candidates:
+			default:
+				t.Fatal("no candidate reached the chat run")
+			}
+			if operation == "apply" && !bytes.Equal(s.stored(wantHead), candidate) {
+				t.Fatal("the stored head differs from the candidate")
+			}
+			actual := sitParts(t, candidate)
+			if _, present := actual[craftCalcChainPart]; present {
+				t.Fatal("the stale calculation chain survived")
+			}
+			for part, data := range sitParts(t, expected) {
+				if part != sitFidelitySheet && !bytes.Equal(actual[part], data) {
+					t.Errorf("part changed: %s", part)
+				}
+			}
+			cells := sitParseSheet(string(actual[sitFidelitySheet]))
+			for row := 8; row <= 577; row++ {
+				if cells[sitAddress(2, row)] != "" {
+					t.Fatalf("formula retained at row %d", row)
+				}
+			}
+			if cells["A600"] != "outside the clear" || cells["F8"] != "comment anchor" {
+				t.Fatal("unrelated worksheet cells changed")
 			}
 		})
 	}

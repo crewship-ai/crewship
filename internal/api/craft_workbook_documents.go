@@ -113,7 +113,7 @@ func (d *craftNativeDocumentsHTTP) saveWorkbook(w http.ResponseWriter, r *http.R
 	}
 	// An address on an unrecognized sheet is still logged as unknown for Undo.
 	touched = craftWorkbookTouchedSheets(touched, baseFile, body)
-	if lost := craftWorkbookPartsLost(baseFile, body, craftWorkbookHumanEdits(touched)); lost != nil {
+	if lost := craftWorkbookPartsLost(ctx, baseFile, body, craftWorkbookHumanEdits(touched)); lost != nil {
 		craftWorkbookFidelityRefusal(w, lost)
 		return
 	}

@@ -48,6 +48,7 @@ func (e craftWorkbookEdits) includes(sheet string, col, row int) bool {
 
 type craftWorksheetState struct {
 	content   [32]byte
+	formulas  [32]byte
 	dimension nativeAgentEngineArea
 	cells     nativeAgentEngineArea
 }
@@ -86,7 +87,7 @@ func (before craftWorksheetState) preservedBy(after craftWorksheetState) bool {
 // contents, and the cached value of an unchanged, ordinary formula. Formulas with
 // attributes (e.g. shared, array and data-table formulas) are kept together with
 // their cached results. Formula expressions are compared as decoded XML text.
-func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookEdits) (craftWorksheetState, error) {
+func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookEdits, checkFormulas bool) (craftWorksheetState, error) {
 	r, err := part.Open()
 	if err != nil {
 		return craftWorksheetState{}, err
@@ -95,6 +96,10 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 	d := xml.NewDecoder(r)
 	out := craftWorksheetHash{sha256.New()}
 	var state craftWorksheetState
+	var formulas craftWorksheetHash
+	if checkFormulas {
+		formulas.Hash = sha256.New()
+	}
 	var stack []xml.Name
 	var row, lastRow, lastCol int
 	var rowStart *xml.StartElement
@@ -112,6 +117,9 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 				return craftWorksheetState{}, errCraftWorksheetXML
 			}
 			state.content = out.sum()
+			if checkFormulas {
+				state.formulas = formulas.sum()
+			}
 			return state, nil
 		}
 		if err != nil {
@@ -167,7 +175,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 				lastCol = col
 				cellBounds := nativeAgentEngineArea{col1: col, row1: row, col2: col, row2: row}
 				state.cells = craftWorksheetEnclose(state.cells, cellBounds)
-				cell, keep, err := craftWorksheetCell(d, el, edits.includes(sheet, col, row), edits.allowScalarValues)
+				cell, keep, err := craftWorksheetCell(d, el, edits.includes(sheet, col, row), edits.allowScalarValues, formulas)
 				if err != nil {
 					return craftWorksheetState{}, err
 				}
@@ -212,7 +220,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 // A simple cell has a known scalar type, optional style, a plain formula or
 // value, and no unknown attributes or child elements. An edit can replace its
 // content, while its style and address stay in the projection.
-func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool) ([32]byte, bool, error) {
+func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowScalar bool, formulas craftWorksheetHash) ([32]byte, bool, error) {
 	cellType := craftWorkbookAttr(el, "t")
 	simple := true
 	switch cellType {
@@ -268,6 +276,10 @@ func craftWorksheetCell(d *xml.Decoder, el xml.StartElement, addressed, allowSca
 	}
 	simple = simple && (!formula.present || formula.plain && formula.nonempty) &&
 		(!value.present || value.plain) && (!inline.present || inline.plain && !formula.present && !value.present)
+	if simple && addressed && formula.present && formulas.Hash != nil {
+		formulas.field(craftWorkbookAttr(el, "r"))
+		_, _ = formulas.Write(formula.digest[:])
+	}
 	if simple && (addressed || allowScalar && !formula.present) {
 		style := craftWorkbookAttr(el, "s")
 		if style == "" || style == "0" {

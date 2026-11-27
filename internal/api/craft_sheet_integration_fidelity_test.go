@@ -229,13 +229,13 @@ func TestWorkbookFidelityRejectsUnprovableChanges(t *testing.T) {
 		{"unrelated cell", edit(sitFidelitySheet, `r="B7" t="inlineStr"><is><t>open`, `r="B7" t="inlineStr"><is><t>changed`), "worksheet"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			lost := craftWorkbookPartsLost(base, tc.body, scope)
+			lost := craftWorkbookPartsLost(t.Context(), base, tc.body, scope)
 			if len(lost) != 1 || lost[0].Code != tc.code {
 				t.Fatalf("losses: %+v, want %s", lost, tc.code)
 			}
 		})
 	}
-	if lost := craftWorkbookPartsLost([]byte("PK bad base"), base, scope); len(lost) != 1 || lost[0].Code != "package" {
+	if lost := craftWorkbookPartsLost(t.Context(), []byte("PK bad base"), base, scope); len(lost) != 1 || lost[0].Code != "package" {
 		t.Fatalf("unreadable base: %+v", lost)
 	}
 }

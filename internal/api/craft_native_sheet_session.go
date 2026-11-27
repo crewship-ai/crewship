@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strconv"
@@ -245,7 +246,7 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 			return nil, ErrCraftNativeSheetBusy
 		}
 		if workbook {
-			if lost := craftWorkbookPartsLost(raw, raw, edits); lost != nil {
+			if lost := craftWorkbookPartsLost(ctx, raw, raw, edits); lost != nil {
 				return nil, &craftsession.FidelityLossError{Parts: lost}
 			}
 		}
@@ -284,6 +285,13 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	snapshot, err := session.Snapshot(ctx)
 	var loss *craftsession.FidelityLossError
 	if errors.As(err, &loss) {
+		for _, part := range loss.Parts {
+			name := part.Code
+			if part.Code == "calc_chain" {
+				name = craftCalcChainPart
+			}
+			slog.WarnContext(ctx, "craft workbook writer refused", "part", name, "code", part.Code, "count", part.Count)
+		}
 		// Nothing was saved; the session still holds the change, so it is not reused.
 		a.engine.Discard(session)
 		return nil, loss
@@ -297,7 +305,7 @@ func (a *CraftNativeSheetAgentAdapter) Apply(ctx context.Context, p CraftNativeD
 	}
 	// Verify the export independently, using the resolved edit ranges.
 	if workbook {
-		if lost := craftWorkbookPartsLost(raw, snapshot, edits); lost != nil {
+		if lost := craftWorkbookPartsLost(ctx, raw, snapshot, edits); lost != nil {
 			a.engine.Discard(session)
 			return nil, &craftsession.FidelityLossError{Parts: lost}
 		}

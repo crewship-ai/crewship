@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ func craftWorkbookPartCode(name string) string {
 		return "content_types"
 	case strings.HasSuffix(lower, ".rels"):
 		return "relationships"
+	case lower == strings.ToLower(craftCalcChainPart):
+		return "calc_chain"
 	case lower == "xl/workbook.xml":
 		return "workbook"
 	case lower == "xl/styles.xml":
@@ -78,50 +81,73 @@ func craftWorkbookPartSum(part *zip.File) ([32]byte, error) {
 
 // Only a mapped worksheet may change. All other parts, including those the editor does
 // not understand, must keep their original bytes, content type and relationships.
-func craftWorkbookPartsLost(base, candidate []byte, edits craftWorkbookEdits) []craftsession.FidelityPart {
-	packageLoss := []craftsession.FidelityPart{{Code: "package", Count: 1}}
+func craftWorkbookPartsLost(ctx context.Context, base, candidate []byte, edits craftWorkbookEdits) []craftsession.FidelityPart {
+	var differences []string
+	note := func(delta, part string) {
+		if len(differences) < 16 {
+			differences = append(differences, delta+" "+part[:min(len(part), 200)])
+		}
+	}
+	defer func() {
+		if len(differences) != 0 {
+			slog.WarnContext(ctx, "craft workbook fidelity refused", "differences", differences)
+		}
+	}()
+	packageLoss := func(delta, part string) []craftsession.FidelityPart {
+		note(delta, part)
+		return []craftsession.FidelityPart{{Code: "package", Count: 1}}
+	}
 	beforeZip, before, ok := craftWorkbookPartFiles(base)
 	if !ok {
-		return packageLoss
+		return packageLoss("unreadable base", "package")
 	}
 	_, after, ok := craftWorkbookPartFiles(candidate)
 	if !ok {
-		return packageLoss
+		return packageLoss("unreadable candidate", "package")
 	}
 	sheets, err := craftsession.WorkbookWorksheetParts(beforeZip)
 	if err != nil {
-		return packageLoss
+		return packageLoss("unreadable worksheet mapping", "xl/workbook.xml")
 	}
 	counts := map[string]int{}
 	changed := false
+	droppedChain := craftCalcChainDropped(before, after)
+	formulaChanged := false
 	for name, part := range before {
 		sum, err := craftWorkbookPartSum(part)
 		if err != nil {
-			return packageLoss
+			return packageLoss("unreadable base part", name)
 		}
 		next := after[name]
+		if droppedChain && (name == craftCalcChainPart || name == craftContentTypesPart || name == craftWorkbookRelsPart) {
+			changed = true
+			continue
+		}
 		if next == nil {
+			note("part removed", name)
 			counts[craftWorkbookPartCode(name)]++
 			continue
 		}
 		nextSum, err := craftWorkbookPartSum(next)
 		if err != nil {
-			return packageLoss
+			return packageLoss("unreadable candidate part", name)
 		}
 		if sheet, ok := sheets[name]; ok {
-			old, err := craftWorksheetProjection(part, sheet, edits)
+			old, err := craftWorksheetProjection(part, sheet, edits, droppedChain)
 			if err != nil {
-				return packageLoss
+				return packageLoss("unreadable base worksheet", name)
 			}
 			if sum == nextSum {
 				continue
 			}
 			changed = true
-			new, err := craftWorksheetProjection(next, sheet, edits)
+			new, err := craftWorksheetProjection(next, sheet, edits, droppedChain)
 			if err != nil {
-				return packageLoss
+				return packageLoss("unreadable candidate worksheet", name)
 			}
+			formulaChanged = formulaChanged || old.formulas != new.formulas
 			if !old.preservedBy(new) {
+				note("worksheet changed outside allowed edits", name)
 				counts["worksheet"]++
 			}
 			continue
@@ -130,19 +156,26 @@ func craftWorkbookPartsLost(base, candidate []byte, edits craftWorkbookEdits) []
 			continue
 		}
 		changed = true
+		note("part changed", name)
 		counts[craftWorkbookPartCode(name)]++
 	}
 	for name, part := range after {
 		if before[name] == nil {
 			if _, err := craftWorkbookPartSum(part); err != nil {
-				return packageLoss
+				return packageLoss("unreadable candidate part", name)
 			}
+			note("part added", name)
 			counts[craftWorkbookPartCode(name)]++
 		}
+	}
+	if droppedChain && !formulaChanged {
+		note("part removed without an edited formula", craftCalcChainPart)
+		counts["calc_chain"]++
 	}
 	if changed {
 		for _, code := range []string{"xml_signatures", "vba_signature"} {
 			if counts[code] == 0 && craftWorkbookHasSignature(before, code) {
+				note("signature invalidated by changes", code)
 				counts[code] = 1
 			}
 		}
