@@ -179,7 +179,7 @@ func (d *craftNativeDocumentsHTTP) mergeRealtimeWorkbook(ctx context.Context, s 
 	for cell, effect := range effects {
 		if effect.effectiveAgent() {
 			agentCells = append(agentCells, cell)
-		} else {
+		} else if effect.base != effect.head {
 			headCells = append(headCells, cell)
 		}
 	}

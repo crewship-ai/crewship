@@ -215,7 +215,7 @@ func TestSheetITRealtimeWireFixture(t *testing.T) {
 			!mooring.ValidNativeAttemptID(merged.Submitted.AttemptID) || merged.Submitted.ContentHash == hash ||
 			merged.HeadContentHash != hash || merged.Receipt.ContentHash != hash || merged.Receipt.CandidateHash != hash ||
 			merged.Receipt.SessionID != session.SessionID || merged.Receipt.Generation != session.Generation ||
-			merged.Receipt.EditorRevision != merged.Submitted.EditorRevision || len(merged.AgentRanges) == 0 || len(merged.Overlap) == 0 {
+			merged.Receipt.EditorRevision != merged.Submitted.EditorRevision || len(merged.AgentRanges) == 0 || len(merged.Overlap) == 0 || len(merged.HeadRanges) == 0 {
 			t.Fatalf("invalid %s fixture receipt: %+v", key, merged.Receipt)
 		}
 	}
@@ -530,7 +530,8 @@ func TestSheetITRealtimeCanMergeAcrossUndoInTheSameChat(t *testing.T) {
 	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "2", submitted, "realtime-after-undo", "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
 	var merged craftRealtimeMerged
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.Kind != "merged" ||
-		merged.Receipt.Version != "4" || len(merged.AgentRanges) != 0 || len(merged.Overlap) != 0 {
+		merged.Receipt.Version != "4" || len(merged.AgentRanges) != 0 || len(merged.Overlap) != 0 ||
+		!reflect.DeepEqual(merged.HeadRanges, []craftSheetRange{{"L", "C2"}}) {
 		t.Fatalf("merge over Undo in the same chat: %d %s", w.Code, w.Body)
 	}
 	head := s.headSheets(editor.SessionToken)["L"]
@@ -652,5 +653,114 @@ func TestSheetITRealtimeCompactionKeepsHolesAndSheetBoundaries(t *testing.T) {
 	reopened := s.realtimeAdmission()
 	if got := s.headSheets(reopened.SessionToken)["L"]["B2"]; got != "keep this" {
 		t.Fatalf("B2 was swallowed by the L shape: %q", got)
+	}
+}
+
+func TestSheetITRealtimeAgentThenUndoHasNoNetRange(t *testing.T) {
+	l := sitInitialL()
+	l["C2"] = "original"
+	s := newSheetITScenario(t, sitWorkbook(l, sitInitialOther()))
+	s.send("Change C2", true)
+	call, editor := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"generation": generation, "base_version": "1", "request_id": "realtime-agent-then-undo",
+		"commands": sitCommands(sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "C2", "input": "agent"})),
+	})
+	var receipt struct {
+		ID string `json:"operation_id"`
+	}
+	if refused || json.Unmarshal([]byte(got), &receipt) != nil || receipt.ID == "" {
+		t.Fatalf("agent change: %s", got)
+	}
+	if undo := s.undo(editor.SessionToken, editor.Generation, receipt.ID); undo.Code != 201 {
+		t.Fatalf("undo: %d %s", undo.Code, undo.Body)
+	}
+	l["C2"] = "new human input"
+	submission := sitWorkbook(l, sitInitialOther())
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", submission, "realtime-net-zero-agent", "", map[string]string{"X-Craft-Touched": `["'L'!C2"]`})
+	var merged craftRealtimeMerged
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil ||
+		merged.Kind != "merged" || merged.HeadRanges == nil || len(merged.HeadRanges) != 0 ||
+		merged.AgentRanges == nil || len(merged.AgentRanges) != 0 || len(merged.Overlap) != 0 {
+		t.Fatalf("a reverted agent write leaked into the net ranges: HTTP %d, %v %v %v", w.Code, merged.HeadRanges, merged.AgentRanges, merged.Overlap)
+	}
+	if current := s.headSheets(editor.SessionToken)["L"]["C2"]; current != "new human input" {
+		t.Fatalf("reverted agent work won against the human: C2=%q", current)
+	}
+}
+
+func TestSheetITRealtimeHeadRangesUseOtherTabsActualChangesAndReconcile(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Read the status cells", true)
+	editor, other := s.realtimeAdmission(), s.realtimeAdmission()
+	cells := sitInitialL()
+	cells["C2"] = "other tab"
+	w := s.humanSaveWith(other.SessionToken, other.Generation, "1", sitWorkbook(cells, sitInitialOther()), "other-tab-head", "", map[string]string{"X-Craft-Touched": `["'L'!C2:D2"]`})
+	if w.Code != 200 || s.head() != 2 {
+		t.Fatalf("other tab: %d %s", w.Code, w.Body)
+	}
+	pending := sitInitialL()
+	pending["B2"] = "first tab"
+	submitted := sitWorkbook(pending, sitInitialOther())
+	w = s.humanSaveWith(editor.SessionToken, editor.Generation, "1", submitted, "first-tab-merge", "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	var merged craftRealtimeMerged
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.Kind != "merged" ||
+		!reflect.DeepEqual(merged.HeadRanges, []craftSheetRange{{"L", "C2"}}) || len(merged.AgentRanges) != 0 {
+		t.Fatalf("other tab's proof contains a hint or our own write: HTTP %d %v", w.Code, merged.HeadRanges)
+	}
+	reply := bytes.Clone(w.Body.Bytes())
+	cells = s.headSheets(editor.SessionToken)["L"]
+	if cells["B2"] != "first tab" || cells["C2"] != "other tab" {
+		t.Fatal(cells)
+	}
+	cells["D2"] = "another version"
+	w = s.humanSaveWith(other.SessionToken, other.Generation, "3", sitWorkbook(cells, sitInitialOther()), "other-tab-later", "", map[string]string{"X-Craft-Touched": `["'L'!D2"]`})
+	if w.Code != 200 || s.head() != 4 {
+		t.Fatalf("later head: %d %s", w.Code, w.Body)
+	}
+	if status, actual := s.realtimeReconcile(editor, "1", "first-tab-merge", submitted); status != 200 || !bytes.Equal(actual, reply) {
+		t.Fatalf("reconcile after another version: HTTP %d, exact reply %v", status, bytes.Equal(actual, reply))
+	}
+}
+
+func TestSheetITRealtimePartialUndoRangesAreOnlyTheRestoredCells(t *testing.T) {
+	l := sitInitialL()
+	l["C2"], l["C3"], l["C4"] = "original", "original", "original"
+	s := newSheetITScenario(t, sitWorkbook(l, sitInitialOther()))
+	s.send("Change C2:C4", true)
+	call, editor := s.agent(), s.realtimeAdmission()
+	generation := s.acquire(call)
+	got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"generation": generation, "base_version": "1", "request_id": "realtime-partial-undo",
+		"commands": sitCommands(sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "C2:C4", "values": [][]string{{"agent"}, {"agent"}, {"agent"}}})),
+	})
+	var receipt struct {
+		ID string `json:"operation_id"`
+	}
+	if refused || json.Unmarshal([]byte(got), &receipt) != nil || receipt.ID == "" {
+		t.Fatalf("agent change: %s", got)
+	}
+	cells := s.headSheets(editor.SessionToken)["L"]
+	cells["C3"] = "keep C3"
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "2", sitWorkbook(cells, sitInitialOther()), "human-before-partial-undo", "", map[string]string{"X-Craft-Touched": `["'L'!C3"]`})
+	if w.Code != 200 {
+		t.Fatalf("human change: %d %s", w.Code, w.Body)
+	}
+	cells["A2"] = "keep A2"
+	pending := sitWorkbook(cells, sitInitialOther())
+	if w := s.undo(editor.SessionToken, editor.Generation, receipt.ID); w.Code != 201 ||
+		!strings.Contains(w.Body.String(), `"restored":2`) || !strings.Contains(w.Body.String(), `"skipped":1`) {
+		t.Fatalf("partial Undo: %d %s", w.Code, w.Body)
+	}
+	w = s.humanSaveWith(editor.SessionToken, editor.Generation, "3", pending, "human-after-partial-undo", "", map[string]string{"X-Craft-Touched": `["'L'!A2"]`})
+	var merged craftRealtimeMerged
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || len(merged.AgentRanges) != 0 ||
+		!reflect.DeepEqual(merged.HeadRanges, []craftSheetRange{{"L", "C2"}, {"L", "C4"}}) {
+		t.Fatalf("partial Undo effects: %d %v", w.Code, merged.HeadRanges)
+	}
+	final := s.headSheets(editor.SessionToken)["L"]
+	if final["A2"] != "keep A2" || final["C2"] != "original" || final["C3"] != "keep C3" || final["C4"] != "original" {
+		t.Fatalf("head after partial Undo and concurrent input: %v", final)
 	}
 }
