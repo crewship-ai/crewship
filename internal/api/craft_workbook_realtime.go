@@ -115,6 +115,7 @@ func (d *craftNativeDocumentsHTTP) saveRealtimeWorkbook(ctx context.Context, s *
 					return nil, err
 				}
 			}
+			meta.HeadRanges = []craftSheetRange{}
 			candidate, ops, meta.Overlap, meta.AgentRanges, err = d.mergeRealtimeWorkbook(ctx, s, a, base, head.Content, submitted, changed)
 			if err != nil {
 				return nil, err

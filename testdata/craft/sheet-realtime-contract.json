@@ -59,6 +59,16 @@
         "sheet": "L",
         "a1": "B3:B5"
       }
+    ],
+    "head_ranges": [
+      {
+        "sheet": "L",
+        "a1": "B3"
+      },
+      {
+        "sheet": "L",
+        "a1": "C2"
+      }
     ]
   },
   "merged_unchanged": {
@@ -98,6 +108,12 @@
       {
         "sheet": "L",
         "a1": "B3:B5"
+      }
+    ],
+    "head_ranges": [
+      {
+        "sheet": "L",
+        "a1": "B3"
       }
     ]
   },

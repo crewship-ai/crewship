@@ -29,6 +29,7 @@ type craftRealtimeMerged struct {
 	Bytes           []byte                   `json:"bytes"`
 	Overlap         []craftSheetRange        `json:"overlap"`
 	AgentRanges     []craftSheetRange        `json:"agent_ranges"`
+	HeadRanges      []craftSheetRange        `json:"head_ranges"`
 }
 
 type craftRealtimeAttemptMetadata struct {
@@ -36,6 +37,7 @@ type craftRealtimeAttemptMetadata struct {
 	Signed      bool              `json:"signed"`
 	Overlap     []craftSheetRange `json:"overlap"`
 	AgentRanges []craftSheetRange `json:"agent_ranges"`
+	HeadRanges  []craftSheetRange `json:"head_ranges"`
 }
 
 // Both publication branches and reconciliation check the same wire limits.
@@ -214,6 +216,6 @@ func (a craftRealtimeAttempt) response(receipt mooring.NativeSaveReceipt, bytes 
 	}
 	return craftRealtimeMerged{
 		Kind: "merged", Submitted: a.submitted, Receipt: result, HeadContentHash: receipt.ContentHash,
-		Bytes: bytes, Overlap: meta.Overlap, AgentRanges: meta.AgentRanges,
+		Bytes: bytes, Overlap: meta.Overlap, AgentRanges: meta.AgentRanges, HeadRanges: meta.HeadRanges,
 	}
 }
