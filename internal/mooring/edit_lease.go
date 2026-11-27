@@ -246,7 +246,18 @@ func (s *EditLeaseStore) Acquire(ctx context.Context, scope EditLeaseScope, p Ed
 
 // Renew is called by a live authenticated editor connection, independently of
 // typing or tab visibility. A disconnected or revoked session cannot renew.
-func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLease, err error) {
+func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (EditLease, error) {
+	return s.renew(ctx, l, false)
+}
+
+// RenewAgent can reclaim the agent's own expired lease when the generation and
+// holder still match and no one has requested handoff. Only the bound agent
+// tool path uses it, with the same authorization checks as Renew.
+func (s *EditLeaseStore) RenewAgent(ctx context.Context, l EditLease) (EditLease, error) {
+	return s.renew(ctx, l, true)
+}
+
+func (s *EditLeaseStore) renew(ctx context.Context, l EditLease, reclaimExpired bool) (result EditLease, err error) {
 	if l.CoWrite != (EditLeasePrincipal{}) {
 		// A co-write grant never renews the person's lease: it is checked again, nothing else.
 		err = s.transaction(ctx, func(tx *sql.Tx) error {
@@ -260,7 +271,7 @@ func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLea
 	}
 	err = s.transaction(ctx, func(tx *sql.Tx) error {
 		_, now, e := s.check(ctx, tx, l, "renew")
-		if errors.Is(e, ErrEditLeaseStale) {
+		if reclaimExpired && errors.Is(e, ErrEditLeaseStale) {
 			now, e = s.revive(ctx, tx, l)
 		}
 		if e != nil {
@@ -281,7 +292,7 @@ func (s *EditLeaseStore) Renew(ctx context.Context, l EditLease) (result EditLea
 	return
 }
 
-// revive lets Renew take back a lease that only expired: the row still names the same holder and
+// revive lets RenewAgent take back a lease that only expired: the row still names the same holder and
 // generation from this server boot, and no person asked for the document meanwhile. Nothing else
 // can have written since, because every write needs the live lease of its generation; a version
 // written by the holder itself is checked by the version compare of the next write. A lease taken

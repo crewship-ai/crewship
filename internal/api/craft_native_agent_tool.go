@@ -317,7 +317,7 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 			writeJSON(w, 200, map[string]bool{"released": true})
 			return
 		}
-		renewed, err := m.human.leases.Renew(bound.Context(), lease)
+		renewed, err := m.human.leases.RenewAgent(bound.Context(), lease)
 		if errors.Is(err, mooring.ErrEditLeaseBusy) {
 			// A co-write grant whose person no longer holds the Sheet: someone else edits it now.
 			writeJSON(w, 409, map[string]string{"error": "document already has an editor", "holder_kind": "human"})
@@ -519,11 +519,6 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if e.tool.uncertain {
 		return zero, mooring.ErrNativeUnconfirmed
 	}
-	// This fresh request is serialized with the chat run's other publications. Its
-	// consented base is the same base the version store checks when committing.
-	if e.chat != nil && base != e.chat.consentBase() {
-		return zero, errCraftNativeConsentStale
-	}
 	// A co-write is replayed by the person's editor over their work: only commands it can replay.
 	if e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{}) {
 		if _, replayable := craftNativeAgentResolvedOps(input.Commands); !replayable {
@@ -540,6 +535,11 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	state, err := store.Read(ctx, e.grant.Scope)
 	if err != nil {
 		return zero, err
+	}
+	// Another writer invalidates consent. A stale command from this same run
+	// only needs a fresh read while the run's last version still holds.
+	if e.chat != nil && state.LatestVersion != e.chat.consentBase() {
+		return zero, errCraftNativeConsentStale
 	}
 	if state.LatestVersion != base {
 		return zero, artifacts.ErrVersionConflict
@@ -571,7 +571,7 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 			case <-renewal.Done():
 				return
 			case <-ticker.C:
-				if _, err := m.human.leases.Renew(renewal, attempt.lease); err != nil {
+				if _, err := m.human.leases.RenewAgent(renewal, attempt.lease); err != nil {
 					cancel()
 					return
 				}

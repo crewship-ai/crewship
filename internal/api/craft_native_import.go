@@ -53,6 +53,16 @@ type craftNativeImportJob struct {
 	lost                      []craftsession.LostCells // what a refused workbook would have lost
 }
 
+type craftNativeImportStatusResponse struct {
+	ID            string                      `json:"id"`
+	State         string                      `json:"state"`
+	Code          string                      `json:"code,omitempty"`
+	Lost          []craftsession.LostCells    `json:"lost,omitempty"`
+	Cells         *int64                      `json:"cells,omitempty"`
+	DocumentBytes *int                        `json:"document_bytes,omitempty"`
+	Archive       *craftsession.ArchiveReport `json:"archive,omitempty"`
+}
+
 type craftNativeImports struct {
 	mu     sync.Mutex
 	jobs   map[string]*craftNativeImportJob
@@ -380,17 +390,10 @@ func (d *craftNativeDocumentsHTTP) importStatus(w http.ResponseWriter, r *http.R
 	}
 	im := d.importer()
 	im.mu.Lock()
-	out := map[string]any{"id": j.id, "state": j.state}
-	if j.code != "" {
-		out["code"] = j.code
-	}
-	if len(j.lost) > 0 {
-		out["lost"] = j.lost // per sheet: its position, name, the kind of cell and how many
-	}
+	out := craftNativeImportStatusResponse{ID: j.id, State: j.state, Code: j.code, Lost: j.lost}
 	if j.state == "ready" {
-		out["cells"] = j.keptCells
-		out["document_bytes"] = len(j.native)
-		out["archive"] = j.archive
+		cells, size := j.keptCells, len(j.native)
+		out.Cells, out.DocumentBytes, out.Archive = &cells, &size, j.archive
 	}
 	im.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")

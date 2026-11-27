@@ -98,6 +98,7 @@ var responseShapeContracts = []struct {
 	{name: "NativeCraftProposal", pointer: "/components/schemas/NativeCraftProposal", value: craftNativeProposalResponse{}},
 	{name: "NativeCraftProposalList", pointer: "/components/schemas/NativeCraftProposalList", value: craftNativeProposalListResponse{}},
 	{name: "NativeCraftVersionList", pointer: "/components/schemas/NativeCraftVersionList", value: craftNativeVersionsResponse{}},
+	{name: "NativeCraftWorkbookImportStatus", pointer: "/components/schemas/NativeCraftWorkbookImportStatus", value: craftNativeImportStatusResponse{}},
 	{name: "NativeCraftOperations", pointer: "/components/schemas/NativeCraftOperations", value: craftOperationsResponse{}},
 	{name: "NativeCraftUndoReceipt", pointer: "/components/schemas/NativeCraftUndoReceipt", value: craftUndoReceipt{}},
 	{name: "NativeCraftVersionDocument", pointer: "/components/schemas/NativeCraftVersionDocument", value: craftNativeVersionDocumentResponse{}},

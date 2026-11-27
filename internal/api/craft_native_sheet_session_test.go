@@ -203,7 +203,7 @@ func TestSheetSessionFormulasOnlyWithTheOption(t *testing.T) {
 }
 
 func TestSheetSessionKeyIsTheContentHash(t *testing.T) {
-	if sheetKey([]byte("a")) == sheetKey([]byte("b")) || sheetKey([]byte("a")) != sheetKey([]byte("a")) {
+	if sheetKey([]byte("a")) == sheetKey([]byte("b")) || sheetKey([]byte("a")) != sheetKey(append([]byte(nil), 'a')) {
 		t.Fatal("key is not a stable content hash")
 	}
 }

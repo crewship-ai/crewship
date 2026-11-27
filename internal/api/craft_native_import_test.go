@@ -159,7 +159,7 @@ func TestCraftNativeImportBoundsBodyAndConcurrency(t *testing.T) {
 	release := make(chan struct{})
 	d.importer().convert = func(context.Context, []byte) (*craftsession.ImportResult, error) {
 		<-release
-		return okConvert(nil, nil)
+		return okConvert(context.Background(), nil)
 	}
 	defer close(release)
 	// one running conversion per person: two people fill the two slots
@@ -225,7 +225,7 @@ func TestCraftNativeImportInitializeWaitsForAReadyImport(t *testing.T) {
 	release := make(chan struct{})
 	d.importer().convert = func(context.Context, []byte) (*craftsession.ImportResult, error) {
 		<-release
-		return okConvert(nil, nil)
+		return okConvert(context.Background(), nil)
 	}
 	defer close(release)
 	var started struct{ ID string }
@@ -265,7 +265,7 @@ func TestCraftNativeImportLimitsRunningConversionsPerPerson(t *testing.T) {
 	release := make(chan struct{})
 	d.importer().convert = func(context.Context, []byte) (*craftsession.ImportResult, error) {
 		<-release
-		return okConvert(nil, nil)
+		return okConvert(context.Background(), nil)
 	}
 	defer close(release)
 	importID(t, startImport(d, ctx, page, []byte("PK")))

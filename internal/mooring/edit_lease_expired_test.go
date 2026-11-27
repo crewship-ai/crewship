@@ -10,7 +10,7 @@ import (
 // than the TTL between its acquire and its apply keeps its generation. Taken by another editor, or
 // asked for by a person, it answers ErrEditLeaseExpired, which is still a stale lease to every
 // caller that only knows that.
-func TestEditLeaseRenewTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
+func TestEditLeaseRenewAgentTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
 	s, db, clock, scope, p := editLeaseFixture(t)
 	first, err := s.Acquire(t.Context(), scope, p)
 	if err != nil {
@@ -20,7 +20,7 @@ func TestEditLeaseRenewTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
 	if err = editWrite(t, s, db, first); !errors.Is(err, ErrEditLeaseStale) {
 		t.Fatalf("a write over an expired lease: %v", err)
 	}
-	renewed, err := s.Renew(t.Context(), first)
+	renewed, err := s.RenewAgent(t.Context(), first)
 	if err != nil || renewed.Generation != first.Generation || renewed.Holder != p {
 		t.Fatalf("renew of an expired lease nobody took: %+v %v", renewed, err)
 	}
@@ -35,7 +35,7 @@ func TestEditLeaseRenewTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Renew(t.Context(), renewed); !errors.Is(err, ErrEditLeaseExpired) || !errors.Is(err, ErrEditLeaseStale) {
+	if _, err = s.RenewAgent(t.Context(), renewed); !errors.Is(err, ErrEditLeaseExpired) || !errors.Is(err, ErrEditLeaseStale) {
 		t.Fatalf("renew of a lease taken since: %v", err)
 	}
 	if err = editWrite(t, s, db, next); err != nil {
@@ -47,7 +47,7 @@ func TestEditLeaseRenewTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.advance(time.Minute)
-	if _, err = s.Renew(t.Context(), next); !errors.Is(err, ErrEditLeaseExpired) {
+	if _, err = s.RenewAgent(t.Context(), next); !errors.Is(err, ErrEditLeaseExpired) {
 		t.Fatalf("renew of an expired lease a person asked for: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestEditLeaseRenewTakesBackAnExpiredLeaseNobodyTook(t *testing.T) {
 	if err = s.Release(t.Context(), third); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Renew(t.Context(), third); !errors.Is(err, ErrEditLeaseStale) || errors.Is(err, ErrEditLeaseExpired) {
+	if _, err = s.RenewAgent(t.Context(), third); !errors.Is(err, ErrEditLeaseStale) || errors.Is(err, ErrEditLeaseExpired) {
 		t.Fatalf("renew of a released lease: %v", err)
 	}
 }

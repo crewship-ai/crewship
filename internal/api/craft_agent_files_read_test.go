@@ -18,7 +18,7 @@ func TestAgentFileIsReadableWithoutTheChipButNotWritable(t *testing.T) {
 		t.Fatalf("the agent's own file is not readable: %s", text)
 	}
 	var source string
-	if err := s.f.rig.db.QueryRow(`SELECT json_extract(metadata,'$.source') FROM audit_logs WHERE action='artifact.sheet_read' AND entity_id='sheet-own' ORDER BY created_at DESC, id DESC LIMIT 1`).Scan(&source); err != nil || source != "agent_files" {
+	if err := s.f.rig.db.QueryRow(`SELECT json_extract(payload,'$.source') FROM journal_entries WHERE workspace_id=? AND entry_type=? AND json_extract(payload,'$.page_id')='sheet-own' AND entry_hash <> '' ORDER BY seq DESC LIMIT 1`, s.f.a.WorkspaceID, auditActionCraftSheetRead).Scan(&source); err != nil || source != "agent_files" {
 		t.Fatalf("the read is not audited as agent_files: %q %v", source, err)
 	}
 	if text, refused := s.toolCall(call, "craft_sheet_acquire", map[string]any{}); !refused || !strings.Contains(text, "agent edits") {

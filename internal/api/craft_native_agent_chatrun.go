@@ -3,14 +3,12 @@ package api
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/tsformat"
 	"io"
 	"log/slog"
 	"math"
@@ -22,6 +20,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/craftapps"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
@@ -687,17 +686,36 @@ func chatRunAgentFile(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority) 
 // auditChatRunAgentFileRead records a read of an agent file without the chip (source agent_files).
 // It carries no cell content.
 func (m *craftNativeAgentManager) auditChatRunAgentFileRead(ctx context.Context, e *craftNativeAgentEntry) {
-	meta, _ := json.Marshal(map[string]string{"source": "agent_files", "agent_id": e.grant.AgentID, "run_id": e.chat.authority.RunID})
-	id := make([]byte, 12)
-	_, _ = rand.Read(id)
-	if _, err := m.human.pages.db.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,'page',?,?,?)`,
-		"aud_"+hex.EncodeToString(id), e.grant.Scope.WorkspaceID, e.grant.Source.UserID, auditActionCraftSheetRead, e.grant.Scope.ArtifactID, string(meta), tsformat.Format(time.Now().UTC())); err != nil {
+	h := m.human.pages
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
 		slog.WarnContext(ctx, "craft agent file read audit", "error", err)
+		return
 	}
+	defer tx.Rollback()
+	notify, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+		WorkspaceID: e.grant.Scope.WorkspaceID,
+		Type:        auditActionCraftSheetRead,
+		ActorType:   journal.ActorUser,
+		ActorID:     e.grant.Source.UserID,
+		AgentID:     e.grant.AgentID,
+		Summary:     "Agent read an attached Sheet",
+		Payload: map[string]any{
+			"source": "agent_files", "agent_id": e.grant.AgentID, "run_id": e.chat.authority.RunID,
+			"page_id": e.grant.Scope.ArtifactID,
+		},
+	})
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "craft agent file read audit", "error", err)
+		return
+	}
+	notify()
 }
 
-// auditActionCraftSheetRead: an agent read a Sheet it was given without the chip (agent_files).
-const auditActionCraftSheetRead = "artifact.sheet_read"
+const auditActionCraftSheetRead journal.EntryType = "artifact.sheet_read"
 
 // craftNativeChatPrewarmRequest recognises the one request that is not a Sheet
 // operation: {"operation":"prewarm"} and nothing else.

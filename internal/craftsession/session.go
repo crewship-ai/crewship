@@ -627,7 +627,6 @@ func (s *Session) Snapshot(ctx context.Context) ([]byte, error) {
 	if json.Unmarshal(raw, &out) != nil || base64.StdEncoding.DecodedLen(len(out.Base64)) > MaxSnapshotBytes {
 		return nil, ErrRefused
 	}
-	raw = nil
 	var compact bytes.Buffer
 	if compactJSON(&compact, base64.NewDecoder(base64.StdEncoding, strings.NewReader(out.Base64))) != nil || !json.Valid(compact.Bytes()) {
 		return nil, ErrRefused

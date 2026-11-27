@@ -66,6 +66,8 @@ var responseShapeExclusions = map[string]string{
 		"(internal/api/pages_draft_key.go), so there is no backing struct to derive tags from. Each branch is closed " +
 		"(additionalProperties false) and requires its one field; TestLocalDraftKey* drive the real handler and " +
 		"cmd/gen-openapi schemas_local_draft_key_test.go checks both branches.",
+	"NativeCraftWorkbookImportDocument": "importDocument sends the pinned engine's workbook JSON bytes unchanged, with no host DTO. " +
+		"The schema describes the sheets array and sheet names while leaving engine-owned fields open.",
 	"StatusResponse": "five DELETE routes share it and one disagrees: DELETE /credentials/{id} writes " +
 		"{\"success\": true} where the schema says {\"status\": string} — wrong key and wrong type. " +
 		"Every writer is a map literal, so there are no tags to derive from either.",

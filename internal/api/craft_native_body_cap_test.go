@@ -93,7 +93,7 @@ func TestCraftNativeImportReadsALargeWorkbookWithinItsOwnLimit(t *testing.T) {
 		if len(data) != 50<<20 {
 			t.Errorf("the converter got %d bytes", len(data))
 		}
-		return okConvert(nil, nil)
+		return okConvert(context.Background(), nil)
 	})
 	_ = f
 	out := startImport(d, ctx, page, bytes.Repeat([]byte("x"), 50<<20))

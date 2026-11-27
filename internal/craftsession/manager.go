@@ -26,7 +26,7 @@ type Launcher func(ctx context.Context, dir string, engineArgs []string) (*craft
 // Config bounds a Manager.
 type Config struct {
 	Launch Launcher
-	// TempRoot holds one private directory per open document ("" = os.TempDir).
+	// TempRoot holds one private directory per open document ("" uses the system temp directory).
 	TempRoot string
 	// MaxSessions caps open documents at once (default 2). A document held
 	// open costs RSS: about 0.4 GiB for 200 000 cells, 2.3 GiB measured for a
@@ -79,9 +79,6 @@ func NewManager(cfg Config) *Manager {
 	}
 	if cfg.OpenTimeout <= 0 {
 		cfg.OpenTimeout = 3 * time.Minute
-	}
-	if cfg.TempRoot == "" {
-		cfg.TempRoot = os.TempDir()
 	}
 	if cfg.MaxSnapshots <= 0 {
 		cfg.MaxSnapshots = 1
