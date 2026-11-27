@@ -61,11 +61,15 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	enum := func(values ...string) map[string]any { return map[string]any{"type": "string", "enum": values} }
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	rangeName := ref("NativeCraftSheetRange")
+	presenceRanges := array(rangeName)
+	presenceRanges["maxItems"] = 64
+	mergeRanges := array(rangeName)
+	mergeRanges["maxItems"] = 2000
 	schemas["NativeCraftSheetRange"] = obj(map[string]any{"sheet": str(), "a1": str()}, "sheet", "a1")
 	schemas["NativeCraftSheetPresence"] = obj(map[string]any{
 		"op_id": str(), "run_id": str(),
 		"agent": obj(map[string]any{"id": str(), "name": str()}, "id", "name"),
-		"phase": enum("started", "updated", "ended"), "ranges": array(rangeName), "ttl_ms": nonnegative(),
+		"phase": enum("started", "updated", "ended"), "ranges": presenceRanges, "ttl_ms": nonnegative(),
 	}, "op_id", "run_id", "agent", "phase", "ranges", "ttl_ms")
 	schemas["NativeCraftSheetPresenceSnapshot"] = obj(map[string]any{"operations": array(ref("NativeCraftSheetPresence"))}, "operations")
 	schemas["NativeCraftMergedSheetSave"] = obj(map[string]any{
@@ -75,7 +79,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 			"content_hash": receipt["contentHash"],
 		}, "attempt_id", "base_version", "editor_revision", "content_hash"),
 		"receipt": ref("NativeCraftSnapshotReceipt"), "head_content_hash": receipt["contentHash"],
-		"bytes": bytes(), "overlap": array(rangeName), "agent_ranges": array(rangeName),
+		"bytes": bytes(), "overlap": mergeRanges, "agent_ranges": mergeRanges,
 	}, "kind", "submitted", "receipt", "head_content_hash", "bytes", "overlap", "agent_ranges")
 	jobID := map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
 	schemas["NativeCraftWorkbookImportUpload"] = map[string]any{"type": "string", "format": "binary", "description": "Raw .xlsx workbook, up to 64 MiB."}

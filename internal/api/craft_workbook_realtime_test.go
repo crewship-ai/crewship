@@ -469,3 +469,88 @@ func TestSheetITRealtimeRefusesUnknownEditsAndWriteAfterDetachment(t *testing.T)
 		t.Fatalf("detachment did not fence computed save: computed=%v head=%d code=%d response=%s", computed, s.head(), w.Code, w.Body)
 	}
 }
+
+func TestSheetITRealtimeReconcilesPlainUnchangedAndCanSaveAgain(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Look at this sheet", true)
+	editor := s.realtimeAdmission()
+	const attempt = "realtime-noop-unchanged"
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "1", s.v1, attempt, "", nil)
+	var first craftWorkbookSaveReceipt
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &first) != nil || !first.Unchanged ||
+		first.BaseVersion != "1" || first.Version != "1" || first.CandidateHash != craftContentHash(s.v1) {
+		t.Fatalf("plain unchanged save: %d %s", w.Code, w.Body)
+	}
+	originalReply := bytes.Clone(w.Body.Bytes())
+	cells := s.headSheets(editor.SessionToken)
+	cells["L"]["B2"] = "changed after recovering confirmation"
+	next := sitWorkbook(cells["L"], cells["Other"])
+	if status, _ := s.realtimeReconcile(editor, "1", attempt, next); status != 409 {
+		t.Fatalf("same attempt with a different hash: %d", status)
+	}
+	if status, _ := s.realtimeReconcile(editor, "1", "realtime-different-attempt", s.v1); status != 410 {
+		t.Fatalf("different attempt with identical original bytes: %d", status)
+	}
+	if status, got := s.realtimeReconcile(editor, "1", attempt, s.v1); status != 200 || !bytes.Equal(got, originalReply) {
+		t.Fatalf("lost unchanged reply: status %d exact %v", status, bytes.Equal(got, originalReply))
+	}
+	w = s.humanSaveWith(editor.SessionToken, editor.Generation, "1", next, "realtime-next-save", "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	if w.Code != 200 || s.head() != 2 || !bytes.Equal(s.stored(2), next) {
+		t.Fatalf("next save after recovered no-op: %d %s", w.Code, w.Body)
+	}
+	if status, got := s.realtimeReconcile(editor, "1", attempt, s.v1); status != 200 || !bytes.Equal(got, originalReply) {
+		t.Fatalf("original no-op after head advanced: status %d exact %v", status, bytes.Equal(got, originalReply))
+	}
+}
+
+func TestSheetITRealtimeCanMergeAcrossUndoInTheSameChat(t *testing.T) {
+	initial := sitInitialL()
+	initial["C2"] = "original C2"
+	s := newSheetITScenario(t, sitWorkbook(initial, sitInitialOther()))
+	s.send("Change C2", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	editor := s.realtimeAdmission()
+	got, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{
+		"generation": generation, "base_version": "1", "request_id": "realtime-C2",
+		"commands": sitCommands(sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "C2", "input": "agent C2"})),
+	})
+	var receipt struct {
+		Operation string `json:"operation_id"`
+	}
+	if refused || json.Unmarshal([]byte(got), &receipt) != nil || receipt.Operation == "" || s.head() != 2 {
+		t.Fatalf("agent write: %s", got)
+	}
+	cells := s.headSheets(editor.SessionToken)
+	cells["L"]["B2"] = "independent human edit"
+	submitted := sitWorkbook(cells["L"], cells["Other"])
+	if undo := s.undo(editor.SessionToken, editor.Generation, receipt.Operation); undo.Code != 201 || s.head() != 3 {
+		t.Fatalf("undo: %d %s", undo.Code, undo.Body)
+	}
+	w := s.humanSaveWith(editor.SessionToken, editor.Generation, "2", submitted, "realtime-after-undo", "", map[string]string{"X-Craft-Touched": `["'L'!B2"]`})
+	var merged craftRealtimeMerged
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.Kind != "merged" ||
+		merged.Receipt.Version != "4" || len(merged.AgentRanges) != 0 || len(merged.Overlap) != 0 {
+		t.Fatalf("merge over Undo in the same chat: %d %s", w.Code, w.Body)
+	}
+	head := s.headSheets(editor.SessionToken)["L"]
+	if head["B2"] != "independent human edit" || head["C2"] != "original C2" {
+		t.Fatalf("saved cell values B2=%q C2=%q", head["B2"], head["C2"])
+	}
+}
+
+func TestSheetITRealtimePresenceRangeLimit(t *testing.T) {
+	const wireLimit = 64
+	columns := make([]map[string]string, 0, wireLimit+1)
+	for i := 1; i <= wireLimit+1; i++ {
+		columns = append(columns, map[string]string{"sheet": "L", "range": "A" + strconv.Itoa(i)})
+	}
+	raw, err := json.Marshal(map[string]any{"result": map[string]any{"columns": columns}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranges := craftSheetPresenceResolved(raw)
+	if len(ranges) != wireLimit || ranges[wireLimit-1] != (craftSheetRange{"L", "A64"}) {
+		t.Fatalf("presence ranges at the wire limit: %d", len(ranges))
+	}
+}

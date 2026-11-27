@@ -537,7 +537,7 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 		var name string
 		_ = tx.QueryRowContext(ctx, `SELECT COALESCE(full_name,'') FROM users WHERE id=?`, user).Scan(&name)
 		if err := recordCraftVersionOps(ctx, tx, craftVersionOps{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: rc.Version, BaseVersion: state.LatestVersion,
-			ActorKind: "human", ActorID: user, ActorName: name, OperationID: "undo:" + operation, EnginePin: s.EnginePin(), Calculate: "calculated", Replayable: replayable, Ops: undoOps}); err != nil {
+			ActorKind: "human", ActorID: user, ActorName: name, ChatID: entry.chatID, OperationID: "undo:" + operation, EnginePin: s.EnginePin(), Calculate: "calculated", Replayable: replayable, Ops: undoOps}); err != nil {
 			return err
 		}
 		return recordUndo(ctx, tx, rc.Version)
