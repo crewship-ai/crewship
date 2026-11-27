@@ -5304,7 +5304,7 @@ index e7d36955..e6d34ad8 100644
  
  [dev-dependencies]
 diff --git a/crates/core/src/date.rs b/crates/core/src/date.rs
-index 606d3dac..8750ad6b 100644
+index c44e6396..3afb1317 100644
 --- a/crates/core/src/date.rs
 +++ b/crates/core/src/date.rs
 @@ -49,11 +49,11 @@ pub fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
@@ -5755,10 +5755,10 @@ index d6646743..2d255e2a 100644
      let d = s.doc()?;
      let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
 diff --git a/crates/engine/src/cmd/pivot/tests.rs b/crates/engine/src/cmd/pivot/tests.rs
-index 3c697f62..addee22a 100644
+index 5dfac1d2..f0fa15b9 100644
 --- a/crates/engine/src/cmd/pivot/tests.rs
 +++ b/crates/engine/src/cmd/pivot/tests.rs
-@@ -1583,3 +1583,44 @@ fn renaming_a_defined_name_leaves_a_table_source_on_its_table() {
+@@ -2087,3 +2087,44 @@ fn renaming_a_defined_name_leaves_a_table_source_on_its_table() {
      let gt = find_row(&s, "Grand Total").unwrap();
      assert_eq!(val(&s, &CellRef::new(gt, 1).a1()), Value::Number(72.0));
  }
@@ -5804,7 +5804,7 @@ index 3c697f62..addee22a 100644
 +    assert_eq!(read(&mut r)["values"][0], json!([1.0]));
 +}
 diff --git a/crates/engine/src/io.rs b/crates/engine/src/io.rs
-index 31c18366..6db093dd 100644
+index 17fe80e4..b578c968 100644
 --- a/crates/engine/src/io.rs
 +++ b/crates/engine/src/io.rs
 @@ -78,9 +78,24 @@ pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>
@@ -5842,7 +5842,7 @@ index 31c18366..6db093dd 100644
      warnings.insert(0, DECRYPTED_NOTICE.into());
      Ok((wb, warnings))
  }
-@@ -1003,10 +1018,10 @@ fn script_sandbox_check(path: &str) -> Result<()> {
+@@ -1010,10 +1025,10 @@ fn script_sandbox_check(path: &str) -> Result<()> {
  
  /// The largest native file the reader still touches: its own cap plus one, used to stop
  /// reads whose bytes arrive faster than metadata can claim (device files, growing files).
@@ -5855,7 +5855,7 @@ index 31c18366..6db093dd 100644
  pub fn read_file(path: &str) -> Result<Vec<u8>> {
      use std::io::Read;
      script_sandbox_check(path)?;
-@@ -1031,13 +1046,13 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
+@@ -1038,13 +1053,13 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
      Ok(buf)
  }
  
@@ -5871,7 +5871,7 @@ index 31c18366..6db093dd 100644
  pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
      use std::io::Write;
      script_sandbox_check(path)?;
-@@ -1121,14 +1136,14 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+@@ -1128,14 +1143,14 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
  /// Apple targets ENOTSUP (45, which std leaves uncategorized there), or an unsupported-operation
  /// error (EOPNOTSUPP/ENOSYS, and ENOTSUP where it equals EOPNOTSUPP). Any other error is a real
  /// failure.
@@ -5888,7 +5888,7 @@ index 31c18366..6db093dd 100644
  fn flush_unsupported_on(e: &std::io::Error, unix: bool, apple: bool) -> bool {
      let raw = e.raw_os_error();
      (unix && raw == Some(25)) || (apple && raw == Some(45)) || e.kind() == std::io::ErrorKind::Unsupported
-@@ -1141,7 +1156,7 @@ fn restored_mode(old: u32, group_kept: bool) -> u32 {
+@@ -1148,7 +1163,7 @@ fn restored_mode(old: u32, group_kept: bool) -> u32 {
      if group_kept { old & 0o7777 } else { old & 0o707 }
  }
  
@@ -6081,10 +6081,10 @@ index 52a0c648..76912d58 100644
              && let Some(d) = self.docs.iter_mut().find(|d| d.uid == uid)
              && !Arc::ptr_eq(&d.wb, &wb)
 diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
-index 85298224..eebcb0c1 100644
+index 098f714e..81ea0f4e 100644
 --- a/crates/engine/src/tests.rs
 +++ b/crates/engine/src/tests.rs
-@@ -8438,3 +8438,232 @@ fn a_refused_cut_paste_leaves_the_cut_to_paste_plainly() {
+@@ -8489,3 +8489,232 @@ fn a_refused_cut_paste_leaves_the_cut_to_paste_plainly() {
      s.execute("edit.paste", json!({})).unwrap();
      assert_eq!((v(&s, "E1"), v(&s, "C3"), v(&s, "D3")), (Value::Empty, Value::Number(1.0), Value::Number(2.0)));
  }
@@ -6350,10 +6350,10 @@ index 00000000..c408ac0d
 +    }
 +}
 diff --git a/crates/engine/tests/it/main.rs b/crates/engine/tests/it/main.rs
-index 11df0e9d..de2cfe76 100644
+index b538e473..fb9066a5 100644
 --- a/crates/engine/tests/it/main.rs
 +++ b/crates/engine/tests/it/main.rs
-@@ -21,12 +21,14 @@ mod ink_roundtrip;
+@@ -22,12 +22,14 @@ mod ink_roundtrip;
  mod line_count_overflow;
  mod long_operator_chains;
  mod merged_selection_keys;
@@ -6821,23 +6821,23 @@ index 33186bd2..bd2786da 100644
  }
  
 diff --git a/crates/model/src/features.rs b/crates/model/src/features.rs
-index 6de1ac50..cb4fba59 100644
+index bd29eb1d..a7c40995 100644
 --- a/crates/model/src/features.rs
 +++ b/crates/model/src/features.rs
 @@ -11,7 +11,7 @@ mod print;
  
  pub use pivot::{
      PIVOT_INDEXER, PivotCalcField, PivotDataCell, PivotDateGroup, PivotField, PivotFilter, PivotFunc, PivotIndexer, PivotItemRef, PivotLayout,
--    PivotLookup, PivotShowAs, PivotSort, PivotTable, PivotValue, pivot_key,
-+    PivotLookup, PivotOriginal, PivotOriginalCache, PivotOriginalParts, PivotShowAs, PivotSort, PivotTable, PivotValue, pivot_key,
+-    PivotLookup, PivotScopeItem, PivotShowAs, PivotSort, PivotTable, PivotValue, pivot_key,
++    PivotLookup, PivotOriginal, PivotOriginalCache, PivotOriginalParts, PivotScopeItem, PivotShowAs, PivotSort, PivotTable, PivotValue, pivot_key,
  };
  pub use print::{EditRange, HfPage, LineInfo, Orientation, PageOrder, PrintSettings, SheetProtection, password_hash};
  
 diff --git a/crates/model/src/features/pivot.rs b/crates/model/src/features/pivot.rs
-index 14bb6c15..7d59e4cf 100644
+index d64647b4..bb221e41 100644
 --- a/crates/model/src/features/pivot.rs
 +++ b/crates/model/src/features/pivot.rs
-@@ -147,6 +147,76 @@ pub struct PivotTable {
+@@ -211,6 +211,76 @@ pub struct PivotTable {
      /// Position of Σ Values among the row fields (`None` = after the last). Only used with
      /// `values_on_rows`: in Columns Σ Values always comes after the last column field.
      pub values_position: Option<usize>,
@@ -6914,7 +6914,7 @@ index 14bb6c15..7d59e4cf 100644
  }
  
  /// A calculated field: a formula over other fields (`=Sales*0.1`, `='Unit Price'*Units`). As in
-@@ -320,6 +390,8 @@ impl Default for PivotTable {
+@@ -391,6 +461,8 @@ impl Default for PivotTable {
              data_index: PivotLookup::default(),
              values_on_rows: false,
              values_position: None,
@@ -6924,7 +6924,7 @@ index 14bb6c15..7d59e4cf 100644
      }
  }
 diff --git a/crates/model/src/lib.rs b/crates/model/src/lib.rs
-index 14bf4c72..2b70946a 100644
+index 869d2df3..fd2f846c 100644
 --- a/crates/model/src/lib.rs
 +++ b/crates/model/src/lib.rs
 @@ -31,8 +31,9 @@ pub use style::{
@@ -7011,7 +7011,7 @@ index 2c6689ec..81cdbbe2 100644
              macros: crate::macros::Macros::default(),
              macros_read: vec![],
 diff --git a/crates/ui-egui/src/app.rs b/crates/ui-egui/src/app.rs
-index 894cc325..e82fc881 100644
+index e5480eb5..db879291 100644
 --- a/crates/ui-egui/src/app.rs
 +++ b/crates/ui-egui/src/app.rs
 @@ -11,6 +11,7 @@ use super::{
@@ -7974,7 +7974,7 @@ index 44b518ff..5635523f 100644
          .map(|c| (c.id.to_string(), c.label.to_string(), c.menu.join(" › "), c.shortcut_for_platform(mac)))
          .take(40)
 diff --git a/crates/ui-egui/src/dialogs/show.rs b/crates/ui-egui/src/dialogs/show.rs
-index 64e0096f..826aaa40 100644
+index d2f1f0bf..56a391c1 100644
 --- a/crates/ui-egui/src/dialogs/show.rs
 +++ b/crates/ui-egui/src/dialogs/show.rs
 @@ -144,6 +144,30 @@ fn command_error(app: &mut SheetApp, d: &mut Dialog, e: String) {
@@ -8407,7 +8407,7 @@ index 393ae68b..22ebfe60 100644
 +        )
 +}
 diff --git a/crates/ui-egui/src/grid/menus.rs b/crates/ui-egui/src/grid/menus.rs
-index c81a39ff..67a75653 100644
+index d832c2df..2bb837a9 100644
 --- a/crates/ui-egui/src/grid/menus.rs
 +++ b/crates/ui-egui/src/grid/menus.rs
 @@ -5,6 +5,10 @@ use super::{Arc, Drag, FillTag, RangeRef, Rect, Sense, Sheet, SheetApp, Stroke,
@@ -8421,7 +8421,7 @@ index c81a39ff..67a75653 100644
      let Some((col, row, at)) = app.grid.filter_menu else { return };
      let Some(d) = app.session.active() else { return };
      let wb = d.wb.clone();
-@@ -168,6 +172,9 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
+@@ -170,6 +174,9 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
              }
              let lang = crate::i18n::current(ui.ctx());
              for (label, id) in items {
@@ -8431,7 +8431,7 @@ index c81a39ff..67a75653 100644
                  if label == "-" {
                      ui.separator();
                      continue;
-@@ -547,6 +554,9 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
+@@ -553,6 +560,9 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
              }
              let lang = crate::i18n::current(ui.ctx());
              for (label, id) in items {
@@ -10043,7 +10043,7 @@ index 00000000..c8e7f941
 +    }
 +}
 diff --git a/crates/xlsx/src/lib.rs b/crates/xlsx/src/lib.rs
-index 29071cff..fd9086d1 100644
+index a1537533..ccca7278 100644
 --- a/crates/xlsx/src/lib.rs
 +++ b/crates/xlsx/src/lib.rs
 @@ -20,10 +20,12 @@ mod csv;
@@ -10083,10 +10083,10 @@ index 561dce41..6dbdc66f 100644
      }
 diff --git a/crates/xlsx/src/package_edit.rs b/crates/xlsx/src/package_edit.rs
 new file mode 100644
-index 00000000..7d9c9239
+index 00000000..732c9692
 --- /dev/null
 +++ b/crates/xlsx/src/package_edit.rs
-@@ -0,0 +1,650 @@
+@@ -0,0 +1,730 @@
 +//! Write cell edits into the exact OPC package from which they were made.
 +//! Nothing outside the edited cells is serialized from GridCraft's model.
 +
@@ -10114,6 +10114,10 @@ index 00000000..7d9c9239
 +const UNSUPPORTED: EditRefusal = EditRefusal { code: "package_edit" };
 +const PACKAGE: EditRefusal = EditRefusal { code: "package" };
 +const WORKSHEET: EditRefusal = EditRefusal { code: "worksheet" };
++const CALC_CHAIN: EditRefusal = EditRefusal { code: "calc_chain" };
++const CHAIN_PART: &str = "xl/calcChain.xml";
++const TYPES_PART: &str = "[Content_Types].xml";
++const WORKBOOK_RELS: &str = "xl/_rels/workbook.xml.rels";
 +
 +/// Preserve the source package, including its original names, relationships and
 +/// indices. Only support changes that can be proved to be ordinary cell edits.
@@ -10146,7 +10150,8 @@ index 00000000..7d9c9239
 +        return Err(UNSUPPORTED);
 +    }
 +
-+    let has_calc_chain = names.iter().any(|name| name.eq_ignore_ascii_case("xl/calcChain.xml"));
++    let chain = names.iter().find(|name| name.eq_ignore_ascii_case(CHAIN_PART));
++    let mut formula_changed = false;
 +    let sheets = sheet_parts(&mut package)?;
 +    let mut replacements = BTreeMap::new();
 +    for (old, new) in before.sheets.iter().zip(&after.sheets) {
@@ -10176,11 +10181,9 @@ index 00000000..7d9c9239
 +        if edits.is_empty() {
 +            continue;
 +        }
-+        if has_calc_chain
-+            && edits.values().any(|(old, new)| !same_formula(old.and_then(|c| c.formula.as_deref()), new.and_then(|c| c.formula.as_deref())))
-+        {
-+            return Err(UNSUPPORTED);
-+        }
++        formula_changed |= chain.is_some() && edits.values().any(|(old, new)| {
++            !same_formula(old.and_then(|c| c.formula.as_deref()), new.and_then(|c| c.formula.as_deref()))
++        });
 +        let part = sheets.get(&(old.file_id, old.name.clone())).ok_or(WORKSHEET)?;
 +        let data = package.read(part).map_err(|_| PACKAGE)?.ok_or(WORKSHEET)?;
 +        let updated = edit_sheet(&data, edits)?;
@@ -10190,6 +10193,13 @@ index 00000000..7d9c9239
 +    }
 +    if replacements.is_empty() {
 +        return Ok(source.to_vec());
++    }
++
++    if formula_changed {
++        if chain.is_some_and(|name| &name[..] != CHAIN_PART) {
++            return Err(CALC_CHAIN);
++        }
++        remove_calc_chain_declarations(&mut package, &mut replacements)?;
 +    }
 +
 +    let mut out = ZipWriter::new(Cursor::new(Vec::new()));
@@ -10204,6 +10214,9 @@ index 00000000..7d9c9239
 +        {
 +            return Err(PACKAGE);
 +        }
++        if formula_changed && name == CHAIN_PART {
++            continue;
++        }
 +        if let Some(data) = replacements.remove(&normalize(&name)) {
 +            let options = SimpleFileOptions::default().compression_method(file.compression());
 +            out.start_file(name, options).map_err(|_| PACKAGE)?;
@@ -10216,6 +10229,73 @@ index 00000000..7d9c9239
 +        return Err(WORKSHEET);
 +    }
 +    Ok(out.finish().map_err(|_| PACKAGE)?.into_inner())
++}
++
++// A formula edit invalidates Excel's calculation-order cache, which Excel can
++// regenerate. Remove its two declarations without reserializing any other XML.
++fn remove_calc_chain_declarations(package: &mut Package<'_>, replacements: &mut BTreeMap<String, Vec<u8>>) -> Result<()> {
++    let types = package.read_limited(TYPES_PART, 16 << 20).map_err(|_| CALC_CHAIN)?.ok_or(CALC_CHAIN)?;
++    let types = without_calc_declaration(
++        &types, b"Types", b"Override", "http://schemas.openxmlformats.org/package/2006/content-types",
++        |el| Ok(attr(el, b"PartName")?.as_deref() == Some("/xl/calcChain.xml")
++            && attr(el, b"ContentType")?.as_deref() == Some("application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml")),
++    )?;
++    let rels = package.read_limited(WORKBOOK_RELS, 16 << 20).map_err(|_| CALC_CHAIN)?.ok_or(CALC_CHAIN)?;
++    let rels = without_calc_declaration(
++        &rels, b"Relationships", b"Relationship", "http://schemas.openxmlformats.org/package/2006/relationships",
++        |el| Ok(matches!(attr(el, b"Target")?.as_deref(), Some("calcChain.xml" | "/xl/calcChain.xml"))
++            && attr(el, b"Type")?.as_deref() == Some("http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain")
++            && matches!(attr(el, b"TargetMode")?.as_deref(), None | Some("Internal"))),
++    )?;
++    replacements.insert(normalize(TYPES_PART), types);
++    replacements.insert(normalize(WORKBOOK_RELS), rels);
++    Ok(())
++}
++
++fn without_calc_declaration(
++    data: &[u8], root_name: &[u8], child_name: &[u8], namespace: &str,
++    matches: impl Fn(&BytesStart<'_>) -> Result<bool>,
++) -> Result<Vec<u8>> {
++    let mut root_seen = false;
++    let mut removed = None;
++    elements(data, |root| {
++        if root_seen || root.start.local_name().as_ref() != root_name {
++            return Err(CALC_CHAIN);
++        }
++        root_seen = true;
++        let name = root.start.name();
++        let mut xmlns = b"xmlns".to_vec();
++        let mut child = Vec::new();
++        if let Some(separator) = name.as_ref().iter().position(|&b| b == b':') {
++            let prefix = &name.as_ref()[..separator];
++            xmlns.push(b':');
++            xmlns.extend_from_slice(prefix);
++            child.extend_from_slice(prefix);
++            child.push(b':');
++        }
++        child.extend_from_slice(child_name);
++        if attr(&root.start, &xmlns)?.as_deref() != Some(namespace) {
++            return Err(CALC_CHAIN);
++        }
++        let body = root.body.ok_or(CALC_CHAIN)?;
++        elements(&data[body.clone()], |el| {
++            if el.start.name().as_ref() == child.as_slice() && matches(&el.start)? {
++                if removed.is_some()
++                    || el.body.as_ref().is_some_and(|span| !span.is_empty())
++                    || attr(&el.start, &xmlns)?.is_some_and(|value| value != namespace)
++                {
++                    return Err(CALC_CHAIN);
++                }
++                removed = Some(absolute(body.start, el.whole));
++            }
++            Ok(())
++        })
++    }).map_err(|_| CALC_CHAIN)?;
++    let range = removed.ok_or(CALC_CHAIN)?;
++    let mut result = Vec::with_capacity(data.len() - range.len());
++    result.extend_from_slice(&data[..range.start]);
++    result.extend_from_slice(&data[range.end..]);
++    Ok(result)
 +}
 +
 +fn same_formula(a: Option<&gridcraft_model::Formula>, b: Option<&gridcraft_model::Formula>) -> bool {
@@ -10738,23 +10818,24 @@ index 00000000..7d9c9239
 +    }
 +}
 diff --git a/crates/xlsx/src/pivot.rs b/crates/xlsx/src/pivot.rs
-index c16252ef..a965ce30 100644
+index a21c94e1..6e0778d0 100644
 --- a/crates/xlsx/src/pivot.rs
 +++ b/crates/xlsx/src/pivot.rs
-@@ -46,7 +46,7 @@ mod read;
+@@ -47,7 +47,8 @@ mod read;
  mod write;
  
  pub use read::{CachesIn, ExternalPivot, KeptSource, read_pivots};
 -pub use write::PivotWriter;
 +pub use write::{PivotWriter, record_source_digests};
- 
++
  pub const CT_PIVOT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml";
  pub const CT_PIVOT_CACHE_DEF: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml";
+ pub const CT_PIVOT_CACHE_REC: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml";
 diff --git a/crates/xlsx/src/pivot/read.rs b/crates/xlsx/src/pivot/read.rs
-index e887602b..dbfd3896 100644
+index 73bf94e2..7a32e441 100644
 --- a/crates/xlsx/src/pivot/read.rs
 +++ b/crates/xlsx/src/pivot/read.rs
-@@ -80,11 +80,33 @@ pub struct SheetPivots {
+@@ -78,11 +78,33 @@ pub struct SheetPivots {
  pub struct CachesIn {
      by_id: HashMap<u32, String>,
      parsed: HashMap<String, Option<CacheIn>>,
@@ -10788,7 +10869,7 @@ index e887602b..dbfd3896 100644
  impl CachesIn {
      pub fn new(wb_xml: &El, wb_rels: &[crate::package::Rel]) -> CachesIn {
          let mut by_id = HashMap::new();
-@@ -97,7 +119,7 @@ impl CachesIn {
+@@ -95,7 +117,7 @@ impl CachesIn {
                  }
              }
          }
@@ -10797,7 +10878,7 @@ index e887602b..dbfd3896 100644
      }
  
      /// Reads the ids of the workbook's data connections (`xl/connections.xml`), which caches on a
-@@ -273,8 +295,21 @@ pub fn read_pivots(cx: &mut Ctx<'_>, caches: &mut CachesIn, sheet_part: &str, sh
+@@ -274,8 +296,21 @@ pub fn read_pivots(cx: &mut Ctx<'_>, caches: &mut CachesIn, sheet_part: &str, sh
              out.external.push(ExternalPivot { rel_id: rel.id.clone(), cache_part, source });
              continue;
          }
@@ -10820,7 +10901,7 @@ index e887602b..dbfd3896 100644
              out.tables.push(pt);
          }
      }
-@@ -321,6 +356,7 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
+@@ -363,6 +398,7 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
          pt.name = format!("PivotTable{id}");
      }
      pt.source = cache.source.clone();
@@ -10829,7 +10910,7 @@ index e887602b..dbfd3896 100644
          cx.warn(format!("PivotTable \"{}\" has no valid location; kept as plain cells", pt.name));
          return None;
 diff --git a/crates/xlsx/src/pivot/write.rs b/crates/xlsx/src/pivot/write.rs
-index ab4a3222..cb316211 100644
+index 078b821e..61e2d8cc 100644
 --- a/crates/xlsx/src/pivot/write.rs
 +++ b/crates/xlsx/src/pivot/write.rs
 @@ -94,6 +94,9 @@ struct Cache {
@@ -10985,7 +11066,7 @@ index ab4a3222..cb316211 100644
      /// Adds the workbook relationships to the caches; returns the `<pivotCaches>` element (empty
      /// when there are none).
      pub fn workbook_xml(&self, wb_rels: &mut Rels) -> String {
-@@ -189,15 +283,22 @@ impl PivotWriter {
+@@ -189,14 +283,23 @@ impl PivotWriter {
      /// Number formats used by value fields (to be registered in the styles part).
      pub fn number_formats(&self, wb: &Workbook) -> Vec<String> {
          let mut v = Vec::new();
@@ -11005,18 +11086,17 @@ index ab4a3222..cb316211 100644
 +        }
 +        for p in self.pending.iter().filter(|p| p.cache.is_some()) {
              if let Some(pt) = wb.sheet(p.sheet).and_then(|s| s.pivots.get(p.idx)) {
--                for val in &pt.values {
--                    if let Some(f) = &val.number_format
--                        && !v.contains(f)
--                    {
+                 let fields = pt.rows.iter().chain(pt.columns.iter()).filter_map(|f| f.number_format.as_ref());
+-                for f in pt.values.iter().filter_map(|v| v.number_format.as_ref()).chain(fields) {
+-                    if !v.contains(f) {
 -                        v.push(f.clone());
 -                    }
 -                }
-+                pt.values.iter().filter_map(|val| val.number_format.as_ref()).for_each(&mut add);
++                pt.values.iter().filter_map(|value| value.number_format.as_ref()).chain(fields).for_each(&mut add);
              }
          }
          v
-@@ -205,14 +306,153 @@ impl PivotWriter {
+@@ -204,14 +307,153 @@ impl PivotWriter {
  
      /// Writes the PivotTable parts. `fmt_id` maps a number format code to its styles id.
      pub fn finish(self, wb: &Workbook, out: &mut Out, fmt_id: &dyn Fn(&str) -> Option<u32>) {
@@ -11171,7 +11251,7 @@ index ab4a3222..cb316211 100644
  /// Resolves a pivot source to (sheet, range including the header row, worksheetSource XML).
  fn resolve_source(wb: &Workbook, text: &str, default_sheet: usize, depth: u32) -> Option<(usize, RangeRef, String)> {
      let t = text.trim().trim_start_matches('=').trim();
-@@ -272,13 +512,26 @@ fn header_text(v: &Value) -> String {
+@@ -271,13 +513,26 @@ fn header_text(v: &Value) -> String {
      }
  }
  
@@ -11199,7 +11279,7 @@ index ab4a3222..cb316211 100644
          if h.is_empty() {
              h = format!("Column{}", k + 1);
          }
-@@ -301,7 +554,7 @@ fn cache_fields(sh: &gridcraft_model::Sheet, r: RangeRef) -> Vec<CField> {
+@@ -300,7 +555,7 @@ fn cache_fields(sh: &gridcraft_model::Sheet, r: RangeRef) -> Vec<CField> {
              formula: None,
          });
      }
@@ -11208,7 +11288,7 @@ index ab4a3222..cb316211 100644
  }
  
  fn group_cache_fields(fields: &mut Vec<CField>, axis: &[&PivotField], date_system: DateSystem) {
-@@ -383,7 +636,7 @@ fn build_cache(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Option<Cac
+@@ -382,7 +637,7 @@ fn build_cache(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Option<Cac
          return None;
      }
      let sh = wb.sheet(si)?;
@@ -11217,7 +11297,7 @@ index ab4a3222..cb316211 100644
      let find = |fields: &[CField], name: &str| fields.iter().position(|f| f.col.is_some() && same(&f.name, name));
  
      // Records (rows that aren't entirely blank), read once.
-@@ -500,7 +753,7 @@ fn build_cache(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Option<Cac
+@@ -499,7 +754,7 @@ fn build_cache(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Option<Cac
              formula: Some(f.to_string()),
          });
      }
@@ -11227,10 +11307,10 @@ index ab4a3222..cb316211 100644
  
  fn group_items(sys: DateSystem, by: PivotDateGroup, start: f64, end: f64) -> Vec<String> {
 diff --git a/crates/xlsx/src/read.rs b/crates/xlsx/src/read.rs
-index 901ef885..8dd0c231 100644
+index b52cbe5b..9500261b 100644
 --- a/crates/xlsx/src/read.rs
 +++ b/crates/xlsx/src/read.rs
-@@ -307,6 +307,30 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
+@@ -315,6 +315,30 @@ fn read_workbook_properties(cx: &mut Ctx<'_>, wb: &mut Workbook, xml: &El) {
  
  /// The single window modelled by GridCraft: prefer the first visible window,
  /// including the format's default visibility, and otherwise retain the first one.
@@ -11261,7 +11341,7 @@ index 901ef885..8dd0c231 100644
  fn selected_workbook_view(workbook: &El) -> Option<&El> {
      let views = workbook.child("bookViews")?;
      views.kids("workbookView").find(|view| view.attr("visibility").unwrap_or("visible") == "visible").or_else(|| views.child("workbookView"))
-@@ -537,17 +561,8 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
+@@ -551,17 +575,8 @@ pub fn read_xlsx<'a>(bytes: &'a [u8], opts: crate::ReadOptions<'a>) -> Result<(W
  
      // A VBA project is carried through unchanged: GridCraft never runs macros, but preserving the
      // binary keeps macro-enabled workbooks from being silently stripped on save.
@@ -11282,10 +11362,10 @@ index 901ef885..8dd0c231 100644
      if let Some(w) = cx.python.warning() {
          cx.warn(w);
 diff --git a/crates/xlsx/src/tests/pivot_tests.rs b/crates/xlsx/src/tests/pivot_tests.rs
-index fda2375c..2c405ee7 100644
+index 3ebb5c30..8d8574b5 100644
 --- a/crates/xlsx/src/tests/pivot_tests.rs
 +++ b/crates/xlsx/src/tests/pivot_tests.rs
-@@ -119,6 +119,8 @@ fn workbook() -> Workbook {
+@@ -138,6 +138,8 @@ fn workbook() -> Workbook {
          data_index: Default::default(),
          values_on_rows: false,
          values_position: None,
@@ -11294,16 +11374,7 @@ index fda2375c..2c405ee7 100644
      };
      // Pivot 2: table source, date grouping on two levels, show-values-as, multi-select page
      // filter and a hidden-items filter on a column field.
-@@ -180,6 +182,8 @@ fn workbook() -> Workbook {
-         data_index: Default::default(),
-         values_on_rows: false,
-         values_position: None,
-+        cache_field_names: vec![],
-+        original: PivotOriginal::default(),
-     };
-     // Pivot 3: defaults, defined-name source, compact.
-     let p3 = PivotTable {
-@@ -203,6 +207,12 @@ fn workbook() -> Workbook {
+@@ -225,6 +227,12 @@ fn workbook() -> Workbook {
      wb
  }
  
@@ -11316,7 +11387,7 @@ index fda2375c..2c405ee7 100644
  fn unzip(bytes: &[u8]) -> HashMap<String, Vec<u8>> {
      let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
      let mut m = HashMap::new();
-@@ -222,7 +232,7 @@ fn pivots_round_trip() {
+@@ -244,7 +252,7 @@ fn pivots_round_trip() {
      let (back, report) = read_xlsx(&bytes).unwrap();
      assert!(report.warnings.iter().all(|w| !w.to_lowercase().contains("pivot")), "{:?}", report.warnings);
      let orig = &wb.sheet(1).unwrap().pivots;
@@ -11325,7 +11396,7 @@ index fda2375c..2c405ee7 100644
      assert_eq!(read.len(), 3);
      for (a, b) in orig.iter().zip(read.iter()) {
          assert_eq!(a, b, "pivot {} differs", a.name);
-@@ -233,7 +243,7 @@ fn pivots_round_trip() {
+@@ -255,7 +263,7 @@ fn pivots_round_trip() {
      assert_eq!(s.value(at("A5")), Value::text("East"));
      // A second trip is stable.
      let (again, _) = read_xlsx(&write_xlsx(&back).unwrap()).unwrap();
@@ -11334,7 +11405,7 @@ index fda2375c..2c405ee7 100644
  }
  
  #[test]
-@@ -659,7 +669,7 @@ fn calculated_fields_round_trip() {
+@@ -686,7 +694,7 @@ fn calculated_fields_round_trip() {
      let (back, report) = read_xlsx(&bytes).unwrap();
      assert!(report.warnings.iter().all(|w| !w.to_lowercase().contains("pivot")), "{:?}", report.warnings);
      let orig = &wb.sheet(1).unwrap().pivots;
@@ -11343,7 +11414,7 @@ index fda2375c..2c405ee7 100644
      for (a, b) in orig.iter().zip(read.iter()) {
          assert_eq!(a, b, "pivot {} differs", a.name);
      }
-@@ -692,7 +702,7 @@ fn values_on_rows_round_trip() {
+@@ -719,7 +727,7 @@ fn values_on_rows_round_trip() {
      assert!(t2.contains("firstDataRow=\"2\" firstDataCol=\"3\""), "{t2}");
      let (back, report) = read_xlsx(&bytes).unwrap();
      assert!(report.warnings.iter().all(|w| !w.to_lowercase().contains("pivot")), "{:?}", report.warnings);
@@ -11352,7 +11423,7 @@ index fda2375c..2c405ee7 100644
  
      // After the last row field.
      wb.sheet_mut(1).unwrap().pivots[1].values_position = None;
-@@ -700,7 +710,7 @@ fn values_on_rows_round_trip() {
+@@ -727,7 +735,7 @@ fn values_on_rows_round_trip() {
      let t2 = String::from_utf8(unzip(&bytes).get("xl/pivotTables/pivotTable2.xml").unwrap().clone()).unwrap();
      assert_eq!(axis_xs(&t2, "rowFields").last(), Some(&-2), "{t2}");
      let (back, _) = read_xlsx(&bytes).unwrap();
@@ -11361,7 +11432,7 @@ index fda2375c..2c405ee7 100644
  
      // Σ Values in Columns is written after the last column field, its only place in the layout.
      {
-@@ -943,3 +953,218 @@ fn count_without_the_gridcraft_extension_reads_as_count() {
+@@ -1031,3 +1039,218 @@ fn count_without_the_gridcraft_extension_reads_as_count() {
      assert_eq!(func(&marked("")), PivotFunc::Sum);
      assert_eq!(func(&marked(" subtotal=\"max\"")), PivotFunc::Max);
  }
@@ -11581,10 +11652,10 @@ index fda2375c..2c405ee7 100644
 +    assert_eq!(as_written(&back.sheet(1).unwrap().pivots), as_written(&wb.sheet(1).unwrap().pivots));
 +}
 diff --git a/crates/xlsx/src/tests/roundtrip.rs b/crates/xlsx/src/tests/roundtrip.rs
-index d810f3b6..a25cd2d4 100644
+index e61bf5e9..7c02a558 100644
 --- a/crates/xlsx/src/tests/roundtrip.rs
 +++ b/crates/xlsx/src/tests/roundtrip.rs
-@@ -2543,3 +2543,79 @@ fn issue_778_full_workbook_import_save_reopen_roundtrip() {
+@@ -2549,3 +2549,79 @@ fn issue_778_full_workbook_import_save_reopen_roundtrip() {
      let out_chart = read_part("xl/charts/chart1.xml");
      assert!(out_chart.contains("<c:numCache>") && out_chart.contains("<c:v>42.5</c:v>"), "{out_chart}");
  }
