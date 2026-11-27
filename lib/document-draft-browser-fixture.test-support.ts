@@ -2,7 +2,9 @@ export const documentDraftBrowserFixture = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';import {createPortal} from 'react-dom';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-import {AuthProvider,useAuth} from '@/hooks/use-auth';
+import {AuthProvider,useAuth,sessionEndDraftRetry} from '@/hooks/use-auth';
+// Storage here fails on purpose and keeps failing: the session end's retries stay short so the overlay shows in time.
+sessionEndDraftRetry.delaysMs=[1,1,1];
 import {AUTH_EVENT} from '@/lib/api-fetch';
 import {usePageDocument} from '@/hooks/use-page-document';
 import {documentSchema} from '@/lib/documents/schema';

@@ -1,11 +1,11 @@
 "use client"
 
-import { ARTIFACT_CREW_NOT_ALLOWED, ARTIFACT_CREW_NOT_ALLOWED_MESSAGE } from "@/lib/artifact-refusal"
+import { ARTIFACT_CREW_NOT_ALLOWED, ARTIFACT_CREW_NOT_ALLOWED_MESSAGE, BUSY_NOT_SENT_MESSAGE, SEND_REFUSED, SEND_REFUSED_BUSY } from "@/lib/artifact-refusal"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
-import { AlertTriangle, FilePlus2, X } from "lucide-react"
+import { AlertTriangle, X } from "lucide-react"
 import { NewArtifactMenu } from "../artifact-context/new-artifact/new-artifact-menu"
 import { availableArtifactKinds } from "../artifact-context/new-artifact/new-artifact-kinds"
-import { chatArtifactProjects } from "@/lib/feature-flags"
+import { isWorkbookName } from "../artifact-context/sheet/workbook-file"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -49,7 +49,8 @@ interface ChatComposerProps {
   artifactCreationEnabled?: boolean
   /** A send the server refused for a typed reason. A new `id` restores the last
    *  typed message and shows the specific reason instead of a generic failure. */
-  sendRefusal?: { id: number; code: string } | null
+  /** A send the server refused without saving it: the code, and the server's words for it. */
+  sendRefusal?: { id: number; code: string; message?: string } | null
   /** "desktop" wraps the input in AttachmentZone + mention autocomplete +
    *  attachment button; "mobile" renders the bare input, matching the two
    *  historical branches of ChatPanel. */
@@ -188,13 +189,16 @@ export function ChatComposer({
   const createDocument = canCreateDocument && creationSelection === creationScope
   const createArtifact = canCreateArtifact && creationSelection === artifactScope
   const creationPacket = useRef<{ scope: string; content: string; submissionId: string } | null>(null)
+  const [projectWithdrawn, setProjectWithdrawn] = useState(false)
   // Consent is ephemeral and belongs to one identity and conversation. It is
   // neither a persisted composer draft nor a preference for future messages.
   useEffect(() => {
     setCreationSelection(null)
     creationPacket.current = null
   }, [creationScope, canCreateDocument, canCreateArtifact])
-  const lastSent = useRef<{ scope: string; text: string } | null>(null)
+  const lastSent = useRef<{ scope: string; text: string; attachments: { key: string; items: ComposerAttachment[] } } | null>(null)
+  // The files the last send took from the composer, by the store key they came from (given back on a refusal).
+  const sentAttachments = useRef<{ key: string; items: ComposerAttachment[] }>({ key: "", items: [] })
   const handledRefusal = useRef(sendRefusal?.id ?? 0)
   const [refusalNotice, setRefusalNotice] = useState<string | null>(null)
   const restoreInput = () => {
@@ -216,9 +220,17 @@ export function ChatComposer({
   useEffect(() => {
     if (!sendRefusal || sendRefusal.id === handledRefusal.current) return
     handledRefusal.current = sendRefusal.id
-    if (sendRefusal.code !== ARTIFACT_CREW_NOT_ALLOWED) return
+    if (sendRefusal.code !== ARTIFACT_CREW_NOT_ALLOWED && sendRefusal.code !== SEND_REFUSED_BUSY && sendRefusal.code !== SEND_REFUSED) return
     const sent = lastSent.current
     if (sent && sent.scope === inputScope && !input.trim()) updateInput(sent.text)
+    // The files that went with it come back too, unless the person already added others.
+    const files = sent?.scope === inputScope ? sent.attachments : undefined
+    if (files && files.items.length > 0) {
+      const store = useComposerStore.getState()
+      if (!(store.attachments[files.key] ?? []).some(a => !a.owner)) store.addAttachments(files.key, files.items)
+    }
+    if (sendRefusal.code === SEND_REFUSED_BUSY) { setRefusalNotice(BUSY_NOT_SENT_MESSAGE); return }
+    if (sendRefusal.code === SEND_REFUSED) { setRefusalNotice(`Not sent: ${sendRefusal.message ?? "the server did not accept it."} Your message is back here.`); return }
     setCreationSelection(null)
     creationPacket.current = null
     setRefusalNotice(ARTIFACT_CREW_NOT_ALLOWED_MESSAGE)
@@ -285,6 +297,13 @@ export function ChatComposer({
   const sentRef = useRef(false)
 
   const unattached = unattachedAttachments(sessionAttachments)
+  // A workbook opens as a Sheet beside the chat: it never starts an HTML artifact project, so a picked project is withdrawn.
+  const carriesWorkbook = sessionAttachments.some(a => a.status !== "error" && a.status !== "cancelled" && isWorkbookName(a.name))
+  useEffect(() => {
+    if (!carriesWorkbook || !createArtifact) return
+    setCreationSelection(null); creationPacket.current = null; setProjectWithdrawn(true)
+  }, [carriesWorkbook, createArtifact])
+  useEffect(() => { if (!carriesWorkbook) setProjectWithdrawn(false) }, [carriesWorkbook])
   const sendBlocked = !isStreaming && (waitingForSignIn || unattached.length > 0)
   const blockReasonId = `${useId()}-send-block`
   const shown = unattached.slice(0, 2)
@@ -354,6 +373,7 @@ export function ChatComposer({
   // The typed text belongs to the typed path alone — see handleTypedSubmit.
   const handleSent = useCallback(() => {
     sentRef.current = true
+    sentAttachments.current = { key: attachmentKey, items: (useComposerStore.getState().attachments[attachmentKey] ?? []).filter(a => !a.owner) }
     clearAttachments(attachmentKey)
     onSent?.()
   }, [clearAttachments, attachmentKey, onSent])
@@ -384,6 +404,7 @@ export function ChatComposer({
   const handleTypedSubmit = useCallback(
     async (message: SubmittedMessage) => {
       sentRef.current = false
+      sentAttachments.current = { key: "", items: [] }
       // Enter in the textarea lands here; answer it instead of returning silently.
       // Rejecting makes PromptInput skip its own clearing of the text; a
       // plain return would be treated as a completed send and empty the box.
@@ -404,7 +425,7 @@ export function ChatComposer({
       }
       await handleSubmit(outgoing)
       if (!sentRef.current) return
-      lastSent.current = { scope: inputScope, text: message.text }
+      lastSent.current = { scope: inputScope, text: message.text, attachments: sentAttachments.current }
       setRefusalNotice(null)
       setCreationSelection(null)
       creationPacket.current = null
@@ -550,28 +571,11 @@ export function ChatComposer({
       }
     : {}
   const refusalAlert = refusalNotice ? <p role="alert" className="px-1 pt-1 text-xs text-destructive">{refusalNotice}</p> : null
-  const artifactCreationControl = canCreateArtifact ? (
-    <>
-      <Button
-        type="button"
-        variant={createArtifact ? "secondary" : "ghost"}
-        size="sm"
-        aria-label="Create artifact project"
-        aria-pressed={createArtifact}
-        disabled={isStreaming || !canSend}
-        className="coarse:min-h-[44px]"
-        onClick={() => {
-          setCreationSelection(createArtifact ? null : artifactScope)
-          creationPacket.current = null
-        }}
-      >Create artifact project</Button>
-      {createArtifact && <span role="status" className="text-xs text-muted-foreground">Private project · Sharing requires your approval</span>}
-    </>
-  ) : null
   // "+" › New artifact lists only kinds with a backend. Picking one sets the
   // same explicit creation intent the toggle buttons set, so a starter never
   // reaches an agent without consent to create it.
-  const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: canCreateArtifact, documents: canCreateDocument }) : []
+  // No text toggle beside the paperclip, with or without the projects flag; a kind is picked here and shows as a chip.
+  const newArtifactKinds = availableArtifactKinds({ projects: canCreateArtifact, documents: canCreateDocument })
   const newArtifactMenu = <NewArtifactMenu kinds={newArtifactKinds} disabled={isStreaming || !canSend} onPick={(kind, prompt) => {
     if (kind === "word") { setCreationSelection(creationScope); creationPacket.current = null }
     if (kind === "project") { setCreationSelection(artifactScope); creationPacket.current = null }
@@ -591,29 +595,8 @@ export function ChatComposer({
       <span role="status" className="truncate text-xs text-muted-foreground">{createArtifact ? "Private project · Sharing requires your approval" : "My space · You and workspace OWNER (audited access)"}</span>
     </span>
   ) : null
-  const creationControl = canCreateDocument ? (
-    <>
-    <Button
-      type="button"
-      variant={createDocument ? "secondary" : "ghost"}
-      size="sm"
-      aria-label="Create document"
-      aria-pressed={createDocument}
-      title="Create document / Vytvořit dokument"
-      disabled={isStreaming || !canSend}
-      className="coarse:min-h-[44px]"
-      onClick={() => {
-        setCreationSelection(createDocument ? null : creationScope)
-        creationPacket.current = null
-      }}
-    >
-      <FilePlus2 className="size-4" aria-hidden="true" />
-      Create document
-    </Button>
-    {createDocument && <span role="status" className="text-xs text-muted-foreground">My space · You and workspace OWNER (audited access)</span>}
-    </>
-  ) : null
-  const creationControls = newArtifactKinds.length > 0 ? <>{newArtifactMenu}{pickedKindChip}</> : <>{creationControl}{artifactCreationControl}</>
+  const withdrawnNotice = projectWithdrawn ? <span role="status" className="text-xs text-muted-foreground">A workbook opens as a Sheet, so no artifact project is started.</span> : null
+  const creationControls = newArtifactKinds.length > 0 ? <>{newArtifactMenu}{pickedKindChip}{withdrawnNotice}</> : withdrawnNotice
 
   if (variant === "mobile") {
     // The mobile branch used to be a bare input: no attachments at all, so a
@@ -643,6 +626,7 @@ export function ChatComposer({
               value={input}
               onChange={(e) => updateInput(e.target.value)}
               placeholder={placeholder}
+              data-chat-composer-input=""
               className="min-h-[44px] [@media(max-height:640px)]:max-h-[18dvh]"
             />
             <PromptInputFooter className="justify-between p-2 gap-2">
@@ -677,6 +661,7 @@ export function ChatComposer({
             value={input}
             onChange={(e) => updateInput(e.target.value)}
             placeholder={placeholder}
+            data-chat-composer-input=""
             className="min-h-[44px]"
           />
           <PromptInputFooter className="justify-between p-2 gap-2">

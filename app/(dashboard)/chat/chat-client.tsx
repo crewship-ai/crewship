@@ -1,5 +1,6 @@
 "use client"
 
+import { useFoldWhile } from "@/hooks/use-fold-while"
 import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
 import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -209,18 +210,9 @@ function ChatClientBody() {
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const artifactFocus = useArtifactStore((s) => s.open && s.focus)
   const [pickerSignal, setPickerSignal] = useState(0)
-  const leftCollapsedRef = useRef(leftCollapsed)
-  useEffect(() => { leftCollapsedRef.current = leftCollapsed }, [leftCollapsed])
-  const beforeArtifactFocusFold = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (artifactFocus && beforeArtifactFocusFold.current === null) {
-      beforeArtifactFocusFold.current = leftCollapsedRef.current
-      setLeftCollapsed(true)
-    } else if (!artifactFocus && beforeArtifactFocusFold.current !== null) {
-      setLeftCollapsed(beforeArtifactFocusFold.current)
-      beforeArtifactFocusFold.current = null
-    }
-  }, [artifactFocus])
+  // An artifact in focus or an expanded Sheet takes the surface: the list folds meanwhile and comes back as it was.
+  const [sheetExpanded, setSheetExpanded] = useState(false)
+  useFoldWhile(artifactFocus || sheetExpanded, leftCollapsed, setLeftCollapsed)
   const tree = useChatTreeData<ChatClientAgent>({
     ensureSlug: pathAgentSlug,
     kind: scopeKindParam(scope),
@@ -518,7 +510,7 @@ function ChatClientBody() {
   const autoTitledRef = useRef<Set<string>>(new Set())
   const attachmentPrefix = useAttachmentScopePrefix()
   const autoTitleSession = useCallback(
-    (sid: string, text: string) => {
+    (sid: string, text: string, names?: string[]) => {
       if (!agent || !workspaceId || !sid) return
       if (autoTitledRef.current.has(sid)) return
       const existing = (threadsRef.current[agent.id] ?? []).find((t) => t.id === sid)
@@ -527,7 +519,7 @@ function ChatClientBody() {
       // in the store at onSend time — the composer clears them one step later,
       // on onSent. Only consulted when the text says nothing usable, which is
       // the "here, look at this" message whose whole content is a file name.
-      const attachmentNames = (useComposerStore.getState().attachments[attachmentPrefix + sid] ?? []).map((a) => a.name)
+      const attachmentNames = names ?? (useComposerStore.getState().attachments[attachmentPrefix + sid] ?? []).map((a) => a.name)
       const title = deriveSessionTitle({ text, attachmentNames })
       // An untitled session reads worse than a good name and better than "…".
       if (!title) return
@@ -562,6 +554,9 @@ function ChatClientBody() {
   // Drafts whose first send has gone out: their row exists from then on, even
   // before the fan-out lists it, so returning to one must load it like any chat.
   const sentDraftsRef = useRef<Set<string>>(new Set())
+
+  // A workbook opened as a Sheet names an untitled chat: its attachment chip is gone by the first send.
+  const handleSheetFromFile = useCallback((sid: string, fileName: string) => autoTitleSession(sid, "", [fileName]), [autoTitleSession])
 
   const handleSend = useCallback(
     (sid: string, text: string) => {
@@ -864,6 +859,8 @@ function ChatClientBody() {
           onMobilePanelChange={setMobilePanel}
           onNewConversation={() => startConversation(agent)}
           onSend={handleSend}
+          onSheetFromFile={handleSheetFromFile}
+          onSheetExpandedChange={setSheetExpanded}
           onReplySettled={handleReplySettled}
         />
       </ChatAgentProvider>

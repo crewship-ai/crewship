@@ -1,5 +1,6 @@
 "use client"
 
+import { OutputSheetOffer } from "../artifact-context/sheet/output-sheet-offer"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FileCode2, FileImage, FileSpreadsheet, FileText, RefreshCw } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
@@ -11,6 +12,7 @@ import { relativeToAgent } from "../files/file-scope"
 import { isClientArtifactPath } from "../artifact/artifact-scope"
 import type { FileEntry } from "../chat-tree-row"
 import { ChatDocumentAccess } from "./chat-document-access"
+import { ChatSheets } from "./chat-sheets"
 
 function extension(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? ""
@@ -87,6 +89,7 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
     .map((file) => [file.path, file] as const)).values()]
 
   return <div className="p-3 text-xs">
+    {workspaceId && chatId && viewerId && <ChatSheets workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} />}
     {workspaceId && chatId && viewerId && <ChatDocumentAccess workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} />}
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="eyebrow">Output files <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
@@ -99,10 +102,10 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug, cha
         const ext = extension(file.name)
         const Icon = ext === "csv" || ext === "tsv" || ext === "xlsx" || ext === "xls" ? FileSpreadsheet : ext === "html" || ext === "htm" ? FileCode2 : ["png", "jpg", "jpeg", "webp"].includes(ext) ? FileImage : FileText
         return <li key={file.path}><button type="button" aria-current={activeId === `${agentId}:${file.path}` ? "true" : undefined} className={cn("lift flex w-full items-start gap-2 rounded-xl border border-border bg-card p-2.5 text-left", activeId === `${agentId}:${file.path}` && "border-primary/50 bg-primary/10")} onClick={() => openArtifact({ id: `${agentId}:${file.path}`, agentId, path: file.path, title: file.name })}>
-          <Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+          <Icon className={cn("mt-0.5 size-4 shrink-0", ext === "xlsx" || ext === "xlsm" ? "text-sheet" : "text-primary")} aria-hidden />
           <span className="min-w-0 flex-1"><span className="block truncate font-medium">{file.name}</span><span className="block truncate text-[10px] text-muted-foreground">{fileKind(ext)}{typeof file.size === "number" && ` · ${fileSize(file.size)}`} · Origin unknown</span></span>
           <span className="rounded border border-border px-1 py-0.5 font-mono text-[9px] uppercase text-muted-foreground">{ext}</span>
-        </button></li>
+        </button>{workspaceId && ext === "xlsx" && <div className="mt-1 pl-2"><OutputSheetOffer workspaceId={workspaceId} agentId={agentId} path={file.path} chatId={chatId} viewerId={viewerId} /></div>}</li>
       })}</ul>}
   </div>
 }

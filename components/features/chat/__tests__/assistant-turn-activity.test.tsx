@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import React from "react"
-import { render, screen, cleanup, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
 // AssistantTurn leans on heavy ai-elements components (motion/react inside
@@ -93,110 +93,270 @@ const turn = (parts: TurnPart[], isStreaming = false): ChatTurn => ({
 const call = (id: string, extra: Record<string, unknown> = {}) =>
   part("tool_call", { tool_id: id, tool_name: "Bash", input: { command: "ls" }, ...extra }, "Bash")
 const result = (id: string, extra: Record<string, unknown> = {}) => part("tool_result", { tool_id: id, ...extra }, "")
-const renderTurn = (t: ChatTurn) =>
-  render(<AssistantTurn turn={t} onCopy={async () => true} onFileClick={() => {}} />)
+const renderTurn = (t: ChatTurn, onCopy: (s: string) => Promise<boolean> = async () => true) =>
+  render(<AssistantTurn turn={t} onCopy={onCopy} onFileClick={() => {}} />)
 
-describe("CH-04 grouped activity", () => {
+// The turn's one activity line, and the steps behind it.
+const activity = (c: HTMLElement) => c.querySelector("[data-testid='turn-activity']") as HTMLElement
+const activityButton = (c: HTMLElement) => activity(c).querySelector("button[data-activity-tone]") as HTMLButtonElement
+const tone = (c: HTMLElement) => activityButton(c).getAttribute("data-activity-tone")
+const openSteps = (c: HTMLElement) => { fireEvent.click(activityButton(c)); return screen.getByRole("dialog") }
+const stepStates = () => screen.getAllByTestId("activity-step").map((s) => s.getAttribute("data-state"))
+
+
+describe("one activity line per turn", () => {
   beforeEach(() => cleanup())
 
-  it("a failed step never produces a green group summary", () => {
+  it("a failed step never produces a success line, and no step is drawn in the transcript", () => {
     const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b", { is_error: true })]))
-    const group = container.querySelector("details[data-activity-tone]")!
-    expect(group.getAttribute("data-activity-tone")).toBe("attention")
-    expect(group.textContent).toContain("Activity incomplete")
-    expect(group.textContent).toContain("1 failed")
-    expect(group.hasAttribute("open")).toBe(true)
-    const states = screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-state"))
-    expect(states).toEqual(["output-available", "output-error"])
+    expect(tone(container)).toBe("attention")
+    const line = activityButton(container)
+    // The turn ran to its end but is not summarised as success; the failure is
+    // named in the line, with a labelled marker, not only a colour.
+    expect(line.textContent).toContain("Finished")
+    expect(line.textContent).toContain("2 steps")
+    expect(line.textContent).toContain("1 failed")
+    expect(line.textContent).not.toContain("Done")
+    expect(line.textContent).not.toContain("Worked")
+    expect(line.querySelector("[aria-label='1 failed']")).not.toBeNull()
+    expect(screen.queryAllByTestId("tool-header")).toHaveLength(0)
+    expect(container.textContent).not.toContain("ls")
+    openSteps(container)
+    expect(stepStates()).toEqual(["succeeded", "failed"])
   })
 
-  it("all-success group reads as worked", () => {
+  it("a failed step the same tool later did successfully reads as done, retried, in words", () => {
+    const { container } = renderTurn(turn([call("a"), result("a", { is_error: true }), call("b"), result("b")]))
+    expect(tone(container)).toBe("ok")
+    const line = activityButton(container).textContent!
+    expect(line).toContain("Done")
+    expect(line).toContain("1 retried")
+    expect(line).not.toContain("Bash")
+  })
+
+  it("a failed step that was retried keeps Failed in the steps and says the retry succeeded", () => {
+    const { container } = renderTurn(turn([call("a"), result("a", { is_error: true }), call("b"), result("b")]))
+    expect(activityButton(container).textContent).toBe("Done · 2 steps · 1 retried")
+    const dialog = openSteps(container)
+    expect(stepStates()).toEqual(["failed", "succeeded"])
+    const [failed, retry] = within(dialog).getAllByTestId("activity-step")
+    expect(within(failed).getByTestId("step-state").textContent).toBe("Failed · retried, then succeeded")
+    expect(within(retry).queryByTestId("step-state")).toBeNull()
+  })
+
+  it("a failed step nothing retried says only Failed", () => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b", { is_error: true })]))
+    const dialog = openSteps(container)
+    expect(within(within(dialog).getAllByTestId("activity-step")[1]).getByTestId("step-state").textContent).toBe("Failed")
+  })
+
+  it("while the agent works the line is one sentence of what it does now, with the time", () => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b")], true))
+    expect(tone(container)).toBe("running")
+    const line = activityButton(container).textContent!
+    expect(line).toContain("Running a command…")
+    expect(line).toMatch(/\d+ (s|min)/)
+    expect(screen.queryAllByTestId("tool-header")).toHaveLength(0)
+  })
+
+  it("while the agent works the line moves nothing itself (the face in the gutter is the one indicator) and reads in full contrast", () => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b")], true))
+    const button = activityButton(container)
+    expect(button.querySelector("[data-testid='working-mark']")).toBeNull()
+    expect(button.querySelector("[class*='animate-']")).toBeNull()
+    const sentence = button.querySelector("[data-testid='activity-sentence']") as HTMLElement
+    expect(sentence.textContent).toBe("Running a command…")
+    expect(sentence.className).toContain("text-foreground")
+    expect(button.querySelector("[data-testid='activity-elapsed']")!.textContent).toMatch(/^\d+ (s|min)/)
+  })
+
+  it("names a Sheet change by its range while it runs", () => {
+    const apply = part("tool_call", { tool_id: "s", tool_name: "mcp__crewship__craft_sheet_apply", input: { commands: [{ command: "range.setValues", params: { sheet: "L", range: "B8:B577", values: [] } }] } }, "mcp__crewship__craft_sheet_apply")
+    const { container } = renderTurn(turn([call("a"), result("a"), apply], true))
+    expect(activityButton(container).textContent).toContain("Changing 'L'!B8:B577 (570 cells)…")
+  })
+
+  it("a real agent's Sheet steps read as words in the line and in the steps, never as an MCP name or [object Object]", () => {
+    const read = part("tool_call", { tool_id: "r", tool_name: "mcp__crewship-routines__craft_sheet_read", input: { query: { command: "sheet.read", params: { sheet: "L" } } } }, "mcp__crewship-routines__craft_sheet_read")
+    const acquire = part("tool_call", { tool_id: "q", tool_name: "mcp__crewship-routines__craft_sheet_acquire", input: {} }, "mcp__crewship-routines__craft_sheet_acquire")
+    const running = renderTurn(turn([read, result("r"), acquire], true))
+    expect(activityButton(running.container).textContent).toContain("Taking over editing of the Sheet…")
+    cleanup()
+    const apply = part("tool_call", { tool_id: "a", tool_name: "mcp__crewship-routines__craft_sheet_apply", input: { generation: "4", base_version: "12", request_id: "n-1", commands: [{ command: "range.setValues", params: { range: "B8:B577", values: [["LN-0001"]], sheet: "L" } }] } }, "mcp__crewship-routines__craft_sheet_apply")
+    const release = part("tool_call", { tool_id: "z", tool_name: "mcp__crewship-routines__craft_sheet_release", input: { generation: "4" } }, "mcp__crewship-routines__craft_sheet_release")
+    const { container } = renderTurn(turn([read, result("r"), acquire, result("q"), apply, result("a"), release, result("z")]))
+    const dialog = openSteps(container)
+    expect(within(dialog).getAllByTestId("activity-step").map(s => s.querySelector("span.text-foreground")!.textContent)).toEqual([
+      "Read sheet L", "Took over editing of the Sheet", "Changed 'L'!B8:B577 (570 cells)", "Handed the Sheet back",
+    ])
+    expect(document.body.textContent).not.toMatch(/\[object Object\]/)
+    for (const row of within(dialog).getAllByTestId("activity-step")) expect(row.firstElementChild!.textContent).not.toMatch(/mcp__|crewship-routines|craft_sheet/)
+  })
+
+  it("a Sheet step waiting for approval keeps a human name in the transcript", () => {
+    const pending = { ...part("activity", { tool_name: "mcp__crewship-routines__craft_sheet_read" }, "mcp__crewship-routines__craft_sheet_read"), tool_call_id: "w", activity: { kind: "tool", name: "mcp__crewship-routines__craft_sheet_read", state: "awaiting_approval", parameters: { query: JSON.stringify({ command: "sheet.read", params: { sheet: "L" } }) } } } as TurnPart
+    renderTurn(turn([call("a"), result("a"), pending], true))
+    const header = screen.getAllByTestId("tool-header").find((h) => h.getAttribute("data-state") === "approval-requested")!
+    expect(header.textContent).toBe("Reading sheet L")
+  })
+
+  it("between tools the line says the agent is writing, and the agent's text stays the answer", () => {
+    const text = { ...part("text", {}, "Here is the answer."), isStreaming: true }
+    const { container } = renderTurn(turn([call("a"), result("a"), text], true))
+    expect(activityButton(container).textContent).toContain("Writing the answer…")
+    expect(screen.getByText("Here is the answer.")).toBeTruthy()
+  })
+
+  it("two runs of tools around text are one line, and the text keeps its place as prose", () => {
+    const { container } = renderTurn(turn([
+      call("a"), result("a"), part("text", {}, "Let me check the second sheet."),
+      call("b"), result("b"), call("c"), result("c"), part("text", {}, "All loans are numbered."),
+    ]))
+    expect(container.querySelectorAll("[data-testid='turn-activity']")).toHaveLength(1)
+    expect(activityButton(container).textContent).toContain("3 steps")
+    expect(screen.getByText("Let me check the second sheet.")).toBeTruthy()
+    expect(screen.getByText("All loans are numbered.")).toBeTruthy()
+    expect(screen.queryAllByTestId("tool-header")).toHaveLength(0)
+  })
+
+  it("a finished line names how long the run took and how many steps it had", () => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b"), part("result", { duration_ms: 41_000 })]))
+    expect(activityButton(container).textContent).toBe("Done · 41 s · 2 steps")
+  })
+
+  it("a run that failed reads Failed, never Done", () => {
+    const t = { ...turn([call("a"), result("a")]), turnState: "failed" } as ChatTurn
+    const { container } = renderTurn(t)
+    expect(tone(container)).toBe("attention")
+    expect(activityButton(container).textContent).toContain("Failed")
+    expect(activityButton(container).textContent).not.toContain("Done")
+  })
+
+  it("a long run renders its steps only once the detail is opened", () => {
+    const parts: TurnPart[] = []
+    for (let i = 0; i < 200; i++) parts.push(call(`s${i}`), result(`s${i}`))
+    const { container } = renderTurn(turn(parts))
+    expect(activityButton(container).textContent).toContain("200 steps")
+    expect(screen.queryAllByTestId("activity-step")).toHaveLength(0)
+    openSteps(container)
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(200)
+  })
+
+  it("all-success run reads Done", () => {
     const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b")]))
-    const group = container.querySelector("details[data-activity-tone]")!
-    expect(group.getAttribute("data-activity-tone")).toBe("ok")
-    expect(group.textContent).toContain("Worked")
+    expect(tone(container)).toBe("ok")
+    expect(activityButton(container).textContent).toContain("Done")
   })
 
   it("shows running while the turn streams and unknown once it ended without a result", () => {
     const parts = [call("a"), result("a"), call("b")]
     const live = renderTurn(turn(parts, true))
-    expect(live.container.querySelector("details")!.getAttribute("data-activity-tone")).toBe("running")
+    expect(tone(live.container)).toBe("running")
     cleanup()
     const done = renderTurn(turn(parts, false))
-    expect(done.container.querySelector("details")!.getAttribute("data-activity-tone")).toBe("neutral")
-    expect(screen.getAllByTestId("tool-header").some((h) => h.getAttribute("data-label") === "Outcome unknown")).toBe(true)
+    expect(tone(done.container)).toBe("neutral")
+    expect(activityButton(done.container).textContent).not.toContain("Done")
+    openSteps(done.container)
+    expect(stepStates()).toEqual(["succeeded", "unknown"])
+    expect(within(screen.getByRole("dialog")).getByText("Outcome unknown")).toBeTruthy()
   })
 
-  it("labels denied and interrupted steps", () => {
-    renderTurn(turn([
+  it("labels denied and interrupted steps in the detail", () => {
+    const { container } = renderTurn(turn([
       call("a"), result("a", { denied: true, is_error: true }),
       ({ ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: "b", activity: { kind: "shell", name: "Bash", state: "interrupted" } }) as TurnPart,
     ]))
-    expect(screen.getByText("Denied")).toBeTruthy()
-    expect(screen.getByText("Interrupted")).toBeTruthy()
+    expect(activityButton(container).textContent).not.toContain("Done")
+    const dialog = openSteps(container)
+    expect(within(dialog).getByText("Denied")).toBeTruthy()
+    expect(within(dialog).getByText("Interrupted")).toBeTruthy()
   })
 
-  it("nests subagent steps under their parent by correlation", () => {
-    renderTurn(turn([
+  it("nests subagent steps under their parent by correlation, in the detail", () => {
+    const { container } = renderTurn(turn([
       call("task"), call("c1", { parent_tool_call_id: "task" }), result("c1"), result("task"),
     ]))
+    expect(activityButton(container).textContent).toContain("2 steps")
+    openSteps(container)
     expect(screen.getAllByTestId("nested-activity")).toHaveLength(1)
   })
 
-  it("keeps an approval request outside the collapsed group", () => {
+  it("keeps an approval request in the transcript, outside the line, and actionable", () => {
     const { container } = renderTurn(turn([
       call("a"), result("a"), call("b"), result("b"),
       ({ ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: "c", activity: { kind: "shell", name: "Bash", state: "awaiting_approval" } }) as TurnPart,
     ], true))
-    const group = container.querySelector("details[data-activity-tone]")!
     const approval = screen.getAllByTestId("tool-header").find((h) => h.getAttribute("data-state") === "approval-requested")!
     expect(approval).toBeTruthy()
-    expect(group.contains(approval)).toBe(false)
-  })
-
-  // CH-04: approvals and questions stay outside the collapsed group, so closing
-  // the group can never hide them.
-  const awaiting = (id: string) =>
-    ({ ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: id, activity: { kind: "shell", name: "Bash", state: "awaiting_approval" } }) as TurnPart
-  const approvalHeader = () => screen.getAllByTestId("tool-header").find((h) => h.getAttribute("data-state") === "approval-requested")
-  const visibleAfterClosingEveryGroup = (container: HTMLElement, el: Element) => {
-    container.querySelectorAll("details").forEach((d) => { d.open = false; fireEvent(d, new Event("toggle")) })
-    for (let node: Element | null = el; node && node !== container; node = node.parentElement) {
-      if (node.tagName === "DETAILS" && !(node as HTMLDetailsElement).open) return false
-    }
-    return container.contains(el)
-  }
-
-  it.each([
-    ["between two runs of tools", (a: TurnPart) => [call("a"), result("a"), call("b"), result("b"), a, call("c"), result("c"), call("d"), result("d")]],
-    ["nested under a running parent", (a: TurnPart) => [call("p"), call("x", { parent_tool_call_id: "p" }), result("x"), { ...a, parent_tool_call_id: "p" } as TurnPart]],
-  ] as const)("an approval %s stays visible when every group is closed", (_where, build) => {
-    const { container } = renderTurn(turn(build(awaiting("c1")), true))
-    const approval = approvalHeader()!
-    expect(approval).toBeTruthy()
-    expect(visibleAfterClosingEveryGroup(container, approval)).toBe(true)
-  })
-
-  it("an approval that arrives after the reader closed the group is not inside it", () => {
-    const run = [call("a"), result("a"), call("b"), result("b")]
-    const { container, rerender } = renderTurn(turn(run, true))
-    expect(visibleAfterClosingEveryGroup(container, container)).toBe(true)
-    rerender(<AssistantTurn turn={turn([...run, awaiting("c1")], true)} onCopy={async () => true} onFileClick={() => {}} />)
-    const approval = approvalHeader()
-    expect(approval).toBeTruthy()
-    expect(container.querySelector("details[data-activity-tone]")!.contains(approval!)).toBe(false)
-    expect(visibleAfterClosingEveryGroup(container, approval!)).toBe(true)
+    expect(activity(container).contains(approval)).toBe(false)
   })
 
   it.each([
     ["as a tool call", part("tool_call", { tool_name: "AskUserQuestion", tool_id: "q" }, "AskUserQuestion")],
     ["as a typed activity", { ...part("activity", { tool_name: "AskUserQuestion" }, "AskUserQuestion"), tool_call_id: "q", activity: { kind: "tool", name: "AskUserQuestion", state: "running" } } as TurnPart],
-  ] as const)("a question %s after a run of tools stays visible when the group is closed", (_form, question) => {
+  ] as const)("a question %s after a run of tools stays in the transcript", (_form, question) => {
     const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b"), question], true))
-    expect(container.querySelector("details[data-activity-tone]")).toBeTruthy()
+    expect(activity(container)).toBeTruthy()
     const header = screen.getAllByTestId("tool-header").find((h) => h.textContent === "AskUserQuestion")
     expect(header).toBeTruthy()
-    expect(visibleAfterClosingEveryGroup(container, header!)).toBe(true)
+    expect(activity(container).contains(header!)).toBe(false)
+  })
+})
+
+describe("the steps popup", () => {
+  beforeEach(() => cleanup())
+
+  it("opens on click as a labelled dialog, closes with Escape and gives focus back", async () => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b")]))
+    const trigger = activityButton(container)
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog")
+    trigger.focus()
+    const dialog = openSteps(container)
+    const labelledBy = dialog.getAttribute("aria-labelledby")
+    expect(labelledBy && document.getElementById(labelledBy)?.textContent).toBe("Steps")
+    expect(within(dialog).getAllByText("Ran a command")).toHaveLength(2)
+    // Quiet: no "Completed" badge on a step that simply succeeded.
+    expect(within(dialog).queryByText("Completed")).toBeNull()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
+  it("keeps the raw command and output folded, with a Copy button", async () => {
+    const onCopy = vi.fn(async () => true)
+    const { container } = renderTurn(turn([
+      part("tool_call", { tool_id: "a", tool_name: "Bash", input: { command: "wc -l loans.csv" } }, "Bash"),
+      part("tool_result", { tool_id: "a" }, "577 loans.csv"),
+    ]), onCopy)
+    const dialog = openSteps(container)
+    const raw = dialog.querySelector("details[data-testid='step-raw']") as HTMLDetailsElement
+    expect(raw).not.toBeNull()
+    expect(raw.open).toBe(false)
+    expect(raw.textContent).toContain("wc -l loans.csv")
+    expect(raw.textContent).toContain("577 loans.csv")
+    fireEvent.click(within(dialog).getByLabelText("Copy command and output"))
+    await waitFor(() => expect(onCopy).toHaveBeenCalledWith("$ wc -l loans.csv\n\n577 loans.csv"))
+  })
+
+  it("never shows a secret from a step's input", () => {
+    const { container } = renderTurn(turn([
+      part("tool_call", { tool_id: "a", tool_name: "mcp__x__login", input: { api_key: "sk-synthetic-123", user: "demo" } }, "mcp__x__login"),
+      part("tool_result", { tool_id: "a" }, "ok"),
+    ]))
+    const dialog = openSteps(container)
+    expect(dialog.textContent).not.toContain("sk-synthetic-123")
+    expect(dialog.textContent).toContain("[REDACTED]")
+  })
+
+  it("stays open as the turn it describes changes", () => {
+    const a = { ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: "a", activity: { kind: "shell", name: "Bash", state: "succeeded" } } as TurnPart
+    const b = { ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: "b", activity: { kind: "shell", name: "Bash", state: "running" } } as TurnPart
+    const withB = (state: string) => ({ ...b, activity: { ...b.activity!, state } }) as TurnPart
+    const { container, rerender } = renderTurn(turn([a, b], true))
+    openSteps(container)
+    rerender(<AssistantTurn turn={turn([a, withB("failed")], true)} onCopy={async () => true} onFileClick={() => {}} />)
+    expect(screen.getByRole("dialog")).toBeTruthy()
+    expect(stepStates()).toEqual(["succeeded", "failed"])
   })
 })
 
@@ -208,39 +368,36 @@ describe("review blockers: parallel calls, wire keys, history", () => {
     const { container } = renderTurn(turn([
       call("A"), call("B"), rUse("A", { is_error: true }), rUse("B"),
     ]))
-    const headers = screen.getAllByTestId("tool-header")
-    expect(headers).toHaveLength(2)
-    expect(headers.map((h) => h.getAttribute("data-state"))).toEqual(["output-error", "output-available"])
-    const group = container.querySelector("details[data-activity-tone]")!
-    expect(group.textContent).toContain("1 failed")
-    expect(group.textContent).not.toContain("unknown")
+    expect(activityButton(container).textContent).toContain("1 failed")
+    expect(activityButton(container).textContent).not.toContain("unknown")
+    openSteps(container)
+    expect(stepStates()).toEqual(["failed", "succeeded"])
   })
 
-  it("pairs parallel calls by tool_id too, and an all-success parallel turn reads Worked", () => {
+  it("pairs parallel calls by tool_id too, and an all-success parallel turn reads Done", () => {
     const { container } = renderTurn(turn([call("A"), call("B"), result("A"), result("B")]))
-    const group = container.querySelector("details[data-activity-tone]")!
-    expect(group.getAttribute("data-activity-tone")).toBe("ok")
-    expect(group.textContent).toContain("2 steps")
+    expect(tone(container)).toBe("ok")
+    expect(activityButton(container).textContent).toContain("2 steps")
   })
 
   it("an orphan result classifies itself by its own is_error", () => {
-    renderTurn(turn([rUse("zzz", { is_error: true })]))
-    expect(screen.getAllByTestId("tool-header")[0].getAttribute("data-state")).toBe("output-error")
+    const { container } = renderTurn(turn([rUse("zzz", { is_error: true })]))
+    openSteps(container)
+    expect(stepStates()).toEqual(["failed"])
   })
 
   it("nests under parent_tool_use_id, the key the server emits", () => {
-    renderTurn(turn([
+    const { container } = renderTurn(turn([
       call("task"), call("c1", { parent_tool_use_id: "task" }), result("c1"), result("task"),
     ]))
+    openSteps(container)
     expect(screen.getAllByTestId("nested-activity")).toHaveLength(1)
   })
 
   it("a finished turn with no recorded result is neutral, not an alarm", () => {
     const { container } = renderTurn(turn([call("a"), result("a"), call("b")], false))
-    const group = container.querySelector("details[data-activity-tone]")!
-    expect(group.getAttribute("data-activity-tone")).toBe("neutral")
-    expect(group.hasAttribute("open")).toBe(false)
-    expect(group.textContent).not.toContain("incomplete")
+    expect(tone(container)).toBe("neutral")
+    expect(activityButton(container).textContent).not.toContain("incomplete")
   })
 })
 
@@ -253,61 +410,38 @@ describe("typed events from the stream consumer", () => {
     activity: { kind: "shell", name: "Bash", state },
   }) as TurnPart
 
-  it("a failed typed step is never green and nests children by parent_tool_call_id", () => {
+  it("a failed typed step is never a success and nests children by parent_tool_call_id", () => {
     const { container } = renderTurn(turn([typed("t", "succeeded"), typed("c", "failed", "t")]))
-    expect(container.querySelector("details[data-activity-tone]")!.getAttribute("data-activity-tone")).toBe("attention")
+    expect(tone(container)).toBe("attention")
+    openSteps(container)
     expect(screen.getAllByTestId("nested-activity")).toHaveLength(1)
-    expect(screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-state"))).toEqual(["output-available", "output-error"])
+    expect(stepStates()).toEqual(["succeeded", "failed"])
   })
 
-  it("the failed step shows the exact visible text Failed with no click, and the group is open and not Worked", () => {
-    // Same shape as the persisted-activity browser fixture.
-    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "failed")]))
-    expect(container.querySelector("details[data-activity-tone]")!.hasAttribute("open")).toBe(true)
-    expect(screen.getByText("Activity incomplete")).toBeTruthy()
-    expect(screen.getAllByText("Failed")).toHaveLength(1)
-    expect(screen.queryByText("Worked")).toBeNull()
-  })
-
-  it("a typed unknown step reads Outcome unknown, not success", () => {
-    renderTurn(turn([typed("a", "unknown")]))
-    // Once: in the header badge only, not repeated as a second label.
-    expect(screen.getByTestId("tool-header").getAttribute("data-label")).toBe("Outcome unknown")
+  it("a typed unknown step reads Outcome unknown in the detail, once", () => {
+    const { container } = renderTurn(turn([typed("a", "unknown")]))
     expect(screen.queryByText("Outcome unknown")).toBeNull()
-  })
-  it("an input_streaming step reads as in progress, never Worked", () => {
-    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "input_streaming")], true))
-    expect(container.querySelector("details[data-activity-tone]")!.getAttribute("data-activity-tone")).toBe("running")
-    expect(screen.queryByText("Worked")).toBeNull()
+    const dialog = openSteps(container)
+    expect(within(dialog).getAllByText("Outcome unknown")).toHaveLength(1)
   })
 
-  it("an unrecognised state token degrades to Outcome unknown, never Worked", () => {
-    renderTurn(turn([typed("a", "succeeded"), typed("b", "paused")]))
-    expect(screen.queryByText("Worked")).toBeNull()
-    expect(screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-label"))).toContain("Outcome unknown")
+  it("an input_streaming step reads as in progress, never Done", () => {
+    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "input_streaming")], true))
+    expect(tone(container)).toBe("running")
+    expect(container.textContent).not.toContain("Done")
+  })
+
+  it("an unrecognised state token degrades to Outcome unknown, never Done", () => {
+    const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "paused")]))
+    expect(activityButton(container).textContent).not.toContain("Done")
+    openSteps(container)
+    expect(stepStates()).toContain("unknown")
   })
 
   it("a typed running step on a finished turn reads Outcome unknown instead of spinning", () => {
     const { container } = renderTurn(turn([typed("a", "succeeded"), typed("b", "running")], false))
-    expect(container.querySelector("details[data-activity-tone]")!.getAttribute("data-activity-tone")).toBe("neutral")
-    expect(screen.getAllByTestId("tool-header").map((h) => h.getAttribute("data-label"))).toContain("Outcome unknown")
-  })
-
-  it("a group the reader opened stays open when its tone changes", () => {
-    // Same part ids across renders, as in a live turn (the key is the first id).
-    const a = typed("a", "succeeded"), b = typed("b", "running")
-    const withB = (state: string) => ({ ...b, activity: { ...b.activity!, state } }) as TurnPart
-    const { container, rerender } = renderTurn(turn([a, b], true))
-    const details = () => container.querySelector("details[data-activity-tone]") as HTMLDetailsElement
-    expect(details().open).toBe(false)
-    details().open = true
-    fireEvent(details(), new Event("toggle"))
-    rerender(<AssistantTurn turn={turn([a, withB("failed")], true)} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(details().getAttribute("data-activity-tone")).toBe("attention")
-    expect(details().open).toBe(true)
-    rerender(<AssistantTurn turn={turn([a, withB("succeeded")], false)} onCopy={async () => true} onFileClick={() => {}} />)
-    expect(details().getAttribute("data-activity-tone")).toBe("ok")
-    expect(details().open).toBe(true)
+    expect(tone(container)).toBe("neutral")
+    expect(activity(container).querySelector("[data-testid='working-mark'][data-active='true']")).toBeNull()
   })
 
   it("every thinking state renders without claiming a finished summary", () => {

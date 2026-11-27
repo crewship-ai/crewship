@@ -255,6 +255,10 @@
    *    reads on a dark ground only; these are the same hues taken dark enough
    *    to be text on white (pinned in theme-contrast.test, day block). ── */
   --success: #157A45;
+  /* A Sheet and an Excel file: the green of the file type, as glyph and text on --card and on
+     --sheet-soft (pinned in theme-contrast.test). */
+  --sheet: #107C41;
+  --sheet-soft: #E8F4ED;
   /* The page Save bar (components/ui/page-save-bar) wears the success toast's
      colours (Sonner richColors), so pending edits read as one step from done. */
   --save-bar-bg: #ECFDF3;
@@ -352,7 +356,7 @@
   --typo-heading-lh: 1.75rem;
   --typo-title: 1.4rem;             /* 21px at Compact, 22px at Standard – page titles (Harbor 2) */
   --typo-title-lh: 2rem;
-  --typo-title-phone: 1.2115rem;    /* 18px at Small – page titles on a phone (owner decision 2026-10-17) */
+  --typo-title-phone: 1.2115rem;    /* 18px at Small – page titles on a phone */
   --typo-title-phone-lh: 1.6rem;
   --typo-display: 1.875rem;         /* 30px – hero/stat numbers */
   --typo-display-lh: 2.25rem;
@@ -518,6 +522,8 @@
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
   --success: #4CC38A;
+  --sheet: #4FCB86;
+  --sheet-soft: #0F2A1C;
   --save-bar-bg: #001F0F;
   --save-bar-border: #0B4A27;
   --save-bar-fg: #59F3A6;
@@ -696,6 +702,8 @@
    *   notice/error/purple/gold). Use these for status chips, timeline
    *   stripes, journal entries, and any brand-consistent storytelling. */
   --color-success: var(--success);
+  --color-sheet: var(--sheet);
+  --color-sheet-soft: var(--sheet-soft);
   --color-info: var(--info);
   --color-notice: var(--notice);
   --color-warn: var(--warn);
@@ -2013,7 +2021,23 @@ body {
   );
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  animation: thinking-ring-spin 1.5s linear infinite;
+  animation: thinking-ring-spin 2.4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes thinking-glow-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.96); }
+  50% { opacity: 0.8; transform: scale(1.08); }
+}
+
+/* A soft halo behind the face: what tells the reader, at a glance, that the
+   agent is on it. Calm on purpose: slow, no hard edge, theme colour only. */
+.thinking-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 16px;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--primary), transparent 55%), transparent);
+  animation: thinking-glow-breathe 2.6s ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -2026,7 +2050,8 @@ body {
    able to tell that the agent has not finished. */
 @media (prefers-reduced-motion: reduce) {
   .thinking-ring,
-  .thinking-face {
+  .thinking-face,
+  .thinking-glow {
     animation: none;
   }
 }

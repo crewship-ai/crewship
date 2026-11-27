@@ -192,7 +192,7 @@ describe("real stopped turn state through transcript and Markdown export", () =>
         { type: "text", content: "Answer" },
       ],
     }]))
-    expect(await copyTranscript()).toContain("## Riley\n> _Thinking:_ Checked the file\n> _Tool:_ `Read`\nAnswer\n")
+    expect(await copyTranscript()).toContain("## Riley\n> _Thinking:_ Checked the file\n> _Step:_ Read a file\nAnswer\n")
     expect(writeText.mock.calls[0][0]).not.toContain("tool output not exported")
   })
 

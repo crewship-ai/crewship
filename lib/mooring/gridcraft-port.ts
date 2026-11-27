@@ -4,19 +4,20 @@
 // no snapshot proof. Every message has an exact key set; anything else closes the port.
 // An editor error carries a machine code (chosen messages) and a text that may quote the
 // workbook: the text never leaves this file.
+import { sheetTouched, type SheetTouched } from "./gridcraft-replay"
 import { verifyEditorHello, transferEditorPort, record, type CapabilityWindow, type WindowEnvelope } from "./channel"
-import type { NativeStructuredPort } from "./native-editor-port"
+import { engineBuildToken, savedRevisionToken, NATIVE_EXECUTE_COMMANDS, NATIVE_EXECUTE_MAX_BYTES, NATIVE_EXECUTE_MAX_COMMANDS, NATIVE_HELD_INPUT_DROPPED, type NativeEditAttempt, type NativeExecuteCommand, type NativeExecuteConflict, type NativeExecuteOptions, type NativeExecuteResult, NATIVE_EXECUTE_MAX_CONFLICTS, validExecuteLabel, type NativeHeldInputDropped, type NativeStructuredPort } from "./native-editor-port"
 
 export const GRIDCRAFT_PROTOCOL = 2
 /** The engine's own bound (upstream MAX_OPEN_BYTES); the server keeps a smaller upload limit. */
-export const GRIDCRAFT_MAX_FILE_BYTES = 32 * 1024 * 1024
+export const GRIDCRAFT_MAX_FILE_BYTES = 512 * 1024 * 1024
 export const GRIDCRAFT_MAX_UNANSWERED_SAVES = 4
 export const GRIDCRAFT_SAVE_FAILURES = ["conflict", "too_large", "forbidden", "failed"] as const
 export type GridcraftSaveFailure = (typeof GRIDCRAFT_SAVE_FAILURES)[number]
 export type GridcraftFormat = "xlsx" | "xlsm"
 export interface GridcraftWarning { code: string; count: number }
 export interface GridcraftOpened { document: string; revision: string; format: GridcraftFormat; calculated: boolean; warnings: GridcraftWarning[] }
-export interface GridcraftSavedFile { requestId: string; document: string; revision: string; name: string; format: GridcraftFormat; bytes: Uint8Array; source: "host" | "editor" }
+export interface GridcraftSavedFile { requestId: string; document: string; revision: string; name: string; format: GridcraftFormat; bytes: Uint8Array; source: "host" | "editor"; /** The cells the person changed since the saved version, or unknown; absent when the editor does not say. */ touched?: SheetTouched }
 /** The editor would not write the file: fidelity_loss names what it would drop, by part and count (no content). */
 export class GridcraftSaveRefused extends Error {
   /** `bytes`: with fidelity_loss, the file as it would be written. Only for a local draft, never a save. */
@@ -39,9 +40,9 @@ export interface GridcraftPortOptions {
   onError(reason: string): void
   /** build: the engine build the editor runs; absent in a development build. */
   onReady?(version: string, build?: string): void
-  onEditAttempt?(kind: "pointer" | "key"): void
-  onHeldInputDropped?(reason: string): void
-  /** Deadline of access requests; open and save take their own. */
+  onEditAttempt?(kind: NativeEditAttempt): void
+  onHeldInputDropped?(reason: NativeHeldInputDropped): void
+  /** Deadline of access and execute requests; open and save take their own. */
   timeoutMs?: number
 }
 export interface GridcraftPort {
@@ -52,6 +53,7 @@ export interface GridcraftPort {
   ack(requestId: string, version: string): boolean
   saveFailed(requestId: string, code: GridcraftSaveFailure): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
+  execute(commands: NativeExecuteCommand[], options: NativeExecuteOptions, signal: AbortSignal): Promise<NativeExecuteResult>
   readonly document: string | undefined
   close(): void
 }
@@ -66,6 +68,19 @@ const documentID = (value: unknown): value is string => text(value, 128) && !val
 const format = (value: unknown): value is GridcraftFormat => value === "xlsx" || value === "xlsm"
 const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => key in value)
 const failure = (value: Record<string, unknown>) => exact(value, ["type", "requestId", "code", "error"]) && code(value.code) && errorText(value.error)
+// The cells the person kept: display text of each side, at most 256 characters (longer ones end in "…").
+const cellText = (value: unknown): value is string => typeof value === "string" && value.length <= 257
+function executeConflicts(value: unknown): NativeExecuteConflict[] | undefined {
+  if (!Array.isArray(value) || value.length > NATIVE_EXECUTE_MAX_CONFLICTS) return undefined
+  const out: NativeExecuteConflict[] = []
+  for (const c of value) {
+    if (!c || typeof c !== "object" || !exact(c as Record<string, unknown>, ["sheet", "cell", "agent", "kept"])) return undefined
+    const { sheet, cell, agent, kept } = c as Record<string, unknown>
+    if (!text(sheet, 255) || typeof cell !== "string" || !/^\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6}$/.test(cell) || !cellText(agent) || !cellText(kept)) return undefined
+    out.push({ sheet, cell, agent, kept })
+  }
+  return out
+}
 const MAX_REFUSED_PARTS = 32
 /** An error reply to a save-request: any contract code, and for fidelity_loss the parts it would drop. */
 function saveRefusal(value: Record<string, unknown>): { code: string; parts: GridcraftWarning[]; bytes?: Uint8Array } | null {
@@ -81,7 +96,7 @@ function saveRefusal(value: Record<string, unknown>): { code: string; parts: Gri
 const fileBytes = (value: unknown): Uint8Array | null => value instanceof ArrayBuffer && value.byteLength > 0 && value.byteLength <= GRIDCRAFT_MAX_FILE_BYTES ? new Uint8Array(value) : null
 const deadline = (ms: number) => Number.isFinite(ms) && ms >= 1 && ms <= MAX_DEADLINE_MS
 
-interface Pending { kind: "open" | "save" | "access"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
+interface Pending { kind: "open" | "save" | "access" | "execute"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
 
 export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPort {
   if (!options.frame || !/^[a-f0-9]{64}$/.test(options.bundle)) throw new Error("invalid_native_port")
@@ -135,7 +150,7 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
     if (!record(raw) || typeof raw.type !== "string") { close("native_port_protocol"); return }
     switch (raw.type) {
       case "gridcraft:ready": {
-        if (!exact(raw, ["type", "version", "accessProtocol", "readOnly", ...("build" in raw ? ["build"] : [])]) || !text(raw.version, 128) || raw.accessProtocol !== 1 || typeof raw.readOnly !== "boolean" || "build" in raw && !(typeof raw.build === "string" && /^[0-9A-Za-z.\-]{1,64}\+[a-f0-9]{12} patch [a-f0-9]{64}$/.test(raw.build))) break
+        if (!exact(raw, ["type", "version", "accessProtocol", "readOnly", ...("build" in raw ? ["build"] : [])]) || !text(raw.version, 128) || raw.accessProtocol !== 1 || typeof raw.readOnly !== "boolean" || "build" in raw && !engineBuildToken(raw.build)) break
         if (ready || raw.readOnly !== true) { close("native_access_boot_writable"); return }
         const build = "build" in raw ? raw.build as string : undefined
         ready = true; observe(() => build === undefined ? options.onReady?.(raw.version as string) : options.onReady?.(raw.version as string, build)); return
@@ -175,6 +190,13 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
         if (raw.readOnly !== request.readOnly) { close("native_access_mismatch"); return }
         confirmedReadOnly = raw.readOnly; request.finish(); request.resolve(raw.readOnly); return
       }
+      case "gridcraft:executed": {
+        const request = answer(raw, "execute"); if (!request) return
+        const conflicts = "conflicts" in raw ? executeConflicts(raw.conflicts) : undefined
+        if (!exact(raw, ["type", "requestId", "document", "revision", "applied", ...("savedRevision" in raw ? ["savedRevision"] : []), ...("conflicts" in raw ? ["conflicts"] : []), ...("conflictsTruncated" in raw ? ["conflictsTruncated"] : [])]) || "savedRevision" in raw && !savedRevisionToken(raw.savedRevision) || "conflicts" in raw && !conflicts || "conflictsTruncated" in raw && (raw.conflictsTruncated !== true || !conflicts) || !documentID(raw.document) || !u64(raw.revision) || !Number.isSafeInteger(raw.applied) || (raw.applied as number) < 1 || (raw.applied as number) > NATIVE_EXECUTE_MAX_COMMANDS) break
+        if (raw.document !== bound) { close("native_document_changed"); return }
+        request.finish(); request.resolve({ documentId: bound, revision: `${bound}:${raw.revision}`, ...("savedRevision" in raw ? { savedRevision: `${bound}:${raw.savedRevision}` } : {}), applied: raw.applied as number, ...(conflicts ? { conflicts, conflictsTruncated: raw.conflictsTruncated === true } : {}) } satisfies NativeExecuteResult); return
+      }
       case "gridcraft:save-request": {
         if (!exact(raw, ["type", "requestId", "document", "revision"]) || !requestID(raw.requestId) || !documentID(raw.document) || !u64(raw.revision)) break
         if (bound === undefined) return
@@ -194,15 +216,16 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
         }
         if (!exact(raw, ["type", "requestId", "document", "revision", "name", "format", "bytes", ...("touched" in raw ? ["touched"] : [])]) || !requestID(raw.requestId) || !documentID(raw.document) || !u64(raw.revision) || !text(raw.name) || !format(raw.format)) break
         const bytes = fileBytes(raw.bytes); if (!bytes) break
+        const touched = "touched" in raw ? { touched: raw.touched === "unknown" ? "unknown" as const : sheetTouched(raw.touched) } : {}
         if (bound === undefined || raw.document !== bound) { close("native_document_changed"); return }
         const id = raw.requestId, asked = pending.get(id), ticket = tickets.get(id)
         if (asked?.kind === "save") {
-          const file: GridcraftSavedFile = { requestId: id, document: bound, revision: raw.revision, name: raw.name, format: raw.format, bytes, source: "host" }
+          const file: GridcraftSavedFile = { requestId: id, document: bound, revision: raw.revision, name: raw.name, format: raw.format, bytes, source: "host", ...touched }
           unanswered.set(id, file); asked.finish(); asked.resolve(file); return
         }
         if (ticket === undefined || ticket !== raw.revision) break
         tickets.delete(id)
-        const file: GridcraftSavedFile = { requestId: id, document: bound, revision: raw.revision, name: raw.name, format: raw.format, bytes, source: "editor" }
+        const file: GridcraftSavedFile = { requestId: id, document: bound, revision: raw.revision, name: raw.name, format: raw.format, bytes, source: "editor", ...touched }
         unanswered.set(id, file); observe(() => options.onSave(file)); return
       }
       case "gridcraft:export": {
@@ -213,11 +236,11 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       case "gridcraft:edit-attempt": {
         if (!exact(raw, ["type", "document", "kind"]) || !documentID(raw.document) || raw.kind !== "pointer" && raw.kind !== "key") break
         if (bound === undefined || raw.document !== bound || !confirmedReadOnly) return
-        observe(() => options.onEditAttempt?.(raw.kind as "pointer" | "key")); return
+        observe(() => options.onEditAttempt?.(raw.kind as NativeEditAttempt)); return
       }
       case "gridcraft:held-input-dropped": {
-        if (!exact(raw, ["type", "document", "reason"]) || !documentID(raw.document) || !["refused", "timeout", "limit", "pointer", "document", "draft"].includes(raw.reason as string)) break
-        observe(() => options.onHeldInputDropped?.(raw.reason as string)); return
+        if (!exact(raw, ["type", "document", "reason"]) || !documentID(raw.document) || !(NATIVE_HELD_INPUT_DROPPED as readonly unknown[]).includes(raw.reason)) break
+        observe(() => options.onHeldInputDropped?.(raw.reason as NativeHeldInputDropped)); return
       }
     }
     close("native_port_protocol")
@@ -260,7 +283,7 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       const file = unanswered.get(requestId)
       if (!file || !u64(version) || closed) return false
       // A newer revision is already the saved baseline: an older file is a conflict, never a baseline.
-      if (lastAcked !== undefined && BigInt(file.revision) < lastAcked) return false
+      if (lastAcked !== undefined && BigInt(file.revision) <= lastAcked) return false
       if (!post({ type: "gridcraft:save-ack", requestId, document: file.document, revision: file.revision, version })) return false
       unanswered.delete(requestId); lastAcked = BigInt(file.revision); return true
     },
@@ -273,6 +296,26 @@ export function createGridcraftPort(options: GridcraftPortOptions): GridcraftPor
       if (closed || !port || !ready || signal.aborted || typeof readOnly !== "boolean" || [...pending.values()].some(request => request.kind === "access")) throw new Error("native_access_unavailable")
       if (!readOnly && bound === undefined) throw new Error("native_open_required")
       return await rpc("access", { type: "gridcraft:set-access", readOnly }, signal, timeoutMs, undefined, readOnly) as boolean
+    },
+    async execute(commands, executeOptions, signal) {
+      if (bound === undefined) throw new Error("native_open_required")
+      if (!Array.isArray(commands) || commands.length < 1 || commands.length > NATIVE_EXECUTE_MAX_COMMANDS) throw new Error("native_execute_invalid")
+      for (const entry of commands) {
+        if (!entry || typeof entry !== "object" || !(NATIVE_EXECUTE_COMMANDS as readonly string[]).includes(entry.command) || entry.params !== undefined && (typeof entry.params !== "object" || entry.params === null || Array.isArray(entry.params))) throw new Error("native_execute_invalid")
+      }
+      const json = JSON.stringify(commands.map(entry => ({ command: entry.command, params: entry.params ?? {} })))
+      if (new TextEncoder().encode(json).length > NATIVE_EXECUTE_MAX_BYTES) throw new Error("native_execute_invalid")
+      let base: string | undefined
+      if (executeOptions?.baseRevision !== undefined) {
+        const cut = executeOptions.baseRevision.lastIndexOf(":")
+        base = cut >= 0 ? executeOptions.baseRevision.slice(cut + 1) : executeOptions.baseRevision
+        if (!savedRevisionToken(base)) throw new Error("native_execute_invalid")
+      }
+      const keep = executeOptions?.keep, label = executeOptions?.label
+      // keep:"human" is always based on a saved version the editor confirmed.
+      // A saved version's own revision (saved-<n>) is a base only for keep; the editor takes nothing else.
+      if (keep === undefined && base !== undefined && !u64(base) || keep !== undefined && (keep !== "human" || !validExecuteLabel(label) || base === undefined) || keep === undefined && label !== undefined) throw new Error("native_execute_invalid")
+      return await rpc("execute", { type: "gridcraft:execute", commands: json, saved: true, ...(base !== undefined ? { baseRevision: base } : {}), ...(keep ? { keep, label } : {}) }, signal, timeoutMs) as NativeExecuteResult
     },
     close() { close() },
   }

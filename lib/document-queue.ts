@@ -53,13 +53,16 @@ function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject:
   return abort
 }
 
+/** The largest row the draft store keeps: a 64 MiB workbook journal row, sealed (about 114 MiB). */
+export const MAX_DRAFT_STORE_BYTES = 128 * 1024 * 1024
+
 export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean; signal?: AbortSignal }): Promise<DocumentDraftStore> {
   const maxDraftBytes = options?.maxDraftBytes ?? 4 * 1024 * 1024
   const requireExclusive = options?.requireExclusive === true
   // A caller that gave up (#5104): stop waiting, release what this open holds.
   const signal = options?.signal
   if (signal?.aborted) throw new DocumentStorageError(message)
-  if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > 64 * 1024 * 1024) throw new DocumentStorageError(message)
+  if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > MAX_DRAFT_STORE_BYTES) throw new DocumentStorageError(message)
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
   // Native journals require a real non-queued lock. Legacy callers retain

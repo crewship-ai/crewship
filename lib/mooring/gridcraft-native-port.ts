@@ -31,7 +31,7 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
   const saveTimeoutMs = options.saveTimeoutMs ?? 120_000
   // Files the editor gave, by request id, each with the hash of its exact bytes.
   const files = new Map<string, { file: GridcraftSavedFile; hash: Promise<string> }>()
-  let lastAcknowledged = BigInt(scope.baseVersion), opened = false
+  let lastAcknowledged = BigInt(scope.baseVersion), dirty = false, opened = false
   // The editor's current revision, and the one it refused to save (fidelity_loss holds per revision).
   let current: string | undefined, refused: { revision: string; error: GridcraftSaveRefused } | undefined
   let openedFormat: GridcraftFormat | undefined, calculated = false
@@ -49,9 +49,10 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
   const inner = createGridcraftPort({
     bundle: options.bundle, frame: options.frame, createChannel: options.createChannel, timeoutMs: options.timeoutMs,
     onChanged(change) {
-      current = revisionOf(change); if (change.dirty) options.onChanged(current, change.document)
+      dirty = change.dirty; current = revisionOf(change); options.onChanged(current, change.document)
       if (change.calculated === true && !calculated) { calculated = true; try { options.onCalculated?.() } catch { /* reporting only */ } }
     },
+    onDirty(value) { dirty = value },
     onSaveRefused(refusal) {
       const document = inner.document
       if (document !== undefined && refusal.code === "fidelity_loss") refuse(`${document}:${refusal.revision}`, new GridcraftSaveRefused(refusal.code, refusal.parts, refusal.bytes))
@@ -59,11 +60,14 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
     onSave(file) { remember(file); options.onSaveRequest({ requestId: file.requestId, editorRevision: revisionOf(file), documentId: file.document }) },
     onExport: file => options.onExport?.(file),
     onError: reason => options.onError(reason),
-    onReady: version => options.onReady?.(version),
+    // The editor's engine build goes along: without it no replay over unsaved work runs.
+    onReady: (version, build) => build === undefined ? options.onReady?.(version) : options.onReady?.(version, build),
+    onEditAttempt: kind => options.onEditAttempt?.(kind),
+    onHeldInputDropped: reason => options.onHeldInputDropped?.(reason),
   })
   // The editor's file of an unedited workbook is not the stored file byte for byte, so the
   // coordinator compares the editor's revision instead (its nativeState, mounted at open).
-  const snapshotOf = (file: GridcraftSavedFile): NativeEditorSnapshot => ({ bytes: file.bytes.slice(), editorRevision: revisionOf(file), documentId: file.document, nativeState: revisionOf(file) })
+  const snapshotOf = (file: GridcraftSavedFile): NativeEditorSnapshot => ({ bytes: file.bytes.slice(), editorRevision: revisionOf(file), documentId: file.document, nativeState: revisionOf(file), format: file.format, ...(file.touched !== undefined ? { touched: file.touched } : {}) })
   return {
     loaded: () => inner.loaded(),
     handleWindowMessage: event => inner.handleWindowMessage(event),
@@ -72,6 +76,7 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       if (options.applicationId !== "gridcraft") throw new Error("invalid_native_port")
       const result = await inner.open({ name: options.fileName, bytes }, { calculate: false, autoFit: false }, signal, timeoutMs)
       if (!options.fileName.endsWith("." + result.format)) throw new Error("native_workbook_format_mismatch")
+      if (!options.fileName.toLowerCase().endsWith("." + result.format)) throw new Error("native_workbook_format_mismatch")
       opened = true; openedFormat = result.format
       try { options.onOpened?.(result) } catch { /* reporting only */ }
       const revision = revisionOf(result)
@@ -124,6 +129,16 @@ export function createGridcraftNativePort(options: GridcraftNativePortOptions): 
       return sent
     },
     setReadOnly: (readOnly, signal) => inner.setReadOnly(readOnly, signal),
+    rebind(next) {
+      if (!opened || dirty || !next || next.sessionId !== scope.sessionId) return false
+      if (!validNativeVersion(next.generation) || next.generation === "0" || BigInt(next.generation) <= BigInt(scope.generation)) return false
+      if (!validNativeVersion(next.baseVersion) || BigInt(next.baseVersion) < lastAcknowledged) return false
+      scope.generation = next.generation; scope.baseVersion = next.baseVersion; lastAcknowledged = BigInt(next.baseVersion)
+      // Files of the earlier generation prove nothing under the new one.
+      for (const id of [...files.keys()]) { inner.saveFailed(id, "conflict"); files.delete(id) }
+      return true
+    },
+    execute: (commands, executeOptions, signal) => inner.execute(commands, executeOptions, signal),
     close: () => inner.close(),
   }
 }

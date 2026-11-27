@@ -1,6 +1,8 @@
+import {GZIP_THRESHOLD,base64Parts,gzipBlob} from "./native-compact"
+import { engineBuildToken } from "./native-editor-port"
 import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
-import {validNativeDraft,validNativeVersion} from "./native-draft"
+import {MAX_NATIVE_BYTES,validNativeDraft,validNativeVersion,type NativeFileFormat} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 import {nativeAppOffFrom} from "./native-app-off"
 import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
@@ -12,7 +14,11 @@ export interface NativeDocumentClientOptions {
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
 export interface NativeDocumentSnapshot {
- version:string;bytes:Uint8Array;legacySource?:boolean;format?:"xlsx"|"xlsm";applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ version:string;bytes:Uint8Array;legacySource?:boolean;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ /** The engine build the server runs for this Sheet (engineBuild); absent when the package does not name it. */
+ engineBuild?:string
+ /** The stored file format for a workbook Sheet. */
+ format?:NativeFileFormat;fileName?:string
  /** `level` (near 80 %, critical 95 %, full) when the server reports it; older servers send only `warning`. */
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string;level?:"none"|"near"|"critical"|"full"}
 }
@@ -41,6 +47,8 @@ export interface NativeDocumentClient {
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
  share(request:NativeShareRequest,signal:AbortSignal):Promise<NativeShareReceipt>
+ /** Undo of an agent's change under this session and its lease generation: the server's response as it is. */
+ undo(operationId:string,generation:string,signal:AbortSignal):Promise<Response>
  proposals(signal:AbortSignal):Promise<NativeProposal[]>
  proposalBytes(id:string,signal:AbortSignal):Promise<Uint8Array>
  /** Accept is this admission's own fenced save; a "stale" result changed nothing. */
@@ -49,15 +57,51 @@ export interface NativeDocumentClient {
  versions(signal:AbortSignal):Promise<NativeVersionList|null>
  /** One saved version's bytes under this admission's Read authority, read-only; never a lease or a write. */
  version(version:string,signal:AbortSignal):Promise<NativeVersionDocument>
+ /** The Sheet as an .xlsx file under this admission's Read authority: the confirmed head, or a saved version. */
+ exportXlsx(signal:AbortSignal,version?:string):Promise<NativeExport>
  /** The existing fenced restore: holder, generation and base version, like a save. Appends a new version. */
  restore(request:NativeRestoreRequest,signal:AbortSignal):Promise<NativeRestoreReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
 }
+export interface NativeExport {blob:Blob;filename:string;version:string}
+export type NativeExportReason="bad_version"|"forbidden"|"not_found"|"too_large"|"not_sheet"|"failed"|"busy"
+/** A refused or failed xlsx export; `busy` carries the server's Retry-After. */
+export class NativeExportError extends Error {
+ constructor(readonly reason:NativeExportReason,readonly retryAfterSeconds?:number){super(`native_export_${reason}`)}
+}
+const EXPORT_VERSION=/^[1-9]\d{0,17}$/
+const EXPORT_STATUS:Record<number,NativeExportReason>={400:"bad_version",401:"forbidden",403:"forbidden",404:"not_found",413:"too_large",422:"not_sheet",500:"failed",503:"busy"}
+/** The download name from Content-Disposition: filename* (UTF-8) before filename, never a path or a control character. */
+export function nativeExportFilename(disposition:string|null):string{
+ let name=""
+ const exact=/filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition??"")
+ if(exact){try{name=decodeURIComponent((exact[1]??"").trim())}catch{name=""}}
+ if(!name&&!exact){const plain=/filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;\s]+)/i.exec(disposition??"");name=plain?.[1]??plain?.[2]??""}
+ // eslint-disable-next-line no-control-regex
+ name=name.replace(/[\\/\u0000-\u001f\u007f]/g,"_").trim()
+ if(!name||/^\.+$/.test(name))return "Sheet.xlsx"
+ return /\.xlsx$/i.test(name)?name:name+".xlsx"
+}
 // Only network I/O and explicitly temporary HTTP failures can reconnect.
 // Invalid metadata, changed authority and callback failures remain terminal.
 export class NativeMetadataTransportError extends Error {}
+/** X-Craft-Touched: the addresses as JSON, every character outside ASCII escaped, so a sheet name of any
+ * script fits a header; or unknown. */
+function touchedHeader(touched:string[]|"unknown"):string{
+ return touched==="unknown"?"unknown":JSON.stringify(touched).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"))
+}
+/** Create version 1 from an Excel upload and optionally link it to a chat atomically. */
+export async function initializeNativeWorkbook(args:{workspaceId:string;pageId:string;file:Blob;chatId?:string;fetch?:typeof fetch;signal?:AbortSignal}):Promise<Response>{
+ const {workspaceId,pageId,file,chatId,signal}=args
+ if(!identifier(workspaceId)||!identifier(pageId)||!(file instanceof Blob)||!file.size||(chatId!==undefined&&!/^[A-Za-z0-9_-]{1,128}$/.test(chatId)))throw new Error("invalid_native_workbook")
+ if(file.size>MAX_NATIVE_BYTES)throw new Error("native_workbook_too_large")
+ const send=args.fetch??((input,init)=>apiFetch(input,{...init,skipRefresh:true}))
+ return send(`/api/v1/pages/${encodeURIComponent("@"+pageId)}/craft/initialize?${new URLSearchParams({workspace_id:workspaceId})}`,{method:"POST",redirect:"error",cache:"no-store",signal,headers:{"Content-Type":"application/json",...(chatId===undefined?{}:{"X-Craft-Chat":chatId})},body:JSON.stringify({application_id:"gridcraft",bytes:nativeBase64(new Uint8Array(await file.arrayBuffer()))})})
+}
+/** The server's refusal code (`{code}`), or "". */
+const refusalCode=async(response:Response)=>{try{const v:unknown=await response.clone().json();return v&&typeof v==="object"&&typeof (v as {code?:unknown}).code==="string"?(v as {code:string}).code:""}catch{return ""}}
 const identifier=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=256&&!value.includes("\0")
 const nativeBase64=(bytes:Uint8Array)=>{
  let binary="";for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(binary)
@@ -101,12 +145,42 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
  async function mutate(operation:"save"|"reconcile",request:NativeSaveRequest,signal:AbortSignal):Promise<unknown>{
   ready()
   if(!validNativeDraft(request)||request.baseVersion==="0"||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.sessionId!==sessionId||request.applicationId!==applicationId||!/^sha256:[a-f0-9]{64}$/.test(request.contentHash))throw new Error("invalid_native_snapshot_binding")
-  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,format:undefined,bytes:nativeBase64(request.bytes)})})
+  const headers:Record<string,string>={"Content-Type":"application/json","X-Craft-Session":token!}
+  if(operation==="save"&&request.touched!==undefined)headers["X-Craft-Touched"]=touchedHeader(request.touched)
+  if(operation==="save"&&request.rebase==="keep-local")headers["X-Craft-Rebase"]="keep-local"
+  let body:BodyInit
+  // Reconcile asks about an attempt by its hash; the server never reads its bytes.
+  if(operation==="reconcile")body=JSON.stringify({...request,bytes:undefined,format:undefined,rebase:undefined,touched:undefined})
+  else if(request.bytes.byteLength*4/3<=GZIP_THRESHOLD)body=JSON.stringify({...request,bytes:nativeBase64(request.bytes),format:undefined,rebase:undefined,touched:undefined})
+  else{
+   // A large document: the JSON is assembled as Blob parts (no 40 MB string), compressed
+   // by the browser's own stream (about 15:1 for a spreadsheet) and declared with its
+   // inflated length, which the server enforces. A browser without CompressionStream
+   // sends the same Blob uncompressed.
+   const marker="\u0000BYTES\u0000",json=JSON.stringify({...request,bytes:marker,format:undefined,rebase:undefined,touched:undefined}),at=json.indexOf(JSON.stringify(marker))
+   if(at<0)throw new Error("invalid_native_snapshot_binding")
+   const plain=new Blob([json.slice(0,at),'"',...base64Parts(request.bytes),'"',json.slice(at+JSON.stringify(marker).length)],{type:"application/json"})
+   const packed=await gzipBlob(plain)
+   if(packed&&packed.length<plain.size){body=packed as unknown as BodyInit;headers["Content-Encoding"]="gzip";headers["X-Craft-Uncompressed-Length"]=String(plain.size)}
+   else body=plain
+  }
+  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers,body})
   ready()
   // Only reconcile answers 410: the server retired that attempt; it never commits (#4899).
   if(operation==="reconcile"&&response.status===410)throw new NativeSaveError("absent")
-  if(response.status===409)throw new NativeSaveError("conflict")
-  if(response.status===413)throw new NativeSaveError("quota")
+  // Refused because the Sheet has a newer version: told apart, so the editor can replay it.
+  if(response.status===409)throw new NativeSaveError(operation==="save"&&await refusalCode(response)==="moved"?"moved":"conflict")
+  // The file itself was refused: not a workbook, encrypted, or another format.
+  if(response.status===415)throw new NativeSaveError("unsupported")
+  // The file would lose or change macros, signatures or customXml; nothing was stored.
+  if(response.status===422&&operation==="save"&&await refusalCode(response)==="fidelity_loss")throw new NativeSaveError("fidelity_loss")
+  if(response.status===413&&request.format!==undefined)throw new NativeSaveError(await refusalCode(response)==="quota"?"quota":"too_large")
+  if(response.status===413){
+   // The server says "quota" for a full version history; any other 413 (the body cap, a proxy in
+   // front of the server) means the document itself is too large to send, which is not a quota.
+   let detail="";try{const body:unknown=await response.clone().json();if(typeof body==="object"&&body!==null&&typeof (body as {detail?:unknown}).detail==="string")detail=(body as {detail:string}).detail;else if(typeof body==="object"&&body!==null&&typeof (body as {error?:unknown}).error==="string")detail=(body as {error:string}).error}catch{/* a proxy page */}
+   throw new NativeSaveError(/quota/i.test(detail)?"quota":"too_large")
+  }
   // A refused bearer or write is insufficient evidence to erase readable data.
   // Only the independently authenticated lifecycle's explicit read loss purges.
   if(response.status===401||response.status===403)throw new NativeSaveError("write_revoked")
@@ -129,6 +203,12 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     return {sessionId,applicationId}
    })()
    return opening
+  },
+  async undo(operationId,generation,signal){
+   ready()
+   if(typeof operationId!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(operationId)||!validNativeVersion(generation))throw new Error('native_undo_invalid')
+   const response=await send(`${base}document/undo?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!,'X-Craft-Generation':generation},body:JSON.stringify({operation_id:operationId})})
+   ready();return response
   },
   async share(request,signal){
    ready()
@@ -314,9 +394,11 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!value||typeof value!=="object")throw new Error("invalid_native_document")
    const v=value as Record<string,unknown>,q=v.quota as Record<string,unknown>|undefined
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
+   if(v.format!==undefined&&(applicationId!=="gridcraft"||v.format!=="xlsx"&&v.format!=="xlsm"))throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,...(v.legacySource===true?{legacySource:true}:{}),...(v.format==="xlsx"||v.format==="xlsm"?{format:v.format}:{}),applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
+   if(v.format!==undefined&&(bytes[0]!==0x50||bytes[1]!==0x4b))throw new Error("invalid_native_document")
+   return {version:v.version,bytes,...(v.legacySource===true?{legacySource:true}:{}),...(v.format==="xlsx"||v.format==="xlsm"?{format:v.format}:{}),applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,...(engineBuildToken(v.engineBuild)?{engineBuild:v.engineBuild}:{}),editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
   },
   async originalWorkbook(signal){
    ready()
@@ -372,6 +454,22 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    const document=parseNativeVersionDocument(await response.json(),version);ready()
    if(!document)throw new Error('invalid_native_version')
    return document
+  },
+  async exportXlsx(signal,version){
+   ready()
+   if(version!==undefined&&!EXPORT_VERSION.test(version))throw new NativeExportError("bad_version")
+   const q=version===undefined?query:`${query}&${new URLSearchParams({version})}`
+   const response=await send(`${base}document/export.xlsx?${q}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+   ready()
+   if(!response.ok){
+    const reason=EXPORT_STATUS[response.status]??"failed"
+    const retry=Number(response.headers.get("Retry-After"))
+    throw new NativeExportError(reason,reason==="busy"&&Number.isSafeInteger(retry)&&retry>0?retry:undefined)
+   }
+   const exported=response.headers.get("X-Craft-Version")??""
+   if(!EXPORT_VERSION.test(exported))throw new NativeExportError("failed")
+   const blob=await response.blob();ready()
+   return {blob,filename:nativeExportFilename(response.headers.get("Content-Disposition")),version:exported}
   },
   async restore(request,signal){
    ready()

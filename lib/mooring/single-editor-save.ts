@@ -1,8 +1,9 @@
-import { type NativeDraft, type NativeDraftJournal, validNativeDraft, validNativeVersion } from "./native-draft"
+import { compactNativeJson } from "./native-compact"
+import { MAX_NATIVE_BYTES, MAX_WORKBOOK_BYTES, type NativeDraft, type NativeDraftJournal, type NativeFileFormat, validNativeDraft, validNativeVersion, validWorkbookFormat } from "./native-draft"
 
 /** `attemptId` is a fresh nonce per transmitted save; reconcile sends the same
  * one so the server can retire an attempt that did not commit (#4899). */
-export interface NativeSaveRequest extends NativeDraft { workspaceId: string; pageId: string; contentHash: string; attemptId?: string }
+export interface NativeSaveRequest extends NativeDraft { workspaceId: string; pageId: string; contentHash: string; attemptId?: string; /** Keep mine: the person's work saved on top of the head without the other change (audit only). */ rebase?: "keep-local"; /** The cells the person changed, from the snapshot it was captured with; unknown for Keep mine; absent: the server takes it as unknown. Never kept in the journal. */ touched?: string[] | "unknown" }
 export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes" | "attemptId"> {
   version: string
   durability: "node"
@@ -13,7 +14,18 @@ export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes" | "at
   unchanged?: true
 }
 /** `absent` (reconcile only): the server retired the attempt; it did not commit and never will. */
-export type NativeSaveFailure = "conflict" | "quota" | "write_revoked" | "read_revoked" | "absent"
+/** `unsupported`: the server refused the file itself (not a workbook, encrypted, another format). */
+/** moved: refused because the Sheet has a newer version (409 code "moved"); answered by a rebase.
+ *  fidelity_loss: the file would lose or change macros, signatures or customXml (422); nothing was stored. */
+export type NativeSaveFailure = "conflict" | "moved" | "fidelity_loss" | "quota" | "too_large" | "write_revoked" | "read_revoked" | "absent" | "unsupported"
+/** Documents above this are exported rarely: 3 s of quiet before an autosave. */
+const LARGE_DOCUMENT_BYTES = 8 << 20
+const LARGE_DOCUMENT_IDLE_MS = 3000
+/** A full quota and a body the server refuses as too large both refuse one save; neither is a fence for a press. */
+// Refusals of the file itself: autosave does not send it again; the person's own save asks the server again (the draft keeps the work meanwhile).
+const refusedForSize = (reason: string | undefined) => reason === "quota" || reason === "too_large" || reason === "unsupported" || reason === "fidelity_loss"
+/** Quiet before an autosave: a native document at most 5 s; a workbook Sheet, whose every save is a whole file, up to 30 s. */
+const MAX_IDLE_MS = 5000, MAX_WORKBOOK_IDLE_MS = 30_000
 export class NativeSaveError extends Error {
   constructor(readonly reason: NativeSaveFailure) { super(reason) }
 }
@@ -28,7 +40,6 @@ export interface SingleEditorSaveOptions {
   pageId: string
   applicationId: string
   enginePin: string
-  workbookFormat?: NativeDraft["format"]
   baseVersion: string
   /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
    * the unchanged-content baseline for a freshly opened editor. Never a local
@@ -46,8 +57,10 @@ export interface SingleEditorSaveOptions {
   sessionId: string
   journal: NativeDraftJournal
   engine: {
-    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string; revision?: string }>
-    validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
+    /** `format`: a workbook editor names the file it wrote (an xlsx stays an xlsx unless it holds macros). */
+    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string; revision?: string; format?: NativeFileFormat; /** The cells the person changed since the saved version, or unknown. */ touched?: string[] | "unknown" }>
+    /** Required for a native document; a workbook Sheet's file is checked by the server. */
+    validate?(draft: NativeDraft, signal: AbortSignal): Promise<void>
   }
   transport: {
     save(request: NativeSaveRequest, signal: AbortSignal): Promise<unknown>
@@ -56,11 +69,13 @@ export interface SingleEditorSaveOptions {
   onState(state: NativeSaveState): void
   onReceipt?(receipt: NativeSaveReceipt): void | Promise<unknown>
   idleMs?: number
+  /** A workbook Sheet (the file is the document): its format as opened. */
+  format?: NativeFileFormat
   timeoutMs?: number
   /** Waits before asking the server about an unconfirmed save; the last one repeats. */
   reconcileBackoffMs?: number[]
 }
-interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string }
+interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string; /** rebaseBase calls seen when the snapshot was asked for. */ rebases?: number }
 
 const RECONCILE_BACKOFF_MS = [2_000, 10_000, 30_000, 60_000]
 
@@ -69,8 +84,10 @@ const RECONCILE_BACKOFF_MS = [2_000, 10_000, 30_000, 60_000]
 export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   options = { ...options }
   if (![options.workspaceId, options.pageId].every(value => typeof value === "string" && value.length > 0 && value.length <= 256 && !value.includes("\0")) || !validNativeDraft({ ...options, editorRevision: "initial", bytes: new Uint8Array() })) throw new Error("invalid_native_session")
+  const workbook = options.format !== undefined
+  if (workbook ? options.applicationId !== "gridcraft" || !validWorkbookFormat(options.format) : typeof options.engine.validate !== "function") throw new Error("invalid_native_session")
   const idleMs = options.idleMs ?? 300, timeoutMs = options.timeoutMs ?? 10_000
-  if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
+  if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > (workbook ? MAX_WORKBOOK_IDLE_MS : MAX_IDLE_MS) || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   // While access is being confirmed, input cannot be seen by whoever types it, so it
   // is not work to keep yet. A hold asks for one capture of what came before, sends
@@ -91,6 +108,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // Sequences whose journal write has not settled, including ones past the deadline.
   const unsettledWrites = new Set<number>()
   let preparingCount = 0
+  // rebaseBase calls so far: a snapshot asked for before one holds the editor without the other author's change.
+  let rebases = 0
+  // Keep mine: the first save on top of this version says so (X-Craft-Rebase: keep-local).
+  let keepLocalFor: string | undefined
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   let writeRetirement: Promise<boolean> | undefined
   // A validated receipt whose local row retirement failed. It is delivered to
@@ -108,6 +129,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let lastState: NativeSaveState = { phase: "idle", dirty: false }
   const stateWaiters = new Set<() => void>()
   const notifyStateWaiters = () => { for (const check of [...stateWaiters]) check() }
+  // A big document is exported and compacted in full each time: wait longer after the last edit.
+  let largeDocument = false
   const emit = (phase: NativeSaveState["phase"], reason?: string) => {
     if (!active && phase !== "stopped" && phase !== "revoked") return
     lastState = { phase, dirty, ...(reason ? { reason } : {}) }
@@ -144,7 +167,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   function schedule() {
     clearTimeout(timer)
     const token = ++nextAutosave
-    if (active && !held) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
+    if (active && !held) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, largeDocument ? Math.max(idleMs, LARGE_DOCUMENT_IDLE_MS) : idleMs)
   }
   // A local storage fence is retried: the next capture either persists (which
   // lifts it) or fails visibly again. Server and authority fences never are.
@@ -168,6 +191,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     if (!validReceipt(receipt, attempt, unchangedAllowed)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
     if (!active || !writable) return
     baseVersion = receipt.version
+    keepLocalFor = undefined
     unconfirmed = undefined
     try { await confirmRow(attempt.draft) } catch {
       // The server committed exactly these bytes; only the local recovery row
@@ -280,7 +304,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       } else if (error instanceof NativeSaveError) {
         blocked = error.reason
         if (error.reason === "write_revoked") { revokeWrite(); return }
-        emit("draft", error.reason)
+        emit("draft", error.reason === "too_large" ? "document_too_large" : error.reason)
       } else { unconfirmed = attempt; emit("uncertain", "unconfirmed") }
     } finally {
       if (pending === operation) pending = undefined
@@ -338,25 +362,43 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const epoch = edits
       dirty = true
       let stage = "engine"
+      const rebasesAsked = rebases
       try {
         const snapshot = await options.engine.snapshot(lifetime.signal, requestId)
         if (!active || !beforeHeldInput(snapshot.revision)) return
+        // Taken before the other author's change was replayed: neither kept nor sent; a fresh capture follows.
+        if (rebasesAsked !== rebases) { lastFailedPreparation = sequence; scheduleIfNeeded(); return }
         const proven = heldInput() && hasWorkBeforeHold(snapshot.revision) ? heldAt : epoch
-        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice(), ...(options.workbookFormat ? { format: options.workbookFormat } : {}) }
+        // A Sheet's engine export is indented JSON (80 MB for a large workbook); the compact form
+        // is what is hashed, validated, kept as a draft and sent, so both sides hash the same bytes.
+        // A workbook file is kept exactly as the editor wrote it.
+        const exported = !workbook && options.applicationId === "gridcraft" && snapshot.bytes.byteLength > (1 << 20) ? await compactNativeJson(snapshot.bytes, lifetime.signal) : snapshot.bytes.slice()
+        if (!active) return
+        // Past the stored-document limit nothing can be saved: say so (the work stays in the editor)
+        // instead of failing as an anonymous snapshot error. Large documents also wait longer to autosave.
+        largeDocument = exported.byteLength > LARGE_DOCUMENT_BYTES
+        if (exported.byteLength > (workbook ? MAX_WORKBOOK_BYTES : MAX_NATIVE_BYTES)) {
+          lastFailedPreparation = sequence
+          emit(writable ? "draft" : "read-only", "document_too_large")
+          return
+        }
+        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: exported, ...(workbook ? { format: snapshot.format ?? options.format } : {}) }
         if (!validNativeDraft(draft)) throw new Error("invalid_native_snapshot")
         stage = "storage"
         await persistDraft(draft, sequence)
         keptEdits = Math.max(keptEdits, proven)
         if (!active) return
         stage = "engine"
-        await options.engine.validate({ ...draft, bytes: draft.bytes.slice() }, lifetime.signal)
+        if (!workbook) await options.engine.validate!({ ...draft, bytes: draft.bytes.slice() }, lifetime.signal)
         if (!active) return
         const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(draft.bytes))
         if (!active) return
         const contentHash = `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`
-        if (!options.workbookFormat && latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
-        const nativeState = (options.applicationId === "wordcraft" || options.workbookFormat) && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
-        latest = { nativeState, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
+        if (!workbook && latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
+        // Word's engine identity, and a workbook file's editor revision (its file is not the stored one byte for byte).
+        const nativeState = (options.applicationId === "wordcraft" || workbook) && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
+        if (rebasesAsked !== rebases) { lastFailedPreparation = sequence; scheduleIfNeeded(); return }
+        latest = { nativeState, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash, ...(snapshot.touched !== undefined ? { touched: snapshot.touched } : {}) }, epoch, sequence, rebases: rebasesAsked }
         return latest
       } catch {
         lastFailedPreparation = sequence
@@ -376,7 +418,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // itself lifts only when this press actually transmits (or proves the
       // content already committed), so a press stopped by a hold or another
       // fence leaves autosave refused. Autosave never retries a quota refusal.
-      const fence = () => explicit && blocked === "quota" ? undefined : blocked
+      const fence = () => explicit && refusedForSize(blocked) ? undefined : blocked
       const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : fence() ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
       const refused = (reason: string) => reason === "read_revoked" ? new NativeSaveError("read_revoked") : new Error(reason)
       let lookedUp = false
@@ -397,7 +439,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
           if (manual) throw refused(unavailable()!)
           return
         }
-        if (attempt.draft.baseVersion === baseVersion) break
+        // Captured before the other author's change: it must never be sent on top of their version.
+        if ((attempt.rebases ?? 0) !== rebases) { scheduleIfNeeded(); if (manual) throw new Error("native_save_rebased"); return }
+        if (attempt.draft.baseVersion === baseVersion) {
+          // Keep mine overwrites the agent's cells too: as far as the agent's undo knows, everything was touched.
+          if (keepLocalFor === baseVersion && attempt.draft.rebase !== "keep-local") attempt = { ...attempt, draft: { ...attempt.draft, rebase: "keep-local", touched: "unknown" } }
+          break
+        }
         attempt = { ...attempt, draft: { ...attempt.draft, baseVersion } }
         try { await persistDraft(attempt.draft, attempt.sequence) } catch { emit("draft", "storage"); if (manual) throw new Error("storage"); return }
         if (latest?.sequence === attempt.sequence) latest = attempt
@@ -445,14 +493,14 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const owed = owedReceipt
         if (owed && owed.version === baseline.version && (owed.unchanged || owed.contentHash === baseline.contentHash)) { owedReceipt = undefined; deliver(owed) }
         if (confirmation) deliver(confirmation)
-        if (blocked === "quota") blocked = undefined
+        if (refusedForSize(blocked)) blocked = undefined
         dirty = newerThan(attempt) || latest?.nativeState !== attempt.nativeState
         emit(dirty ? "dirty" : "saved")
         scheduleIfNeeded()
         return
       }
       // Seeding or a row retirement was awaited: check every fence again.
-      if (blocked === "quota") {
+      if (refusedForSize(blocked)) {
         if (unavailable()) {
           emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked)
           if (manual) throw refused(unavailable()!)
@@ -613,6 +661,52 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       else scheduleIfNeeded()
     },
     save: (requestId?: string) => save(requestId),
+    /** The server holds version `version` (hash `contentHash`, as sent by whoever stored it, for
+     * example an agent) and the editor has just been brought to exactly that state without
+     * reloading (a replayed command list). The next save is measured against it: the same
+     * content saves nothing, other content saves as a new version on top of `version`
+     * (never an overwrite). Refused (false) while anything of the person's is unsaved or in
+     * flight; the caller then opens the whole version instead. */
+    adoptVersion(version: string, contentHash: string): boolean {
+      if (!active || !writable || blocked || unconfirmed || pending || dirty || held || !validNativeVersion(version) || !/^sha256:[a-f0-9]{64}$/.test(contentHash)) return false
+      if (BigInt(version) <= BigInt(baseVersion)) return false
+      baseVersion = version
+      baselineStale = false
+      confirmed = { nativeState: undefined, contentHash, version, seeded: true }
+      return true
+    },
+    /**
+     * Concurrent editing: another author's log was replayed over the person's unsaved work, so the editor
+     * now holds `version` (whose stored bytes hash to `contentHash`) plus that work. The next save goes on
+     * top of `version`; any capture asked for before this call is dropped, never relabelled. Refused while
+     * a save is in flight or unresolved (the host retries once it settles).
+     */
+    /** A save refused as moved, but nothing newer is logged: lift the refusal and save again on the same base (the server decides again). */
+    retryMoved(): boolean {
+      if (!active || !writable || blocked !== "moved" || unconfirmed || pending || held) return false
+      blocked = undefined
+      dirty = true
+      void save(undefined, ++nextAutosave).catch(() => {})
+      return true
+    },
+    /** The version the next save goes on top of (the person's unsaved work is on it). */
+    currentBase(): string { return baseVersion },
+    rebaseBase(version: string, contentHash: string, rebaseOptions: { keepLocal?: boolean } = {}): boolean {
+      // A save the server refused because the Sheet moved on (409) is exactly what a rebase answers.
+      if (!active || !writable || blocked && blocked !== "moved" || unconfirmed || pending || held || !validNativeVersion(version) || !/^sha256:[a-f0-9]{64}$/.test(contentHash)) return false
+      if (BigInt(version) <= BigInt(baseVersion)) return false
+      blocked = undefined
+      keepLocalFor = rebaseOptions.keepLocal ? version : undefined
+      rebases++
+      baseVersion = version
+      baselineStale = false
+      confirmed = { nativeState: undefined, contentHash, version, seeded: true }
+      latest = undefined
+      edits++
+      dirty = true
+      void save(undefined, ++nextAutosave).catch(() => {})
+      return true
+    },
     // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
     async flush() { await save(undefined, undefined, true); await waitForCleanSaved() },
     // The server version the editor's clean, saved content is confirmed at: the

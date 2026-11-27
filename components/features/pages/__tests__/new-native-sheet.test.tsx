@@ -79,3 +79,23 @@ it('says an administrator turned Sheet off when initialize is refused for it',as
  expect(created).not.toHaveBeenCalled()
  client.clear()
 })
+// A person who only views a new Sheet holds no lease. A release whose answer was lost is
+// tried again; one that still did not go is left for the editor to release, exactly that custody and nothing else.
+import {takeUnreleasedCreation} from '@/lib/mooring/creation-custody'
+it('tries a lost creation release again, and leaves the exact custody for the editor when it still did not go',async()=>{
+ const {client,created}=prepare({release:'lost'})
+ fireEvent.click(screen.getByRole('button',{name:'Create Doc'}))
+ await waitFor(()=>expect(created).toHaveBeenCalledWith('budget','sheet-page'),{timeout:3000})
+ expect(mocks.fetch.mock.calls.filter(([url])=>url.includes('/lease/release'))).toHaveLength(3)
+ expect(takeUnreleasedCreation('sheet-page')).toEqual({token:'a'.repeat(64),generation:'9007199254740993'})
+ expect(takeUnreleasedCreation('sheet-page'),'taken once').toBeUndefined()
+ client.clear()
+})
+it('does not try again a release the server answered, even with a refusal',async()=>{
+ const {client,created}=prepare({release:'expired'})
+ fireEvent.click(screen.getByRole('button',{name:'Create Doc'}))
+ await waitFor(()=>expect(created).toHaveBeenCalledWith('budget','sheet-page'))
+ expect(mocks.fetch.mock.calls.filter(([url])=>url.includes('/lease/release'))).toHaveLength(1)
+ expect(takeUnreleasedCreation('sheet-page')).toBeUndefined()
+ client.clear()
+})

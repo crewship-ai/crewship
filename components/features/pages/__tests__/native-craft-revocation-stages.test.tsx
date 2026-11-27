@@ -199,7 +199,7 @@ describe('silent stream',()=>{
   await advance(NATIVE_REAUTHORIZE_INTERVAL_MS-300)
   expect(server.count('reauthorize')).toBe(0);expect(contentVisible()).toBe(true);expect(offered()).toBe(true)
   await advance(600)
-  // T1: the refusal arrived. T2: hidden and withdrawn before any proof of read loss.
+  // The refusal arrived: hidden and withdrawn before any proof of read loss.
   expect(server.count('reauthorize')).toBe(1);expect(contentVisible()).toBe(false);expect(offered()).toBe(false)
   await advance(60_000)
   expect(server.count('document')).toBe(0)
@@ -261,7 +261,7 @@ describe('offline',()=>{
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
   server.calls.length=0;server.reachable=true
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
-  // T3: nothing is read, and only the positive proof erases. Whichever of the kept
+  // Nothing is read, and only the positive proof erases. Whichever of the kept
   // draft's watch and the admission retry reaches the server first may ask for it.
   expect(server.count('draft-key')).toBeGreaterThan(0);expect(server.count('document')).toBe(0);expect(offered()).toBe(false)
   expect(m.purge).toHaveBeenCalledOnce()
@@ -372,6 +372,24 @@ describe('a draft kept after write loss',()=>{
   await advance(5*60_000)
   expect(server.count('draft-key')).toBe(0)
   // The journal identity is per module: the next test signs in again.
+  await suspendOtherDocumentDrafts('human')
+ })
+ // The session ends while an edit is unsaved and the page tears the editor down before
+ // it confirmed read-only. The edit is already in the journal and the port is closed, so the end of the session goes
+ // on; before, every retry awaited the same failed retirement and the tab stayed on Keep this tab open.
+ it('a session end whose editor is torn down before it confirmed read-only keeps the captured draft and finishes',async()=>{
+  await opened()
+  const port=m.port.mock.results.at(-1)!.value as {setReadOnly:ReturnType<typeof vi.fn>}
+  port.setReadOnly.mockImplementation((value:boolean,signal:AbortSignal)=>value?new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('native_access_unconfirmed')),{once:true})):Promise.resolve(false))
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await settle(()=>journal.persist.mock.calls.length>0)
+  let outcome:'pending'|'done'|'failed'='pending'
+  void suspendOtherDocumentDrafts(null).then(()=>{outcome='done'},()=>{outcome='failed'})
+  await settle(()=>journal.persist.mock.calls.at(-1)?.[1]===true)
+  expect(journal.persist.mock.calls.at(-1)?.[1],'the edit is captured as the final draft first').toBe(true)
+  cleanup()
+  await settle(()=>outcome!=='pending')
+  expect(outcome).toBe('done')
   await suspendOtherDocumentDrafts('human')
  })
  it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
@@ -701,5 +719,36 @@ describe('lease handoff',()=>{
   await advance(2_000)
   expect(screen.getByRole('alert')).toHaveTextContent('The connection timed out')
   expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+})
+// The session ends while the Sheet holds unsaved work. The editor's own
+// capture for retirement failing is no reason to block the app: a confirmed local capture keeps the work, and only when
+// that cannot be confirmed either does the suspension refuse (the tab, and its buffer, stay).
+describe('the end of the session over unsaved work',()=>{
+ it('keeps the work in the local journal when the retiring capture fails, and lets the sign-out go on',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  let refused=0
+  const kept=journal.persist.getMockImplementation()
+  journal.persist.mockImplementation(async(...args:unknown[])=>{if(args[1]===true&&refused++===0)throw new Error('storage_busy');return kept?.(...args)})
+  let outcome:'kept'|'refused'|undefined
+  await act(async()=>{await suspendOtherDocumentDrafts(null).then(()=>{outcome='kept'},()=>{outcome='refused'})})
+  await advance(2_000)
+  expect(refused,'the retiring capture was refused once').toBeGreaterThan(0)
+  expect(outcome,'a confirmed local capture is enough to end the session').toBe('kept')
+  const finals=journal.persist.mock.calls.filter(call=>call[1]===true)
+  expect(finals.length,'a second, local capture was taken').toBeGreaterThanOrEqual(2)
+  await suspendOtherDocumentDrafts('human')
+ })
+ it('still refuses when not even the local capture can be confirmed, so nothing is lost silently',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  journal.persist.mockImplementation(async(...args:unknown[])=>{if(args[1]===true)throw new Error('storage_gone')})
+  let outcome:'kept'|'refused'|undefined
+  await act(async()=>{await suspendOtherDocumentDrafts(null).then(()=>{outcome='kept'},()=>{outcome='refused'})})
+  await advance(2_000)
+  expect(outcome).toBe('refused')
+  journal.persist.mockResolvedValue(undefined)
+  await suspendOtherDocumentDrafts('human').catch(()=>{})
  })
 })

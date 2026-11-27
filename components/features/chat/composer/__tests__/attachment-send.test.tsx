@@ -181,4 +181,9 @@ describe("composer: attachments ride along with the message", () => {
     expect(sendMessage).not.toHaveBeenCalled()
     expect(useComposerStore.getState().attachments["sess-1"]).toHaveLength(1)
   })
+
+  it("marks the message field, so the chat can give it the keyboard back without guessing", () => {
+    render(<ChatComposer {...baseProps} variant="desktop" />)
+    expect(document.querySelector("textarea")?.hasAttribute("data-chat-composer-input")).toBe(true)
+  })
 })
