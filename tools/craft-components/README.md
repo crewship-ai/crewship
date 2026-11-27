@@ -58,6 +58,8 @@ The build stops when a crate's license expression cannot be satisfied by the
 permissive allowlist in the script (`ALLOWED_LICENSES`) or when a font license
 is not the SIL OFL 1.1. Each package carries `licenses/crates.json` and a
 CycloneDX SBOM, `licenses/sbom.cdx.json`; both are covered by the package's pin.
+WordCraft records Cargo compiler artifacts separately for its WASI engine and
+browser editor. Its inventory uses the artifacts built for those two targets.
 
 ## Release
 

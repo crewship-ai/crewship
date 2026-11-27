@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location('build_craft_components', Path(__file__).with_name('build-craft-components.py'))
 build = importlib.util.module_from_spec(_spec)
@@ -37,6 +38,40 @@ class LicensePolicy(unittest.TestCase):
         self.assertIn('file 3', str(refused.exception))
         self.assertNotIn('ok 1', str(refused.exception))
 
+
+class WordArtifactInventory(unittest.TestCase):
+    def test_records_only_artifacts_for_the_requested_wasm_target(self):
+        target = 'wasm32-unknown-unknown'
+        directory = Path('/tmp/build-word')
+        entries = [
+            ('wordcraft-web', 'bin', directory / target / 'release/wordcraft-web.wasm'),
+            ('jpeg-encoder', 'lib', directory / target / 'release/deps/libjpeg_encoder.rlib'),
+            ('harfbuzz-subset-sys', 'lib', directory / 'release/deps/libharfbuzz_subset_sys.rlib'),
+            ('host-build-script', 'custom-build', directory / target / 'release/build/build-script'),
+        ]
+        lines = [json.dumps({'reason': 'compiler-artifact', 'package_id': name,
+                            'target': {'kind': [kind]}, 'filenames': [str(path)]})
+                 for name, kind, path in entries]
+        with mock.patch.object(build.subprocess, 'Popen') as popen:
+            proc = popen.return_value.__enter__.return_value
+            proc.stdout = io.StringIO('\n'.join(lines))
+            proc.wait.return_value = 0
+            artifacts = {}
+            build.cargo_build('cargo', Path('/tmp/source'), {}, directory, target, 'wordcraft-web', artifacts)
+        self.assertEqual(artifacts, {target: {'wordcraft-web', 'jpeg-encoder'}})
+
+    def test_uses_only_the_observed_crates_and_requires_the_target_root(self):
+        names = ['wordcraft-cli', 'wordcraft-web', 'jpeg-encoder', 'webpki-roots']
+        packages = [{'id': name, 'name': name, 'version': '1', 'license': 'MIT'} for name in names]
+        packages[-1]['license'] = 'CDLA-Permissive-2.0'
+        component = {'cli_package': names[0], 'web_package': names[1]}
+        artifacts = {'wasm32-wasip1': {names[0], names[2]}, 'wasm32-unknown-unknown': {names[1]}}
+        with mock.patch.object(build, 'run', return_value=json.dumps({'packages': packages}).encode()):
+            crates = build.crate_inventory(component, Path('/tmp/source'), 'cargo', {}, artifacts)
+            self.assertEqual([c['name'] for c in crates], sorted(names[:3]))
+            artifacts['wasm32-unknown-unknown'] = {names[0]}
+            with self.assertRaisesRegex(ValueError, 'artifact evidence does not match'):
+                build.crate_inventory(component, Path('/tmp/source'), 'cargo', {}, artifacts)
 
 class FontLicenses(unittest.TestCase):
     def test_only_ofl_1_1_fonts_pass(self):
