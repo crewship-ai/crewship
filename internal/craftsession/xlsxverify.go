@@ -170,7 +170,7 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 	return out, nil
 }
 
-// WorkbookWorksheetParts maps internal worksheet parts to their workbook sheet names.
+// WorkbookWorksheetParts maps internal worksheet parts to their original, case-preserving sheet names.
 func WorkbookWorksheetParts(zr *zip.Reader) (map[string]string, error) {
 	sheets, err := workbookSheets(zr)
 	if err != nil {
@@ -187,7 +187,7 @@ func WorkbookWorksheetParts(zr *zip.Reader) (map[string]string, error) {
 			return nil, ErrNotXLSX
 		}
 		names[name] = true
-		out[sheet.part] = name
+		out[sheet.part] = sheet.name
 	}
 	return out, nil
 }

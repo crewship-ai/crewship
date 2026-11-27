@@ -79,16 +79,33 @@ func craftRealtimeChangedCells(base, submitted []byte, edits craftWorkbookEdits)
 		return nil, err
 	}
 	changed := make([]craftRealtimeCell, 0, len(candidate))
+	digestCounts := make(map[[32]byte]int)
 	for cell, value := range candidate {
 		if original[cell] != value {
 			changed = append(changed, cell)
+			digestCounts[original[cell]]--
+			digestCounts[value]++
 		}
 		delete(original, cell)
 	}
-	for cell := range original {
+	for cell, value := range original {
 		changed = append(changed, cell)
+		digestCounts[value]--
+		digestCounts[[32]byte{}]++
 	}
 	if len(changed) > craftRealtimeCellLimit {
+		return nil, errCraftRealtimeUnproved
+	}
+	// A permutation of the same inputs could be a sort whose intended
+	// logical cell identities cannot be inferred from two snapshots.
+	permuted := len(changed) > 1
+	for _, n := range digestCounts {
+		if n != 0 {
+			permuted = false
+			break
+		}
+	}
+	if permuted {
 		return nil, errCraftRealtimeUnproved
 	}
 	sort.Slice(changed, func(i, j int) bool {

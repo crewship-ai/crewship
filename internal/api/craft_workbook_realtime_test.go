@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,7 +10,9 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
@@ -224,5 +227,137 @@ func TestSheetITRealtimeWireFixture(t *testing.T) {
 		start.OpID != end.OpID || start.RunID != end.RunID || start.Phase != "started" || start.TTL != craftSheetPresenceTTL.Milliseconds() ||
 		end.Phase != "ended" || end.TTL != 0 || len(end.Ranges) != 0 {
 		t.Fatalf("invalid presence fixture: %+v %+v", start, end)
+	}
+}
+
+func TestSheetITRealtimeAnchoredWriteHasCompleteInverse(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Update the two status cells", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	admission := s.realtimeAdmission()
+	applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "realtime-anchored-write", "commands": sitCommands(
+		sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "B3", "values": [][]string{{"first"}, {"second"}}}),
+	)})
+	var r struct {
+		Operation string `json:"operation_id"`
+		Undoable  bool   `json:"undoable"`
+	}
+	if refused || json.Unmarshal([]byte(applied), &r) != nil || !r.Undoable || r.Operation == "" {
+		t.Fatalf("anchored apply: %s", applied)
+	}
+	cells := s.headSheets(admission.SessionToken)["L"]
+	if cells["B3"] != "first" || cells["B4"] != "second" {
+		t.Fatalf("anchored apply did not cover two cells: %v", cells)
+	}
+	ops := s.opsRows()
+	if len(ops) != 1 || !strings.Contains(ops[0].Inverse, "'L'!B3:B4") || !strings.Contains(ops[0].Ops, "'L'!B3:B4") {
+		t.Fatalf("anchored write has incomplete journal: %+v", ops)
+	}
+	w := s.undo(admission.SessionToken, admission.Generation, r.Operation)
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"restored":2`) {
+		t.Fatalf("anchored undo: %d %s", w.Code, w.Body)
+	}
+	cells = s.headSheets(admission.SessionToken)["L"]
+	if cells["B3"] != "open" || cells["B4"] != "open" {
+		t.Fatalf("anchored undo did not restore both cells: %v", cells)
+	}
+}
+
+func TestSheetITRealtimeAllOverlapsAndRetiredAttempt(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Change B8", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	admission := s.realtimeAdmission()
+	user := s.headSheets(admission.SessionToken)
+	user["L"]["B8"] = "person"
+	submitted := sitWorkbook(user["L"], user["Other"])
+	if status, _ := s.realtimeReconcile(admission, "1", "realtime-retire", submitted); status != 410 {
+		t.Fatalf("uncommitted attempt reconcile: %d", status)
+	}
+	touched := map[string]string{"X-Craft-Touched": `["'L'!B8"]`}
+	if w := s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submitted, "realtime-retire", "", touched); w.Code != 409 || s.head() != 1 {
+		t.Fatalf("retired attempt wrote: %d %s", w.Code, w.Body)
+	}
+	applied, refused := s.toolCall(call, "craft_sheet_apply", sitApply(generation, "realtime-all-overlap"))
+	if refused || s.head() != 2 {
+		t.Fatalf("agent apply: %s", applied)
+	}
+	w := s.humanSaveWith(admission.SessionToken, admission.Generation, "1", submitted, "realtime-all-lost", "", touched)
+	var merged craftRealtimeMerged
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.Kind != "merged" ||
+		merged.Receipt.Version != "2" || merged.Receipt.BaseVersion != "2" || !merged.Receipt.Unchanged || s.head() != 2 ||
+		!bytes.Equal(merged.Bytes, s.stored(2)) || !reflect.DeepEqual(merged.Overlap, []craftSheetRange{{"L", "B8"}}) {
+		t.Fatalf("all overlaps: %d receipt %+v overlap %+v head %d", w.Code, merged.Receipt, merged.Overlap, s.head())
+	}
+	if status, raw := s.realtimeReconcile(admission, "1", "realtime-all-lost", submitted); status != 200 || !bytes.Equal(raw, w.Body.Bytes()) {
+		t.Fatalf("no-op merge reconciliation: %d original response=%v", status, bytes.Equal(raw, w.Body.Bytes()))
+	}
+}
+
+func TestSheetITRealtimePresenceAndChatDetachment(t *testing.T) {
+	s := newSheetITScenario(t)
+	s.send("Change B8", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	admission := s.realtimeAdmission()
+	next := craftNativeOpenStreamHandler(t, s.f.rig, s.human, admission.SessionToken, func(w http.ResponseWriter, r *http.Request) {
+		r.SetPathValue("slug", "sheet-own")
+		s.m.human.events(w, r)
+	})
+	if event, data := next(); event != "sheet_agent_presence_snapshot" || !reflect.DeepEqual(data["operations"], []any{}) {
+		t.Fatalf("initial presence: %s %v", event, data)
+	}
+	engineApply := s.m.config.AgentApply
+	entered, release, applied := make(chan struct{}), make(chan struct{}), make(chan string, 1)
+	var releaseOnce sync.Once
+	stop := func() { releaseOnce.Do(func() { close(release) }) }
+	defer stop()
+	s.m.config.AgentApply = func(ctx context.Context, p CraftNativeDocumentProfile, workbook []byte, commands json.RawMessage) ([]byte, error) {
+		close(entered)
+		select {
+		case <-release:
+			return engineApply(ctx, p, workbook, commands)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	go func() {
+		result, _ := s.toolCall(call, "craft_sheet_apply", sitApply(generation, "realtime-presence"))
+		applied <- result
+	}()
+	select {
+	case <-entered:
+	case <-time.After(8 * time.Second):
+		t.Fatal("agent did not enter engine Apply")
+	}
+	event, started := next()
+	if event != "sheet_agent_presence" || started["phase"] != "started" || started["op_id"] == "" ||
+		!reflect.DeepEqual(started["ranges"], []any{map[string]any{"sheet": "L", "a1": "B8"}}) {
+		t.Fatalf("start presence: %s %v", event, started)
+	}
+	stop()
+	select {
+	case result := <-applied:
+		if !strings.Contains(result, `"version":2`) {
+			t.Fatalf("agent apply did not commit: %s", result)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("agent did not finish")
+	}
+	event, ended := next()
+	if event != "sheet_agent_presence" || ended["phase"] != "ended" || ended["op_id"] != started["op_id"] || !reflect.DeepEqual(ended["ranges"], []any{}) {
+		t.Fatalf("end presence: %s %v", event, ended)
+	}
+	mustExec(t, s.f.rig.db, `DELETE FROM artifact_message_refs WHERE chat_id=? AND page_id='sheet-own'`, s.f.a.ChatID)
+	if w := s.humanRequest(http.MethodGet, "", admission.SessionToken, nil, s.m.human.lease); w.Code != 403 {
+		t.Fatalf("detached session read: %d %s", w.Code, w.Body)
+	}
+	if status, _ := s.realtimeReconcile(admission, "1", "realtime-detached", s.v1); status != 403 {
+		t.Fatalf("detached session reconciliation: %d", status)
+	}
+	if event, data := next(); event != "session_retired" || data["draft"] != "retain" {
+		t.Fatalf("detached stream: %s %v", event, data)
 	}
 }

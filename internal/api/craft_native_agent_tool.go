@@ -395,8 +395,10 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 			return
 		}
 		result := map[string]any{"application": e.grant.Application, "version": strconv.FormatInt(state.LatestVersion, 10), "engine_pin": store.EnginePin()}
+		var activity craftSheetPresenceHandle
 		if store.Workbook() {
-			defer m.sheetPresence(bound.Context(), e, craftSheetPresenceReadRanges(input.Query))()
+			activity = m.sheetPresence(bound.Context(), e, craftSheetPresenceReadRanges(input.Query))
+			defer activity.end()
 		}
 		if len(input.Query) > 0 {
 			native, err := nativeAgentDocumentBytes(state)
@@ -418,6 +420,7 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 				craftNativeDocumentError(w, err)
 				return
 			}
+			activity.update(craftSheetPresenceResolved(view))
 			result["view"] = view
 		}
 		writeJSON(w, 200, result)
@@ -618,7 +621,7 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	record := craftNativeAgentSheetRecord(e)
 	undoable := store.Workbook()
 	if undoable {
-		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(input.Commands))()
+		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(input.Commands)).end()
 		ops, err := resolveCraftWorkbookOps(input.Commands)
 		if err != nil {
 			forgetNativeAgentAttempt(e, input.RequestID, attempt)
@@ -919,7 +922,11 @@ func resolveCraftWorkbookOps(commands json.RawMessage) (json.RawMessage, error) 
 		case "cell.set":
 			params["input"] = e.Params["input"]
 		case "range.setValues":
-			params["values"] = e.Params["values"]
+			rng, err := craftResolvedWriteRange(address, e.Params[key], e.Params["values"])
+			if err != nil {
+				return nil, err
+			}
+			params[key], params["values"] = rng, e.Params["values"]
 		case "range.clear":
 			name = "edit.clearContents"
 		default:
@@ -928,6 +935,39 @@ func resolveCraftWorkbookOps(commands json.RawMessage) (json.RawMessage, error) 
 		out = append(out, op{Command: name, Params: params})
 	}
 	return json.Marshal(out)
+}
+
+// An A1 anchor with a matrix changes the complete rectangle. Reject ragged
+// matrices because the workbook journal needs an exact footprint for Undo.
+func craftResolvedWriteRange(address string, rangeRaw, valuesRaw json.RawMessage) (string, error) {
+	area, ok := nativeAgentEngineRange(rangeRaw)
+	var rows [][]json.RawMessage
+	if !ok || json.Unmarshal(valuesRaw, &rows) != nil || len(rows) == 0 || len(rows) > nativeAgentWriteRows {
+		return "", ErrCraftNativeAgentEngine
+	}
+	width := len(rows[0])
+	if width < 1 || width > nativeAgentWriteCols {
+		return "", ErrCraftNativeAgentEngine
+	}
+	for _, row := range rows {
+		if len(row) != width {
+			return "", errCraftNativeAgentUndoUnavailable
+		}
+	}
+	if area.cells() > 1 {
+		if area.height() != len(rows) || area.width() != width {
+			return "", ErrCraftNativeAgentEngine
+		}
+		return address, nil
+	}
+	lastCol, lastRow := area.col1+width-1, area.row1+len(rows)-1
+	if lastCol > nativeAgentMaxColumns || lastRow > nativeAgentMaxRows {
+		return "", ErrCraftNativeAgentEngine
+	}
+	if width > 1 || len(rows) > 1 {
+		address = address[:strings.LastIndex(address, "!")+1] + craftUndoA1(area.col1, area.row1) + ":" + craftUndoA1(lastCol, lastRow)
+	}
+	return address, nil
 }
 
 // craftNativeAgentWorkbookRecord adds to the agent's version record the operations it applied,

@@ -88,6 +88,7 @@ func (before craftWorksheetState) preservedBy(after craftWorksheetState) bool {
 // attributes (e.g. shared, array and data-table formulas) are kept together with
 // their cached results. Formula expressions are compared as decoded XML text.
 func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookEdits) (craftWorksheetState, error) {
+	sheetKey := strings.ToLower(sheet)
 	r, err := part.Open()
 	if err != nil {
 		return craftWorksheetState{}, err
@@ -168,7 +169,7 @@ func craftWorksheetProjection(part *zip.File, sheet string, edits craftWorkbookE
 				lastCol = col
 				cellBounds := nativeAgentEngineArea{col1: col, row1: row, col2: col, row2: row}
 				state.cells = craftWorksheetEnclose(state.cells, cellBounds)
-				addressed := edits.includes(sheet, col, row)
+				addressed := edits.includes(sheetKey, col, row)
 				var observe func([32]byte) error
 				if addressed && edits.observe != nil {
 					observe = func(input [32]byte) error { return edits.observe(sheet, col, row, input) }

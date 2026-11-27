@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,12 +94,12 @@ func (p *craftSheetPresence) observe(scope craftSheetPresenceScope) ([]craftShee
 	return out, p.change
 }
 
-func (p *craftSheetPresence) start(op craftSheetPresenceOperation) func() {
+func (p *craftSheetPresence) start(op craftSheetPresenceOperation) craftSheetPresenceHandle {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prune(time.Now())
 	if len(p.active) >= craftSheetPresenceLimit {
-		return func() {}
+		return craftSheetPresenceHandle{}
 	}
 	if p.active == nil {
 		p.active = make(map[string]craftSheetPresenceOperation)
@@ -105,28 +107,51 @@ func (p *craftSheetPresence) start(op craftSheetPresenceOperation) func() {
 	id := op.event.OpID
 	p.active[id] = op
 	p.signal()
-	return func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if _, ok := p.active[id]; ok {
-			delete(p.active, id)
-			p.signal()
-		}
+	return craftSheetPresenceHandle{p, id}
+}
+
+type craftSheetPresenceHandle struct {
+	p  *craftSheetPresence
+	id string
+}
+
+func (h craftSheetPresenceHandle) update(ranges []craftSheetRange) {
+	if h.p == nil || len(ranges) == 0 {
+		return
+	}
+	h.p.mu.Lock()
+	defer h.p.mu.Unlock()
+	if op, ok := h.p.active[h.id]; ok && len(op.event.Ranges) == 0 {
+		op.event.Ranges = ranges
+		h.p.active[h.id] = op
+		h.p.signal()
 	}
 }
 
-func (m *craftNativeAgentManager) sheetPresence(ctx context.Context, e *craftNativeAgentEntry, ranges []craftSheetRange) func() {
+func (h craftSheetPresenceHandle) end() {
+	if h.p == nil {
+		return
+	}
+	h.p.mu.Lock()
+	defer h.p.mu.Unlock()
+	if _, ok := h.p.active[h.id]; ok {
+		delete(h.p.active, h.id)
+		h.p.signal()
+	}
+}
+
+func (m *craftNativeAgentManager) sheetPresence(ctx context.Context, e *craftNativeAgentEntry, ranges []craftSheetRange) craftSheetPresenceHandle {
 	if e.chat == nil || ctx.Err() != nil {
-		return func() {}
+		return craftSheetPresenceHandle{}
 	}
 	id, err := craftNativeOpaque()
 	if err != nil {
-		return func() {}
+		return craftSheetPresenceHandle{}
 	}
 	a := e.chat.authority
 	var name string
-	if err = m.human.pages.db.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(name,''),'Agent') FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, a.AgentID, a.WorkspaceID).Scan(&name); err != nil {
-		return func() {}
+	if err = m.human.pages.db.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(substr(name,1,128),''),'Agent') FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, a.AgentID, a.WorkspaceID).Scan(&name); err != nil {
+		return craftSheetPresenceHandle{}
 	}
 	if ranges == nil {
 		ranges = []craftSheetRange{}
@@ -149,7 +174,9 @@ func craftSheetPresenceWriteRanges(commands json.RawMessage) []craftSheetRange {
 	}
 	ranges := make([]craftSheetRange, 0, len(reads))
 	for _, read := range reads {
-		ranges = append(ranges, craftSheetRange{Sheet: read.sheet, A1: read.rng})
+		if r, ok := craftSheetPresenceRange(read.sheet, read.rng); ok {
+			ranges = append(ranges, r)
+		}
 	}
 	return ranges
 }
@@ -173,9 +200,43 @@ func craftSheetPresenceReadRanges(query json.RawMessage) []craftSheetRange {
 	if err != nil || !ok {
 		return nil
 	}
-	var rng string
-	if json.Unmarshal(op.Params[key], &rng) != nil {
+	rng := address[strings.LastIndex(address, "!")+1:]
+	if adjusted, ok := craftSheetPresenceRange(sheet, rng); ok {
+		return []craftSheetRange{adjusted}
+	}
+	return nil
+}
+
+func craftSheetPresenceResolved(view json.RawMessage) []craftSheetRange {
+	type read struct {
+		Sheet string `json:"sheet"`
+		Range string `json:"range"`
+	}
+	var answer struct {
+		Result struct {
+			read
+			Columns []read `json:"columns"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(view, &answer) != nil {
 		return nil
 	}
-	return []craftSheetRange{{Sheet: sheet, A1: rng}}
+	if r, ok := craftSheetPresenceRange(answer.Result.Sheet, answer.Result.Range); ok {
+		return []craftSheetRange{r}
+	}
+	ranges := make([]craftSheetRange, 0, min(len(answer.Result.Columns), craftSheetRangeLimit))
+	for _, column := range answer.Result.Columns[:min(len(answer.Result.Columns), craftSheetRangeLimit)] {
+		if r, ok := craftSheetPresenceRange(column.Sheet, column.Range); ok {
+			ranges = append(ranges, r)
+		}
+	}
+	return ranges
+}
+
+func craftSheetPresenceRange(sheet, rng string) (craftSheetRange, bool) {
+	if pos := strings.LastIndex(rng, "!"); pos >= 0 {
+		rng = rng[pos+1:]
+	}
+	_, ok := nativeAgentEngineRange(json.RawMessage(strconv.Quote(rng)))
+	return craftSheetRange{Sheet: sheet, A1: rng}, ok && sheet != "" && len(sheet) <= 128
 }
