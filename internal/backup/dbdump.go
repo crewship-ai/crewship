@@ -330,10 +330,13 @@ var BackupTables = []string{
 	"artifact_design_documents",
 	"artifact_version_blobs",
 	"artifact_versions",
-	"craft_workbook_migrations",     // immutable conversion receipt; FK to the native profile and source version/blob
-	"artifact_library_publications", // FK artifact_version_heads
-	"artifact_library_pins",         // FK artifact_version_heads; library_page_id is a soft Page reference
-	"artifact_library_pin_files",    // FK artifact_library_pins
+	"craft_version_ops",              // durable workbook replay history; FK pages and workspaces
+	"craft_version_undos",            // durable Undo results; FK pages, workspaces and users
+	"craft_version_signature_breaks", // stored version signature warnings; FK pages and workspaces
+	"craft_workbook_migrations",      // immutable conversion receipt; FK to the native profile and source version/blob
+	"artifact_library_publications",  // FK artifact_version_heads
+	"artifact_library_pins",          // FK artifact_version_heads; library_page_id is a soft Page reference
+	"artifact_library_pin_files",     // FK artifact_library_pins
 	"artifact_data_collections",
 	"artifact_data_documents",
 	"artifact_data_runs",

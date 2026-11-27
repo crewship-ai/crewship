@@ -264,16 +264,15 @@ func TestHandleChatMessage_RefusesPendingReviewAgent(t *testing.T) {
 		t.Errorf("error = %v, want contains 'pending review'", err)
 	}
 
-	// Exactly one 'error' event with reason=pending_review must have
-	// been streamed before the bridge returned. No status/thinking
-	// events should leak — the container must not have been touched.
-	if len(events) != 1 {
-		t.Fatalf("events = %d, want 1 (just the pending-review error)", len(events))
+	// The kept user turn, then exactly one 'error' event with
+	// reason=pending_review. No status/thinking events leak — the container is not touched.
+	if len(events) != 2 || events[0].Type != "user_message" {
+		t.Fatalf("events = %+v, want the saved user turn and the pending-review error", events)
 	}
-	if events[0].Type != "error" {
-		t.Errorf("event type = %q, want error", events[0].Type)
+	if events[1].Type != "error" {
+		t.Errorf("event type = %q, want error", events[1].Type)
 	}
-	md, _ := events[0].Metadata.(map[string]any)
+	md, _ := events[1].Metadata.(map[string]any)
 	if md == nil {
 		t.Fatalf("event metadata = %T, want map[string]any", events[0].Metadata)
 	}

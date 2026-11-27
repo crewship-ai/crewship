@@ -73,6 +73,9 @@ func memoryMCPSpec(agentSlug string) mcpSpec {
 // even for a SkipSidecar worker — which is correct, the sink IS up. A
 // cold first-touch returns false, so the memory tool is withheld.
 func memorySinkReady(ctx context.Context, ctr provider.ContainerProvider, containerID string) bool {
+	if memoryWithheld(ctx) {
+		return false // a run without memory is not offered the memory tools
+	}
 	return checkSidecar(ctx, ctr, containerID) != nil
 }
 

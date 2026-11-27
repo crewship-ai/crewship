@@ -3,15 +3,22 @@ package server
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/craftapps"
+	"github.com/crewship-ai/crewship/internal/craftassets"
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
 func nativeCraftHTTPConfig(cfg *config.Config, craft *craftApps, editor *editororigin.Handler) (goapi.CraftNativeHTTPConfig, error) {
+	return nativeCraftHTTPConfigWith(cfg, craft, editor, &sheetSessions{})
+}
+
+// nativeCraftHTTPConfigWith lets the server keep the session set it must close.
+func nativeCraftHTTPConfigWith(cfg *config.Config, craft *craftApps, editor *editororigin.Handler, sessions *sheetSessions) (goapi.CraftNativeHTTPConfig, error) {
 	craft = craftAppsOr(cfg, craft)
 	out := goapi.CraftNativeHTTPConfig{Enabled: craft.enabled(), Profiles: make(map[string]goapi.CraftNativeDocumentProfile), Policy: craft.policy(), Components: make(map[string]craftapps.Component)}
 	for app, c := range craft.components {
@@ -21,14 +28,18 @@ func nativeCraftHTTPConfig(cfg *config.Config, craft *craftApps, editor *editoro
 	// agents setting (or the operator's explicit one) admits each task.
 	out.AgentsEnabled = out.Enabled
 	if out.AgentsEnabled {
-		engine := goapi.NewCraftNativeAgentCLIAdapter()
-		out.AgentApply, out.AgentInspect = engine.Apply, engine.Inspect
+		out.AgentApply, out.AgentInspect = nativeCraftAgentEngine(sessions)
+		out.SheetComputed = sessions.computed
+		out.SheetTrusted = sessions.trusted
 	}
 	for key, p := range craft.operator {
 		if editor == nil || !editor.HasBundle(p.EditorBundle) || editor.IndexURL(p.EditorBundle) != p.EditorURL {
 			return goapi.CraftNativeHTTPConfig{}, errors.New("qualified native editor bundle is not served at its exact pin")
 		}
 		out.Profiles[key] = goapi.CraftNativeDocumentProfile{Application: p.Application, EngineRevision: p.EngineRevision, CLIPath: p.CLIPath, CLISHA256: p.CLISHA256, EditorBundle: p.EditorBundle, EditorURL: p.EditorURL}
+	}
+	if err := sheetWorkbookRequired(os.Getenv("CREWSHIP_SHEET_WORKBOOK"), craft.installed); err != nil {
+		return goapi.CraftNativeHTTPConfig{}, err
 	}
 	for app, inst := range craft.installed {
 		p, c, err := craft.activate(editor, inst)
@@ -88,4 +99,20 @@ func nativeCraftCredentialGate(cfg *config.Config, craft *craftApps, editor *edi
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sheetWorkbookRequired is the development and test switch CREWSHIP_SHEET_WORKBOOK=1: it asks for
+// workbook Sheets, which only a Sheet package with document_format "workbook" provides (the
+// package alone decides in a release). Asked without one, the server does not start.
+func sheetWorkbookRequired(value string, installed map[string]*craftassets.Installed) error {
+	switch value {
+	case "":
+		return nil
+	case "1":
+		if inst := installed["gridcraft"]; inst != nil && inst.Component.DocumentFormat == craftassets.DocumentFormatWorkbook {
+			return nil
+		}
+		return errors.New(`CREWSHIP_SHEET_WORKBOOK=1 needs an installed Sheet package whose manifest names document_format "workbook"; the installed one keeps native documents`)
+	}
+	return errors.New("CREWSHIP_SHEET_WORKBOOK must be 1 or unset")
 }

@@ -53,6 +53,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_project_origins":         IntentInclude,
 	"artifact_project_run_consents":    IntentExcludeRuntime,
 	"artifact_project_message_intents": IntentExcludeRuntime,
+	"artifact_chat_refs":               IntentExcludeRuntime, // private chat references require fresh admission after a portable restore
+	"agent_files":                      IntentExcludeRuntime, // fresh attachment required for agent access on a target
 	"artifact_message_refs":            IntentExcludeRuntime, // checked chat references must be re-admitted after restore, never replayed
 
 	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
@@ -87,10 +89,13 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
 	"mooring_edit_lease_requests":   IntentExcludeRuntime,
 
-	"craft_workbook_migrations":     IntentInclude,        // durable Sheet conversion and exact source references
-	"craft_native_documents":        IntentInclude,        // immutable native compatibility pins, never runtime authority
-	"craft_native_proposals":        IntentInclude,        // reviewable document DATA; accept re-checks live rights and lease
-	"craft_native_retired_attempts": IntentExcludeRuntime, // fences in-flight save attempts of live admissions; never portable
+	"craft_version_ops":              IntentInclude,        // history of saved versions, with the same Page scope
+	"craft_version_undos":            IntentInclude,        // durable Undo results
+	"craft_version_signature_breaks": IntentInclude,        // signature warnings for saved versions
+	"craft_workbook_migrations":      IntentInclude,        // durable Sheet conversion and exact source references
+	"craft_native_documents":         IntentInclude,        // immutable native compatibility pins, never runtime authority
+	"craft_native_proposals":         IntentInclude,        // reviewable document DATA; accept re-checks live rights and lease
+	"craft_native_retired_attempts":  IntentExcludeRuntime, // fences in-flight save attempts of live admissions; never portable
 
 	// Workbook content and immutable receipts travel; live authority does not.
 	"gridcraft_heads":        IntentInclude,

@@ -1585,7 +1585,7 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 	// — a recall failure logs and continues so a flaky Ollama embed
 	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
 	// reserved in promptBuf.Grow above.
-	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" && !req.strictContentPrivacy {
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" && !req.strictContentPrivacy && !req.withoutMemory {
 		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
 			WorkspaceID: req.WorkspaceID,
@@ -1846,15 +1846,16 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var ipcCfg *SidecarIPCConfig
 		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
-				GridCraftEnabled: o.gridCraftEnabled,
-				BaseURL:          ipcBaseURL,
-				Token:            internalAPIToken,
-				AgentID:          req.AgentID,
-				AgentSlug:        req.AgentSlug,
-				CrewID:           req.CrewID,
-				WorkspaceID:      req.WorkspaceID,
-				ChatID:           req.ChatID,
-				ContainerID:      req.ContainerID,
+				GridCraftEnabled:  o.gridCraftEnabled,
+				CraftSheetEnabled: o.craftSheetEnabled,
+				BaseURL:           ipcBaseURL,
+				Token:             internalAPIToken,
+				AgentID:           req.AgentID,
+				AgentSlug:         req.AgentSlug,
+				CrewID:            req.CrewID,
+				WorkspaceID:       req.WorkspaceID,
+				ChatID:            req.ChatID,
+				ContainerID:       req.ContainerID,
 				// #812: the boot agent's own per-agent token. req.CrewMembers
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.

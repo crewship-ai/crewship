@@ -47,6 +47,25 @@ type adminCraftApplication struct {
 	UpdatedAt  *time.Time           `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
 	Component  *adminCraftComponent `json:"component,omitempty" yaml:"component,omitempty"`
 	Documents  *int                 `json:"documents,omitempty" yaml:"documents,omitempty"`
+	ChatRun    *adminCraftAgentPath `json:"chat_run,omitempty" yaml:"chat_run,omitempty"`
+	Tasks      *adminCraftAgentPath `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+}
+
+// adminCraftAgentPath is whether an agent can work on a Sheet by one route.
+type adminCraftAgentPath struct {
+	State   string `json:"state" yaml:"state"`
+	Reason  string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+func (p *adminCraftAgentPath) line(label string) string {
+	if p == nil {
+		return ""
+	}
+	if p.State == "ready" {
+		return fmt.Sprintf("  %s: ready\n", label)
+	}
+	return fmt.Sprintf("  %s: %s (%s): %s\n", label, p.State, p.Reason, p.Message)
 }
 
 type adminCraftApplications struct {
@@ -65,6 +84,9 @@ type adminCraftDiagnostics struct {
 	Version    string `json:"version,omitempty" yaml:"version,omitempty"`
 	DurationMS int64  `json:"duration_ms" yaml:"duration_ms"`
 	Editor     string `json:"editor" yaml:"editor"`
+	// For Sheet: whether an agent can work on it in a chat and in a task.
+	AgentChatRun *adminCraftAgentPath `json:"agent_chat_run,omitempty" yaml:"agent_chat_run,omitempty"`
+	AgentTasks   *adminCraftAgentPath `json:"agent_tasks,omitempty" yaml:"agent_tasks,omitempty"`
 }
 
 // craftSubject maps the names people use to the API's identifiers.
@@ -144,6 +166,7 @@ func printAdminApplications(cmd *cobra.Command, out adminCraftApplications) erro
 			if a.Message != "" {
 				fmt.Fprintf(w, "  %s\n", a.Message)
 			}
+			fmt.Fprint(w, a.ChatRun.line("in a chat"), a.Tasks.line("in a task"))
 			if c := a.Component; c != nil && c.Available {
 				kind := "installed"
 				if c.Development {
@@ -255,6 +278,7 @@ It reads and writes no document. Exits non-zero when the check fails.`,
 			} else {
 				fmt.Fprintf(w, "%s: failed: %s\n", out.ID, out.Message)
 			}
+			fmt.Fprint(w, out.AgentChatRun.line("agent in a chat"), out.AgentTasks.line("agent in a task"))
 			fmt.Fprintf(w, "Editor isolation: %s\n", out.Editor)
 		}); err != nil {
 			return err

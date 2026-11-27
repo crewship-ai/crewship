@@ -261,6 +261,8 @@ documented in [`crewship craft`](/cli/craft).
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/pages/{slug}/craft/availability` | Whether Craft, preview and agents are available for this artifact; `can_edit` is false and `edit_refusal` says `app_draining` or `app_disabled` while an administrator has its application off |
+| GET | `/api/v1/pages/{slug}/craft/agent-access?chat_id=…` | Whether an agent may change this Sheet if you attach it to the next message of your own private chat: `allowed`, or `reason` (the one the agent would be told), `message`, `detail` and the current `holder`. To a caller who may read the latest revision (not Read or Comment grantees) it also names that revision: `head_version`, `saved_at`, `saved_by_name`, allowed or not. Advice only; every agent call is checked again |
+| GET | `/api/v1/chats/{chatId}/artifact-refs?cursor=…&limit=…` | The artifacts attached to messages of a chat you may read, oldest first: `refs[]` with `message_id`, `page_id`, `slug`, `name`, `application` and `created_at`, and `next_cursor` while more may follow (at most 100 per page). Each one is listed only while you may see that page; a hidden one is neither listed nor counted. A chat you may not read is 404 |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | Open an editing session |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Refresh the session's credential |
 | GET | `/api/v1/pages/{slug}/craft/events` | Server-sent heartbeat that keeps the lease alive |
@@ -276,6 +278,7 @@ documented in [`crewship craft`](/cli/craft).
 | GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
 | GET | `/api/v1/pages/{slug}/craft/document/versions` | Version history, newest first (needs the `craft_version_history` workspace flag) |
 | GET | `/api/v1/pages/{slug}/craft/document/versions/{version}` | One saved version's bytes and metadata, read-only, same rights and admin audit as the document read (needs the `craft_version_history` workspace flag) |
+| GET | `/api/v1/pages/{slug}/craft/document/export.xlsx` | The Sheet as an `.xlsx` download (head, or `?version=N` with the `craft_version_history` flag), same rights and admin audit as the document read; each export is audited as `artifact.sheet_exported` without cell values |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Save a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |
@@ -337,6 +340,8 @@ status for those.
 | 422 | `artifact_slides_unsupported` | The version is outside the Slides profile |
 | 422 | `artifact_slides_overflow` | Slide text does not fit its frame |
 | 422 | — | Craft: invalid native document |
+| 500 | `server_begin`, `server_store`, `server_storage`, `server_token`, `server_commit` | Craft `initialize`: the server's own work failed at that step (the server log names the step and the error class, never document content). The document was not created; try again |
+| 503 | `clock` | Craft `initialize`: the server cannot start a native session now |
 | 503 | — | Storage, Design or Craft is unavailable; the write outcome may be unknown. Keep the candidate and original Craft request, inspect the latest state or reconcile the original save before retrying |
 
 ## Related

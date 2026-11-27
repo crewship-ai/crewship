@@ -324,3 +324,27 @@ func TestCraftCLIProposalActionsRejectBadInputBeforeRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestCraftCLIAgentAccessAsksForTheChat(t *testing.T) {
+	stub := pageStub(t)
+	var query string
+	stub.OnGet("/api/v1/pages/health/craft/agent-access", func(r *http.Request, _ []byte) (int, []byte, string) {
+		query = r.URL.Query().Get("chat_id")
+		return 200, []byte(`{"allowed":false,"reason":"not_attached","detail":"chat_not_private","max_sheets":1}`), "application/json"
+	})
+	out, err := runPageCLI(t, "", "craft", "agent-access", "health", "--chat", "chat a&b", "-f", "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "chat a&b" || !strings.Contains(out, "reason: not_attached") {
+		t.Fatalf("query %q, out %s", query, out)
+	}
+	// Cobra keeps flag values between runs in one process; start clean.
+	access, _, _ := rootCmd.Find([]string{"craft", "agent-access"})
+	_ = access.Flags().Set("chat", "")
+	access.Flags().Lookup("chat").Changed = false
+	query = "untouched"
+	if _, err = runPageCLI(t, "", "craft", "agent-access", "health"); err == nil || query != "untouched" {
+		t.Fatalf("ran without --chat: %v, server asked with %q", err, query)
+	}
+}

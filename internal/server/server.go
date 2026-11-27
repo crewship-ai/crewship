@@ -58,6 +58,7 @@ import (
 type Server struct {
 	// craft is the startup view of the Word and Sheet applications (#5315).
 	craft               *craftApps
+	sheetSessions       *sheetSessions
 	documentsStartupErr error
 	mooringStartupErr   error
 	mooringAssets       *mooringassets.Prepared
@@ -1096,12 +1097,16 @@ func (s *Server) mountAPIRouter(
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
-	nativeConfig, nativeErr := nativeCraftHTTPConfig(cfg, s.craft, s.editor)
+	s.sheetSessions = &sheetSessions{}
+	nativeConfig, nativeErr := nativeCraftHTTPConfigWith(cfg, s.craft, s.editor, s.sheetSessions)
 	if nativeErr != nil {
 		logger.Error("native document release unavailable", "error", nativeErr)
 		return
 	}
 	opts = append(opts, goapi.WithCraftNativeHTTP(nativeConfig))
+	// The tools are listed only where native documents and agents are on; each
+	// call is still refused by the host unless a Sheet is attached to its run.
+	s.orchestrator.SetCraftSheetEnabled(nativeConfig.Enabled && nativeConfig.AgentsEnabled)
 	opts = s.configureMooringHTTP(opts)
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {

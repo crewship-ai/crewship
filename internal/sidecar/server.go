@@ -41,6 +41,8 @@ type MemoryConfig struct {
 // crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
 	GridCraftEnabled bool `json:"gridcraft_enabled,omitempty"`
+	// CraftSheetEnabled offers the chat run's native Sheet tools (craft_sheet_*).
+	CraftSheetEnabled bool `json:"craft_sheet_enabled,omitempty"`
 	// CrewOnly exposes only read-only fleet telemetry to agent-less scripts.
 	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`
@@ -164,8 +166,10 @@ type RouteAuth struct {
 // It provides an HTTP forward proxy with credential injection,
 // optional memory search API, and assignment routing for lead agents.
 type Server struct {
-	peerPatterns peerCredentialPatterns
-	httpServer   *http.Server
+	// craftSheetPrewarm remembers the run tokens whose Sheet prewarm was sent.
+	craftSheetPrewarm sync.Map
+	peerPatterns      peerCredentialPatterns
+	httpServer        *http.Server
 	// runCapabilities holds the host-minted capability of each run without a
 	// human (#5339), attached to that run's artifact tool calls only.
 	runCapabilities  runCapabilities

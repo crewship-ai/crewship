@@ -255,6 +255,108 @@ legacy editor bundles together
 may name at most four pins. The qualification rules are in the
 [Craft native spec](/specs/craft-native).
 
+### Where the document engine runs
+
+Word and Sheet use a signed WebAssembly engine. Since this release it runs in a
+**separate worker process**: the server starts its own binary again with an
+internal flag, hands it the verified engine module and one private working
+directory, and kills the process when a run exceeds its deadline or its output
+limit. The engine has no network, an empty environment and a memory cap
+(1 GiB, at most 4 GiB). A worker that is killed, runs out of memory or exits
+with an error fails that one run (`document engine run failed`); the server and
+other runs carry on.
+
+The in-process engine of earlier releases had to poll for cancellation, which
+made a large workbook open about 4.6 times slower (122 s against 26 s for a
+workbook of 235 000 cells), too slow for the 60 s deadline of a save.
+
+The worker needs to start its own executable and to write the engine module to
+the temporary directory (a directory the server user may write, `TMPDIR`; with a
+read-only root file system mount a writable temporary directory). When it cannot,
+Crewship **does not stay quiet**: it logs one warning (`Craft engine runs
+in-process`) and falls back to the in-process engine, and the application's
+diagnostics (`POST /api/v1/admin/instance/artifacts/applications/{app}/diagnostics`)
+report `runtime` (`wasm-process` or `wasm`), `degraded: true` and a short
+`degraded_reason`. `CREWSHIP_CRAFT_ENGINE_INPROCESS=1` chooses the in-process
+engine on purpose (it is then not reported as degraded). A fallback is slower
+for large workbooks and cannot stop a stuck run.
+
+#### Memory and time
+
+Two different numbers matter. The engine's **linear memory cap** is what the
+engine module itself may allocate: 2 GiB for Sheet and 1 GiB for Word per run
+(at most 4 GiB). The **resident memory of the worker process** is larger: a
+real workbook of 235 000 cells and 95 000 formulas held open for editing was
+measured at about 2.3 GiB, and a snapshot of it peaks higher. Plan for this on
+the host:
+
+- at most 2 documents are held open at once and one snapshot runs at a time;
+- at most 2 one-shot engine runs (validation, import conversion) run at once;
+- a small instance should keep large workbooks off, or give the server
+  container 6 GiB or more.
+
+Time follows the size of the document: a validation may take 30 s plus 8 s per
+MiB, at most 5 minutes (a workbook of 30 MB gets 270 s; it measured 26 s on a
+quiet machine and 77 s under load). An import conversion has 5 minutes. A run
+that exceeds its deadline or its memory is stopped and fails; nothing falls
+back to the in-process engine because of it.
+
+#### Request size and a reverse proxy
+
+The API refuses request bodies over 16 MiB, except the routes that carry a whole
+Sheet document, which keep their own limit: the xlsx import (64 MiB), `initialize`
+and the document save and reconcile (45 MiB, which holds a workbook of about
+30 MB as JSON; a browser with gzip support sends it compressed, 15:1). A reverse
+proxy in front of Crewship must allow the same: for nginx
+`client_max_body_size 70m;` on the Crewship location (and a `proxy_read_timeout`
+of at least 120 s, because a large workbook is converted and validated for up to
+a few minutes). A proxy that stops a large body answers 413; the editor then
+says the document is too large to send and keeps your changes in the open tab
+instead of reporting a full version history.
+
+#### Upgrading the Sheet editor
+
+A release may ship a newer Sheet **editor** for the same document engine. The
+engine module and the document format stay the same, so existing Sheets open
+unchanged: a document is pinned to the engine it was written with, and the store
+accepts, besides the current editor, the earlier editors listed as compatible
+for that exact engine (revision and module digest must both match; another
+engine is never accepted this way). A stored document keeps its pin and is not
+rewritten when it is saved. A **new** Sheet is written with the earlier editor's
+pin, so a server that still runs the earlier release can open it. Going back to
+the earlier release is therefore safe for every Sheet; the newer editor's extra
+host message (`gridcraft:execute`, which shows an agent's change without
+reloading the document) is simply not used there.
+
+### Importing an .xlsx workbook into a Sheet
+
+`crewship craft import <page> --file book.xlsx` (and the same three routes
+under `/api/v1/pages/{slug}/craft/import`) convert a workbook on the server and
+publish it as a new native Sheet in an **empty page you own**. The file is only
+read: an existing Sheet is never replaced, and the original stays with you.
+
+Before the engine runs, the archive is checked (at most 10 000 entries, 512 MiB
+per part and 1 GiB unpacked, a compression ratio of 200, no absolute or `..`
+paths, no encrypted or macro-enabled content imported), and the import is
+**refused, never shortened**, when:
+
+| Case | Code | Why |
+|---|---|---|
+| Not a readable `.xlsx` (damaged, encrypted) | `not_xlsx` | the engine cannot read it |
+| A sheet holds more than 1 000 000 XML elements (roughly 330 000 cells with formulas) | `too_large` | the engine stops reading such a sheet without a warning |
+| The workbook is over 16 million cells or 256 sheets | `too_large` | engine and import limits |
+| The engine kept fewer cells or formulas than the file holds | `truncated` | nothing is imported |
+
+Macros, links to other workbooks, pivot tables and charts are listed as notes
+when the file has them; macros and external links are not carried over.
+
+A Sheet document is stored as compact JSON of **at most 32 MiB**. A real
+workbook of 235 000 cells and 95 000 formulas measures 29.7 MB compact, so the
+reserve is about 7 %. A Sheet that grows past the limit cannot be saved: the
+editor says so, keeps your changes in the open tab and does not replace the
+last saved version. Large saves go over the wire gzip-compressed (about 15:1)
+with the inflated length declared and enforced by the server.
+
 ### Docs engine settings
 
 `documents.enabled` needs three clean absolute paths of at most 100 bytes each,
