@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,14 +33,18 @@ func TestNativeAgentDocumentBytesReadsAWorkbookSheet(t *testing.T) {
 // does not apply (the save's fidelity check does), and a save that would lose parts comes back as
 // that loss, not as a generic engine failure.
 func TestSheetSessionAppliesToAWorkbookAndKeepsAFidelityLoss(t *testing.T) {
-	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: []byte("PK\x03\x04 after")}}
+	raw := craftTestWorkbook(t, "xlsx", "before")
+	parts := sitParts(t, raw)
+	part := string(parts["xl/worksheets/sheet1.xml"])
+	sheet := strings.Replace(part, "</row>", `<c r="C1" t="inlineStr"><is><t>done</t></is></c></row>`, 1)
+	after := workbookEdited(t, raw, "", map[string]string{"xl/worksheets/sheet1.xml": sheet})
+	engine := &fakeSheetEngine{session: &fakeSheetSession{snapshot: after}}
 	checked := 0
 	a := NewCraftNativeSheetAgentAdapter(engine, WithCraftNativeSheetOpenCheck(func(base, snapshot []byte) error { checked++; return errors.New("not JSON") }))
 	p := CraftNativeDocumentProfile{Application: "gridcraft"}
-	raw := []byte("PK\x03\x04 before")
 	commands := json.RawMessage(`[{"command":"range.clear","params":{"range":"B8:B577","sheet":"L"}},{"command":"cell.set","params":{"cell":"C1","input":"done","sheet":"L"}}]`)
 	out, err := a.Apply(context.Background(), p, raw, commands)
-	if err != nil || string(out) != "PK\x03\x04 after" || checked != 0 {
+	if err != nil || !bytes.Equal(out, after) || checked != 0 {
 		t.Fatalf("apply %q %v, open checks %d", out, err, checked)
 	}
 	if want := "clear 'L'!B8:B577|set 'L'!C1=done|snapshot"; strings.Join(engine.session.calls, "|") != want {
@@ -57,7 +62,7 @@ func TestSheetSessionAppliesToAWorkbookAndKeepsAFidelityLoss(t *testing.T) {
 	}
 	// In a workbook file every write names its sheet: the file's active sheet on the server is
 	// not the sheet the person sees. Refused before any session opens.
-	opened := &fakeSheetEngine{session: &fakeSheetSession{snapshot: []byte("PK\x03\x04 after")}}
+	opened := &fakeSheetEngine{session: &fakeSheetSession{snapshot: after}}
 	for _, unnamed := range []string{`[{"command":"cell.set","params":{"cell":"C1","input":"x"}}]`, `[{"command":"range.clear","params":{"range":"B8:B9"}}]`, `[{"command":"range.setValues","params":{"range":"A1:A1","values":[[1]]}}]`} {
 		if _, err := NewCraftNativeSheetAgentAdapter(opened).Apply(context.Background(), p, raw, json.RawMessage(unnamed)); !errors.Is(err, errCraftNativeSheetNameRequired) || len(opened.session.calls) != 0 {
 			t.Fatalf("%s: %v %v", unnamed, err, opened.session.calls)

@@ -61,7 +61,7 @@ func TestSheetITAcceptanceTwoSheetsAndALostConfirmation(t *testing.T) {
 	v1 := sitWorkbook(sitInitialL(), initialOther)
 	human := s.humanSession()
 	generationH := s.humanLease(human)
-	if w := s.humanSave(human, generationH, "1", v1, "sit-acc-v1", ""); w.Code != 200 || s.head() != 2 {
+	if w := s.humanSaveWith(human, generationH, "1", v1, "sit-acc-v1", "", map[string]string{"X-Craft-Touched": `["'Other'!C1"]`}); w.Code != 200 || s.head() != 2 {
 		t.Fatalf("seed: %d %s", w.Code, w.Body)
 	}
 	if w := craftNativeLeaseCall(s.m.human, s.human, human, "sheet-own", "release", `{"generation":"`+generationH+`"}`); w.Code != 200 {
@@ -138,7 +138,7 @@ func TestSheetITAcceptanceTwoSheetsAndALostConfirmation(t *testing.T) {
 	}
 	// Exactly one agent operation, in the table and in the listing.
 	rows := s.opsRows()
-	if len(rows) != 1 || rows[0].Version != 3 || !strings.HasSuffix(rows[0].OperationID, ":acc-1") {
+	if len(rows) != 2 || rows[1].Kind != "agent" || rows[1].Version != 3 || !strings.HasSuffix(rows[1].OperationID, ":acc-1") {
 		t.Fatalf("craft_version_ops: %+v", rows)
 	}
 	code, ops, raw = s.operations(human, "1")

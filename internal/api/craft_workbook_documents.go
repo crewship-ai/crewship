@@ -87,17 +87,19 @@ func (d *craftNativeDocumentsHTTP) saveWorkbook(w http.ResponseWriter, r *http.R
 		replyError(w, 400, "invalid X-Craft-Touched")
 		return
 	}
-	// The base file, read before storage is reserved, for the kept-parts check; a base that is no
-	// longer the head is answered by the CAS. An xlsm saved as xlsx loses its VBA project and is
-	// refused like any other loss.
-	var baseFile []byte
-	{
-		if state, err := s.Read(r.Context(), entry.scope); err == nil && state.LatestVersion == base {
-			if f, err := s.DocumentFile(state.Manifest); err == nil {
-				baseFile = f.Content
-			}
-		}
+	// Read the exact base, even for a retry after the head advanced. The
+	// publication CAS still decides whether a new version can be written.
+	manifest, _, err := s.ReadVersion(r.Context(), entry.scope, base)
+	if err != nil {
+		craftWorkbookFidelityRefusal(w, []craftsession.FidelityPart{{Code: "package", Count: 1}})
+		return
 	}
+	file, err := s.DocumentFile(manifest)
+	if err != nil {
+		craftWorkbookFidelityRefusal(w, []craftsession.FidelityPart{{Code: "package", Count: 1}})
+		return
+	}
+	baseFile := file.Content
 	// Validate the format and archive before inspecting preserved parts.
 	if _, err := mooring.DetectWorkbook(body); err != nil {
 		craftWorkbookError(w, err)
@@ -109,13 +111,12 @@ func (d *craftNativeDocumentsHTTP) saveWorkbook(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
-	if lost := craftWorkbookPartsLost(baseFile, body); lost != nil {
-		writeJSON(w, 422, map[string]any{"error": "the file would lose parts of the workbook it must keep; nothing was saved", "code": "fidelity_loss", "reason": CraftSheetReasonFidelityLoss, "parts": lost})
+	// An address on an unrecognized sheet is still logged as unknown for Undo.
+	touched = craftWorkbookTouchedSheets(touched, baseFile, body)
+	if lost := craftWorkbookPartsLost(baseFile, body, craftWorkbookHumanEdits(touched)); lost != nil {
+		craftWorkbookFidelityRefusal(w, lost)
 		return
 	}
-	// An address on a sheet in neither the saved nor the new version (or one the server cannot
-	// check) stores "*": undo then keeps every cell. Never a 400: the person's save goes through.
-	touched = craftWorkbookTouchedSheets(touched, baseFile, body)
 	// An optional marker only: the save is the same CAS over the head with or without it.
 	if source == craftSheetSavedByEditor && r.Header.Get("X-Craft-Rebase") == "keep-local" {
 		source = craftSheetSavedByKeepLocal
@@ -150,6 +151,39 @@ func (d *craftNativeDocumentsHTTP) saveWorkbook(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, 200, craftWorkbookSaveReceipt{NativeSaveReceipt: receipt, SignatureInvalidated: signed})
+}
+
+func craftWorkbookFidelityRefusal(w http.ResponseWriter, lost []craftsession.FidelityPart) {
+	message := "the workbook changes could not be verified and nothing was saved"
+	for _, part := range lost {
+		if part.Code == "vba_signature" || part.Code == "xml_signatures" {
+			message = "a change to this signed workbook was refused because its signature validity could not be verified"
+			break
+		}
+	}
+	writeJSON(w, 422, map[string]any{
+		"error": message,
+		"code":  "fidelity_loss", "reason": CraftSheetReasonFidelityLoss, "parts": lost,
+	})
+}
+
+func craftWorkbookHumanEdits(touched json.RawMessage) craftWorkbookEdits {
+	edits := craftWorkbookEdits{allowScalarValues: touched == nil}
+	var rows []struct {
+		Params struct {
+			Range string `json:"range"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(touched, &rows) == nil {
+		for _, row := range rows {
+			if row.Params.Range == "*" {
+				edits.allowScalarValues = true
+				continue
+			}
+			edits.add(row.Params.Range)
+		}
+	}
+	return edits
 }
 
 // workbookSheets: this server keeps Sheets as workbook files.

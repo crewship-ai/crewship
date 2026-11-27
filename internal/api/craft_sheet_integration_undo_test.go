@@ -42,7 +42,7 @@ func TestSheetITUndoOfAnAgentChangeKeepsTheLaterHumanWork(t *testing.T) {
 	l := sitInitialL()
 	l["C2"] = "=L!B2|open"
 	generationH := s.humanLease(human)
-	if w := s.humanSave(human, generationH, "1", sitWorkbook(l, sitInitialOther()), "sit-undo-v2", ""); w.Code != 200 || s.head() != 2 {
+	if w := s.humanSaveWith(human, generationH, "1", sitWorkbook(l, sitInitialOther()), "sit-undo-v2", "", map[string]string{"X-Craft-Touched": `["'L'!C2"]`}); w.Code != 200 || s.head() != 2 {
 		t.Fatalf("seed: %d %s", w.Code, w.Body)
 	}
 	if w := craftNativeLeaseCall(s.m.human, s.human, human, "sheet-own", "release", `{"generation":"`+generationH+`"}`); w.Code != 200 {
@@ -70,7 +70,7 @@ func TestSheetITUndoOfAnAgentChangeKeepsTheLaterHumanWork(t *testing.T) {
 		t.Errorf("agent apply is not offered as undoable: %s", applied)
 	}
 	s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
-	if rows := s.opsRows(); len(rows) != 1 || rows[0].Inverse == "" || rows[0].Inverse == "[]" {
+	if rows := s.opsRows(); len(rows) != 2 || rows[1].Inverse == "" || rows[1].Inverse == "[]" {
 		t.Fatalf("the agent's row keeps no inverse: %+v", rows)
 	}
 
@@ -104,12 +104,12 @@ func TestSheetITUndoOfAnAgentChangeKeepsTheLaterHumanWork(t *testing.T) {
 	}
 	// Two rows: the agent's change, and the undo as the person's replayable version 5.
 	rows := s.opsRows()
-	if len(rows) == 0 || rows[0].Version != 3 || rows[0].Kind != "agent" || rows[0].OperationID != result.OperationID {
+	if len(rows) < 2 || rows[1].Version != 3 || rows[1].Kind != "agent" || rows[1].OperationID != result.OperationID {
 		t.Fatalf("craft_version_ops after undo, the agent's row: %+v", rows)
 	}
-	if len(rows) != 2 {
-		t.Errorf("the undo version 5 has no operations row (want 2 rows): %d rows", len(rows))
-	} else if u := rows[1]; u.Version != 5 || u.Kind != "human" || !u.Replayable || u.OperationID != "undo:"+result.OperationID {
+	if len(rows) != 3 {
+		t.Errorf("the undo version 5 has no operations row (want 3 rows): %d rows", len(rows))
+	} else if u := rows[2]; u.Version != 5 || u.Kind != "human" || !u.Replayable || u.OperationID != "undo:"+result.OperationID {
 		t.Errorf("the undo's row: version %d kind %q replayable %v operation_id %q; want 5 human true %q", u.Version, u.Kind, u.Replayable, u.OperationID, "undo:"+result.OperationID)
 	}
 	var source string

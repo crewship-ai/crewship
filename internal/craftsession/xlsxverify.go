@@ -91,7 +91,7 @@ func (c xlsxCell) nativeKind() string {
 
 // workbookSheet is a sheet listed in xl/workbook.xml with the part its relationship names.
 type workbookSheet struct {
-	name, part string
+	name, part, relationship string
 }
 
 // workbookSheets lists the sheets in workbook order. A sheet whose relationship is missing is an
@@ -103,7 +103,7 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 	}
 	read := func(name string) ([]byte, error) {
 		f := files[name]
-		if f == nil {
+		if f == nil || f.UncompressedSize64 > 16<<20 {
 			return nil, ErrNotXLSX
 		}
 		rc, err := f.Open()
@@ -111,7 +111,7 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 			return nil, ErrNotXLSX
 		}
 		defer rc.Close()
-		b, err := io.ReadAll(io.LimitReader(rc, 16<<20))
+		b, err := io.ReadAll(rc)
 		if err != nil {
 			return nil, ErrNotXLSX
 		}
@@ -126,6 +126,7 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 	var rels struct {
 		Rel []struct {
 			ID     string `xml:"Id,attr"`
+			Type   string `xml:"Type,attr"`
 			Target string `xml:"Target,attr"`
 			Mode   string `xml:"TargetMode,attr"`
 		} `xml:"Relationship"`
@@ -138,7 +139,7 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 	if err != nil || xml.Unmarshal(raw, &rels) != nil {
 		return nil, ErrNotXLSX
 	}
-	target := map[string]string{}
+	target := map[string]workbookSheet{}
 	for _, r := range rels.Rel {
 		if strings.EqualFold(r.Mode, "External") {
 			continue
@@ -149,18 +150,44 @@ func workbookSheets(zr *zip.Reader) ([]workbookSheet, error) {
 		} else {
 			p = path.Clean("xl/" + p)
 		}
-		target[r.ID] = p
+		if _, exists := target[r.ID]; r.ID == "" || exists {
+			return nil, ErrNotXLSX
+		}
+		target[r.ID] = workbookSheet{part: p, relationship: r.Type}
 	}
 	if len(wb.Sheets) == 0 || len(wb.Sheets) > maxSheetRelation {
 		return nil, ErrNotXLSX
 	}
 	out := make([]workbookSheet, 0, len(wb.Sheets))
 	for _, s := range wb.Sheets {
-		p, ok := target[s.RID]
-		if !ok || files[p] == nil {
+		entry, ok := target[s.RID]
+		if !ok || files[entry.part] == nil {
 			return nil, ErrNotXLSX
 		}
-		out = append(out, workbookSheet{name: s.Name, part: p})
+		entry.name = s.Name
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// WorkbookWorksheetParts maps internal worksheet parts to their workbook sheet names.
+func WorkbookWorksheetParts(zr *zip.Reader) (map[string]string, error) {
+	sheets, err := workbookSheets(zr)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(sheets))
+	names := make(map[string]bool, len(sheets))
+	for _, sheet := range sheets {
+		if sheet.relationship != "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" {
+			continue
+		}
+		name := strings.ToLower(sheet.name)
+		if name == "" || names[name] || out[sheet.part] != "" || !strings.HasPrefix(sheet.part, "xl/worksheets/") {
+			return nil, ErrNotXLSX
+		}
+		names[name] = true
+		out[sheet.part] = name
 	}
 	return out, nil
 }

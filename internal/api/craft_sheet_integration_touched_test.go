@@ -120,8 +120,7 @@ func TestSheetITInvalidTouchedStoresNothing(t *testing.T) {
 
 // An address on a sheet the workbook has neither in the new nor in the previous version never refuses
 // the person's save: it is stored, its touched row is "*" (unknown) and undo holds every cell. An
-// address on a sheet the person deleted in this version (it is in the previous one) stays as sent,
-// and the agent's cells on L come back.
+// attempt to remove a whole worksheet is refused by the workbook fidelity check.
 func TestSheetITTouchedOnASheetNotInTheWorkbook(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -146,7 +145,14 @@ func TestSheetITTouchedOnASheetNotInTheWorkbook(t *testing.T) {
 				body = sitWorkbook(sheets["L"], sheets["Other"])
 			}
 			attempt := "sit-touched-" + strings.ReplaceAll(tc.name, " ", "-")
-			if w := s.humanSaveWith(human, generationH, "2", body, attempt, "", map[string]string{"X-Craft-Touched": tc.touched}); w.Code != 200 || s.head() != 3 {
+			w := s.humanSaveWith(human, generationH, "2", body, attempt, "", map[string]string{"X-Craft-Touched": tc.touched})
+			if tc.deleteOther {
+				if w.Code != 422 || !strings.Contains(w.Body.String(), "fidelity_loss") || s.head() != 2 {
+					t.Fatalf("sheet deletion: %d %s, head %d", w.Code, w.Body, s.head())
+				}
+				return
+			}
+			if w.Code != 200 || s.head() != 3 {
 				t.Fatalf("touched %s: the person's save is refused: %d %.200s, head %d", tc.name, w.Code, w.Body, s.head())
 			}
 			var row *sitOpsRow
@@ -163,7 +169,7 @@ func TestSheetITTouchedOnASheetNotInTheWorkbook(t *testing.T) {
 			if star != tc.wantStar || (!tc.wantStar && !strings.Contains(string(row.Ops), "Other")) {
 				t.Errorf("touched %s: touched ops %s, want unknown %v", tc.name, row.Ops, tc.wantStar)
 			}
-			w := s.undo(human, generationH, operation)
+			w = s.undo(human, generationH, operation)
 			var answer struct {
 				Restored *int `json:"restored"`
 				Skipped  *int `json:"skipped"`
