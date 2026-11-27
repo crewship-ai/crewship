@@ -64,7 +64,9 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	schemas["NativeCraftProposalAcceptRequest"] = obj(map[string]any{"sessionId": str(), "generation": version(false)}, "sessionId", "generation")
 	schemas["NativeCraftProposalAcceptReceipt"] = obj(map[string]any{"proposal": ref("NativeCraftProposal"), "receipt": ref("NativeCraftSnapshotReceipt")}, "proposal", "receipt")
 	routes := map[string]DomainSchema{}
-	routes["POST /api/v1/pages/{slug}/craft/initialize"] = DomainSchema{Request: ref("NativeCraftInitializeRequest"), Response: ref("NativeCraftInitializeReceipt"), RequestRequired: true, SuccessStatuses: []string{"201"}}
+	routes["POST /api/v1/pages/{slug}/craft/initialize"] = DomainSchema{Request: ref("NativeCraftInitializeRequest"), Response: ref("NativeCraftInitializeReceipt"), RequestRequired: true, SuccessStatuses: []string{"201"}, Parameters: []map[string]any{
+		{"name": "X-Craft-Chat", "in": "header", "schema": str(), "description": "Optional chat owned by the caller. Attach the new Sheet in the same transaction as version 1."},
+	}}
 	add := func(method, path, req, res string) {
 		d := DomainSchema{Response: ref(res), SuccessStatuses: []string{"200"}, NoRequest: req == "", Parameters: []map[string]any{{"name": "X-Craft-Session", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID."}}}
 		if req != "" {
@@ -82,6 +84,14 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 
 	add("GET", "", "", "NativeCraftDocument")
 	add("POST", "/save", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
+	saveKey := "POST /api/v1/pages/{slug}/craft/document/save"
+	save := routes[saveKey]
+	save.Parameters = append(save.Parameters,
+		map[string]any{"name": "X-Craft-Touched", "in": "header", "schema": map[string]any{"type": "string"}, "description": "Workbook Sheet only. ASCII JSON list of at most 2000 sheet-qualified ranges, up to 64 KiB, or unknown."},
+		map[string]any{"name": "X-Craft-Rebase", "in": "header", "schema": map[string]any{"type": "string", "enum": []string{"keep-local"}}, "description": "Workbook Sheet only. Audits an explicit choice to keep the local snapshot. The base still must equal the head."},
+		map[string]any{"name": "X-Craft-Uncompressed-Length", "in": "header", "schema": map[string]any{"type": "string"}, "description": "Required with Content-Encoding: gzip. Exact JSON request length after decompression."},
+	)
+	routes[saveKey] = save
 	add("POST", "/import", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/reconcile", "NativeCraftReconcileRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/restore", "NativeCraftRestoreRequest", "NativeCraftRestoreReceipt")

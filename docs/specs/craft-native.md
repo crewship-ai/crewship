@@ -103,7 +103,7 @@ Authentication: ordinary human authentication and current workspace/Page access
 are required. Request headers: `Authorization` or a session cookie, plus
 `X-Craft-Session` after admission. Query parameters: `workspace_id`. The slug
 path parameter accepts a slug or `@<page-id>`. The private header never travels
-to an editor frame. Responses are JSON, except the explicitly documented SSE.
+to an editor frame. Responses are JSON except on the documented download and SSE routes.
 Statuses: 401 for missing authentication, 403 for denied current authority,
 400 for malformed requests, 409 for competing/stale custody, and 503 when a
 mutation is disabled or unavailable. A generic denial does not prove read loss.
@@ -126,7 +126,10 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header; private read (see Shared previews). | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/migrate-workbook` | Craft admission and Edit authority. | `{version: "2"}`, 200, or 422 when fidelity cannot be confirmed. |
 | GET | `/api/v1/pages/{slug}/craft/document/original-workbook` | Craft admission and private read authority. | Exact original Sheet JSON as an attachment, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/save` | Bound JSON snapshot. For workbook Sheets, optional `X-Craft-Touched` and `X-Craft-Rebase` headers. | Exact committed snapshot receipt, 200. A moved workbook head answers 409 with `code: "moved"`, the head version and operations URL. |
+| GET | `/api/v1/pages/{slug}/craft/document/operations?from=` | Craft admission and private read of a workbook Sheet. | Versions after `from` through the head, and replayable operations where available, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/undo` | Craft admission, current edit lease in `X-Craft-Generation`, and JSON `{operation_id}`. | New version and restored and skipped cell counts, 201. A repeat returns the saved result, 200. |
+| GET | `/api/v1/pages/{slug}/craft/document/export.xlsx` | Craft admission and private read. Optional historical `version` requires version history. | Saved workbook bytes as an attachment, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |

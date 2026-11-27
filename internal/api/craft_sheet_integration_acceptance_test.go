@@ -131,7 +131,7 @@ func TestSheetITAcceptanceTwoSheetsAndALostConfirmation(t *testing.T) {
 
 	// Reopened: both changes, the formula over both.
 	reopened := s.humanGet(human, "", s.m.documents.readSnapshot)
-	got := sitParts(t, reworkbookRead(t, opened).Bytes)
+	got := sitParts(t, workbookRead(t, reopened).Bytes)
 	l, other := sitParseSheet(string(got["xl/worksheets/sheet1.xml"])), sitParseSheet(string(got["xl/worksheets/sheet2.xml"]))
 	if reopened.Code != 200 || l["B8"] != "done" || other["A2"] != "person" || other["C1"] != "="+formula+"|done+person" {
 		t.Fatalf("reopened: %d L!B8=%q Other!A2=%q Other!C1=%q", reopened.Code, l["B8"], other["A2"], other["C1"])
@@ -153,8 +153,8 @@ func TestSheetITAcceptanceTwoSheetsAndALostConfirmation(t *testing.T) {
 	}
 	// The exported xlsx is the head: both cells and the recalculated formula.
 	export := s.humanGet(human, "/export.xlsx", s.m.documents.exportXLSX)
-	if export.Code != 200 || !bytes.Equal(export.Body.Bytes(), reworkbookRead(t, opened).Bytes) {
-		t.Fatalf("export: %d, equals the head %v", export.Code, bytes.Equal(export.Body.Bytes(), reworkbookRead(t, opened).Bytes))
+	if export.Code != 200 || !bytes.Equal(export.Body.Bytes(), workbookRead(t, reopened).Bytes) {
+		t.Fatalf("export: %d, equals the head %v", export.Code, bytes.Equal(export.Body.Bytes(), workbookRead(t, reopened).Bytes))
 	}
 	ex := sitParts(t, export.Body.Bytes())
 	if el, eo := sitParseSheet(string(ex["xl/worksheets/sheet1.xml"])), sitParseSheet(string(ex["xl/worksheets/sheet2.xml"])); el["B8"] != "done" || eo["A2"] != "person" || eo["C1"] != "="+formula+"|done+person" {
