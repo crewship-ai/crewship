@@ -12,7 +12,7 @@ export interface NativeDocumentClientOptions {
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
 export interface NativeDocumentSnapshot {
- version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ version:string;bytes:Uint8Array;format?:"xlsx"|"xlsm";applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
  /** `level` (near 80 %, critical 95 %, full) when the server reports it; older servers send only `warning`. */
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string;level?:"none"|"near"|"critical"|"full"}
 }
@@ -97,7 +97,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
  async function mutate(operation:"save"|"reconcile",request:NativeSaveRequest,signal:AbortSignal):Promise<unknown>{
   ready()
   if(!validNativeDraft(request)||request.baseVersion==="0"||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.sessionId!==sessionId||request.applicationId!==applicationId||!/^sha256:[a-f0-9]{64}$/.test(request.contentHash))throw new Error("invalid_native_snapshot_binding")
-  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,bytes:nativeBase64(request.bytes)})})
+  const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,format:undefined,bytes:nativeBase64(request.bytes)})})
   ready()
   // Only reconcile answers 410: the server retired that attempt; it never commits (#4899).
   if(operation==="reconcile"&&response.status===410)throw new NativeSaveError("absent")
@@ -297,7 +297,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
+   return {version:v.version,bytes,...(v.format==="xlsx"||v.format==="xlsm"?{format:v.format}:{}),applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
   },
   async proposals(signal){
    ready();const response=await send(`${base}proposals?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})

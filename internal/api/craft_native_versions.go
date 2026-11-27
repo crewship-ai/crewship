@@ -56,6 +56,7 @@ type craftNativeVersionDocumentResponse struct {
 	EnginePin      string                              `json:"enginePin"`
 	EditorBundle   string                              `json:"editorBundle"`
 	EditorURL      string                              `json:"editorURL"`
+	Format         string                              `json:"format,omitempty"`
 	Bytes          []byte                              `json:"bytes"`
 }
 type craftNativeVersionsResponse struct {
@@ -199,12 +200,12 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 	if !d.auditRead(w, r, entry) {
 		return
 	}
-	file, ok := m.Files["document.json"]
-	if !ok || len(m.Files) != 1 || m.EntryPoint != "document.json" || file.MediaType != "application/json" {
-		craftNativeDocumentError(w, mooring.ErrNativeProfile)
+	file, err := s.DocumentFile(m)
+	if err != nil {
+		craftNativeDocumentError(w, err)
 		return
 	}
-	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content}
+	out := craftNativeVersionDocumentResponse{Version: strconv.FormatInt(m.Version, 10), CurrentVersion: strconv.FormatInt(latest, 10), Current: m.Version == latest, CreatedAt: m.CreatedAt, Author: d.versionAuthor(r, entry.scope.WorkspaceID, m.Actor), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorBundle: profile.Store.EditorBundle, EditorURL: profile.EditorURL, Bytes: file.Content, Format: craftWorkbookResponseFormat(file)}
 	if m.RestoredFrom > 0 {
 		out.RestoredFrom = strconv.FormatInt(m.RestoredFrom, 10)
 	}

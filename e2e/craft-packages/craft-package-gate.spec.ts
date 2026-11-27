@@ -6,6 +6,7 @@
 // save. The server's head must hold both markers, so the reopened editor started
 // from the saved document rather than a blank one.
 import { expect, test, type Browser, type Page } from "@playwright/test"
+import { emptyGridCraftWorkbook } from "../../lib/mooring/gridcraft-empty-workbook"
 import { apiAs, loginStorageState, type StorageState } from "../acceptance/prd/auth"
 import * as N from "../acceptance/prd/outage-lostack/native"
 
@@ -71,7 +72,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
     const log: string[] = []
     const api = await apiAs(ORIGIN, owner)
     try {
-      const ref = await N.createNative(api, WORKSPACE, app, `Package gate ${N.APP_LABEL[app]}`)
+      const ref = await N.createNative(api, WORKSPACE, app, `Package gate ${N.APP_LABEL[app]}`, app === "gridcraft" ? emptyGridCraftWorkbook() : undefined)
       const first = `gate-${app}-one-${Date.now().toString(36)}`, second = `gate-${app}-two-${Date.now().toString(36)}`
 
       const page = await open(browser, ref, log)

@@ -35,7 +35,7 @@ func newCraftCommand() *cobra.Command {
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", Long: "Read bounded NDJSON actions; watch keeps the lease stream alive.\n\nThe share action needs the page's owner: Edit rights or a workspace role exit 4. Each lease row says so in can_share.", RunE: craftConnect})
 	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as native Word or Sheet; keep its admission in this process", RunE: craftInitialize}
 	initialize.Flags().String("application", "word", `Application to create: "word" or "sheet"`)
-	initialize.Flags().String("file", "", "Native document file (or - for stdin, without subsequent actions)")
+	initialize.Flags().String("file", "", "Word native JSON or Sheet workbook (.xlsx/.xlsm), or - for stdin")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
 	craft.AddCommand(newCraftAgentTaskCommand())

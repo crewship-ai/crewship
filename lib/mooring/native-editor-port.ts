@@ -1,5 +1,6 @@
 import { verifyEditorHello, transferEditorPort, record, type CapabilityWindow, type WindowEnvelope } from "./channel"
 import { validNativeDraft, validNativeVersion, type NativeDraft } from "./native-draft"
+import { createGridcraftNativePort } from "./gridcraft-native-port"
 import type { NativeSaveReceipt } from "./single-editor-save"
 
 export interface NativeStructuredPort {
@@ -11,6 +12,7 @@ export interface NativeStructuredPort {
 export interface NativeEditorPortOptions {
   applicationId: "wordcraft" | "gridcraft"
   enginePin: string
+  workbookFormat?: "xlsx" | "xlsm"
   bundle: string
   frame: CapabilityWindow
   scope: { workspaceId: string; pageId: string; baseVersion: string; generation: string; sessionId: string }
@@ -35,7 +37,12 @@ export interface NativeEditorPort {
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
   close(): void
 }
-export function createNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPort { return buildNativeEditorPort(options) }
+export function createNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPort {
+  if (options.applicationId === "gridcraft" && options.workbookFormat) {
+    return createGridcraftNativePort({ ...options, fileName: "workbook." + options.workbookFormat })
+  }
+  return buildNativeEditorPort(options)
+}
 
 export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string; revision?: string }
 interface SnapshotProof { requestId: string; revision: string; editorRevision: string; document: string; hash: Promise<string>; wordBytes?: Uint8Array }

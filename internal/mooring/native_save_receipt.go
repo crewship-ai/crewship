@@ -165,7 +165,7 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	if "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
-	request := nativeManifest(base, b)
+	request := s.manifest(base, b)
 	request.Message = message
 	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
 	if errors.Is(err, artifacts.ErrVersionConflict) {
@@ -257,9 +257,9 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, proven func(string) bool, notProven func(tx *sql.Tx, stored string) error, receipt *NativeSaveReceipt) error {
 	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
 		if readErr == nil {
-			file, ok := m.Files["document.json"]
+			file, fileErr := s.DocumentFile(m)
 			hash := sha256.Sum256(file.Content)
-			if proven(m.Message) && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
+			if proven(m.Message) && m.Actor == l.Holder.ActorID && fileErr == nil && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
 				*receipt = s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version)
 				return nil
 			}

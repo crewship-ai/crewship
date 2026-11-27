@@ -6,6 +6,7 @@
 import type { APIRequestContext, BrowserContext, Frame, Page, Request } from "@playwright/test"
 import { expect } from "@playwright/test"
 import { createHash } from "node:crypto"
+import { strFromU8, unzipSync } from "fflate"
 import * as net from "node:net"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
 import { readFileSync } from "node:fs"
@@ -34,12 +35,12 @@ export interface NativeRef {
 }
 
 /** Creates an empty page and initializes it as a native document; releases the init lease. */
-export async function createNative(api: APIRequestContext, ws: string, app: NativeApp, name: string): Promise<NativeRef> {
+export async function createNative(api: APIRequestContext, ws: string, app: NativeApp, name: string, initialBytes?: Uint8Array): Promise<NativeRef> {
   const slug = `prd-outage-${app}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
   const c = await api.post(`/api/v1/pages${q(ws)}`, { data: { name, slug, panels: [], allow_empty: true, created_by_test: true } })
   expect(c.status(), `create page: ${(await c.text()).slice(0, 300)}`).toBe(201)
   const page = (await c.json()) as { id: string }
-  const bytes = Buffer.from(app === "wordcraft" ? createEmptyNativeWord() : emptyGridCraftNativeDocument())
+  const bytes = Buffer.from(initialBytes ?? (app === "wordcraft" ? createEmptyNativeWord() : emptyGridCraftNativeDocument()))
   const init = await api.post(craft(page.id, ws, "initialize"), { data: { application_id: app, bytes: bytes.toString("base64") }, timeout: 120_000 })
   expect(init.status(), `initialize ${app}: ${(await init.text()).slice(0, 300)}`).toBe(201)
   const i = (await init.json()) as { generation: string; session_token: string; version: string }
@@ -80,9 +81,12 @@ export async function readHead(api: APIRequestContext, ref: NativeRef): Promise<
   const tok = ((await s.json()) as { session_token: string }).session_token
   const r = await api.get(craft(ref.pageId, ref.workspaceId, "document"), { headers: { "X-Craft-Session": tok, "Cache-Control": "no-cache" }, timeout: 120_000 })
   expect(r.status(), "read document").toBe(200)
-  const d = (await r.json()) as { version: string; bytes: string }
+  const d = (await r.json()) as { version: string; bytes: string; format?: "xlsx" | "xlsm" }
   const raw = Buffer.from(d.bytes, "base64")
-  return { version: String(d.version), hash: sha256(raw), text: raw.toString("utf8") }
+  const text = d.format
+    ? Object.values(unzipSync(raw, { filter: entry => entry.name.startsWith("xl/") && entry.name.endsWith(".xml") })).map(bytes => strFromU8(bytes)).join("\n")
+    : raw.toString("utf8")
+  return { version: String(d.version), hash: sha256(raw), text }
 }
 
 export interface Op {

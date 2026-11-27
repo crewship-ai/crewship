@@ -55,7 +55,7 @@ export function parseNativeRestoreReceipt(raw:unknown):NativeRestoreReceipt|null
 /** One saved version with its bytes (`GET .../craft/document/versions/{version}`), read-only. */
 export interface NativeVersionDocument {
  version:string;currentVersion:string;current:boolean;createdAt:string;author:NativeVersionAuthor;restoredFrom?:string
- applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string;bytes:Uint8Array
+ applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string;bytes:Uint8Array;format?:"xlsx"|"xlsm"
 }
 const pinned=(v:unknown):v is string=>typeof v==="string"&&/^[a-f0-9]{64}$/.test(v)
 
@@ -73,7 +73,7 @@ export function parseNativeVersionDocument(raw:unknown,expected:string):NativeVe
   if(!binary.length||binary.length>32*1024*1024||btoa(binary)!==raw.bytes)return null
   bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))
  }catch{return null}
- return {version:raw.version,currentVersion:raw.currentVersion,current:raw.current,createdAt:raw.createdAt,author:{actorId:a.actorId,kind:a.kind,displayName:a.displayName},...(raw.restoredFrom?{restoredFrom:raw.restoredFrom as string}:{}),applicationId:raw.applicationId,enginePin:raw.enginePin,editorBundle:raw.editorBundle,editorURL:raw.editorURL,bytes}
+ return {version:raw.version,currentVersion:raw.currentVersion,current:raw.current,createdAt:raw.createdAt,author:{actorId:a.actorId,kind:a.kind,displayName:a.displayName},...(raw.restoredFrom?{restoredFrom:raw.restoredFrom as string}:{}),applicationId:raw.applicationId,enginePin:raw.enginePin,editorBundle:raw.editorBundle,editorURL:raw.editorURL,bytes,...(raw.format==="xlsx"||raw.format==="xlsm"?{format:raw.format}:{})}
 }
 
 export type NativeDiffLine={kind:"same"|"added"|"removed";text:string}

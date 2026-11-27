@@ -106,6 +106,11 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 						refusal = m.apps.reason(r.Context(), application)
 					}
 					agentsEnabled = enabled && canEdit && m.agents != nil && m.agents.runtimeReady()
+					if agentsEnabled && m.agents.documents != nil {
+						if profile, ok := m.agents.documents.application(application); ok && profile.Store.Format == mooring.NativeFormatWorkbook {
+							agentsEnabled = false
+						}
+					}
 				}
 			}
 		}

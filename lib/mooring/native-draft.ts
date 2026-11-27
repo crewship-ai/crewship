@@ -9,6 +9,7 @@ export interface NativeDraft {
   sessionId: string
   editorRevision: string
   bytes: Uint8Array
+  format?: "xlsx" | "xlsm"
 }
 export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
 export interface NativeDraftJournal {
@@ -40,13 +41,14 @@ export function validNativeDraft(d: NativeDraft): boolean {
     && validNativeVersion(d.baseVersion)
     && validNativeVersion(d.generation) && d.generation !== "0"
     && identifier(d.editorRevision)
+    && (d.format === undefined || d.applicationId === "gridcraft" && (d.format === "xlsx" || d.format === "xlsm"))
     && d.bytes instanceof Uint8Array && d.bytes.byteLength <= MAX_NATIVE_BYTES
 }
 function encode(draft: NativeDraft): string {
   if (!validNativeDraft(draft)) throw fail()
   let binary = ""
   for (let i = 0; i < draft.bytes.length; i += 32768) binary += String.fromCharCode(...draft.bytes.subarray(i, i + 32768))
-  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, nativeBase64: btoa(binary) })
+  return JSON.stringify({ kind: "native-whole-document-v1", applicationId: draft.applicationId, enginePin: draft.enginePin, baseVersion: draft.baseVersion, generation: draft.generation, sessionId: draft.sessionId, editorRevision: draft.editorRevision, nativeBase64: btoa(binary), format: draft.format })
 }
 function decode(snapshot: string): NativeDraft | null {
   try {
@@ -54,7 +56,7 @@ function decode(snapshot: string): NativeDraft | null {
     const value = JSON.parse(snapshot)
     if (value?.kind !== "native-whole-document-v1" || typeof value.nativeBase64 !== "string") return null
     const binary = atob(value.nativeBase64)
-    const draft: NativeDraft = { applicationId: value.applicationId, enginePin: value.enginePin, sessionId: value.sessionId, baseVersion: value.baseVersion, generation: value.generation, editorRevision: value.editorRevision, bytes: Uint8Array.from(binary, c => c.charCodeAt(0)) }
+    const draft: NativeDraft = { applicationId: value.applicationId, enginePin: value.enginePin, sessionId: value.sessionId, baseVersion: value.baseVersion, generation: value.generation, editorRevision: value.editorRevision, format: value.format, bytes: Uint8Array.from(binary, c => c.charCodeAt(0)) }
     return validNativeDraft(draft) ? draft : null
   } catch { return null }
 }

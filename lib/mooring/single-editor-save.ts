@@ -28,6 +28,7 @@ export interface SingleEditorSaveOptions {
   pageId: string
   applicationId: string
   enginePin: string
+  workbookFormat?: NativeDraft["format"]
   baseVersion: string
   /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
    * the unchanged-content baseline for a freshly opened editor. Never a local
@@ -341,7 +342,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const snapshot = await options.engine.snapshot(lifetime.signal, requestId)
         if (!active || !beforeHeldInput(snapshot.revision)) return
         const proven = heldInput() && hasWorkBeforeHold(snapshot.revision) ? heldAt : epoch
-        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice() }
+        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice(), ...(options.workbookFormat ? { format: options.workbookFormat } : {}) }
         if (!validNativeDraft(draft)) throw new Error("invalid_native_snapshot")
         stage = "storage"
         await persistDraft(draft, sequence)
@@ -353,8 +354,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(draft.bytes))
         if (!active) return
         const contentHash = `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`
-        if (latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
-        const nativeState = options.applicationId === "wordcraft" && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
+        if (!options.workbookFormat && latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
+        const nativeState = (options.applicationId === "wordcraft" || options.workbookFormat) && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
         latest = { nativeState, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
         return latest
       } catch {

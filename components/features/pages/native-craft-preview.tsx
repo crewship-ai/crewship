@@ -59,7 +59,7 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sha
    let ready=false
    // This is only an ephemeral port binding, never a server admission/lease.
    // No draft journal, write transition, save API, or custody callback exists.
-   const ownPort=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,baseVersion:snapshot.version,generation:'1',sessionId:`preview:${crypto.randomUUID()}`},requireAccessProtocol:true,
+   const ownPort=createNativeEditorPort({applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,baseVersion:snapshot.version,generation:'1',sessionId:`preview:${crypto.randomUUID()}`},requireAccessProtocol:true,
     onChanged(){if(frame===mountedFrame&&ready)fail()},
     onSaveRequest(request){if(frame===mountedFrame&&request.requestId)port?.saveFailed(request.requestId,`${label} is read-only.`)},
     onExport(file){if(!dead&&frame===mountedFrame)try{downloadNativeExport(file)}catch{fail()}},

@@ -422,7 +422,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const finish=()=>{clearTimeout(timer);clearTimeout(totalTimer);abort.signal.removeEventListener('abort',canceled);document.removeEventListener('securitypolicyviolation',onViolation)}
    ready.then(finish,finish)
    let port:NativeEditorPort
-   try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
+   try{port=createNativeEditorPort({applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onExport(file){
      if(!r||!liveMount()||!r.ready||r.blocked||!readable||offerStale||networkRetired)return
      try{downloadNativeExport(file)}catch{setError('The export could not be downloaded. The document stays open.')}
@@ -456,6 +456,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const snapshot=await own.read(lifetime.signal)
    const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
    const [serverHash,draftHash]=await Promise.all([digest(snapshot.bytes),digest(draft.bytes)])
+   if(snapshot.format||draft.format){setError('Workbook drafts can be downloaded for comparison.');return}
    const decoder=new TextDecoder('utf-8',{fatal:true})
    if(readable&&!dead&&client===own&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(draft.bytes),serverHash,draftHash,equal:serverHash===draftHash})
   })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('The comparison could not be loaded. The draft was not overwritten.')})}
@@ -781,7 +782,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
    acquireStage='writable'
-   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Writing was stopped; editor access was not confirmed.'))})}},
     onReceipt(receipt){
      const edit=r.edit
@@ -992,7 +993,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   }
   return()=>{closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};retrySave.current=()=>{};stop('Editor closed',true)}
  },[enabled,humanId,workspaceId,pageId,scopeKey])
- function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
+ function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:draft.format?'application/octet-stream':'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.${draft.format??'json'}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  const shownProposals=readVerified&&!retainedBuffer&&!connectionRetired?proposals:[],shownRecoveries=readVerified&&!offerWithdrawn?recoveries:[]
  if(stateScope!==scopeKey)return <p role="status" className="p-6">Connecting…</p>
  if(!enabled)return <p className="p-6">The native editor is not turned on.</p>
@@ -1015,7 +1016,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    {proposal.state==='open'&&view.can_edit===true&&<Button variant="outline" disabled={busy} onClick={()=>decide.current(proposal.id,'reject')}>Reject</Button>}
    {proposal.state==='open'&&ownsEditor&&<Button disabled={busy} onClick={()=>decide.current(proposal.id,'accept')}>Accept</Button>}
   </div>)}
-   {shownRecoveries.map((recovery,index)=><div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
+   {shownRecoveries.map((recovery,index)=><div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span>{!recovery.draft.format&&<Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button>}<Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
   </div>}
   {readVerified&&!offerWithdrawn&&comparison&&<div className="grid gap-2 p-3 md:grid-cols-2"><p className="md:col-span-2">Server version {comparison.version} and {comparison.draftLabel?.toLowerCase()??'local draft'}: {comparison.equal?'identical data':'different data'}. The native data is read-only.</p><label>Server version<textarea aria-label="Server version" readOnly value={comparison.server} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.serverHash}</span></label><label>{comparison.draftLabel??'Local draft'}<textarea aria-label={comparison.draftLabel??'Local draft'} readOnly value={comparison.draft} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.draftHash}</span></label><Button variant="outline" onClick={()=>setComparison(undefined)}>Close comparison</Button></div>}
   {accessCheck&&<p className="px-3 py-2 text-sm text-muted-foreground">Checking access…</p>}

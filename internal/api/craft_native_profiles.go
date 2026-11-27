@@ -26,7 +26,8 @@ type CraftNativeDocumentProfile struct {
 	// override (Linux only) and the engine is built from them.
 	Engine craftengine.Engine
 	// Bundled marks a profile built from the components inside this binary.
-	Bundled bool
+	Bundled  bool
+	Workbook bool
 }
 
 func craftNativePin(value string, size int) bool {
@@ -66,7 +67,14 @@ func qualifyCraftNativeProfiles(input map[string]CraftNativeDocumentProfile) (ma
 			return nil, nil, errors.New("invalid native editor bundle URL")
 		}
 		validator := mooring.NativeCLIValidator{Application: p.Application, Engine: p.Engine}
-		profiles[key] = craftNativeApplication{Store: mooring.NativeStoreConfig{Application: p.Application, EngineRevision: p.EngineRevision, EngineSHA256: p.CLISHA256, EditorBundle: p.EditorBundle, Validate: validator.Validate}, EditorURL: p.EditorURL}
+		store := mooring.NativeStoreConfig{Application: p.Application, EngineRevision: p.EngineRevision, EngineSHA256: p.CLISHA256, EditorBundle: p.EditorBundle, Validate: validator.Validate}
+		if p.Workbook {
+			if key != "gridcraft" {
+				return nil, nil, errors.New("invalid workbook release profile")
+			}
+			store.Format, store.Validate = mooring.NativeFormatWorkbook, mooring.ValidateWorkbook
+		}
+		profiles[key] = craftNativeApplication{Store: store, EditorURL: p.EditorURL}
 		resolved[key] = p
 	}
 	return profiles, resolved, nil

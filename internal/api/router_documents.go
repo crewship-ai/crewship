@@ -1,12 +1,13 @@
 package api
 
 import (
-	"github.com/crewship-ai/crewship/internal/craftapps"
-
 	"context"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/craftapps"
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 func (r *Router) registerDocumentRoutes() {
@@ -84,9 +85,10 @@ func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
 		// "New Word"/"New Sheet" appear only while the administrator allows
 		// creating documents of that application.
 		_, word := d.application("wordcraft")
-		_, grid := d.application("gridcraft")
+		sheet, grid := d.application("gridcraft")
 		status.WordCraftNative = word && d.human.apps.allows(req.Context(), craftapps.Word, craftapps.OpCreate)
 		status.GridCraftNative = grid && d.human.apps.allows(req.Context(), craftapps.Sheet, craftapps.OpCreate)
+		status.GridCraftWorkbook = status.GridCraftNative && sheet.Store.Format == mooring.NativeFormatWorkbook
 		status.Applications = map[string]craftapps.Mode{craftapps.Word: d.human.apps.mode(req.Context(), craftapps.Word), craftapps.Sheet: d.human.apps.mode(req.Context(), craftapps.Sheet)}
 	}
 	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {

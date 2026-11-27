@@ -114,6 +114,10 @@ export function NativeCraftVersionHistory({ load, loadVersion, Preview, scope, r
     const abort = new AbortController()
     void Promise.all([read(panel.version, abort.signal), read(list.currentVersion, abort.signal)]).then(([old, head]) => {
       if (abort.signal.aborted) return
+      if (old.format || head.format) {
+        setPanelError("Open each workbook version in the preview to compare its contents.")
+        return
+      }
       const before = nativeVersionText(old.bytes), after = nativeVersionText(head.bytes)
       const equal = old.bytes.length === head.bytes.length && old.bytes.every((b, i) => b === head.bytes[i])
       setComparison({ version: old.version, current: head.version, equal, before, after, lines: equal ? null : nativeLineDiff(before, after) })

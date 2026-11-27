@@ -9305,6 +9305,9 @@
           "gridcraft_native": {
             "type": "boolean"
           },
+          "gridcraft_workbook": {
+            "type": "boolean"
+          },
           "wordcraft_native": {
             "type": "boolean"
           },
@@ -16486,6 +16489,13 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "format": {
+            "enum": [
+              "xlsx",
+              "xlsm"
+            ],
+            "type": "string"
+          },
           "quota": {
             "$ref": "#/components/schemas/NativeCraftDocumentQuota"
           },
@@ -16794,6 +16804,13 @@
             "type": "string"
           },
           "enginePin": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "xlsx",
+              "xlsm"
+            ],
             "type": "string"
           },
           "version": {
@@ -17573,6 +17590,13 @@
           },
           "enginePin": {
             "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "xlsx",
+              "xlsm"
+            ],
             "type": "string"
           },
           "proposal": {

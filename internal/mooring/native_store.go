@@ -25,6 +25,7 @@ type NativeStoreConfig struct {
 	Authorize                                               NativeAuthorize
 	// Validate must invoke the exact pinned application engine, outside the SQL
 	// writer. It must reject lossy import/repair warnings, not silently normalize.
+	Format                   string
 	Validate                 func(context.Context, []byte) error
 	MaxHistoryBytes          int64
 	MaxProposalBytes         int64 // trusted per-Page retained proposal budget, separate from human history
@@ -57,7 +58,7 @@ func NewNativeStore(db *sql.DB, c NativeStoreConfig) *NativeStore {
 	if c.MaxHistoryBytes <= 0 {
 		c.MaxHistoryBytes = DefaultNativeHistoryBytes
 	}
-	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes, MaxWorkspaceHistoryBytes: c.MaxWorkspaceHistoryBytes})}
+	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes, MaxVersionBytes: maxVersionBytes(c), MaxWorkspaceHistoryBytes: c.MaxWorkspaceHistoryBytes})}
 }
 func nativeHex(value string, n int) bool {
 	if len(value) != n {
@@ -75,7 +76,7 @@ func (s *NativeStore) ready() error {
 		return ErrNativeDisabled
 	}
 	c := s.config
-	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
+	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) || c.Format != "" && (c.Format != NativeFormatWorkbook || c.Application != "gridcraft") {
 		return ErrInvalid
 	}
 	return nil
@@ -133,14 +134,20 @@ func (s *NativeStore) holderAuthority(l EditLease, intent string) artifacts.Vers
 	}
 }
 func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error) {
-	if len(raw) == 0 || len(raw) > 32<<20 {
+	if !s.workbookStore() && (len(raw) == 0 || len(raw) > 32<<20) {
 		return nil, ErrInvalid
+	}
+	if s.workbookStore() {
+		if _, err := DetectWorkbook(raw); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+	} else {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(trimmed) {
+			return nil, ErrInvalid
+		}
 	}
 	b := append([]byte(nil), raw...)
-	trimmed := bytes.TrimSpace(b)
-	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b) {
-		return nil, ErrInvalid
-	}
 	if err := s.config.Validate(ctx, append([]byte(nil), b...)); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNativeValidation, err)
 	}
@@ -195,7 +202,7 @@ func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLe
 		initialized = true
 		return actor, nil
 	}
-	r, err := s.versions.Apply(ctx, nativeVersionKey(k), nativeManifest(0, b), a)
+	r, err := s.versions.Apply(ctx, nativeVersionKey(k), s.manifest(0, b), a)
 	if err != nil {
 		return EditLease{}, artifacts.VersionReceipt{}, err
 	}
@@ -213,7 +220,7 @@ func (s *NativeStore) Save(ctx context.Context, l EditLease, base int64, raw []b
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), nativeManifest(base, b), a)
+	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), s.manifest(base, b), a)
 }
 func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
 	if err := s.ready(); err != nil {
@@ -251,12 +258,9 @@ func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	if m.EntryPoint != "document.json" || len(m.Files) != 1 {
-		return artifacts.VersionReceipt{}, ErrNativeProfile
-	}
-	file, ok := m.Files["document.json"]
-	if !ok || file.MediaType != "application/json" {
-		return artifacts.VersionReceipt{}, ErrNativeProfile
+	file, err := s.DocumentFile(m)
+	if err != nil {
+		return artifacts.VersionReceipt{}, err
 	}
 	if _, err = s.candidate(ctx, file.Content); err != nil {
 		return artifacts.VersionReceipt{}, err

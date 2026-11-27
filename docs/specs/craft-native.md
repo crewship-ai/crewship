@@ -73,6 +73,13 @@ A lost creation-release response cannot erase or reinitialize its confirmed data
 This does not convert existing documents or qualify the complete editor
 acceptance. Agent proposals are described under "Agent proposals" below.
 
+A Sheet package whose manifest declares \`document_format: workbook\` uses
+GridCraft protocol 2. Each version stores one XLSX or XLSM file and reads
+include its \`format\`. The workspace document status advertises
+\`gridcraft_workbook\` when Sheet creation uses this profile. The native
+initialize and save requests still carry base64 bytes, with the existing
+32 MiB limit. Sheet agent changes require workbook-specific support.
+
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
 Ordinary authentication and workspace membership remain required.
