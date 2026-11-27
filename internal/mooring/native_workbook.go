@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"strings"
@@ -176,17 +175,6 @@ func maxVersionBytes(c NativeStoreConfig) int64 {
 		return MaxWorkbookBytes
 	}
 	return 0
-}
-
-// WorkbookFormatOf is the format a version's entry point names: xlsx, xlsm, or native.
-func WorkbookFormatOf(entryPoint string) string {
-	switch entryPoint {
-	case "workbook.xlsx":
-		return "xlsx"
-	case "workbook.xlsm":
-		return "xlsm"
-	}
-	return "native"
 }
 
 // ValidateWorkbook bounds the archive before any editor receives the stored file.

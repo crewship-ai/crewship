@@ -46,7 +46,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	receipt["unchanged"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "No version was created: version equals baseVersion, which already holds this snapshot."}
 	receiptRequired := append(append([]string{}, required...), "editorRevision", "contentHash", "version", "candidateHash", "durability", "issuedBy", "phase")
 	quota := obj(map[string]any{"usedBytes": version(true), "limitBytes": version(false), "warning": map[string]any{"type": "boolean"}, "level": map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}}, "retention": str()}, "usedBytes", "limitBytes", "warning", "retention")
-	document := obj(map[string]any{"version": version(false), "bytes": bytes(), "applicationId": properties()["applicationId"], "enginePin": pin(), "editorBundle": pin(), "editorURL": str(), "format": map[string]any{"type": "string", "enum": []string{"xlsx", "xlsm"}}, "quota": ref("NativeCraftDocumentQuota")}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL", "quota")
+	document := obj(map[string]any{"version": version(false), "bytes": bytes(), "applicationId": properties()["applicationId"], "enginePin": pin(), "editorBundle": pin(), "editorURL": str(), "format": map[string]any{"type": "string", "enum": []string{"xlsx", "xlsm"}}, "legacySource": map[string]any{"type": "boolean", "description": "The original native Sheet remains available for download."}, "quota": ref("NativeCraftDocumentQuota")}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL", "quota")
 	schemas := map[string]any{"NativeCraftSnapshotRequest": snapshot, "NativeCraftReconcileRequest": reconcile, "NativeCraftRestoreRequest": restore, "NativeCraftSnapshotReceipt": obj(receipt, receiptRequired...), "NativeCraftDocumentQuota": quota, "NativeCraftDocument": document, "NativeCraftRestoreReceipt": obj(map[string]any{"version": version(false), "durability": receipt["durability"], "issuedBy": receipt["issuedBy"], "phase": receipt["phase"]}, "version", "durability", "issuedBy", "phase")}
 	schemas["NativeCraftInitializeRequest"] = obj(map[string]any{"application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "bytes": bytes()}, "application_id", "bytes")
 	schemas["NativeCraftInitializeReceipt"] = obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private process-local human admission, issued only after atomic initialization. Never send to the editor iframe or local journal."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "page_id": str(), "generation": version(false), "version": map[string]any{"type": "string", "enum": []string{"1"}}}, "session_token", "session_id", "application_id", "page_id", "generation", "version")
@@ -68,6 +68,13 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 		}
 		routes[method+" /api/v1/pages/{slug}/craft/document"+path] = d
 	}
+	schemas["NativeCraftWorkbookMigrationReceipt"] = obj(map[string]any{"version": version(false)}, "version")
+	add("POST", "/migrate-workbook", "", "NativeCraftWorkbookMigrationReceipt")
+	add("GET", "/original-workbook", "", "NativeCraftDocument")
+	original := routes["GET /api/v1/pages/{slug}/craft/document/original-workbook"]
+	original.Response = map[string]any{"type": "string", "format": "binary", "description": "Exact original native Sheet JSON bytes, returned as an attachment."}
+	routes["GET /api/v1/pages/{slug}/craft/document/original-workbook"] = original
+
 	add("GET", "", "", "NativeCraftDocument")
 	add("POST", "/save", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/import", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")

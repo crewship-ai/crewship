@@ -8,7 +8,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/featureflags"
-	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 // CraftVersionHistoryFlag is the workspace feature flag for native Word and

@@ -175,6 +175,17 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 		return
 	}
 	state, err := s.Read(r.Context(), entry.scope)
+	if errors.Is(err, mooring.ErrNativeProfile) && s.Workbook() {
+		source, sourceErr := s.LegacyWorkbook(r.Context(), entry.scope, false)
+		if sourceErr == nil {
+			if source.WorkbookVersion == 0 {
+				w.Header().Set("Cache-Control", "no-store")
+				writeJSON(w, 409, map[string]string{"code": "legacy_workbook", "error": "This older Sheet needs to be converted to Excel."})
+				return
+			}
+			state, err = s.Read(r.Context(), entry.scope)
+		}
+	}
 	if err != nil {
 		craftNativeDocumentError(w, err)
 		return
@@ -188,7 +199,7 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, Format: craftWorkbookResponseFormat(file), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
+	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, Format: craftWorkbookResponseFormat(file), LegacySource: s.HasWorkbookMigration(r.Context(), entry.scope), ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
 }
 func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http.Request, operation string) {
 	r, entry, s, _, err := d.bind(r)
@@ -236,6 +247,10 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	var trailing any
 	if decoder.Decode(&trailing) != io.EOF {
 		replyError(w, 400, "invalid native snapshot request")
+		return
+	}
+	if len(body.Bytes) > 32<<20 {
+		replyError(w, 413, "document file exceeds 32 MiB")
 		return
 	}
 	generation, err := craftNativeGeneration(body.Generation)

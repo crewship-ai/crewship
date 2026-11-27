@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -644,6 +645,15 @@ func (s *VersionStore) View(ctx context.Context, k VersionKey, a VersionViewAuth
 				return e
 			}
 			preview := PlanRetention(out.Versions, out.State.LatestVersion, out.State.SharedVersion, time.Now(), DefaultRetentionPolicy)
+			if s.opts.ContentType == "gridcraft" {
+				var source int64
+				e = tx.QueryRowContext(ctx, "SELECT source_version FROM craft_workbook_migrations WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&source)
+				if e != nil && !errors.Is(e, sql.ErrNoRows) {
+					return e
+				}
+				preview.WouldThin = slices.DeleteFunc(preview.WouldThin, func(version int64) bool { return version == source })
+				preview.Retained = preview.Total - len(preview.WouldThin)
+			}
 			out.Retention = &preview
 		}
 		return e

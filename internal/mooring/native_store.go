@@ -86,7 +86,11 @@ func nativeVersionKey(k EditLeaseScope) artifacts.VersionKey {
 }
 func (s *NativeStore) profile(ctx context.Context, tx *sql.Tx, k EditLeaseScope) error {
 	var app, revision, hash, bundle string
-	if err := tx.QueryRowContext(ctx, `SELECT application_id,engine_revision,engine_sha256,editor_bundle FROM craft_native_documents WHERE page_id=? AND workspace_id=?`, k.ArtifactID, k.WorkspaceID).Scan(&app, &revision, &hash, &bundle); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT d.application_id,
+			coalesce(m.engine_revision,d.engine_revision),coalesce(m.engine_sha256,d.engine_sha256),coalesce(m.editor_bundle,d.editor_bundle)
+		FROM craft_native_documents d
+		LEFT JOIN craft_workbook_migrations m ON m.page_id=d.page_id AND m.workspace_id=d.workspace_id
+		WHERE d.page_id=? AND d.workspace_id=?`, k.ArtifactID, k.WorkspaceID).Scan(&app, &revision, &hash, &bundle); err != nil {
 		return err
 	}
 	if app != s.config.Application || revision != s.config.EngineRevision || hash != s.config.EngineSHA256 || bundle != s.config.EditorBundle {

@@ -86,9 +86,13 @@ func TestWorkbookStoreKeepsTheFileAsTheVersion(t *testing.T) {
 		t.Fatalf("manifest %+v", state.Manifest)
 	}
 	edited := testWorkbook(t, "xlsx", nil)
-	r2, err := s.Save(t.Context(), l, 1, edited)
-	if err != nil || r2.Version != 2 {
+	r2, err := s.SaveAttempt(t.Context(), l, 1, "workbook:2", nativeReceiptHash(edited), edited, "workbook-attempt")
+	if err != nil || r2.Version != "2" {
 		t.Fatalf("save: %+v %v", r2, err)
+	}
+	reconciled, err := s.ReconcileAttempt(t.Context(), l, 1, "workbook:2", nativeReceiptHash(edited), "workbook-attempt")
+	if err != nil || reconciled != r2 {
+		t.Fatalf("reconcile: %+v %v, want %+v", reconciled, err, r2)
 	}
 	state, _ = s.Read(t.Context(), scope)
 	if f, err = s.DocumentFile(state.Manifest); err != nil || f.Format != "xlsx" || f.MediaType != WorkbookMediaTypeXLSX || !bytes.Equal(f.Content, edited) {

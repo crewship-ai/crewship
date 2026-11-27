@@ -12,7 +12,7 @@ export interface NativeDocumentClientOptions {
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
 export interface NativeDocumentSnapshot {
- version:string;bytes:Uint8Array;format?:"xlsx"|"xlsm";applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ version:string;bytes:Uint8Array;legacySource?:boolean;format?:"xlsx"|"xlsm";applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
  /** `level` (near 80 %, critical 95 %, full) when the server reports it; older servers send only `warning`. */
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string;level?:"none"|"near"|"critical"|"full"}
 }
@@ -29,9 +29,13 @@ function nativeProposal(raw:unknown):NativeProposal|null{
  if(typeof v.id!=='string'||!PROPOSAL_ID.test(v.id)||!Number.isSafeInteger(v.base_version)||(v.base_version as number)<1||typeof v.summary!=='string'||typeof v.created_at!=='string'||!['open','accepted','rejected','stale'].includes(v.state as string)||!author||author.kind!=='agent'||typeof author.display_name!=='string')return null
  return {id:v.id,authorName:author.display_name,baseVersion:String(v.base_version),summary:v.summary,createdAt:v.created_at,state:v.state as NativeProposal['state'],...(Number.isSafeInteger(v.result_version)?{resultVersion:String(v.result_version)}:{})}
 }
+export class LegacyWorkbookError extends Error {
+ constructor(readonly code?: string) { super("legacy_workbook_unavailable") }
+}
 export interface NativeDocumentClient {
  open(signal: AbortSignal): Promise<{sessionId: string; applicationId: string}>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
+ originalWorkbook?(signal:AbortSignal):Promise<Uint8Array>
  events(signal:AbortSignal,onEvent:(event:"lease"|"session_retired",value:Record<string,unknown>)=>void):Promise<void>
  reauthorize(signal:AbortSignal):Promise<boolean>
  lease(signal:AbortSignal):Promise<unknown>
@@ -286,8 +290,23 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   },
   async read(signal){
    ready()
-   const response=await send(`${base}document?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+   const read=()=>send(`${base}document?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+   let response=await read()
    ready()
+   if(applicationId==="gridcraft"&&response.status===409){
+    const reason=await response.json().catch(()=>null)
+    if(reason?.code==="legacy_workbook"){
+     ready()
+     const result=await send(`${base}document/migrate-workbook?${query}`,{method:"POST",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+     ready()
+     if(!result.ok){
+      const refused=await result.json().catch(()=>null)
+      throw new LegacyWorkbookError(typeof refused?.code==="string"?refused.code:result.status===403?"legacy_workbook_needs_editor":undefined)
+     }
+     response=await read()
+     ready()
+    }
+   }
    // The admission stays valid: 403 here means no private read, not read loss.
    if(response.status===403)throw new Error("native_private_read_refused")
    if(!response.ok)throw new Error("native_document_unavailable")
@@ -297,7 +316,17 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,...(v.format==="xlsx"||v.format==="xlsm"?{format:v.format}:{}),applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
+   return {version:v.version,bytes,...(v.legacySource===true?{legacySource:true}:{}),...(v.format==="xlsx"||v.format==="xlsm"?{format:v.format}:{}),applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
+  },
+  async originalWorkbook(signal){
+   ready()
+   const response=await send(`${base}document/original-workbook?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
+   ready()
+   if(!response.ok||!response.headers.get("content-disposition")?.startsWith("attachment"))throw new Error("original_workbook_unavailable")
+   const bytes=new Uint8Array(await response.arrayBuffer())
+   ready()
+   if(!bytes.length||bytes.length>32*1024*1024)throw new Error("invalid_original_workbook")
+   return bytes
   },
   async proposals(signal){
    ready();const response=await send(`${base}proposals?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
