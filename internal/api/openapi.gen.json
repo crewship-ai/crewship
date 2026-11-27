@@ -16291,7 +16291,8 @@
               "agent_policy",
               "not_attached",
               "holder_human",
-              "engine_failed"
+              "engine_failed",
+              "preview_only"
             ],
             "type": "string"
           },
@@ -16950,6 +16951,7 @@
             "items": {
               "$ref": "#/components/schemas/NativeCraftSheetRange"
             },
+            "maxItems": 256,
             "type": "array"
           },
           "bytes": {
@@ -16972,6 +16974,7 @@
             "items": {
               "$ref": "#/components/schemas/NativeCraftSheetRange"
             },
+            "maxItems": 256,
             "type": "array"
           },
           "receipt": {
@@ -17719,10 +17722,14 @@
             "items": {
               "$ref": "#/components/schemas/NativeCraftSheetRange"
             },
+            "maxItems": 32,
             "type": "array"
           },
           "run_id": {
             "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
           },
           "ttl_ms": {
             "format": "int64",
