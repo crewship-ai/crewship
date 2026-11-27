@@ -5898,7 +5898,7 @@ index 31c18366..6db093dd 100644
      script_sandbox_check(path)?;
      Err(EngineError::Other(format!("{path}: no file system in the browser")))
 diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
-index 52a0c648..23c5d7aa 100644
+index 52a0c648..76912d58 100644
 --- a/crates/engine/src/lib.rs
 +++ b/crates/engine/src/lib.rs
 @@ -26,6 +26,7 @@ pub mod record;
@@ -5918,21 +5918,27 @@ index 52a0c648..23c5d7aa 100644
  pub use selection::Selection;
  pub use windows::{Target, TargetGuard, WindowState, WindowView};
  
-@@ -185,6 +188,13 @@ pub enum Mode {
+@@ -185,6 +188,19 @@ pub enum Mode {
      Point,
  }
  
 +/// Committed package bytes and the model that originated from them.
-+#[derive(Clone, Debug)]
++#[derive(Clone)]
 +pub struct WorkbookPackage {
 +    pub bytes: Arc<[u8]>,
 +    pub model: Arc<Workbook>,
 +}
 +
++impl std::fmt::Debug for WorkbookPackage {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("WorkbookPackage").field("byte_len", &self.bytes.len()).finish_non_exhaustive()
++    }
++}
++
  #[derive(Clone, Debug)]
  pub struct DocState {
      pub wb: Arc<Workbook>,
-@@ -231,6 +241,12 @@ pub struct DocState {
+@@ -231,6 +247,12 @@ pub struct DocState {
      /// The Distinct Count PivotTable value fields (sheet, pivot, value) an .xlsx save has already
      /// told the user about (#3336), so only a field not yet disclosed raises the notice again.
      pub distinct_disclosed: Vec<(usize, usize, usize)>,
@@ -5945,7 +5951,7 @@ index 52a0c648..23c5d7aa 100644
  }
  
  static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-@@ -331,21 +347,30 @@ impl DocState {
+@@ -331,21 +353,30 @@ impl DocState {
      /// made in this session.
      pub fn new(mut wb: Workbook, path: Option<String>, title: String, trust: Trust) -> DocState {
          let _ = gridcraft_model::PIVOT_INDEXER.set(pivot::index_cells);
@@ -5977,7 +5983,7 @@ index 52a0c648..23c5d7aa 100644
          let scripts_trusted = !cmd::extra::has_scripts(&wb);
          let wb = Arc::new(wb);
          let mut sel = Selection::at(wb.active().map(|s| s.view_active).unwrap_or_default());
-@@ -374,6 +399,8 @@ impl DocState {
+@@ -374,6 +405,8 @@ impl DocState {
              edits: None,
              go_to_recent: vec![],
              distinct_disclosed: vec![],
@@ -5986,7 +5992,7 @@ index 52a0c648..23c5d7aa 100644
          }
      }
      pub fn is_dirty(&self) -> bool {
-@@ -503,6 +530,10 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
+@@ -503,6 +536,10 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
  
  #[derive(Default)]
  pub struct Session {
@@ -5997,7 +6003,7 @@ index 52a0c648..23c5d7aa 100644
      docs: Vec<DocState>,
      /// Index in `docs` of the active window's workbook.
      active: usize,
-@@ -581,6 +612,42 @@ impl Session {
+@@ -581,6 +618,42 @@ impl Session {
      pub fn new() -> Session {
          Session::default()
      }
@@ -6040,7 +6046,7 @@ index 52a0c648..23c5d7aa 100644
      pub fn documents(&self) -> &[DocState] {
          &self.docs
      }
-@@ -716,8 +783,13 @@ impl Session {
+@@ -716,8 +789,13 @@ impl Session {
      /// unless an undo group is open on the document (the group then makes the step).
      /// Panics inside commands are caught and reported; the workbook is restored.
      pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
@@ -6055,7 +6061,7 @@ index 52a0c648..23c5d7aa 100644
              return Err(EngineError::Disabled(id.to_string(), why));
          }
          // A debugger whose undo group something else ended locks nothing any more (`macro.debug`
-@@ -725,7 +797,8 @@ impl Session {
+@@ -725,7 +803,8 @@ impl Session {
          if id != "macro.debug" {
              macros::debug::drop_if_ended(self);
          }
@@ -6065,7 +6071,7 @@ index 52a0c648..23c5d7aa 100644
          // While a macro is being debugged its undo group is open, and its workbook is locked:
          // between steps only the debugger, queries and commands that look around run there
          // (`macros::debug::LOOKS_AROUND`). Anything else waits, undoable or not (saving, view
-@@ -871,7 +944,7 @@ impl Session {
+@@ -871,7 +950,7 @@ impl Session {
          let epoch_changed = self.group_epoch != group_epoch;
          let in_group_now = before.as_ref().is_some_and(|(uid, ..)| self.in_group(*uid));
          let was_open = start.is_some_and(|(was_open, _)| was_open);
@@ -10077,10 +10083,10 @@ index 561dce41..6dbdc66f 100644
      }
 diff --git a/crates/xlsx/src/package_edit.rs b/crates/xlsx/src/package_edit.rs
 new file mode 100644
-index 00000000..e238918a
+index 00000000..66e786cf
 --- /dev/null
 +++ b/crates/xlsx/src/package_edit.rs
-@@ -0,0 +1,611 @@
+@@ -0,0 +1,621 @@
 +//! Write cell edits into the exact OPC package from which they were made.
 +//! Nothing outside the edited cells is serialized from GridCraft's model.
 +
@@ -10122,12 +10128,13 @@ index 00000000..e238918a
 +        return Err(UNSUPPORTED);
 +    }
 +    let mut zip = ZipArchive::new(Cursor::new(source)).map_err(|_| PACKAGE)?;
-+    if types.contains("digital-signature") || zip.file_names().any(|name| name.to_ascii_lowercase().starts_with("_xmlsignatures/")) {
++    let names = zip.file_names().collect::<std::result::Result<Vec<_>, _>>().map_err(|_| PACKAGE)?;
++    if types.contains("digital-signature") || names.iter().any(|name| name.to_ascii_lowercase().starts_with("_xmlsignatures/")) {
 +        return Err(EditRefusal { code: "xml_signatures" });
 +    }
 +    if types.contains("vbaprojectsignature")
 +        || !before.vba_signatures.is_empty()
-+        || zip.file_names().any(|name| name.to_ascii_lowercase().starts_with("xl/vbaprojectsignature"))
++        || names.iter().any(|name| name.to_ascii_lowercase().starts_with("xl/vbaprojectsignature"))
 +    {
 +        return Err(EditRefusal { code: "vba_signature" });
 +    }
@@ -10139,6 +10146,7 @@ index 00000000..e238918a
 +        return Err(UNSUPPORTED);
 +    }
 +
++    let has_calc_chain = names.iter().any(|name| name.eq_ignore_ascii_case("xl/calcChain.xml"));
 +    let sheets = sheet_parts(&mut package)?;
 +    let mut replacements = BTreeMap::new();
 +    for (old, new) in before.sheets.iter().zip(&after.sheets) {
@@ -10168,6 +10176,11 @@ index 00000000..e238918a
 +        if edits.is_empty() {
 +            continue;
 +        }
++        if has_calc_chain
++            && edits.values().any(|(old, new)| !same_formula(old.and_then(|c| c.formula.as_deref()), new.and_then(|c| c.formula.as_deref())))
++        {
++            return Err(UNSUPPORTED);
++        }
 +        let part = sheets.get(&(old.file_id, old.name.clone())).ok_or(WORKSHEET)?;
 +        let data = package.read(part).map_err(|_| PACKAGE)?.ok_or(WORKSHEET)?;
 +        let updated = edit_sheet(&data, edits)?;
@@ -10183,7 +10196,7 @@ index 00000000..e238918a
 +    let mut seen = HashSet::new();
 +    for i in 0..zip.len() {
 +        let file = zip.by_index(i).map_err(|_| PACKAGE)?;
-+        let name = file.name();
++        let name = file.name().map_err(|_| PACKAGE)?.into_owned();
 +        if !seen.insert(normalize(name.trim_end_matches('/')).to_ascii_lowercase())
 +            || name.starts_with('/')
 +            || name.contains('\\')
@@ -10191,7 +10204,7 @@ index 00000000..e238918a
 +        {
 +            return Err(PACKAGE);
 +        }
-+        if let Some(data) = replacements.remove(&normalize(name)) {
++        if let Some(data) = replacements.remove(&normalize(&name)) {
 +            let options = SimpleFileOptions::default().compression_method(file.compression());
 +            out.start_file(name, options).map_err(|_| PACKAGE)?;
 +            out.write_all(&data).map_err(|_| PACKAGE)?;
@@ -10605,6 +10618,9 @@ index 00000000..e238918a
 +            ("xl/customProperty1.bin", "opaque\0sheet data".into()),
 +        ];
 +        if macro_enabled {
++            parts[0].1 = parts[0]
++                .1
++                .replace("</Types>", r#"<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>"#);
 +            parts.push(("xl/vbaProject.bin", "synthetic\0unsigned VBA".into()));
 +        }
 +        if signed {
@@ -10623,7 +10639,7 @@ index 00000000..e238918a
 +        (0..zip.len())
 +            .map(|i| {
 +                let mut entry = zip.by_index(i).unwrap();
-+                let name = entry.name().to_string();
++                let name = entry.name().unwrap().into_owned();
 +                let mut data = Vec::new();
 +                entry.read_to_end(&mut data).unwrap();
 +                (name, data)
