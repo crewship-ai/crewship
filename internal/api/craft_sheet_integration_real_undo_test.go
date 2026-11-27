@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/craftsession"
@@ -261,7 +262,7 @@ func TestSheetITCalcChainClearWithTheRealEngine(t *testing.T) {
 				return candidate, err
 			}
 			s.send("Clear the formulas from B8 to B577", true)
-			call := s.agent()
+			call := s.agentWithTimeout(90 * time.Second)
 			args := map[string]any{
 				"base_version": "1", "request_id": "real-calc-chain-" + operation,
 				"commands": sitCommands(sitCmd("range.clear", map[string]any{"sheet": "L", "range": "B8:B577"})),

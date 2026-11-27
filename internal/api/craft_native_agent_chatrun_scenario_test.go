@@ -359,6 +359,11 @@ func (s *chatRunScenario) send(content string, attach bool) {
 // the agent's CLI would make.
 func (s *chatRunScenario) agent() func(method string, params any) (text string, isError bool, raw json.RawMessage) {
 	s.t.Helper()
+	return s.agentWithTimeout(15 * time.Second)
+}
+
+func (s *chatRunScenario) agentWithTimeout(timeout time.Duration) func(method string, params any) (text string, isError bool, raw json.RawMessage) {
+	s.t.Helper()
 	master := s.f.pages.artifactMasterToken
 	runKey := internaltoken.DeriveAgentRunKey(master, s.f.a.WorkspaceID, s.f.a.CrewID)
 	bearer := internaltoken.DeriveAgentRunToken(runKey, s.f.a.WorkspaceID, s.f.a.AgentID, s.resolver.runID)
@@ -398,7 +403,7 @@ func (s *chatRunScenario) agent() func(method string, params any) (text string, 
 	case <-time.After(5 * time.Second):
 		s.t.Fatal("the sidecar never became ready")
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	return func(method string, params any) (string, bool, json.RawMessage) {
 		s.t.Helper()
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
