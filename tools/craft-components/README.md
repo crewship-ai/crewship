@@ -26,7 +26,9 @@ always give the same package and pin.
 
 ## Patches
 
-`patches/*.patch` are minimal source changes for WASI, offered upstream:
+`patches/*.patch` are the source changes on top of the pinned public commits. The
+WordCraft patch and the first rows below are minimal WASI changes, offered upstream;
+the GridCraft patch also carries the private-port editor host (mooring protocol 2):
 
 | File | Change |
 |---|---|
@@ -34,6 +36,10 @@ always give the same package and pin.
 | `engine/src/safe_save.rs` (Word) | no `process::id()` on WASI |
 | `fonts/build.rs` (Word) | the web size budget applies to the browser build only; WASI embeds every craft-fonts face so server PDFs match the editor |
 | `core/src/date.rs`, `core/Cargo.toml` (Sheet) | the clock comes from `std` on WASI, not `js-sys` |
+| `engine/src/cmd/file.rs`, `engine/src/io.rs` (Sheet) | `file.open` takes `calculate` and `autoFit`: `false` keeps the file's values and row heights |
+| `calc/src/held.rs` (Sheet) | a formula calling an Excel function the engine lacks keeps the value its file holds |
+| `engine`, `ui-egui` (Sheet) | managed read-only access, document custody and managed-mode UI limits |
+| `apps/gridcraft-web/src/port_*.rs` (Sheet) | `?host=port`: open, save and access of an xlsx/xlsm over one private `MessagePort` |
 
 ## Build
 
@@ -93,7 +99,10 @@ and `playwright.craft-packages.config.ts` runs `e2e/craft-packages/` in full hea
 Chromium under Xvfb with software WebGL. For Word and for Sheet it opens a new
 document, takes over editing, types a marker, saves with ctrl+s, reopens it in a
 fresh browser context, types a second marker and saves again; the server's head must
-hold both markers. Any host refusal ("did not connect safely", "cannot be opened
+hold both markers. A legacy Sheet case starts from native JSON with a populated
+cell, converts it in the browser, edits and reopens the workbook, checks the
+preserved and edited cells, then downloads and compares the original JSON byte
+for byte. Any host refusal ("did not connect safely", "cannot be opened
 safely") fails at once. The spec types only once the editor has taken the keyboard
 (its canvas or its hidden text input has focus) and saves only once the host shows
 the edit: the editor handles keys on its next frame, so on a slow runner keys sent

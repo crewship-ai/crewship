@@ -28,6 +28,7 @@ export interface SingleEditorSaveOptions {
   pageId: string
   applicationId: string
   enginePin: string
+  workbookFormat?: NativeDraft["format"]
   baseVersion: string
   /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
    * the unchanged-content baseline for a freshly opened editor. Never a local
@@ -45,7 +46,7 @@ export interface SingleEditorSaveOptions {
   sessionId: string
   journal: NativeDraftJournal
   engine: {
-    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string; revision?: string }>
+    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string; revision?: string; captureId?: string }>
     validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
   }
   transport: {
@@ -53,13 +54,13 @@ export interface SingleEditorSaveOptions {
     reconcile?(request: NativeSaveRequest, signal: AbortSignal): Promise<unknown>
   }
   onState(state: NativeSaveState): void
-  onReceipt?(receipt: NativeSaveReceipt): void | Promise<unknown>
+  onReceipt?(receipt: NativeSaveReceipt, captureId?: string): void | Promise<unknown>
   idleMs?: number
   timeoutMs?: number
   /** Waits before asking the server about an unconfirmed save; the last one repeats. */
   reconcileBackoffMs?: number[]
 }
-interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string }
+interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string; captureId?: string }
 
 const RECONCILE_BACKOFF_MS = [2_000, 10_000, 30_000, 60_000]
 
@@ -95,7 +96,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // A validated receipt whose local row retirement failed. It is delivered to
   // the receipt observer (the native ACK) once that row is retired, or
   // superseded by a newer receipt; it is never sent again (#4852).
-  let owedReceipt: NativeSaveReceipt | undefined
+  let owedReceipt: { receipt: NativeSaveReceipt; captureId?: string } | undefined
   // After a retired attempt the confirmed baseline is no longer proof of the
   // server head (another holder may have committed meanwhile). Until a new
   // receipt, every capture is sent with the base-version fence (#4900 review).
@@ -178,14 +179,14 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // that one retry.
       if (!active || !writable) return
       confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }; baselineStale = false
-      owedReceipt = receipt
+      owedReceipt = { receipt, captureId: attempt.captureId }
       retirementRetried = true
       unretired(attempt); return
     }
     if (!active || !writable) return
     confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }; baselineStale = false
     owedReceipt = undefined; retirementRetried = false
-    deliver(receipt)
+    deliver(receipt, attempt.captureId)
     if (!active || !writable) return
     dirty = newerThan(attempt) || latest?.draft.editorRevision !== attempt.draft.editorRevision
     emit(dirty ? "dirty" : "saved")
@@ -196,8 +197,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")
   }
-  function deliver(receipt: NativeSaveReceipt) {
-    try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
+  function deliver(receipt: NativeSaveReceipt, captureId?: string) {
+    try {
+      const result = captureId === undefined ? options.onReceipt?.(receipt) : options.onReceipt?.(receipt, captureId)
+      void Promise.resolve(result).catch(() => {})
+    } catch { /* Receipt observers cannot change persistence. */ }
   }
   // A journal step that never answers must not hold the transport (`pending`),
   // a manual ticket, a flush or a write retirement forever (#4852). Past the
@@ -341,7 +345,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const snapshot = await options.engine.snapshot(lifetime.signal, requestId)
         if (!active || !beforeHeldInput(snapshot.revision)) return
         const proven = heldInput() && hasWorkBeforeHold(snapshot.revision) ? heldAt : epoch
-        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice() }
+        const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice(), ...(options.workbookFormat ? { format: options.workbookFormat } : {}) }
         if (!validNativeDraft(draft)) throw new Error("invalid_native_snapshot")
         stage = "storage"
         await persistDraft(draft, sequence)
@@ -353,9 +357,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(draft.bytes))
         if (!active) return
         const contentHash = `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`
-        if (latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
-        const nativeState = options.applicationId === "wordcraft" && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
-        latest = { nativeState, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
+        if (!options.workbookFormat && latest && draft.editorRevision === latest.draft.editorRevision && contentHash !== latest.draft.contentHash) throw new Error("unstable_editor_revision")
+        const nativeState = (options.applicationId === "wordcraft" || options.workbookFormat) && typeof snapshot.nativeState === "string" && snapshot.nativeState.length > 0 && snapshot.nativeState.length <= 256 && !snapshot.nativeState.includes("\0") ? snapshot.nativeState : undefined
+        latest = { nativeState, captureId: snapshot.captureId, draft: { ...draft, workspaceId: options.workspaceId, pageId: options.pageId, contentHash }, epoch, sequence }
         return latest
       } catch {
         lastFailedPreparation = sequence
@@ -425,7 +429,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
           // for the next edit, Ctrl+S or flush (#4852). A press is owed its ACK
           // from that retry and fails until then.
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) {
-            if (confirmation) owedReceipt = confirmation
+            if (confirmation) owedReceipt = { receipt: confirmation, captureId: attempt.captureId }
             unretired(attempt)
             if (!retirementRetried) { retirementRetried = true; scheduleIfNeeded() }
           }
@@ -442,8 +446,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Storage recovered after a committed save whose row could not be
         // retired: its own validated receipt now completes the native ACK.
         const owed = owedReceipt
-        if (owed && owed.version === baseline.version && (owed.unchanged || owed.contentHash === baseline.contentHash)) { owedReceipt = undefined; deliver(owed) }
-        if (confirmation) deliver(confirmation)
+        if (owed && owed.receipt.version === baseline.version && (owed.receipt.unchanged || owed.receipt.contentHash === baseline.contentHash)) { owedReceipt = undefined; deliver(owed.receipt, owed.captureId) }
+        if (confirmation) deliver(confirmation, attempt.captureId)
         if (blocked === "quota") blocked = undefined
         dirty = newerThan(attempt) || latest?.nativeState !== attempt.nativeState
         emit(dirty ? "dirty" : "saved")
@@ -574,7 +578,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // not be retired is that server version; retire it instead of offering it.
   async function retireOwed() {
     const owed = owedReceipt, capture = latest
-    if (!active || !owed || !capture || capture.draft.contentHash !== owed.contentHash) return
+    if (!active || !owed || !capture || capture.draft.contentHash !== owed.receipt.contentHash) return
     try { await confirmRow(capture.draft); owedReceipt = undefined } catch { /* It remains a draft to compare. */ }
   }
   // The single read-revocation path, whichever call learned of it (save,

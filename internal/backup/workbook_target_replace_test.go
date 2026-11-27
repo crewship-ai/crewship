@@ -1,18 +1,22 @@
 package backup_test
 
 import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 
 	"filippo.io/age"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
-// Workbooks are never in a bundle, so a replace restore that wipes the target
-// workspace would destroy them for good. It refuses, naming the workbook
-// Pages, unless the operator explicitly acknowledges the loss.
+// This bundle predates the target workbook. Replacement refuses and names the
+// workbook Page unless the operator explicitly acknowledges the loss.
 func TestReplaceRestoreRefusesTargetWorkbooks(t *testing.T) {
 	f := newInstanceFixture(t)
 	bundle, err := backup.CreateBackup(t.Context(), f.db, backup.CreateOptions{
@@ -62,5 +66,147 @@ func TestReplaceRestoreRefusesTargetWorkbooks(t *testing.T) {
 	}
 	if workbooks() != 0 {
 		t.Fatal("acknowledged replace kept a workbook the bundle does not contain")
+	}
+}
+
+// The older encrypted bundle carries the genuine legacy profile and JSON v1.
+// Rebuilding the newer target from its portable dump drops runtime rows, so
+// neither refusal can be attributed to lease or delivery metadata.
+func TestReplaceRestoreRefusesTargetNativeWorkbookHistory(t *testing.T) {
+	ctx := t.Context()
+	f := newInstanceFixture(t)
+	source := reopenDurableBackupDB(t, f.db)
+	scope, original := seedWorkbookBackupRestore(t, source)
+	bundle, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope: backup.ScopeWorkspace, WorkspaceID: scope.WorkspaceID, OutputDir: t.TempDir(),
+		Actor: backup.Actor{UserID: "u_admin", Role: "OWNER"}, Recipients: []age.Recipient{f.identity.Recipient()},
+		ConversationRoot: f.paths.Output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := convertAndEditWorkbookBackup(t, source, scope)
+	dump, err := backup.DumpWorkspace(ctx, source, scope.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"converted workbook", "native head without receipt", "receipt with a legacy head"} {
+		t.Run(mode, func(t *testing.T) {
+			target := openDurableArtifactBackupDB(t)
+			if err := backup.RestoreDump(t.Context(), target, dump); err != nil {
+				t.Fatal(err)
+			}
+			assertNoWorkbookBackupRuntime(t, target)
+			switch mode {
+			case "native head without receipt":
+				replacementExec(t, target, "DELETE FROM craft_workbook_migrations WHERE page_id=?", scope.ArtifactID)
+			case "receipt with a legacy head":
+				replacementExec(t, target, "UPDATE artifact_version_heads SET latest_version=1 WHERE page_id=?", scope.ArtifactID)
+			}
+			opts := backup.RestoreOptions{
+				Path: bundle.Path, Identities: []age.Identity{f.identity}, Replace: true,
+				Actor: backup.Actor{UserID: "u_admin", Role: "OWNER"}, ConversationRoot: f.paths.Output,
+			}
+			for _, dryRun := range []bool{true, false} {
+				opts.DryRun = dryRun
+				_, err := backup.RestoreBackup(t.Context(), target, opts)
+				if !errors.Is(err, backup.ErrWorkbookTargetReplacement) || strings.Count(err.Error(), scope.ArtifactID) != 1 {
+					t.Fatalf("replace (dry run %t): %v, want one opaque Page ID", dryRun, err)
+				}
+			}
+			tx, err := target.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = backup.ReplaceWorkspaceContents(t.Context(), tx, scope.WorkspaceID, "e2e-ws")
+			_ = tx.Rollback()
+			if !errors.Is(err, backup.ErrWorkbookTargetReplacement) {
+				t.Fatalf("replace in the writer transaction: %v", err)
+			}
+			if mode == "converted workbook" {
+				assertWorkbookBackupUnchanged(t, target, scope, original, newer)
+				opts.DiscardWorkbooks = true
+				if _, err := backup.RestoreBackup(t.Context(), target, opts); err != nil {
+					t.Fatalf("acknowledged replace: %v", err)
+				}
+				assertLegacyWorkbookBackupRestored(t, target, scope, original)
+			}
+		})
+	}
+}
+
+func seedWorkbookBackupRestore(t *testing.T, db *sql.DB) (mooring.EditLeaseScope, []byte) {
+	t.Helper()
+	scope := mooring.EditLeaseScope{WorkspaceID: "ws_e2e_1", ArtifactID: "native-wb-restore"}
+	replacementExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,'legacy-sheet','Legacy Sheet','u_admin','{}')`, scope.ArtifactID, scope.WorkspaceID)
+	replacementExec(t, db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle)
+		VALUES(?,?,'gridcraft','e68d192282499bed81a9800d742cb9b239d367e5',?,?)`, scope.ArtifactID, scope.WorkspaceID, strings.Repeat("a", 64), strings.Repeat("b", 64))
+	original := []byte("{\n  \"sheets\": [{\"name\": \"Original\"}]\n}\n")
+	publishWorkbookBackupVersion(t, db, scope, 0, "document.json", "application/json", original)
+	return scope, original
+}
+
+func convertAndEditWorkbookBackup(t *testing.T, db *sql.DB, scope mooring.EditLeaseScope) []byte {
+	t.Helper()
+	store, _ := workbookBackupStore(db, true)
+	legacy, err := store.LegacyWorkbook(t.Context(), scope, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version, err := store.MigrateLegacyWorkbook(t.Context(), scope, legacy, workbookBackupFixture(t, "converted")); err != nil || version != 2 {
+		t.Fatalf("migrate: version %d, %v", version, err)
+	}
+	newer := workbookBackupFixture(t, "edited after conversion")
+	publishWorkbookBackupVersion(t, db, scope, 2, "workbook.xlsx", mooring.WorkbookMediaTypeXLSX, newer)
+	return newer
+}
+
+func publishWorkbookBackupVersion(t *testing.T, db *sql.DB, scope mooring.EditLeaseScope, base int64, name, media string, content []byte) {
+	t.Helper()
+	history := artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: true, ContentType: "gridcraft"})
+	key := artifacts.VersionKey{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID}
+	req := artifacts.VersionRequest{BaseVersion: base, EntryPoint: name,
+		Files: map[string]artifacts.VersionFile{name: {Content: content, MediaType: media}}}
+	version, err := history.Apply(t.Context(), key, req, func(context.Context, *sql.Tx) (string, error) {
+		return workbookBackupPrincipal.ActorID, nil
+	})
+	if err != nil || version.Version != base+1 {
+		t.Fatalf("publish %s: version %+v, %v", name, version, err)
+	}
+}
+
+func assertNoWorkbookBackupRuntime(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"gridcraft_heads", "mooring_delivery_gates", "mooring_delivery_barriers", "mooring_edit_leases", "mooring_edit_lease_workspaces"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("target has %d %s rows or lookup failed: %v", count, table, err)
+		}
+	}
+}
+
+func assertWorkbookBackupUnchanged(t *testing.T, db *sql.DB, scope mooring.EditLeaseScope, original, newer []byte) {
+	t.Helper()
+	store, _ := workbookBackupStore(db, true)
+	state, err := store.Read(t.Context(), scope)
+	if err != nil || state.LatestVersion != 3 || sha256.Sum256(state.Manifest.Files["workbook.xlsx"].Content) != sha256.Sum256(newer) {
+		t.Fatalf("refused restoration changed workbook v3: head %d, %v", state.LatestVersion, err)
+	}
+	legacy, err := store.LegacyWorkbook(t.Context(), scope, true)
+	if err != nil || legacy.Version != 1 || legacy.WorkbookVersion != 2 || sha256.Sum256(legacy.Bytes) != sha256.Sum256(original) {
+		t.Fatalf("refused restoration changed receipt or source: versions %d/%d, %v", legacy.Version, legacy.WorkbookVersion, err)
+	}
+}
+
+func assertLegacyWorkbookBackupRestored(t *testing.T, db *sql.DB, scope mooring.EditLeaseScope, original []byte) {
+	t.Helper()
+	store, _ := workbookBackupStore(db, false)
+	state, err := store.Read(t.Context(), scope)
+	if err != nil || state.LatestVersion != 1 || sha256.Sum256(state.Manifest.Files["document.json"].Content) != sha256.Sum256(original) {
+		t.Fatalf("acknowledged restoration did not restore the legacy JSON: head %d, %v", state.LatestVersion, err)
+	}
+	var receipts int
+	if err := db.QueryRowContext(t.Context(), "SELECT count(*) FROM craft_workbook_migrations WHERE page_id=?", scope.ArtifactID).Scan(&receipts); err != nil || receipts != 0 {
+		t.Fatalf("acknowledged restoration retained %d migration receipts, %v", receipts, err)
 	}
 }

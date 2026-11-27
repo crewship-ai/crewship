@@ -23,6 +23,7 @@ var errCraftNativeShareAudit = errors.New("native preview audit unavailable")
 
 type craftNativePreviewResponse struct {
 	Version       string `json:"version"`
+	Format        string `json:"format,omitempty"`
 	Bytes         []byte `json:"bytes"`
 	ApplicationID string `json:"applicationId"`
 	EnginePin     string `json:"enginePin"`
@@ -97,9 +98,12 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		craftNativeDocumentError(w, err)
 		return
 	}
-	file, ok := state.Manifest.Files["document.json"]
-	if !ok || len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != "document.json" || file.MediaType != "application/json" {
-		craftNativeDocumentError(w, mooring.ErrNativeProfile)
+	file, err := store.DocumentFile(state.Manifest)
+	format := craftWorkbookResponseFormat(file)
+	if errors.Is(err, mooring.ErrNativeLegacy) {
+		format = file.Format
+	} else if err != nil {
+		craftNativeDocumentError(w, err)
 		return
 	}
 	if readRecord == nil {
@@ -109,7 +113,7 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 	if !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
 		return
 	}
-	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})
+	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, Format: format, ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})
 }
 
 type craftNativeShareBody struct {

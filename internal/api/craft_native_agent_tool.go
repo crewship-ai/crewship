@@ -237,7 +237,7 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 	}
 	application, ok := m.documents.application(e.grant.Application)
 	profile, pinned := m.documents.profile(e.grant.Application)
-	if !ok || !pinned {
+	if !ok || !pinned || application.Store.Format == mooring.NativeFormatWorkbook {
 		replyError(w, 503, "native Craft profile unavailable")
 		return
 	}

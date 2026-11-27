@@ -64,8 +64,7 @@ type ReplaceOptions struct {
 }
 
 // ReplaceWorkspaceContentsWithOptions is ReplaceWorkspaceContents with
-// explicit acknowledgements. When workbooks are discarded, the returned
-// counts include "gridcraft_heads": the number of workbooks destroyed.
+// explicit acknowledgements. The result counts deleted rows by table.
 func ReplaceWorkspaceContentsWithOptions(ctx context.Context, tx *sql.Tx, bundleWorkspaceID, bundleWorkspaceSlug string, opts ReplaceOptions) (map[string]int, error) {
 	if bundleWorkspaceID == "" {
 		return nil, fmt.Errorf("backup: ReplaceWorkspaceContents requires bundleWorkspaceID")
@@ -119,10 +118,6 @@ func ReplaceWorkspaceContentsWithOptions(ctx context.Context, tx *sql.Tx, bundle
 	}
 
 	deleted := map[string]int{}
-	if len(workbooks) > 0 {
-		// Not a backup table: the workbooks go with their Pages by cascade.
-		deleted["gridcraft_heads"] = len(workbooks)
-	}
 	for _, st := range order {
 		expr, args := st.WorkspaceScopeFilterIDs(targetIDs)
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(st.Name), expr)

@@ -87,7 +87,9 @@ export function useWordDocumentCreation(workspaceId: string) {
       if (!original.nativeAdmission) {
         if (original.nativeAttempted) throw new Error("Native initialization could not be confirmed. Check the original Page before starting again.")
         const bytes = application === "gridcraft"
-          ? (await import("@/lib/mooring/gridcraft-empty")).emptyGridCraftNativeDocument()
+          ? availability.gridcraftWorkbook
+            ? (await import("@/lib/mooring/gridcraft-empty-workbook")).emptyGridCraftWorkbook()
+            : (await import("@/lib/mooring/gridcraft-empty")).emptyGridCraftNativeDocument()
           : (await import("@/lib/mooring/wordcraft-native-create")).createEmptyNativeWord()
         let binary = ""; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768))
         original.nativeAttempted = true

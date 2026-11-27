@@ -279,9 +279,10 @@ var TableCategory = map[string]string{
 
 	// Pages and their files.
 	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
-	"craft_native_documents": CategoryPages,
-	"craft_native_proposals": CategoryPages,
-	"page_panels":            CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
+	"craft_native_documents":    CategoryPages,
+	"craft_workbook_migrations": CategoryPages,
+	"craft_native_proposals":    CategoryPages,
+	"page_panels":               CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
 	"page_project_live": CategoryPages, "page_project_withdrawals": CategoryPages,
 	"page_project_drafts": CategoryPages, "page_project_revisions": CategoryPages, "page_grants": CategoryPages,

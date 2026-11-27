@@ -9,8 +9,7 @@ tag: Stable
 # crewship craft
 
 This experimental human CLI uses the separate native profile. The server flag
-is off by default. Existing documents are never converted. Agent mandates,
-proposals are separate surfaces. Whole-document actions operate only on an
+is off by default. Agent mandates and proposals are separate surfaces. Whole-document actions operate only on an
 existing explicit native Page and its qualified startup profile.
 
 ```bash
@@ -18,6 +17,7 @@ crewship craft availability <page>
 crewship craft preview <page>
 crewship craft versions <page>
 crewship craft version <page> <version> [--output FILE]
+crewship craft original-workbook <page> [--output FILE]
 crewship craft connect <page>
 crewship craft initialize <page> [--application word|sheet] --file <native.json>
 crewship craft task instruction|start|status|stop ...
@@ -26,6 +26,12 @@ crewship craft task instruction|start|status|stop ...
 `preview` reads only `GET /api/v1/pages/{slug}/craft/preview` under ordinary
 human authentication, without opening a native admission or acquiring a lease.
 A missing shared version or redirect is an error; it never falls back to private latest bytes.
+
+Use `crewship craft original-workbook <page>` to download the exact original
+JSON of a legacy Sheet. It reads
+`GET /api/v1/pages/{slug}/craft/document/original-workbook` under a read-only
+admission, without a lease. The server requires private Page read access.
+The default is raw stdout. `--output FILE` writes a private file atomically.
 
 `availability` reads `GET /api/v1/pages/{slug}/craft/availability`. While an
 administrator has Word or Sheet draining or off, it reports `can_edit: false`

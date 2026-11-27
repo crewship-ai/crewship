@@ -79,7 +79,7 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if len(m.entries) >= 128 {
 		return zero, refuse(craftNativeAgentReasonCapacity)
 	}
-	if _, ok := m.documents.application(proof.application); !ok {
+	if application, ok := m.documents.application(proof.application); !ok || application.Store.Format == mooring.NativeFormatWorkbook {
 		return zero, mooring.ErrNativeDisabled
 	}
 	original, err := chataudience.CaptureTrustedQuery(ctx, tx, input.ChatID, source.UserID, nil)

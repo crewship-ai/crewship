@@ -76,6 +76,8 @@ var fileBytesExemptHandlers = map[string]string{
 	"InstanceBackupsHandler.DownloadBundle": "instance admins only (authedInstance); streams a whole backup archive " +
 		"whose path must be a backup_catalog row (catalogued) — the catalog, not the request, names the file, and it " +
 		"is never a per-file read of the crew/agent output tree",
+	"craftNativeDocumentsHTTP.downloadLegacyWorkbook": "loads the exact native Sheet JSON blob from artifact_version_blobs " +
+		"using the authorized Page and workspace, verifies its digest, and applies the private read audit before writing the attachment",
 	"PageHandler.ExportDesign": "renders one immutable Design version as HTML in memory (design.RenderHTML) from the " +
 		"version's design.yjs blob in artifact_version_blobs, behind the same read check as GetDesign; it reads no " +
 		"file from crew or agent storage",

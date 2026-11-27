@@ -140,6 +140,10 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		replyError(w, 400, "invalid native initialization request")
 		return
 	}
+	if len(body.Bytes) > 32<<20 {
+		replyError(w, 413, "document file exceeds 32 MiB")
+		return
+	}
 	profile, qualified := d.application(body.ApplicationID)
 	if !qualified {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)

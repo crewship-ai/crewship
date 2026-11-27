@@ -6,6 +6,7 @@
 import type { APIRequestContext, BrowserContext, Frame, Page, Request } from "@playwright/test"
 import { expect } from "@playwright/test"
 import { createHash } from "node:crypto"
+import { strFromU8, unzipSync } from "fflate"
 import * as net from "node:net"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
 import { readFileSync } from "node:fs"
@@ -34,12 +35,12 @@ export interface NativeRef {
 }
 
 /** Creates an empty page and initializes it as a native document; releases the init lease. */
-export async function createNative(api: APIRequestContext, ws: string, app: NativeApp, name: string): Promise<NativeRef> {
+export async function createNative(api: APIRequestContext, ws: string, app: NativeApp, name: string, initialBytes?: Uint8Array): Promise<NativeRef> {
   const slug = `prd-outage-${app}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
   const c = await api.post(`/api/v1/pages${q(ws)}`, { data: { name, slug, panels: [], allow_empty: true, created_by_test: true } })
   expect(c.status(), `create page: ${(await c.text()).slice(0, 300)}`).toBe(201)
   const page = (await c.json()) as { id: string }
-  const bytes = Buffer.from(app === "wordcraft" ? createEmptyNativeWord() : emptyGridCraftNativeDocument())
+  const bytes = Buffer.from(initialBytes ?? (app === "wordcraft" ? createEmptyNativeWord() : emptyGridCraftNativeDocument()))
   const init = await api.post(craft(page.id, ws, "initialize"), { data: { application_id: app, bytes: bytes.toString("base64") }, timeout: 120_000 })
   expect(init.status(), `initialize ${app}: ${(await init.text()).slice(0, 300)}`).toBe(201)
   const i = (await init.json()) as { generation: string; session_token: string; version: string }
@@ -71,6 +72,7 @@ export interface Head {
   version: string
   hash: string
   text: string
+  workbookParts?: Record<string, string>
 }
 
 /** Reads the native head with a fresh read admission (no lease). */
@@ -80,9 +82,13 @@ export async function readHead(api: APIRequestContext, ref: NativeRef): Promise<
   const tok = ((await s.json()) as { session_token: string }).session_token
   const r = await api.get(craft(ref.pageId, ref.workspaceId, "document"), { headers: { "X-Craft-Session": tok, "Cache-Control": "no-cache" }, timeout: 120_000 })
   expect(r.status(), "read document").toBe(200)
-  const d = (await r.json()) as { version: string; bytes: string }
+  const d = (await r.json()) as { version: string; bytes: string; format?: "xlsx" | "xlsm" }
   const raw = Buffer.from(d.bytes, "base64")
-  return { version: String(d.version), hash: sha256(raw), text: raw.toString("utf8") }
+  const workbookParts = d.format
+    ? Object.fromEntries(Object.entries(unzipSync(raw, { filter: entry => entry.name.startsWith("xl/") && entry.name.endsWith(".xml") })).map(([name, bytes]) => [name, strFromU8(bytes)]))
+    : undefined
+  const text = workbookParts ? Object.values(workbookParts).join("\n") : raw.toString("utf8")
+  return { version: String(d.version), hash: sha256(raw), text, workbookParts }
 }
 
 export interface Op {
@@ -186,34 +192,43 @@ export async function release(page: Page): Promise<void> {
   await pause(500)
 }
 
-/**
- * Waits until the editor routes keys to a text field (`text`: the name box or a cell
- * editor) or to the grid itself (`grid`). The editor (eframe) handles input only on
- * its next painted frame, and the browser routes each key by the DOM focus at that
- * moment: while its hidden text input still has focus, typed keys go to the text
- * field that held it, whatever the test meant. Two animation frames do not prove the
- * editor caught up; on a slow runner the marker typed right after the name box's Enter
- * never reached the grid and the cell stayed empty. Only keys that reach the canvas
- * (grid) or the active hidden input (text field) count, and the focus switch is the
- * editor's own acknowledgement, so wait for it.
- */
-async function keysTo(f: Frame, target: "text" | "grid") {
-  const tag = target === "text" ? "INPUT" : "CANVAS"
-  await f.waitForFunction((t) => document.activeElement?.tagName === t, tag, { timeout: 30_000 })
-}
-
-async function gotoCell(page: Page, f: Frame, app: NativeApp, cell: string) {
+async function gotoCell(page: Page, f: Frame, app: NativeApp, cell: string): Promise<"INPUT" | "CANVAS"> {
   const kb = page.keyboard
   for (let k = 0; k < 3; k++) {
     await kb.press("Control+PageUp")
     await barrier(page, app)
   }
   await f.locator("canvas").first().click({ position: { x: 68, y: 178 } }) // name box
-  await keysTo(f, "text")
+  const nameBox = f.locator("canvas + input:focus")
+  await nameBox.waitFor({ state: "attached" })
+  const nameBoxTop = await nameBox.evaluate(input => (input as HTMLInputElement).offsetTop)
   await kb.press("Control+a")
   await kb.type(cell)
   await kb.press("Enter")
-  await keysTo(f, "grid")
+
+  // GridCraft can focus the grid's invisible text agent for IME, including
+  // before a cell editor opens. Wait for the caret to move below the name
+  // box into the sheet or for older editors to return focus to the canvas.
+  const target = await f.waitForFunction(top => {
+    const active = document.activeElement
+    if (!document.hasFocus()) return false
+    if (active instanceof HTMLCanvasElement) return "CANVAS"
+    if (active instanceof HTMLInputElement && active.previousElementSibling instanceof HTMLCanvasElement && active.offsetTop > top) return "INPUT"
+    return false
+  }, nameBoxTop, { timeout: 30_000 }).catch(async cause => {
+    const focus = await f.evaluate(() => {
+      const active = document.activeElement
+      return { tag: active?.tagName, top: active instanceof HTMLElement ? active.offsetTop : undefined, frameFocused: document.hasFocus() }
+    }).catch(() => undefined)
+    throw new Error("Grid did not receive focus after the name box committed " + cell + " (" + JSON.stringify(focus) + ")", { cause })
+  })
+  try {
+    const kind = await target.jsonValue()
+    if (kind === "INPUT" || kind === "CANVAS") return kind
+    throw new Error("Grid focus target was unavailable")
+  } finally {
+    await target.dispose()
+  }
 }
 
 /** Types a unique marker: a new paragraph in Word, a cell value in Sheet. */
@@ -224,11 +239,16 @@ export async function typeMarker(page: Page, f: Frame, app: NativeApp, text: str
     await kb.press("Enter")
     await kb.type(text)
   } else {
-    await gotoCell(page, f, app, cell)
-    await kb.type(text)
-    await keysTo(f, "text") // the cell editor opened with the marker
+    const target = await gotoCell(page, f, app, cell)
+    // One input event gives GridCraft the complete marker when starting the
+    // cell edit. Older canvas-focused builds still take real key events.
+    if (target === "INPUT") await kb.insertText(text)
+    else {
+      await kb.type(text)
+      await f.locator("canvas + input:focus").waitFor({ state: "attached" })
+    }
+    await barrier(page, app)
     await kb.press("Enter")
-    await keysTo(f, "grid") // and committed it
   }
   await barrier(page, app).catch(() => {})
 }

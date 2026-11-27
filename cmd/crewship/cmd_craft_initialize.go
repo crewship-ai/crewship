@@ -42,7 +42,7 @@ func craftInitialize(cmd *cobra.Command, args []string) error {
 	}
 	native, err := io.ReadAll(io.LimitReader(input, craftNativeBytesLimit+1))
 	if err != nil || len(native) == 0 || len(native) > craftNativeBytesLimit {
-		return fmt.Errorf("native document must contain 1 to32MiB of native bytes")
+		return fmt.Errorf("document file must contain 1 byte to 32 MiB")
 	}
 	c, err := pageClient()
 	if err != nil {

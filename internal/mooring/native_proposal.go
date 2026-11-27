@@ -301,7 +301,7 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 		if err != nil {
 			return NativeProposal{}, NativeSaveReceipt{}, err
 		}
-		request := nativeManifest(base, b)
+		request := s.manifest(base, b)
 		request.Message = message
 		decided := false
 		receipt, err = s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, func(ctx context.Context, tx *sql.Tx) (string, error) {

@@ -330,6 +330,7 @@ var BackupTables = []string{
 	"artifact_design_documents",
 	"artifact_version_blobs",
 	"artifact_versions",
+	"craft_workbook_migrations",     // immutable conversion receipt; FK to the native profile and source version/blob
 	"artifact_library_publications", // FK artifact_version_heads
 	"artifact_library_pins",         // FK artifact_version_heads; library_page_id is a soft Page reference
 	"artifact_library_pin_files",    // FK artifact_library_pins
@@ -1338,6 +1339,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
+			if table == "craft_workbook_migrations" {
+				return stats, fmt.Errorf("backup: target schema cannot preserve Sheet conversion history")
+			}
 			// Target lacks this table — skip rather than failing so a
 			// bundle from a newer schema can restore (partially) here.
 			continue

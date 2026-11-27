@@ -109,6 +109,7 @@ var responseShapeContracts = []struct {
 	{name: "NativeCraftShareReceipt", pointer: "/components/schemas/NativeCraftShareReceipt", value: craftNativeRestoreResponse{}},
 	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
 	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftWorkbookMigrationReceipt", pointer: "/components/schemas/NativeCraftWorkbookMigrationReceipt", value: craftNativeWorkbookMigrationResponse{}},
 	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
 	{name: "MooringCommandSession", pointer: "/components/schemas/MooringCommandSession", value: commandProductHTTPResponse{}},
 	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},

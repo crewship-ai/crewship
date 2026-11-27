@@ -73,6 +73,26 @@ A lost creation-release response cannot erase or reinitialize its confirmed data
 This does not convert existing documents or qualify the complete editor
 acceptance. Agent proposals are described under "Agent proposals" below.
 
+A Sheet package whose manifest declares \`document_format: workbook\` uses
+GridCraft protocol 2. Each version stores one XLSX or XLSM file and reads
+include its \`format\`. The workspace document status advertises
+\`gridcraft_workbook\` when Sheet creation uses this profile. The native
+initialize and save requests still carry base64 bytes, with the existing
+32 MiB limit. Sheet agent changes require workbook-specific support.
+
+On the first editor open of a Sheet written by GridCraft 0.12.1, a client
+with Edit authority requests conversion. The current engine exports the
+source JSON to XLSX and reads that workbook back with saved values preserved.
+The server requires both the engine's fidelity report and preservation of
+the original JSON model's fields, including cell values, formulas, styles,
+names and pivots. If either check fails, the Sheet keeps its current head.
+An authorized reader can download the exact source JSON in both cases.
+
+The conversion publishes one successor to the exact source version and
+records its workbook profile in the same transaction. A retry returns
+the recorded successor even if later edits have advanced the head. The
+original version and blob are retained for the life of the page.
+
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
 Ordinary authentication and workspace membership remain required.
@@ -103,6 +123,8 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header; private read (see Shared previews). | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/migrate-workbook` | Craft admission and Edit authority. | `{version: "2"}`, 200, or 422 when fidelity cannot be confirmed. |
+| GET | `/api/v1/pages/{slug}/craft/document/original-workbook` | Craft admission and private read authority. | Exact original Sheet JSON as an attachment, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |

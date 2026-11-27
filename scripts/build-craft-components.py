@@ -75,7 +75,19 @@ def load_recipe():
             raise ValueError(c['application'] + ': commit and patch must be pinned')
         if sha256_bytes((RECIPE / c['patch']).read_bytes()) != c['patch_sha256']:
             raise ValueError(c['application'] + ': patch does not match its pin')
+        document_format(c)
     return recipe
+
+
+def document_format(c):
+    """The manifest field telling the server how a component's documents are stored: a Sheet
+    whose editor and engine keep the xlsx/xlsm file as the document says "workbook". A
+    component without it keeps native documents, as every package before it did."""
+    if 'document_format' not in c:
+        return {}
+    if c['application'] != 'gridcraft' or c['document_format'] != 'workbook':
+        raise ValueError(c['application'] + ': unknown document_format')
+    return {'document_format': c['document_format']}
 
 
 def rust_env(rust_bin, version, targets):
@@ -137,6 +149,8 @@ def remap(env, *pairs):
 def build_engine(c, source, fonts, cargo, env, target_dir):
     env = remap(env, (source, '/' + c['application']), (fonts, '/craft-fonts'), (Path.home(), '/home'))
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts), CRAFT_FONTS_REQUIRED='1')
+    # The build identity the engine reports with --version: the pinned source and its patch.
+    env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
     run([cargo, 'build', '--release', '--locked', '--target', 'wasm32-wasip1', '-p', c['cli_package']], cwd=source, env=env)
     module = target_dir / 'wasm32-wasip1/release' / (c['cli_package'] + '.wasm')
     raw = module.read_bytes()
@@ -149,6 +163,8 @@ def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, te
     app, package = c['application'], c['web_package']
     env = remap(env, (source, '/' + app), (fonts, '/craft-fonts'), (Path.home(), '/home'))
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts))
+    # The editor reports the same build identity as the engine (gridcraft:ready build).
+    env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
     run([cargo, 'build', '--release', '--locked', '--target', 'wasm32-unknown-unknown', '-p', package], cwd=source, env=env)
     out = temp / (app + '-web')
     run([bindgen / 'wasm-bindgen', target_dir / 'wasm32-unknown-unknown/release' / (package + '.wasm'),
@@ -377,7 +393,8 @@ def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
                 'application': app, 'version': f'{version}+{c["commit"][:12]}', 'engine_revision': c['commit'],
                 'source': {'repository': c['repository'].removesuffix('.git'), 'commit': c['commit'], 'patch_sha256': c['patch_sha256']},
                 'engine': engine, 'editor': {'digest': editor_digest, 'files': editor_files},
-                'licenses': [c['license'], {'name': 'craft-fonts', 'spdx': 'OFL-1.1'}], 'notices': notices}
+                'licenses': [c['license'], {'name': 'craft-fonts', 'spdx': 'OFL-1.1'}], 'notices': notices,
+                **document_format(c)}
             notices.append(add_file(stage, f'{app}/licenses/sbom.cdx.json',
                                     sbom(component, crates, recipe['fonts']['repository'], fonts_commit(fonts))))
             components.append(component)

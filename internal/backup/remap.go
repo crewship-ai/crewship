@@ -511,10 +511,12 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	}
 	// The profile's primary key is page_id, so the generic id map has no
 	// craft_native_documents entry. Follow its Page anchor explicitly.
-	for _, row := range dump.Tables["craft_native_proposals"] {
-		if old, ok := row["page_id"].(string); ok {
-			if mapped := idMap["pages"][old]; mapped != "" {
-				row["page_id"] = mapped
+	for _, table := range []string{"craft_native_proposals", "craft_workbook_migrations"} {
+		for _, row := range dump.Tables[table] {
+			if old, ok := row["page_id"].(string); ok {
+				if mapped := idMap["pages"][old]; mapped != "" {
+					row["page_id"] = mapped
+				}
 			}
 		}
 	}

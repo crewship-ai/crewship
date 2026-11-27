@@ -181,7 +181,7 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 		}
 	}
 	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, Engine: engine,
-		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), Bundled: true}, a.componentOf(inst), nil
+		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), Bundled: true, Workbook: c.DocumentFormat == craftassets.DocumentFormatWorkbook}, a.componentOf(inst), nil
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the

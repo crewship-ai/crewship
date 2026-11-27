@@ -3,6 +3,7 @@
 package backup_test
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -14,9 +15,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
-// Offline recovery with --force replaces the whole database, and no bundle
-// contains a workbook, so it refuses exactly like a replace restore unless the
-// operator acknowledges the loss with DiscardWorkbooks (--discard-workbooks).
+// The instance bundle predates the target workbook. Forced recovery refuses
+// unless the operator acknowledges the loss with DiscardWorkbooks.
 func TestForceRecoverRefusesTargetWorkbooks(t *testing.T) {
 	f := newInstanceFixture(t)
 	bundle := f.create(t, true)
@@ -62,4 +62,47 @@ func TestForceRecoverRefusesTargetWorkbooks(t *testing.T) {
 	if workbooks() != 0 {
 		t.Fatal("acknowledged forced recover kept a workbook the bundle does not contain")
 	}
+}
+
+func TestForceRecoverRefusesTargetNativeWorkbookHistory(t *testing.T) {
+	f := newInstanceFixture(t)
+	f.db = reopenDurableBackupDB(t, f.db)
+	scope, original := seedWorkbookBackupRestore(t, f.db)
+	older := f.create(t, true)
+	newer := convertAndEditWorkbookBackup(t, f.db, scope)
+	f.outputDir = t.TempDir()
+	current := f.create(t, true)
+	opts := backup.RecoverOptions{
+		BundlePath: current.Path, Identities: []age.Identity{f.identity},
+		DataDir: filepath.Join(t.TempDir(), "installation"), Actor: "u_admin",
+	}
+	report, err := backup.RecoverInstance(t.Context(), opts)
+	if err != nil {
+		t.Fatalf("recover current portable bundle: %v", err)
+	}
+	readTarget := func(check func(*sql.DB)) {
+		t.Helper()
+		db, err := database.Open("file:" + report.DatabasePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		check(db.DB)
+	}
+	readTarget(func(db *sql.DB) {
+		assertNoWorkbookBackupRuntime(t, db)
+		assertWorkbookBackupUnchanged(t, db, scope, original, newer)
+	})
+	opts.BundlePath, opts.Force = older.Path, true
+	_, err = backup.RecoverInstance(t.Context(), opts)
+	if !errors.Is(err, backup.ErrWorkbookTargetReplacement) || strings.Count(err.Error(), scope.ArtifactID) != 1 {
+		t.Fatalf("force-recover older bundle: %v, want one opaque Page ID", err)
+	}
+	readTarget(func(db *sql.DB) { assertWorkbookBackupUnchanged(t, db, scope, original, newer) })
+
+	opts.DiscardWorkbooks = true
+	if _, err := backup.RecoverInstance(t.Context(), opts); err != nil {
+		t.Fatalf("acknowledged force recovery: %v", err)
+	}
+	readTarget(func(db *sql.DB) { assertLegacyWorkbookBackupRestored(t, db, scope, original) })
 }

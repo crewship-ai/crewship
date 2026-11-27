@@ -9,6 +9,8 @@ type craftNativeDocumentQuotaResponse struct {
 }
 type craftNativeDocumentResponse struct {
 	Version       string                           `json:"version"`
+	LegacySource  bool                             `json:"legacySource,omitempty"`
+	Format        string                           `json:"format,omitempty"`
 	Bytes         []byte                           `json:"bytes"`
 	ApplicationID string                           `json:"applicationId"`
 	EnginePin     string                           `json:"enginePin"`

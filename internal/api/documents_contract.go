@@ -11,6 +11,7 @@ import (
 type DocumentAvailability struct {
 	Enabled            bool   `json:"enabled"`
 	WordCraftNative    bool   `json:"wordcraft_native"`
+	GridCraftWorkbook  bool   `json:"gridcraft_workbook,omitempty"`
 	GridCraftNative    bool   `json:"gridcraft_native"`
 	WordCraftSDKPrefix string `json:"wordcraft_sdk_prefix,omitempty"`
 	WordCraftCommands  bool   `json:"wordcraft_commands,omitempty"`

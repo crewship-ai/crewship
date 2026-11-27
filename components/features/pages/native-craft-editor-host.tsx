@@ -9,7 +9,7 @@ import {apiFetch} from "@/lib/api-fetch"
 import {NativeCraftAgentStart} from "./native-craft-agent-start"
 import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
-import {createNativeDocumentClient,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
+import {createNativeDocumentClient,LegacyWorkbookError,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
 import {openJournalWithRetry} from "@/lib/mooring/native-journal-open"
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
@@ -137,6 +137,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const [appOff,setAppOff]=React.useState<string>()
  const [saveTrace,setSaveTrace]=React.useState<{phase:string;reason?:string}>()
  const [handoffRequest,setHandoffRequest]=React.useState<{generation:string;holder:string}>()
+ const [legacySource,setLegacySource]=React.useState(false)
+ const downloadOriginalWorkbook=React.useRef<()=>void>(()=>{})
  const [agentWork,setAgentWork]=React.useState<string>(),[hostBlocked,setHostBlocked]=React.useState(false),[hostRetiring,setHostRetiring]=React.useState(false)
  const agentStarted=React.useCallback((workId:string)=>{
   setAgentWork(workId)
@@ -149,7 +151,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setOfferWithdrawn(false);setAccessCheck(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setAppOff(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
-  setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined)
+  setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined);setLegacySource(false)
   const lifetime=new AbortController()
   // Replaced only by a fresh read admission after the server retires write (#4348).
   let client=createNativeDocumentClient({workspaceId,pageId})
@@ -376,6 +378,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    viewNow=confirmed;setView(confirmed);return confirmed
   }
   async function mountEditor(snapshot:NativeDocumentSnapshot,generation:string):Promise<Runtime>{
+   setLegacySource(snapshot.legacySource===true)
    if(dead)throw Error('retired')
    if(snapshot.applicationId!==sessionApplication)throw Error('native_application_changed')
    const src=nativeCraftFrameURL(snapshot,window.location.origin)
@@ -422,7 +425,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const finish=()=>{clearTimeout(timer);clearTimeout(totalTimer);abort.signal.removeEventListener('abort',canceled);document.removeEventListener('securitypolicyviolation',onViolation)}
    ready.then(finish,finish)
    let port:NativeEditorPort
-   try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
+   try{port=createNativeEditorPort({applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onExport(file){
      if(!r||!liveMount()||!r.ready||r.blocked||!readable||offerStale||networkRetired)return
      try{downloadNativeExport(file)}catch{setError('The export could not be downloaded. The document stays open.')}
@@ -456,6 +459,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    const snapshot=await own.read(lifetime.signal)
    const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
    const [serverHash,draftHash]=await Promise.all([digest(snapshot.bytes),digest(draft.bytes)])
+   if(snapshot.format||draft.format){setError('Workbook drafts can be downloaded for comparison.');return}
    const decoder=new TextDecoder('utf-8',{fatal:true})
    if(readable&&!dead&&client===own&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(draft.bytes),serverHash,draftHash,equal:serverHash===draftHash})
   })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('The comparison could not be loaded. The draft was not overwritten.')})}
@@ -781,14 +785,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
    acquireStage='writable'
-   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Writing was stopped; editor access was not confirmed.'))})}},
-    onReceipt(receipt){
+    onReceipt(receipt,captureId){
      const edit=r.edit
      const acknowledgement=(async()=>{
       if(!live(r)||!r.writable)return false
       try{
-       const acknowledged=await r.port.ack(receipt)
+       const acknowledged=await (captureId===undefined?r.port.ack(receipt):r.port.ack(receipt,captureId))
        if(!live(r)||!r.writable)return false
        if(!acknowledged){failNative(r,'The editor confirmation failed. The last changes are not confirmed; the original editor stays locked.');return false}
        if(r.edit===edit)r.ackedVersion=receipt.version
@@ -946,6 +950,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'The request was sent, but the current editing state cannot be loaded. The draft is kept.':'The result of the action was not confirmed. The draft is kept.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
+  downloadOriginalWorkbook.current=()=>{
+   const recovery=createNativeDocumentClient({workspaceId,pageId})
+   void(async()=>{
+    await recovery.open(readLossAbort.signal)
+    if(!recovery.originalWorkbook)throw Error('original_workbook_unavailable')
+    const bytes=await recovery.originalWorkbook(readLossAbort.signal)
+    if(!closed&&!readLossAbort.signal.aborted)downloadNativeExport({name:'sheet-original.json',bytes})
+   })().catch(()=>{if(!closed)setError('The original Sheet could not be downloaded. Check your access and try again.')}).finally(()=>recovery.close())
+  }
   const initialStartup=armAdmissionDeadline()
   void(async()=>{
    const admission=client
@@ -958,7 +971,19 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    await currentLease(admission,lifetime.signal);if(dead||client!==admission)return
    await mountEditor(snapshot,viewNow.generation??'1');if(dead||client!==admission)return;finishAdmission(initialStartup);setBusy(false)
    void loadProposals();proposalWatch=setInterval(()=>{if(viewNow.can_edit===true)void loadProposals()},5000)
-  })().catch(()=>{if(!dead){stop('The document cannot be opened safely.');proveReadLoss()}})
+  })().catch(cause=>{
+   if(dead)return
+   if(cause instanceof LegacyWorkbookError){
+    setLegacySource(true)
+    stop(cause.code==='legacy_workbook_fidelity'
+     ? 'The Sheet could not be converted to Excel with its contents intact.'
+     : cause.code==='legacy_workbook_needs_editor'
+       ? 'Someone with edit access needs to open this Sheet to convert it to Excel.'
+       : 'The Sheet could not be converted now. Reopen it to try again.')
+    return
+   }
+   stop('The document cannot be opened safely.');proveReadLoss()
+  })
   function watch(){
    // Callbacks of a superseded admission never act on its fresh successor.
    const own=client
@@ -992,7 +1017,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   }
   return()=>{closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};retrySave.current=()=>{};stop('Editor closed',true)}
  },[enabled,humanId,workspaceId,pageId,scopeKey])
- function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
+ function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:draft.format?'application/octet-stream':'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.${draft.format??'json'}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  const shownProposals=readVerified&&!retainedBuffer&&!connectionRetired?proposals:[],shownRecoveries=readVerified&&!offerWithdrawn?recoveries:[]
  if(stateScope!==scopeKey)return <p role="status" className="p-6">Connecting…</p>
  if(!enabled)return <p className="p-6">The native editor is not turned on.</p>
@@ -1007,6 +1032,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Storage is full, so nothing more can be saved. Your changes are not saved on the server yet.</b> The editor keeps them and the draft stays in this browser. All earlier versions stay.</p><p className="text-sm text-muted-foreground">Do not close the editor. As soon as space is free, choose Save again (or Ctrl+S). To be safe, download your work as a file.</p><div className="flex flex-wrap gap-2"><Button onClick={()=>retrySave.current()}>Save again</Button><Button variant="outline" onClick={()=>downloadDraft.current()}>Download draft</Button></div></div>}
   {retainedBuffer&&<div role="group" aria-label="Local copy recovery" className="space-y-2 border-y px-3 py-2"><p>The last changes were not captured with confirmation. The original editor stays locked; its content is not overwritten by a new document.</p>{readVerified&&!offerWithdrawn?<Button disabled={busy} variant="outline" onClick={()=>downloadDraft.current()}>Download the local copy</Button>:<Button disabled={busy||authEnded} variant="outline" onClick={()=>retryRead.current()}>Check access again</Button>}</div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current(true)}>Check the result</Button>}
+  {legacySource&&<Button type="button" variant="outline" className="mx-3 self-start" onClick={()=>downloadOriginalWorkbook.current()}>Download original Sheet</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Open at {mismatch.address}</a></>}</p>}
   {(shownProposals.length>0||shownRecoveries.length>0)&&<div data-craft-banner={shownProposals.length>0?'proposal':'draft'} className={'mx-2 my-1.5 grid gap-0.5 rounded-lg border p-1 text-sm '+(shownProposals.length>0?'border-chip-violet-fg/30 bg-chip-violet-bg':'border-warn/40 bg-warn/10')}>
    {shownProposals.map(proposal=><div key={proposal.id} role="group" aria-label={`Proposal by ${proposal.authorName}`} className="flex flex-wrap items-center gap-2 px-2 py-1.5">
@@ -1015,7 +1041,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    {proposal.state==='open'&&view.can_edit===true&&<Button variant="outline" disabled={busy} onClick={()=>decide.current(proposal.id,'reject')}>Reject</Button>}
    {proposal.state==='open'&&ownsEditor&&<Button disabled={busy} onClick={()=>decide.current(proposal.id,'accept')}>Accept</Button>}
   </div>)}
-   {shownRecoveries.map((recovery,index)=><div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
+   {shownRecoveries.map((recovery,index)=><div key={index} className="flex flex-wrap items-center gap-2 px-2 py-1.5"><RotateCcw aria-hidden className="size-4 shrink-0 text-warn"/><span className="min-w-0 flex-1">Local draft · version {recovery.draft.baseVersion}</span>{!recovery.draft.format&&<Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Compare</Button>}<Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Keep a copy</Button></div>)}
   </div>}
   {readVerified&&!offerWithdrawn&&comparison&&<div className="grid gap-2 p-3 md:grid-cols-2"><p className="md:col-span-2">Server version {comparison.version} and {comparison.draftLabel?.toLowerCase()??'local draft'}: {comparison.equal?'identical data':'different data'}. The native data is read-only.</p><label>Server version<textarea aria-label="Server version" readOnly value={comparison.server} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.serverHash}</span></label><label>{comparison.draftLabel??'Local draft'}<textarea aria-label={comparison.draftLabel??'Local draft'} readOnly value={comparison.draft} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.draftHash}</span></label><Button variant="outline" onClick={()=>setComparison(undefined)}>Close comparison</Button></div>}
   {accessCheck&&<p className="px-3 py-2 text-sm text-muted-foreground">Checking access…</p>}

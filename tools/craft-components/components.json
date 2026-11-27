@@ -21,9 +21,10 @@
     {
       "application": "gridcraft",
       "repository": "https://github.com/storytold/gridcraft.git",
-      "commit": "e68d192282499bed81a9800d742cb9b239d367e5",
+      "commit": "59f6b6c14a37b47ed58c2457b54cad25d1b8c9c5",
       "patch": "patches/gridcraft-wasi.patch",
-      "patch_sha256": "5e14954302a65cf89d4d24412a34f22467468644b01b7646e7c5a3609cf06165",
+      "document_format": "workbook",
+      "patch_sha256": "8d0077ac5ce5d08b987fc63143f1ae6a8ed12b5b652a2cced63291a850cca222",
       "cli_package": "gridcraft-cli",
       "web_package": "gridcraft-web",
       "license": {"name": "GridCraft", "spdx": "MIT OR Apache-2.0"},

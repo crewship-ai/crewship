@@ -107,7 +107,13 @@ type Component struct {
 	// Notices are the license texts and crate inventory, under
 	// <application>/licenses/.
 	Notices []File `json:"notices"`
+	// DocumentFormat "workbook" marks a Sheet editor that opens and saves the xlsx or xlsm file
+	// itself: the server then keeps Sheets as those files. Empty: the native document.
+	DocumentFormat string `json:"document_format,omitempty"`
 }
+
+// DocumentFormatWorkbook is the one DocumentFormat a package may name (Sheet only).
+const DocumentFormatWorkbook = "workbook"
 
 // Manifest is a package's manifest.json.
 type Manifest struct {
@@ -146,6 +152,9 @@ func parseManifest(raw []byte, pin Pin) (Manifest, error) {
 	}
 	if !validFile(c.Engine, c.Application+"/") || !sha256Pattern.MatchString(c.Editor.Digest) || len(c.Editor.Files) == 0 {
 		return Manifest{}, fmt.Errorf("%w: %s: invalid file entries", ErrIntegrity, c.Application)
+	}
+	if c.DocumentFormat != "" && (c.DocumentFormat != DocumentFormatWorkbook || c.Application != "gridcraft") {
+		return Manifest{}, fmt.Errorf("%w: %s: unsupported document format", ErrIntegrity, c.Application)
 	}
 	if c.Engine.Size > maxEngineBytes {
 		return Manifest{}, fmt.Errorf("%w: %s: engine too large", ErrIntegrity, c.Application)

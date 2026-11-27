@@ -25,10 +25,9 @@ What it does, in order:
 
 1. Verifies the bundle's checksum, then decrypts it with your key.
 2. Refuses a non-empty `--data-dir` unless `--force`. With `--force` it still
-   refuses a target database that holds any workbook, naming the workbook page
-   IDs: backups never contain workbooks, so replacing the database would
-   destroy them. Save them first (`crewship workbook read`) or add
-   `--discard-workbooks` to acknowledge the loss.
+   refuses a target database with workbook history and names its page IDs.
+   Back up or export the current workbooks, or add `--discard-workbooks` to
+   acknowledge the loss of target history absent from the bundle.
 3. Writes the database and every file store — attachments and workspace files
    (`output/`), memory and its version history (`memory/`), page projects
    (`page-projects/`), chats and skills — checking each file against the

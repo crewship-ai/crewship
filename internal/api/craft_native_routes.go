@@ -129,6 +129,10 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/share", roleSelf, d.shareSnapshot)
 	// openapi: responses 200,401,403,409,422,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.readSnapshot)))))
+	// openapi: responses 200,401,403,409,413,422,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/migrate-workbook", roleSelf, d.migrateWorkbook)
+	// openapi: responses 200,401,403,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document/original-workbook", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.downloadLegacyWorkbook)))))
 	// Read-only version history, same admission and private read authority as
 	// the document read; the craft_version_history workspace flag keeps it off.
 	// openapi: responses 200,401,403,404,409,500,503

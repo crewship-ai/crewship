@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/craftassets"
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 // With real release packages (CREWSHIP_CRAFT_TEST_PACKAGES=<directory with
@@ -58,5 +60,22 @@ func TestReleaseCraftPackagesInstallAndRun(t *testing.T) {
 			t.Fatalf("%s engine: %q %v", app, stdout.String(), err)
 		}
 		t.Logf("%s %s: %s", app, c.Version, strings.TrimSpace(stdout.String()))
+		if p.Workbook {
+			t.Run("LegacySheetRoundTrip", func(t *testing.T) {
+				source, err := os.ReadFile("../../lib/mooring/gridcraft-empty.ts")
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, literal, found := strings.Cut(string(source), "const emptyWorkbook = ")
+				literal, _, boundary := strings.Cut(literal, "\n\nexport function")
+				var raw string
+				if !found || !boundary || json.Unmarshal([]byte(strings.TrimSpace(literal)), &raw) != nil {
+					t.Fatal("missing canonical legacy Sheet JSON")
+				}
+				if _, err := mooring.ConvertLegacyWorkbook(t.Context(), p.Engine, []byte(raw)); err != nil {
+					t.Fatalf("canonical legacy Sheet: %v", err)
+				}
+			})
+		}
 	}
 }
