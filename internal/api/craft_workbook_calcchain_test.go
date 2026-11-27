@@ -64,6 +64,10 @@ func TestWorkbookCalcChainDropRequiresAnAddressedFormulaChange(t *testing.T) {
 	base, cleared := sitCalcChainWorkbook(t)
 	parts := sitParts(t, base)
 	candidateParts := sitParts(t, cleared)
+	originalSheet := string(parts[sitFidelitySheet])
+	withSheet := func(sheet string) []byte {
+		return workbookEdited(t, cleared, "", map[string]string{sitFidelitySheet: sheet})
+	}
 	var scope, wrongScope craftWorkbookEdits
 	scope.add("'L'!B8:B577")
 	wrongScope.add("'Other'!B8:B577")
@@ -74,7 +78,9 @@ func TestWorkbookCalcChainDropRequiresAnAddressedFormulaChange(t *testing.T) {
 		code      string
 	}{
 		{"consistent drop", cleared, scope, ""},
-		{"drop without formula change", workbookEdited(t, cleared, "", map[string]string{sitFidelitySheet: string(parts[sitFidelitySheet])}), scope, "calc_chain"},
+		{"addressed formula rewritten", withSheet(strings.Replace(originalSheet, "E8</f>", "E9</f>", 1)), scope, ""},
+		{"drop without formula change", withSheet(originalSheet), scope, "calc_chain"},
+		{"drop after updating only the formula cache", withSheet(strings.Replace(originalSheet, "<v>L_</v>", "<v>L_updated</v>", 1)), scope, "calc_chain"},
 		{"formulas outside touched range", cleared, wrongScope, "worksheet"},
 		{"missing explicit touched range", cleared, craftWorkbookEdits{allowScalarValues: true}, "worksheet"},
 		{"without relationship update", workbookEdited(t, cleared, "", map[string]string{craftWorkbookRelsPart: string(parts[craftWorkbookRelsPart])}), scope, "calc_chain"},
