@@ -215,7 +215,7 @@ func TestSheetITRealtimeWireFixture(t *testing.T) {
 			!mooring.ValidNativeAttemptID(merged.Submitted.AttemptID) || merged.Submitted.ContentHash == hash ||
 			merged.HeadContentHash != hash || merged.Receipt.ContentHash != hash || merged.Receipt.CandidateHash != hash ||
 			merged.Receipt.SessionID != session.SessionID || merged.Receipt.Generation != session.Generation ||
-			merged.Receipt.EditorRevision != merged.Submitted.EditorRevision || len(merged.AgentRanges) == 0 || len(merged.Overlap) == 0 || len(merged.HeadRanges) == 0 {
+			merged.Receipt.EditorRevision != merged.Submitted.EditorRevision || len(merged.AgentRanges) == 0 || len(merged.Overlap) == 0 || merged.HeadRanges == nil || (len(merged.HeadRanges) == 0) != (key == "merged_unchanged") {
 			t.Fatalf("invalid %s fixture receipt: %+v", key, merged.Receipt)
 		}
 	}

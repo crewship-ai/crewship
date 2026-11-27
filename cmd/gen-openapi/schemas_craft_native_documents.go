@@ -81,7 +81,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 		"receipt": ref("NativeCraftSnapshotReceipt"), "head_content_hash": receipt["contentHash"],
 		"bytes": bytes(), "overlap": mergeRanges, "agent_ranges": mergeRanges,
 		"head_ranges": map[string]any{"type": "array", "items": rangeName, "maxItems": 256,
-			"description": "Proved ranges from the head's authorized history before this attempt. Only agent_ranges apply agent precedence."},
+			"description": "Proved net cell changes from the authorized head that are outside the effective agent ranges. Excludes the submitting attempt and inputs restored to their base."},
 	}, "kind", "submitted", "receipt", "head_content_hash", "bytes", "overlap", "agent_ranges", "head_ranges")
 	jobID := map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
 	schemas["NativeCraftWorkbookImportUpload"] = map[string]any{"type": "string", "format": "binary", "description": "Raw .xlsx workbook, up to 64 MiB."}

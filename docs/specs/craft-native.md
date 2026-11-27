@@ -633,8 +633,14 @@ leave the local draft available for recovery.
 
 A merge answers 200 with `kind: "merged"`, the original `submitted`
 attempt ID, base, editor revision and content hash, the actual `receipt`,
-`head_content_hash`, canonical base64 `bytes`, `overlap` and `agent_ranges`.
-The two range lists contain `{sheet, a1}` pairs. `receipt.contentHash`,
+`head_content_hash`, canonical base64 `bytes`, `overlap`, `agent_ranges` and
+`head_ranges`. Each list contains up to 256 precise `{sheet, a1}` pairs.
+The server proves net typed inputs across the authorized version history
+before this attempt. Only effective agent changes participate in agent
+precedence. The editor verifies canonical differences against the union of
+`agent_ranges` and `head_ranges`. A cell restored to its base input stays
+in Undo history and is absent from both lists. An unrepresentable list
+returns 422 with reason `too_many_ranges` and leaves the draft recoverable. `receipt.contentHash`,
 `receipt.candidateHash` and `head_content_hash` all hash the canonical bytes.
 If all submitted changes overlapped, `receipt.unchanged` is true and its
 base and version both identify the confirmed head. Reconcile of the same
@@ -650,7 +656,8 @@ cell, including cells whose inputs were changed and later put back.
 The existing SSE stream sends `sheet_agent_presence_snapshot` with
 `{operations: [...]}` at connection time and `sheet_agent_presence` as
 operations start, refresh or end. Events identify an operation, a run and its
-agent, and include the current ranges and a TTL. Delivery requires fresh
+agent, and include up to 32 current ranges and a TTL. A range list marked
+`truncated` displays the ranges the server could fit. Delivery requires fresh
 private read authority for the referenced Page and chat. Session retirement
 ends the stream and leaves recovery to the existing draft policy.
 
