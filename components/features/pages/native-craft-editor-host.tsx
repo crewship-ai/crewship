@@ -787,12 +787,12 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    acquireStage='writable'
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,workbookFormat:snapshot.format,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Writing was stopped; editor access was not confirmed.'))})}},
-    onReceipt(receipt){
+    onReceipt(receipt,captureId){
      const edit=r.edit
      const acknowledgement=(async()=>{
       if(!live(r)||!r.writable)return false
       try{
-       const acknowledged=await r.port.ack(receipt)
+       const acknowledged=await r.port.ack(receipt,captureId)
        if(!live(r)||!r.writable)return false
        if(!acknowledged){failNative(r,'The editor confirmation failed. The last changes are not confirmed; the original editor stays locked.');return false}
        if(r.edit===edit)r.ackedVersion=receipt.version

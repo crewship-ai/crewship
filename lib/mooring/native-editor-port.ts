@@ -32,7 +32,7 @@ export interface NativeEditorPort {
   bootstrap(bytes: Uint8Array, signal: AbortSignal): Promise<NativeEditorSnapshot>
   snapshot(signal: AbortSignal, manualRequestId?: string): Promise<NativeEditorSnapshot>
   validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
-  ack(receipt: NativeSaveReceipt): Promise<boolean>
+  ack(receipt: NativeSaveReceipt, captureId?: string): Promise<boolean>
   saveFailed(requestId: string, error: string): boolean
   setReadOnly(readOnly: boolean, signal: AbortSignal): Promise<boolean>
   close(): void
@@ -44,7 +44,7 @@ export function createNativeEditorPort(options: NativeEditorPortOptions): Native
   return buildNativeEditorPort(options)
 }
 
-export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string; revision?: string }
+export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string; revision?: string; captureId?: string }
 interface SnapshotProof { requestId: string; revision: string; editorRevision: string; document: string; hash: Promise<string>; wordBytes?: Uint8Array }
 interface PendingRPC { kind: "snapshot" | "validate" | "open" | "access"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024

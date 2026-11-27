@@ -5,13 +5,13 @@ import { createSingleEditorSave, type NativeSaveRequest } from "./single-editor-
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto))
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
-function rig(applicationId: "wordcraft" | "gridcraft" = "wordcraft", accessRequired = false) {
+function rig(applicationId: "wordcraft" | "gridcraft" = "wordcraft", accessRequired = false, workbookFormat?: "xlsx") {
   const port = { postMessage: vi.fn(), onmessage: null, start: vi.fn(), close: vi.fn() } satisfies NativeStructuredPort
   const frame = { postMessage: vi.fn() }, peer = {}
-  const options: NativeEditorPortOptions = { applicationId, enginePin: "pinned-engine", bundle: "a".repeat(64), frame, scope: { workspaceId: "w", pageId: "p", baseVersion: "1", generation: "9007199254740993", sessionId: "public-tab" }, createChannel: () => ({ port1: port, port2: peer }), onChanged: vi.fn(), onSaveRequest: vi.fn(), onError: vi.fn() }
+  const options: NativeEditorPortOptions = { applicationId, workbookFormat, enginePin: "pinned-engine", bundle: "a".repeat(64), frame, scope: { workspaceId: "w", pageId: "p", baseVersion: "1", generation: "9007199254740993", sessionId: "public-tab" }, createChannel: () => ({ port1: port, port2: peer }), onChanged: vi.fn(), onSaveRequest: vi.fn(), onError: vi.fn() }
   if (accessRequired) options.requireAccessProtocol = true
   const adapter = createNativeEditorPort(options)
-  const hello = { source: frame, origin: "null", data: { type: `${applicationId}:hello`, protocol: 1, bundle: options.bundle } }
+  const hello = { source: frame, origin: "null", data: { type: `${applicationId}:hello`, protocol: workbookFormat ? 2 : 1, bundle: options.bundle } }
   const receive = (data: unknown) => (port as NativeStructuredPort).onmessage?.({ data })
   return { port, frame, peer, options, adapter, hello, receive }
 }
@@ -350,5 +350,36 @@ it("exposes stable Word native state separately from distinct RPC receipt identi
   expect(second.editorRevision).not.toBe(first.editorRevision)
   const changedPending = r.adapter.snapshot(signal()); reply(r, latest(r), "bound", "changed-wire-revision", new Uint8Array([5])); const changed = await changedPending
   expect(changed.nativeState).not.toBe(first.nativeState)
+  r.adapter.close()
+})
+
+it("acknowledges the exact workbook capture when autosave and Ctrl+S export the same revision", async () => {
+  const r = rig("gridcraft", true, "xlsx")
+  r.adapter.loaded()
+  expect(r.adapter.handleWindowMessage(r.hello)).toBe(true)
+  r.receive({ type: "gridcraft:ready", version: "test", accessProtocol: 1, readOnly: true })
+  const opening = r.adapter.bootstrap(bytes, signal())
+  const open = latest(r)
+  r.receive({ type: "gridcraft:opened", requestId: open.requestId, document: "2", revision: "1", format: "xlsx", calculated: false, warnings: [] })
+  await opening
+
+  const autosave = r.adapter.snapshot(signal())
+  const autoId = latest(r).requestId
+  const file = { type: "gridcraft:save", requestId: autoId, document: "2", revision: "4", name: "workbook.xlsx", format: "xlsx", bytes: new Uint8Array(bytes).buffer }
+  r.receive(file)
+  r.receive({ type: "gridcraft:save-request", requestId: "editor-1", document: file.document, revision: file.revision })
+  r.receive({ ...file, requestId: "editor-1", bytes: new Uint8Array([9, 8, 7]).buffer })
+  const automatic = await autosave
+  const manual = await r.adapter.snapshot(signal(), "editor-1")
+  expect(automatic.captureId).toBe(autoId)
+  expect(manual.captureId).toBe("editor-1")
+  const autoReceipt = await receiptFor(r, automatic)
+  const manualReceipt = { ...await receiptFor(r, manual), baseVersion: "2", version: "3" }
+
+  expect(await r.adapter.ack(autoReceipt, automatic.captureId)).toBe(true)
+  expect(latest(r)).toMatchObject({ type: "gridcraft:save-ack", requestId: autoId, version: "2" })
+  expect(await r.adapter.ack(manualReceipt, manual.captureId)).toBe(true)
+  expect(latest(r)).toMatchObject({ type: "gridcraft:save-ack", requestId: "editor-1", version: "3" })
+  expect(r.port.postMessage.mock.calls.some(([message]) => (message as { type: string }).type === "gridcraft:save-failed")).toBe(false)
   r.adapter.close()
 })
