@@ -65,7 +65,7 @@ func TestReleaseCraftPackagesWordAgentProfiles(t *testing.T) {
 		t.Cleanup(func() { _ = engine.Close(context.Background()) })
 		return CraftNativeDocumentProfile{
 			Application: c.Application, EngineRevision: c.EngineRevision, CLISHA256: c.Engine.SHA256, Engine: engine,
-			EditorBundle: c.Editor.Digest, EditorURL: "/_editor/b/" + c.Editor.Digest + "/index.html",
+			EditorBundle: c.Editor.Digest, EditorURL: "/_editor/b/" + c.Editor.Digest + "/index.html", Bundled: true,
 		}
 	}
 	old := load(historical, historicalPin)
@@ -77,6 +77,13 @@ func TestReleaseCraftPackagesWordAgentProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("restore_round_trip", func(t *testing.T) {
+		edited, err := NewCraftNativeAgentCLIAdapter().Apply(t.Context(), old, initial, json.RawMessage(`[{"command":"text.insert","params":{"text":"Restored original Word document"}}]`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		testCraftWordProfilesAcrossDefaultChange(t, old, current, initial, edited)
+	})
 	t.Run("retained_document", func(t *testing.T) {
 		qualifyNativeAgentHTTP(t, old, initial, current, old)
 	})

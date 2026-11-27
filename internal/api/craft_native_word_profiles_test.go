@@ -49,12 +49,6 @@ func (e *wordProfileTestEngine) Run(_ context.Context, dir string, args []string
 }
 
 func TestCraftWordProfilesKeepDocumentPinsAcrossDefaultChange(t *testing.T) {
-	f, _, _ := craftNativeHTTPFixture(t)
-	mustExec(t, f.db, "DELETE FROM craft_native_documents WHERE page_id='native-page'")
-	const oldPage = "word-old-profile"
-	const newPage = "word-new-profile"
-	f.seedPage(t, oldPage, oldPage, "Old Word document", f.userID, "")
-	f.seedPage(t, newPage, newPage, "New Word document", f.userID, "")
 	makeProfile := func(rev, engineHash, bundleHash string) CraftNativeDocumentProfile {
 		bundle := strings.Repeat(bundleHash, 64)
 		return CraftNativeDocumentProfile{
@@ -64,6 +58,19 @@ func TestCraftWordProfilesKeepDocumentPinsAcrossDefaultChange(t *testing.T) {
 		}
 	}
 	old, next := makeProfile("a", "b", "c"), makeProfile("d", "e", "f")
+	initial := []byte("{\n  \"text\": \"Word profile one\"\n}\n")
+	edited := []byte(`{"text":"Word profile one edited"}`)
+	testCraftWordProfilesAcrossDefaultChange(t, old, next, initial, edited)
+}
+
+func testCraftWordProfilesAcrossDefaultChange(t *testing.T, old, next CraftNativeDocumentProfile, initial, edited []byte) {
+	t.Helper()
+	f, _, _ := craftNativeHTTPFixture(t)
+	mustExec(t, f.db, "DELETE FROM craft_native_documents WHERE page_id='native-page'")
+	const oldPage = "word-old-profile"
+	const newPage = "word-new-profile"
+	f.seedPage(t, oldPage, oldPage, "Old Word document", f.userID, "")
+	f.seedPage(t, newPage, newPage, "New Word document", f.userID, "")
 	openRouter := func(db *sql.DB, defaultProfile CraftNativeDocumentProfile, retained ...CraftNativeDocumentProfile) *Router {
 		t.Helper()
 		defaults := map[string]CraftNativeDocumentProfile{}
@@ -82,8 +89,6 @@ func TestCraftWordProfilesKeepDocumentPinsAcrossDefaultChange(t *testing.T) {
 		t.Cleanup(router.Shutdown)
 		return router
 	}
-	initial := []byte("{\n  \"text\": \"Word profile one\"\n}\n")
-	edited := []byte(`{"text":"Word profile one edited"}`)
 	bearer := mintIngressScopedToken(t, f.db, f.userID, "dual-word-profile", "pages:*")
 	router := openRouter(f.db, CraftNativeDocumentProfile{}, old)
 	call := craftNativeInitializeTCP(t, router, f.wsID)
@@ -133,8 +138,10 @@ func TestCraftWordProfilesKeepDocumentPinsAcrossDefaultChange(t *testing.T) {
 		t.Fatalf("save old admission across default switch: %d %s", status, raw)
 	}
 	read(oldPage, opened.Token, "2", old, edited)
-	if old.Engine.(*wordProfileTestEngine).validations.Load() != 2 || next.Engine.(*wordProfileTestEngine).validations.Load() != 1 {
-		t.Fatal("save reached the wrong WordCraft engine")
+	if engine, fake := old.Engine.(*wordProfileTestEngine); fake {
+		if engine.validations.Load() != 2 || next.Engine.(*wordProfileTestEngine).validations.Load() != 1 {
+			t.Fatal("save reached the wrong WordCraft engine")
+		}
 	}
 	preview := func(wantStatus int) {
 		t.Helper()
@@ -194,6 +201,11 @@ func TestCraftWordProfilesKeepDocumentPinsAcrossDefaultChange(t *testing.T) {
 		t.Fatalf("restored old admission: %d %s", status, raw)
 	}
 	read(oldPage, reopened.Token, "2", old, edited)
+
+	router.Shutdown()
+	router = openRouter(target.DB, next) // clean restore without the historical archive
+	call = craftNativeInitializeTCP(t, router, f.wsID)
+	preview(503)
 
 	// Present the same engine under an untrusted bundle. A restored tuple does
 	// not establish trust in the editor or authorize re-pinning the document.
