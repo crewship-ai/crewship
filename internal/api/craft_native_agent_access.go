@@ -168,6 +168,9 @@ func (m *craftNativeHTTP) agentAccessRefusal(ctx context.Context, tx *sql.Tx, sc
 	if state, why := m.agents.ChatRunReadiness(); state != craftapps.StateReady {
 		return CraftSheetReasonEngineFailed, string(why), nil
 	}
+	if profile, ok := m.agents.documents.application(craftapps.Sheet); ok && profile.ChatSheetPreviewOnly {
+		return CraftSheetReasonEngineFailed, "preview_only", nil
+	}
 	if !m.pages.artifactRunModesOn(ctx, scope.WorkspaceID) {
 		return CraftSheetReasonFeatureOff, craftSheetDetailWorkspaceFlag, nil
 	}

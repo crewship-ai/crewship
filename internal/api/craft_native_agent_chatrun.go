@@ -208,6 +208,12 @@ func (m *craftNativeAgentManager) chatRunTool(w http.ResponseWriter, r *http.Req
 		replyChatSheetRefusal(w, 403, CraftSheetReasonNotAttached)
 		return
 	}
+	if parseErr == nil && input.Operation != "read" && input.Operation != "release" {
+		if profile, ok := m.documents.application(e.grant.Application); ok && profile.ChatSheetPreviewOnly {
+			replyChatSheetRefusal(w, http.StatusForbidden, CraftSheetReasonEngineFailed)
+			return
+		}
+	}
 	// A write names the consented revision (then the run's own), and the Sheet
 	// is still at it: anything else in between means the person's consent no
 	// longer covers what would be changed.

@@ -343,6 +343,19 @@ func (d *craftNativeDocumentsHTTP) undoOperation(w http.ResponseWriter, r *http.
 		return
 	}
 	ctx, db, scope := r.Context(), d.human.pages.db, entry.scope
+	if app.ChatSheetPreviewOnly {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			craftNativeDocumentError(w, err)
+			return
+		}
+		_, err = d.human.checkEntry(ctx, tx, entry, true)
+		_ = tx.Rollback()
+		if err != nil {
+			craftNativeDocumentError(w, err)
+			return
+		}
+	}
 	realtime := entry.chatID != ""
 	lease := mooring.EditLease{Scope: scope, Holder: craftNativePrincipal(entry), Generation: generation}
 	if realtime {

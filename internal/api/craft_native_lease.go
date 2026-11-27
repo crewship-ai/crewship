@@ -100,7 +100,7 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 					_, previewErr := m.pageAuthorityForView(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false, true)
 					previewEnabled = previewErr == nil
 					_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
-					canEdit = writeErr == nil
+					canEdit = writeErr == nil && m.checkChatSheetWrite(ctx, tx, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, application) == nil
 					// Never offer editing that lease/acquire would refuse (#5381).
 					if canEdit && application != "" && !m.apps.allows(r.Context(), application, craftLeaseOperation("acquire")) {
 						canEdit = false

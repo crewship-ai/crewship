@@ -171,21 +171,6 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 		replyCode(w, 404, "chat_not_found", "Chat not found")
 		return
 	}
-	// A Sheet opened from a file the person attached in their private chat with an agent is private
-	// to them: only an empty page just made, theirs, without a folder or
-	// a crew; an existing page keeps its audience. Before any authority is taken: the change moves the
-	// workspace's authority revision, which every later proof then includes. Failing later leaves an
-	// empty page of the same owner private, never wider.
-	if chatNamed {
-		if _, err := m.pages.db.ExecContext(r.Context(), `UPDATE pages SET private_audience=1 WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND private_audience=0
- AND julianday(created_at) >= julianday('now','-15 minutes')
- AND NOT EXISTS(SELECT 1 FROM artifact_versions v WHERE v.page_id=pages.id AND v.workspace_id=pages.workspace_id)
- AND EXISTS(SELECT 1 FROM chats c WHERE c.id=? AND c.workspace_id=? AND c.created_by=? AND c.visibility='private')`,
-			recForUpload.ID, WorkspaceIDFromContext(r.Context()), source.UserID, chat, WorkspaceIDFromContext(r.Context()), source.UserID); err != nil {
-			craftNativeInitializeRefused(w, "page", err)
-			return
-		}
-	}
 	uploadKey := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: recForUpload.ID}
 	uploadScope := mooring.EditLeaseScope{WorkspaceID: uploadKey.WorkspaceID, ArtifactID: uploadKey.PageID}
 	var uploadRefused bool // the storage admission failed on the owner check, not on storage
@@ -242,6 +227,25 @@ func (d *craftNativeDocumentsHTTP) initializeFrom(w http.ResponseWriter, r *http
 	if !m.apps.allows(r.Context(), body.ApplicationID, craftapps.OpCreate) {
 		m.apps.refuse(w, r.Context(), body.ApplicationID)
 		return
+	}
+	if chatNamed && profile.ChatSheetPreviewOnly {
+		craftNativeInitializeRefused(w, "profile", errCraftNativeAccess)
+		return
+	}
+	// A Sheet opened from a file the person attached in their private chat with an agent is private
+	// to them: only an empty page just made, theirs, without a folder or
+	// a crew; an existing page keeps its audience. Before any authority is taken: the change moves the
+	// workspace's authority revision, which every later proof then includes. Failing later leaves an
+	// empty page of the same owner private, never wider.
+	if chatNamed {
+		if _, err := m.pages.db.ExecContext(r.Context(), `UPDATE pages SET private_audience=1 WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND private_audience=0
+ AND julianday(created_at) >= julianday('now','-15 minutes')
+ AND NOT EXISTS(SELECT 1 FROM artifact_versions v WHERE v.page_id=pages.id AND v.workspace_id=pages.workspace_id)
+ AND EXISTS(SELECT 1 FROM chats c WHERE c.id=? AND c.workspace_id=? AND c.created_by=? AND c.visibility='private')`,
+			recForUpload.ID, WorkspaceIDFromContext(r.Context()), source.UserID, chat, WorkspaceIDFromContext(r.Context()), source.UserID); err != nil {
+			craftNativeInitializeRefused(w, "page", err)
+			return
+		}
 	}
 	tx, err := m.pages.db.BeginTx(r.Context(), nil)
 	if err != nil {

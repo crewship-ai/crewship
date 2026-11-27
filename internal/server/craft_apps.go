@@ -241,7 +241,8 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 	}
 	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, EngineBuild: build, Engine: engine,
 		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), EngineModule: &goapi.EngineModuleSource{Load: inst.EngineLoader()}, CompatEditors: craftCompatEditors[c.Application], Bundled: true,
-		Workbook: workbook}, comp, nil
+		// Writable chat requires a separately qualified editor and engine pin.
+		Workbook: workbook, ChatSheetPreviewOnly: workbook}, comp, nil
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the

@@ -72,6 +72,11 @@ func (m *craftNativeHTTP) checkEntry(ctx context.Context, tx *sql.Tx, entry *cra
 			return proof, errCraftNativeAccess
 		}
 	}
+	if write {
+		if err = m.checkChatSheetWrite(ctx, tx, entry.scope, entry.application); err != nil {
+			return proof, err
+		}
+	}
 	boot, now, err := m.clock.Now()
 	if err != nil || boot != entry.boot || now < 0 || now >= entry.deadline {
 		return proof, errCraftNativeAccess

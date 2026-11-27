@@ -19,9 +19,10 @@ import (
 // Qualified profiles are host-owned. Requests cannot select executable paths,
 // validator callbacks, compatibility pins, or publication principals.
 type craftNativeApplication struct {
-	Store       mooring.NativeStoreConfig
-	EditorURL   string
-	EngineBuild string
+	Store                mooring.NativeStoreConfig
+	EditorURL            string
+	EngineBuild          string
+	ChatSheetPreviewOnly bool
 }
 type craftNativeDocumentsHTTP struct {
 	human *craftNativeHTTP

@@ -103,7 +103,7 @@ func (m *craftNativeHTTP) issue(w http.ResponseWriter, r *http.Request) {
 				entry.chatID = body.ChatID
 				entry.realtimeDeadline = now + 24*time.Hour
 				_, writeErr := m.checkEntry(ctx, tx, entry, true)
-				canWrite = writeErr == nil && craftNativePersonalSpace(proof.record, source.UserID) && m.apps.allows(ctx, entry.application, craftapps.OpStartEdit)
+				canWrite = !app.ChatSheetPreviewOnly && writeErr == nil && craftNativePersonalSpace(proof.record, source.UserID) && m.apps.allows(ctx, entry.application, craftapps.OpStartEdit)
 				entry.realtimeWrite = canWrite
 			}
 		}

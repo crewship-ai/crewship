@@ -43,6 +43,8 @@ type CraftNativeDocumentProfile struct {
 	// Workbook keeps a Sheet as its xlsx or xlsm file (mooring.NativeFormatWorkbook): only with an
 	// editor that opens and saves the file itself. Sheet (gridcraft) only.
 	Workbook bool
+	// ChatSheetPreviewOnly is set by the bundled release until its exact editor and engine are qualified for concurrent chat editing.
+	ChatSheetPreviewOnly bool
 }
 
 func craftNativePin(value string, size int) bool {
@@ -89,7 +91,7 @@ func qualifyCraftNativeProfiles(input map[string]CraftNativeDocumentProfile, tru
 		if p.Workbook {
 			store.Format, store.Validate = mooring.NativeFormatWorkbook, mooring.ValidateWorkbook
 		}
-		profiles[key] = craftNativeApplication{Store: store, EditorURL: p.EditorURL, EngineBuild: p.EngineBuild}
+		profiles[key] = craftNativeApplication{Store: store, EditorURL: p.EditorURL, EngineBuild: p.EngineBuild, ChatSheetPreviewOnly: p.ChatSheetPreviewOnly}
 		resolved[key] = p
 	}
 	return profiles, resolved, nil

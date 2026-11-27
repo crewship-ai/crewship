@@ -132,6 +132,11 @@ func (m *craftNativeAgentManager) authorize(ctx context.Context, tx *sql.Tx, sco
 	if err := m.checkRun(ctx, tx, c.entry); err != nil {
 		return mooring.EditLeasePrincipal{}, err
 	}
+	if intent == "write" || intent == "acquire" || intent == "renew" {
+		if err := m.human.checkChatSheetWrite(ctx, tx, scope, c.entry.grant.Application); err != nil {
+			return mooring.EditLeasePrincipal{}, err
+		}
+	}
 	// A direct save is authorized against the document's current location in
 	// the publishing transaction itself, so a move out of the personal space
 	// cannot slip between the check and the write (Q15/Q16).
