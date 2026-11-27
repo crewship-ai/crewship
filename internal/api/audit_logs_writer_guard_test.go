@@ -68,8 +68,10 @@ import (
 //
 // Adding an entry is a deliberate act that has to be justified in review.
 var legacyAuditInsertSites = map[string]string{
-	"internal/backup/dbdump.go:RestoreDumpTxHooks":                  "quarantine receipt for newly imported host rows before destination authority is admitted; copied approvals are stripped before INSERT, ignored existing rows are unchanged; atomic legacy recovery record, not a live grant",
-	"internal/backup/host_hooks_recover.go:resetRecoveredHostHooks": "offline recovery normalization before server start; source signing keys or current migrations may be unavailable, so preserve source chain and atomically record legacy quarantine receipt without granting destination authority",
+	"internal/api/craft_native_sheet_audit.go:recordCraftSheetSaved": "records one saved Sheet or Document revision (who, version, size, digest prefix) on the saving transaction itself, so revision and row commit together; a content save, not an access or permission change",
+	"internal/api/craft_native_export.go:recordCraftSheetExported":   "read-access record of a Sheet handed out as an xlsx file (who, version, size, digest prefix; never cell values); written fail-closed before the file is sent, so no file leaves without its row; changes no access",
+	"internal/backup/dbdump.go:RestoreDumpTxHooks":                   "quarantine receipt for newly imported host rows before destination authority is admitted; copied approvals are stripped before INSERT, ignored existing rows are unchanged; atomic legacy recovery record, not a live grant",
+	"internal/backup/host_hooks_recover.go:resetRecoveredHostHooks":  "offline recovery normalization before server start; source signing keys or current migrations may be unavailable, so preserve source chain and atomically record legacy quarantine receipt without granting destination authority",
 
 	"internal/api/internal_handler.go:WriteAuditLog":                             "the best-effort writer this guard polices at its call sites",
 	"internal/api/pages_private_metadata_read.go:appendPrivateReadAudit":         "read-access record (workspace OWNER/ADMIN reading another custodian's private Page, or an ordinary Page through the role alone; PRD §5); fail-closed in the read transaction, no access changes",

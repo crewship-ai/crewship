@@ -32,6 +32,11 @@ const (
 	ReasonEditorIsolationFailed  Reason = "editor_isolation_failed"
 	ReasonEditorIsolationPending Reason = "editor_isolation_pending"
 	ReasonAgentsNeedApplication  Reason = "agents_need_application"
+	// What an agent working in a Sheet needs besides the application itself.
+	ReasonAgentRuntimeUnavailable Reason = "agent_runtime_unavailable"
+	ReasonAgentEngineMissing      Reason = "agent_engine_missing"
+	ReasonSheetEngineNotPinned    Reason = "sheet_engine_not_pinned"
+	ReasonAgentDispatcherMissing  Reason = "agent_dispatcher_missing"
 )
 
 // Message is the one sentence Admin shows next to a reason.
@@ -65,6 +70,14 @@ func (r Reason) Message() string {
 		return "The editor's proxy check runs once a signed-in browser has used Crewship."
 	case ReasonAgentsNeedApplication:
 		return "Turn on Word or Sheet first."
+	case ReasonAgentRuntimeUnavailable:
+		return "The runtime that starts agents on documents is not running. See the server log."
+	case ReasonAgentEngineMissing:
+		return "The document engine adapter agents use to read and change documents is not set up."
+	case ReasonSheetEngineNotPinned:
+		return "No Sheet engine is installed and pinned, so an agent cannot read or change a Sheet in chat."
+	case ReasonAgentDispatcherMissing:
+		return "Background document tasks cannot be started: the task dispatcher is not set up."
 	}
 	return ""
 }

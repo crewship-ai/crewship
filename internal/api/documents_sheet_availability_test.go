@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 func TestDocumentAvailabilityNativeSheetRequiresItsOwnLiveQualifiedProfile(t *testing.T) {
@@ -76,5 +78,28 @@ func TestNativeSheetPageMetadataKeepsExplicitApplicationOnReopen(t *testing.T) {
 				t.Fatalf("Sheet reopen descriptor missing: %s", out.Body.String())
 			}
 		})
+	}
+}
+
+// gridcraft_workbook says a Sheet is kept as its file: only with a workbook profile, and only
+// while a Sheet may be created at all.
+func TestDocumentAvailabilitySaysWhenASheetIsItsWorkbookFile(t *testing.T) {
+	for _, mode := range []string{"native", "workbook", "workbook-off"} {
+		human := &craftNativeHTTP{enabled: mode != "workbook-off"}
+		documents := newCraftNativeDocumentsHTTP(human, nil)
+		app := craftNativeApplication{}
+		if mode != "native" {
+			app.Store.Format = mooring.NativeFormatWorkbook
+		}
+		documents.applications["gridcraft"] = app
+		router := &Router{pages: &PageHandler{}, craftNativeHTTP: human, craftNativeDocuments: documents}
+		raw, _ := json.Marshal(router.documentAvailability(httptest.NewRequest("GET", "/api/v1/documents/status", nil)))
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := fields["gridcraft_workbook"].(bool); got != (mode == "workbook") {
+			t.Errorf("%s: %s", mode, raw)
+		}
 	}
 }

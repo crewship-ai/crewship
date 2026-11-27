@@ -18,6 +18,13 @@ func artifactStorageUpload(w http.ResponseWriter, r *http.Request, store *artifa
 	if r.ContentLength >= 0 && r.ContentLength < bytes {
 		bytes = r.ContentLength
 	}
+	return artifactStorageUploadSized(w, r, store, key, bytes, authorize)
+}
+
+// artifactStorageUploadSized reserves exactly `bytes` (plus the row overhead)
+// for a version whose content the server already holds (an import it converted
+// itself), instead of deriving the size from the request's Content-Length.
+func artifactStorageUploadSized(w http.ResponseWriter, r *http.Request, store *artifacts.VersionStore, key artifacts.VersionKey, bytes int64, authorize artifacts.VersionAuthorize) (*http.Request, func(), error) {
 	bytes += 256 << 10 // manifest/row overhead remains bounded independently of JSON content
 	upload, err := store.ReserveUpload(r.Context(), key, bytes, authorize)
 	if err != nil {

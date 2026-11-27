@@ -55,7 +55,7 @@ func TestCraftNativeAgentCLIRejectsUnsafeCommandsBeforeExecution(t *testing.T) {
 		})
 	}
 	p.Application = "gridcraft"
-	for _, cell := range []string{"../file", "A0", "XFE1", "A1048577", "A1:B2", "Sheet1!A1"} {
+	for _, cell := range []string{"../file", "A0", "XFE1", "A1048577", "A1:B2", "Sheet1!", "Sheet1!../A1"} {
 		q, _ := json.Marshal([]any{map[string]any{"command": "cell.set", "params": map[string]any{"cell": cell, "input": "x"}}})
 		if _, err := a.Apply(context.Background(), p, []byte(`{"sheets":[]}`), q); err == nil {
 			t.Fatalf("invalid cell address %q accepted", cell)

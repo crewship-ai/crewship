@@ -9,7 +9,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
-	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -57,7 +56,7 @@ var schemaKeyContracts = []struct {
 	{name: "NativeCraftPreview", pointer: "/components/schemas/NativeCraftPreview", value: craftNativePreviewResponse{}},
 	{name: "NativeCraftShareReceipt", pointer: "/components/schemas/NativeCraftShareReceipt", value: craftNativeRestoreResponse{}},
 	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
-	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: craftWorkbookSaveReceipt{}},
 	{name: "NativeCraftWorkbookMigrationReceipt", pointer: "/components/schemas/NativeCraftWorkbookMigrationReceipt", value: craftNativeWorkbookMigrationResponse{}},
 	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},

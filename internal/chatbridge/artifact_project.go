@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -50,3 +51,18 @@ func artifactProjectRunPrompt(content string, intent *artifacts.ProjectIntent) s
 	}
 	return fmt.Sprintf("%s\n\nThe human explicitly authorized updating only artifact Page @%s (use this exact @ID as the tools' slug argument) from base version %d, comment %s. Use artifact_versions and artifact_comments, verify the exact path/selector/quote at the original version, then artifact_publish with the exact read base_version and complete manifest. If the anchor no longer matches or the version changed, ask for a new selection; never blindly rebase. Reply with artifact_reply describing the confirmed new version. Do not mutate another Page or silently change the shared version.", content, intent.PageID, intent.BaseVersion, intent.CommentID)
 }
+
+// artifactProjectConflicts: a project is not started from a message that carries a Sheet or a
+// workbook file.
+func artifactProjectConflicts(intent *artifacts.ProjectIntent, hasArtifactRefs bool, content string) bool {
+	if intent == nil {
+		return false
+	}
+	return hasArtifactRefs || attachedWorkbook.MatchString(content)
+}
+
+// attachedWorkbook matches a workbook in the attachment block the client adds ("- <path>" lines).
+var attachedWorkbook = regexp.MustCompile(`(?im)^- \S.*\.xls[xm]\s*$`)
+
+// ErrConflictingIntent refuses an artifact project sent with a Sheet or a workbook.
+var ErrConflictingIntent = errors.New("an artifact project cannot start from a Sheet or a workbook; send the message without the project")

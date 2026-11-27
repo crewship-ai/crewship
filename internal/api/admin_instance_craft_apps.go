@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/craftapps"
+	"github.com/crewship-ai/crewship/internal/craftengine"
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
@@ -37,6 +38,16 @@ type craftAppView struct {
 	UpdatedAt  *time.Time           `json:"updated_at,omitempty"`
 	Component  *craftapps.Component `json:"component,omitempty"`
 	Documents  *int                 `json:"documents,omitempty"`
+	// ChatRun and Tasks (agents only) say whether an agent can work on a Sheet in
+	// an ordinary chat and in a background document task, and why not.
+	ChatRun *craftAgentPathView `json:"chat_run,omitempty"`
+	Tasks   *craftAgentPathView `json:"tasks,omitempty"`
+}
+
+type craftAgentPathView struct {
+	State   craftapps.State  `json:"state"`
+	Reason  craftapps.Reason `json:"reason,omitempty"`
+	Message string           `json:"message,omitempty"`
 }
 
 type craftAppsView struct {
@@ -229,6 +240,12 @@ func (h *CraftAppsAdminHandler) view(ctx context.Context) (craftAppsView, error)
 		agents.State = craftapps.StateReady
 	}
 	agents.Message = agents.Reason.Message()
+	if h.r.craftNativeHTTP != nil {
+		chat, chatReason := h.r.craftNativeHTTP.agents.ChatRunReadiness()
+		tasks, tasksReason := h.r.craftNativeHTTP.agents.TasksReadiness()
+		agents.ChatRun = &craftAgentPathView{State: chat, Reason: chatReason, Message: chatReason.Message()}
+		agents.Tasks = &craftAgentPathView{State: tasks, Reason: tasksReason, Message: tasksReason.Message()}
+	}
 	out.Agents = agents
 	return out, nil
 }
@@ -406,15 +423,23 @@ func craftPackageUploadPath(p string) bool {
 }
 
 type craftAppDiagnostics struct {
-	ID         string           `json:"id"`
-	Passed     bool             `json:"passed"`
-	Reason     craftapps.Reason `json:"reason,omitempty"`
-	Message    string           `json:"message,omitempty"`
-	Runtime    string           `json:"runtime,omitempty"`
-	EngineSHA  string           `json:"engine_sha256,omitempty"`
-	Version    string           `json:"version,omitempty"`
-	DurationMS int64            `json:"duration_ms"`
-	Editor     string           `json:"editor"`
+	ID      string           `json:"id"`
+	Passed  bool             `json:"passed"`
+	Reason  craftapps.Reason `json:"reason,omitempty"`
+	Message string           `json:"message,omitempty"`
+	Runtime string           `json:"runtime,omitempty"`
+	// Degraded is true when the engine was meant to run in a worker process and runs in the
+	// server process instead; DegradedReason says why in general terms.
+	Degraded       bool   `json:"degraded,omitempty"`
+	DegradedReason string `json:"degraded_reason,omitempty"`
+	EngineSHA      string `json:"engine_sha256,omitempty"`
+	Version        string `json:"version,omitempty"`
+	DurationMS     int64  `json:"duration_ms"`
+	Editor         string `json:"editor"`
+	// For Sheet: whether an agent can work on it in an ordinary chat and in a
+	// background task, and why not. Informational; it does not change Passed.
+	AgentChatRun *craftAgentPathView `json:"agent_chat_run,omitempty"`
+	AgentTasks   *craftAgentPathView `json:"agent_tasks,omitempty"`
 }
 
 // Diagnose is POST /api/v1/admin/instance/artifacts/applications/{app}/diagnostics.
@@ -427,6 +452,12 @@ func (h *CraftAppsAdminHandler) Diagnose(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	out := craftAppDiagnostics{ID: app, Editor: h.editorState()}
+	if app == craftapps.Sheet && h.r.craftNativeHTTP != nil {
+		chat, chatReason := h.r.craftNativeHTTP.agents.ChatRunReadiness()
+		tasks, tasksReason := h.r.craftNativeHTTP.agents.TasksReadiness()
+		out.AgentChatRun = &craftAgentPathView{State: chat, Reason: chatReason, Message: chatReason.Message()}
+		out.AgentTasks = &craftAgentPathView{State: tasks, Reason: tasksReason, Message: tasksReason.Message()}
+	}
 	c := h.component(app)
 	profile, ok := h.r.craftNativeDocuments.profile(app)
 	if !c.Available || !ok || profile.Engine == nil {
@@ -451,6 +482,10 @@ func (h *CraftAppsAdminHandler) Diagnose(w http.ResponseWriter, req *http.Reques
 	var stdout, stderr bytes.Buffer
 	err = profile.Engine.Run(ctx, dir, []string{"--version"}, &limitedBuffer{b: &stdout, n: 4096}, &limitedBuffer{b: &stderr, n: 4096})
 	out.DurationMS = time.Since(started).Milliseconds()
+	if reporter, ok := profile.Engine.(craftengine.StatusReporter); ok {
+		status := reporter.Status()
+		out.Runtime, out.Degraded, out.DegradedReason = status.Runtime, status.Degraded, status.Reason
+	}
 	version := strings.TrimSpace(stdout.String())
 	if err != nil || !strings.Contains(strings.ToLower(version), app) {
 		h.r.logger.Warn("Craft engine self-test failed", "application", app, "error", err, "stderr", strings.TrimSpace(stderr.String()))

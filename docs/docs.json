@@ -204,6 +204,7 @@
                   "guides/artifacts/interactive",
                   "guides/artifacts/slides",
                   "guides/artifacts/word-and-sheet",
+                  "guides/artifacts/sheet-agent-setup",
                   "guides/artifacts/chat",
                   "guides/artifacts/operations"
                 ]

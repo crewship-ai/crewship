@@ -173,7 +173,7 @@ func (d *craftNativeDocumentsHTTP) decideProposal(w http.ResponseWriter, r *http
 		return
 	}
 	lease := mooring.EditLease{Scope: entry.scope, Holder: craftNativePrincipal(entry), Generation: generation}
-	p, receipt, err := s.AcceptProposal(r.Context(), lease, id)
+	p, receipt, err := s.AcceptProposalRecorded(r.Context(), lease, id, craftProposalRecord(entry.scope, entry.application, entry.source.UserID))
 	if err != nil {
 		if p.State == "stale" {
 			writeJSON(w, 409, map[string]any{"error": "the document changed after this proposal; it was not applied", "proposal": d.proposalView(r, entry.scope.WorkspaceID, p)})

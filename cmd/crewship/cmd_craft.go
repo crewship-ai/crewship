@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -27,6 +29,18 @@ func newCraftCommand() *cobra.Command {
 		r, e := c.WithContext(cmd.Context()).Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/availability")
 		return craftResponse(cmd, r, e, "")
 	}})
+	access := &cobra.Command{Use: "agent-access <page>", Args: cobra.ExactArgs(1), Short: "Say whether the agent of your private chat may change this Sheet when you attach it, and why not", RunE: func(cmd *cobra.Command, args []string) error {
+		chat, _ := cmd.Flags().GetString("chat")
+		c, e := pageClient()
+		if e != nil {
+			return e
+		}
+		r, e := c.WithContext(cmd.Context()).Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/agent-access?chat_id=" + url.QueryEscape(chat))
+		return craftResponse(cmd, r, e, "")
+	}}
+	access.Flags().String("chat", "", "Your private chat with the agent")
+	_ = access.MarkFlagRequired("chat")
+	craft.AddCommand(access)
 	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
 	craft.AddCommand(&cobra.Command{Use: "versions <page>", Args: cobra.ExactArgs(1), Short: "List saved native versions, newest first; read-only (restore through connect)", RunE: craftVersions})
 	version := &cobra.Command{Use: "version <page> <version>", Args: cobra.ExactArgs(2), Short: "Read one saved native version's bytes, read-only (preview or diagnose; restore through connect)", RunE: craftVersion}
@@ -41,6 +55,11 @@ func newCraftCommand() *cobra.Command {
 	initialize.Flags().String("file", "", "Word native JSON or Sheet workbook (.xlsx/.xlsm), or - for stdin")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
+	imp := &cobra.Command{Use: "import <page>", Args: cobra.ExactArgs(1), Short: "Import an .xlsx workbook into an existing empty owned Page as a native Sheet", RunE: craftImport}
+	imp.Flags().String("file", "", "The .xlsx workbook to import (never modified)")
+	imp.Flags().Duration("wait", 10*time.Minute, "How long to wait for the conversion")
+	_ = imp.MarkFlagRequired("file")
+	craft.AddCommand(imp)
 	craft.AddCommand(newCraftAgentTaskCommand())
 	return craft
 }
@@ -174,7 +193,10 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 		case "restore":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/restore", a.Snapshot)
 		case "reconcile":
-			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/reconcile", a.Snapshot)
+			// Reconcile asks by hash; the server reads no document bytes (and caps the body at 16 MiB).
+			ask := *a.Snapshot
+			ask.Bytes = nil
+			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/reconcile", &ask)
 		case "versions":
 			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions")
 		case "status":

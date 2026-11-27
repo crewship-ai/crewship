@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/craftsession"
 	"io"
 	"net/http"
 	"strconv"
@@ -39,6 +41,9 @@ type craftNativeAgentToolAttempt struct {
 	proposalID        string
 	proposalCandidate []byte // retained only while this proposal's commit is unknown
 	proposalErr       error
+	undoable          bool // the server kept what this change replaced
+	// signatureInvalidated: the workbook's XML package signature was kept but no longer matches.
+	signatureInvalidated bool
 }
 
 const maxNativeAgentChangeRequests = 64
@@ -184,6 +189,14 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		replyError(w, 403, "confirmed native Craft task required")
 		return
 	}
+	m.serveToolCall(w, r, bound, e)
+}
+
+// serveToolCall runs one tool operation for an entry the caller has already
+// bound to this request's run credential. The task path binds through
+// bindTool; a chat run binds through its own scope (same operations, same
+// fences, same lease and compare-and-swap publication).
+func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.Request, bound *http.Request, e *craftNativeAgentEntry) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 128<<10))
 	if err != nil {
 		replyError(w, 413, "native Craft request too large")
@@ -255,6 +268,14 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		lease, err := m.human.leases.Acquire(bound.Context(), e.grant.Scope, craftNativeAgentPrincipal(e))
+		if errors.Is(err, mooring.ErrEditLeaseBusy) && e.chat != nil && store.Workbook() {
+			// The person whose own message consented holds the Sheet in their editor. The
+			// agent writes beside their lease (a co-write grant), never changing it; any other
+			// holder stays holder_human.
+			if grant, coErr := m.human.leases.CoWrite(bound.Context(), e.grant.Scope, craftNativeAgentPrincipal(e), "user:"+e.chat.authority.HumanUserID); coErr == nil {
+				lease, err = grant, nil
+			}
+		}
 		if err != nil {
 			if errors.Is(err, mooring.ErrEditLeaseBusy) {
 				current, readErr := m.human.leases.Read(bound.Context(), e.grant.Scope, craftNativeAgentPrincipal(e))
@@ -296,6 +317,16 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		renewed, err := m.human.leases.Renew(bound.Context(), lease)
+		if errors.Is(err, mooring.ErrEditLeaseBusy) {
+			// A co-write grant whose person no longer holds the Sheet: someone else edits it now.
+			writeJSON(w, 409, map[string]string{"error": "document already has an editor", "holder_kind": "human"})
+			return
+		}
+		if errors.Is(err, mooring.ErrEditLeaseExpired) {
+			// The lease expired and another editor took the Sheet since: not a change of the Sheet.
+			replyCode(w, 409, CraftSheetReasonLeaseExpired, "the edit lease expired and another editor took the document; acquire it again")
+			return
+		}
 		if err != nil {
 			craftNativeDocumentError(w, err)
 			return
@@ -309,10 +340,17 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			if errors.Is(err, errCraftNativeAgentProposalRequired) {
 				craftNativeAgentMandateError(w, err)
+			} else if errors.Is(err, errCraftNativeConsentStale) {
+				replyChatSheetRefusal(w, http.StatusConflict, CraftSheetReasonConsentStale)
+			} else if errors.Is(err, ErrCraftNativeSheetBusy) {
+				replyNativeSheetBusy(w)
 			} else if e.tool.uncertain {
 				replyError(w, 503, "original native save outcome unconfirmed; reconcile the exact original request")
 			} else if errors.Is(err, errNativeAgentChangeRequestLimit) {
 				replyError(w, 429, "this run has reached its change request limit")
+			} else if errors.Is(err, mooring.ErrEditLeaseBusy) {
+				writeJSON(w, 409, map[string]string{"error": "document already has an editor", "holder_kind": "human"})
+			} else if nativeAgentChangeRefused(w, err) {
 			} else if errors.Is(err, ErrCraftNativeAgentEngine) {
 				replyError(w, 422, "original native engine operation refused")
 			} else {
@@ -328,6 +366,7 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 				replyError(w, 503, "original native change outcome unconfirmed; reconcile the exact original request")
 			} else if errors.Is(err, errNativeAgentChangeRequestLimit) {
 				replyError(w, 429, "this run has reached its change request limit")
+			} else if nativeAgentChangeRefused(w, err) {
 			} else if errors.Is(err, ErrCraftNativeAgentEngine) {
 				replyError(w, 422, "original native engine operation refused")
 			} else {
@@ -350,6 +389,10 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			view, err := m.config.AgentInspect(bound.Context(), profile, native, input.Query)
+			if errors.Is(err, ErrCraftNativeSheetBusy) {
+				replyNativeSheetBusy(w)
+				return
+			}
 			if err != nil || len(view) > 1<<20 || !json.Valid(view) {
 				replyError(w, 422, "original native engine query refused")
 				return
@@ -425,6 +468,15 @@ func nativeAgentLeaseResult(lease mooring.EditLease) map[string]string {
 	return map[string]string{"generation": strconv.FormatInt(lease.Generation, 10), "expires_at": lease.ExpiresAt.UTC().Format(time.RFC3339Nano), "holder_kind": "agent"}
 }
 func nativeAgentDocumentBytes(state artifacts.VersionState) ([]byte, error) {
+	// A Sheet kept as its workbook file (mooring.NativeFormatWorkbook).
+	for name, media := range map[string]string{"workbook.xlsx": mooring.WorkbookMediaTypeXLSX, "workbook.xlsm": mooring.WorkbookMediaTypeXLSM} {
+		if file, ok := state.Manifest.Files[name]; ok {
+			if len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != name || file.MediaType != media {
+				return nil, mooring.ErrNativeProfile
+			}
+			return file.Content, nil
+		}
+	}
 	file, ok := state.Manifest.Files["document.json"]
 	if !ok || len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != "document.json" || file.MediaType != "application/json" {
 		return nil, mooring.ErrNativeProfile
@@ -450,7 +502,11 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		}
 		receipt, err := store.ReconcileSnapshot(ctx, prior.lease, prior.base, prior.revision, prior.hash)
 		if err == nil {
+			if prior.receipt == nil {
+				e.chat.rememberApply(input, receipt)
+			}
 			prior.receipt = &receipt
+			prior.undoable = prior.undoable && !receipt.Unchanged
 			rememberNativeAgentReceipt(e.tool, receipt)
 			if e.tool.uncertainAttempt == prior {
 				e.tool.uncertainAttempt = nil
@@ -461,6 +517,17 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	}
 	if e.tool.uncertain {
 		return zero, mooring.ErrNativeUnconfirmed
+	}
+	// This fresh request is serialized with the chat run's other publications. Its
+	// consented base is the same base the version store checks when committing.
+	if e.chat != nil && base != e.chat.consentBase() {
+		return zero, errCraftNativeConsentStale
+	}
+	// A co-write is replayed by the person's editor over their work: only commands it can replay.
+	if e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{}) {
+		if _, replayable := craftNativeAgentResolvedOps(input.Commands); !replayable {
+			return zero, mooring.ErrEditLeaseBusy
+		}
 	}
 	if len(e.tool.requests) >= maxNativeAgentChangeRequests {
 		return zero, errNativeAgentChangeRequestLimit
@@ -485,7 +552,11 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	e.tool.currentAttempt = attempt
 	// Renew only while this exact authenticated HTTP apply remains alive. The
 	// normal 15s lease and every run/original-human fence remain unchanged.
-	renewal, cancel := context.WithTimeout(ctx, 65*time.Second)
+	window := 65 * time.Second
+	if e.chat != nil {
+		window = craftNativeChatRunEngineWindow
+	}
+	renewal, cancel := context.WithTimeout(ctx, window)
 	active := renewal
 	done := make(chan struct{})
 	finish := beginBackgroundWork()
@@ -507,7 +578,8 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		}
 	}()
 	defer func() { cancel(); <-done }()
-	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	limit := nativeAgentCandidateLimit(store)
+	upload, err := store.ReserveUpload(active, e.grant.Scope, craftNativeReservation(int64(limit)))
 	if err != nil {
 		// Refused before the engine ran: nothing was attempted, so the same
 		// request ID must stay retryable.
@@ -516,11 +588,29 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	}
 	defer upload.Close()
 	active = upload.Context(active)
+	// What the change replaces, for its undo: read before it runs; nil when it cannot be undone
+	// (the read failed or did not cover every cell), and the change then says it is not undoable.
+	var inverse json.RawMessage
+	if store.Workbook() {
+		if ops, ok := craftNativeAgentResolvedOps(input.Commands); ok {
+			inverse, _ = craftUndoCapture(active, m.config.AgentInspect, profile, native, ops)
+		}
+		// Beside the person's open editor only a change the person can undo is published: one
+		// whose old values could not be kept (over the read limit) answers holder_human.
+		if inverse == nil && e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{}) {
+			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+			return zero, mooring.ErrEditLeaseBusy
+		}
+	}
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
+		if errors.Is(err, ErrCraftNativeSheetBusy) {
+			// Nothing ran: the same request ID stays retryable.
+			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+		}
 		return zero, err
 	}
-	if len(candidate) == 0 || len(candidate) > 32<<20 {
+	if len(candidate) == 0 || len(candidate) > limit {
 		return zero, ErrCraftNativeAgentEngine
 	}
 	sum := sha256.Sum256(candidate)
@@ -528,7 +618,9 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	attempt.attempted = true
 	// There is one publication attempt. Any repeat reconciles this exact saved
 	// snapshot; it never reruns the original engine or advances the base.
-	receipt, err := store.SaveSnapshot(active, attempt.lease, base, attempt.revision, attempt.hash, candidate)
+	record, undoable := craftNativeAgentWorkbookRecord(e, store, base, input, inverse, craftNativeAgentSheetRecord(e))
+	attempt.undoable = undoable
+	receipt, err := store.SaveAttemptRecorded(active, attempt.lease, base, attempt.revision, attempt.hash, candidate, "", record)
 	if err != nil {
 		e.tool.uncertain = !knownNativeAgentRefusal(err)
 		if e.tool.uncertain {
@@ -537,6 +629,9 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		return zero, err
 	}
 	attempt.receipt = &receipt
+	attempt.undoable = attempt.undoable && !receipt.Unchanged
+	e.chat.rememberApply(input, receipt)
+	attempt.signatureInvalidated = store.Workbook() && craftWorkbookSigned(native)
 	rememberNativeAgentReceipt(e.tool, receipt)
 	e.tool.uncertainAttempt = nil
 	e.tool.uncertain = false
@@ -601,9 +696,14 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 	attempt := &craftNativeAgentToolAttempt{input: fingerprint, base: base, isProposal: true}
 	e.tool.requests[input.RequestID] = attempt
 	e.tool.currentAttempt = attempt
-	active, cancel := context.WithTimeout(ctx, 65*time.Second)
+	proposeWindow := 65 * time.Second
+	if e.chat != nil {
+		proposeWindow = craftNativeChatRunEngineWindow
+	}
+	active, cancel := context.WithTimeout(ctx, proposeWindow)
 	defer cancel()
-	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	limit := nativeAgentCandidateLimit(store)
+	upload, err := store.ReserveUpload(active, e.grant.Scope, craftNativeReservation(int64(limit)))
 	if err != nil {
 		forgetNativeAgentAttempt(e, input.RequestID, attempt)
 		return mooring.NativeProposal{}, err
@@ -616,7 +716,7 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 		attempt.proposalErr = err
 		return mooring.NativeProposal{}, err
 	}
-	if len(candidate) == 0 || len(candidate) > 32<<20 {
+	if len(candidate) == 0 || len(candidate) > limit {
 		attempt.proposalErr = ErrCraftNativeAgentEngine
 		return mooring.NativeProposal{}, ErrCraftNativeAgentEngine
 	}
@@ -650,7 +750,7 @@ func (m *craftNativeAgentManager) recordProposalAttempt(ctx context.Context, e *
 }
 
 func knownNativeAgentRefusal(err error) bool {
-	for _, known := range []error{mooring.ErrInvalid, mooring.ErrNativeValidation, mooring.ErrNativeProfile, mooring.ErrEditLeaseDenied, mooring.ErrEditLeaseStale, artifacts.ErrVersionConflict, artifacts.ErrVersionQuota, errCraftNativeAgentDenied} {
+	for _, known := range []error{mooring.ErrInvalid, mooring.ErrNativeValidation, mooring.ErrNativeProfile, mooring.ErrEditLeaseDenied, mooring.ErrEditLeaseStale, mooring.ErrEditLeaseBusy, artifacts.ErrVersionConflict, artifacts.ErrVersionQuota, errCraftNativeAgentDenied} {
 		if errors.Is(err, known) {
 			return true
 		}
@@ -696,4 +796,168 @@ func (m *craftNativeAgentManager) clearClosedProposalCandidates(e *craftNativeAg
 	if closed {
 		clearNativeProposalCandidatesLocked(e)
 	}
+}
+
+// replyNativeSheetBusy answers a request that found no free engine session.
+func replyNativeSheetBusy(w http.ResponseWriter) {
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": craftSheetReasonText[CraftSheetReasonBusy], "reason": CraftSheetReasonBusy})
+}
+
+// craftNativeAgentSheetRecord audits an agent's saved revision on the saving
+// transaction: a Sheet as artifact.sheet_saved, a Word document as
+// artifact.document_saved, naming the person it acts for, the agent and its
+// run (a chat run's, or the native Craft task's confirmed run).
+func craftNativeAgentSheetRecord(e *craftNativeAgentEntry) mooring.NativeRecord {
+	if e == nil || e.grant.Application != "gridcraft" && e.grant.Application != "wordcraft" {
+		return nil
+	}
+	scope, app, user, agent, run := e.grant.Scope, e.grant.Application, e.grant.Original.UserID, e.grant.AgentID, e.attempt.runID
+	if run == "" {
+		run = e.claimedRun
+	}
+	if run == "" {
+		run = e.workID
+	}
+	if e.chat != nil {
+		user, agent, run = e.chat.authority.HumanUserID, e.chat.authority.AgentID, e.chat.authority.RunID
+	}
+	return func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt, native []byte) error {
+		return recordCraftSheetSaved(ctx, tx, craftSheetSaved{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version,
+			Source: craftSheetSavedByAgent, Application: app, UserID: user, AgentID: agent, RunID: run, Native: native})
+	}
+}
+
+// nativeAgentCandidateLimit is the largest document an agent change may save: a workbook file
+// up to one storage upload less the manifest room (64 MiB - 256 KiB), a native document 32 MiB.
+func nativeAgentCandidateLimit(store *mooring.NativeStore) int {
+	if store.Workbook() {
+		return int(artifacts.MaxStorageUploadBytes) - (256 << 10)
+	}
+	return 32 << 20
+}
+
+// craftNativeAgentResolvedOps is what an agent write applied, as saved with its version: each
+// command with its address resolved (the sheet folded in), in order, named exactly as the editor's
+// gridcraft:execute takes it (cell.set, range.setValues, edit.clearContents). Not ok when any
+// command is not such a write or an address has no sheet; that version then has no operations.
+func craftNativeAgentResolvedOps(commands json.RawMessage) (json.RawMessage, bool) {
+	var entries []struct {
+		Command string                     `json:"command"`
+		Params  map[string]json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(commands, &entries) != nil || len(entries) == 0 {
+		return nil, false
+	}
+	type op struct {
+		Command string         `json:"command"`
+		Params  map[string]any `json:"params"`
+	}
+	out := make([]op, 0, len(entries))
+	for _, e := range entries {
+		// The recalculation is an effect of every write, not an operation of its own.
+		if e.Command == "formulas.calculateNow" {
+			continue
+		}
+		key := "range"
+		if e.Command == "cell.set" {
+			key = "cell"
+		}
+		if raw, err := json.Marshal(e.Params); err == nil {
+			lifted, ok := nativeAgentLiftSheet(e.Command, raw)
+			if !ok || json.Unmarshal(lifted, &e.Params) != nil {
+				return nil, false
+			}
+		}
+		address, err := nativeAgentSheetAddress("", e.Params, key)
+		// Without its sheet the editor would write the person's active sheet.
+		if err != nil || !strings.Contains(address, "!") {
+			return nil, false
+		}
+		params := map[string]any{key: address}
+		name := e.Command
+		switch e.Command {
+		case "cell.set":
+			params["input"] = e.Params["input"]
+		case "range.setValues":
+			params["values"] = e.Params["values"]
+		case "range.clear":
+			name = "edit.clearContents"
+		default:
+			return nil, false
+		}
+		out = append(out, op{Command: name, Params: params})
+	}
+	raw, err := json.Marshal(out)
+	return raw, err == nil
+}
+
+// craftNativeAgentWorkbookRecord adds to the agent's version record the operations it applied,
+// for a Sheet kept as its workbook file.
+func craftNativeAgentWorkbookRecord(e *craftNativeAgentEntry, store *mooring.NativeStore, base int64, input craftNativeAgentToolRequest, inverse json.RawMessage, record mooring.NativeRecord) (mooring.NativeRecord, bool) {
+	if !store.Workbook() || record == nil {
+		return record, false
+	}
+	ops, replayable := craftNativeAgentResolvedOps(input.Commands)
+	fits := craftVersionOpsFit(ops, inverse)
+	agent := e.grant.AgentID
+	if e.chat != nil {
+		agent = e.chat.authority.AgentID
+	}
+	pin, scope := store.EnginePin(), e.grant.Scope
+	operation := nativeAgentOperationID(e, input.RequestID)
+	coWrite := e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{})
+	return func(ctx context.Context, tx *sql.Tx, r artifacts.VersionReceipt, native []byte) error {
+		// A co-write is replayed by the person's editor: a change stored as not replayable (any
+		// command off the list, or over the operations limit) is never published beside them.
+		if coWrite && (!replayable || !fits) {
+			return mooring.ErrEditLeaseBusy
+		}
+		if err := record(ctx, tx, r, native); err != nil {
+			return err
+		}
+		if craftWorkbookSigned(native) {
+			if err := recordCraftSignatureBreak(ctx, tx, scope.WorkspaceID, scope.ArtifactID, r.Version); err != nil {
+				return err
+			}
+		}
+		return recordCraftVersionOps(ctx, tx, craftVersionOps{WorkspaceID: scope.WorkspaceID, PageID: scope.ArtifactID, Version: r.Version, BaseVersion: base,
+			ActorKind: "agent", ActorID: agent, OperationID: operation, EnginePin: pin, Calculate: "calculated", Replayable: replayable, Ops: ops, Inverse: inverse})
+	}, fits && len(inverse) > 0
+}
+
+// nativeAgentChangeRefused answers the refusals of an agent change that tell the agent what to do
+// instead: a write without its sheet, a save that would lose parts of the workbook file.
+func nativeAgentChangeRefused(w http.ResponseWriter, err error) bool {
+	var loss *craftsession.FidelityLossError
+	switch {
+	case errors.Is(err, errCraftNativeSheetNameRequired):
+		writeJSON(w, 400, map[string]string{"error": errCraftNativeSheetNameRequired.Error(), "reason": CraftSheetReasonInvalid})
+	case errors.As(err, &loss):
+		writeJSON(w, 422, map[string]any{"error": "saving this change would lose parts of the workbook file; nothing was saved", "reason": CraftSheetReasonFidelityLoss, "parts": loss.Parts})
+	default:
+		return false
+	}
+	return true
+}
+
+// craftNativeReservation is the storage reservation for a document of at most size bytes: its
+// size and room for the manifest, never more than one storage upload admits (64 MiB).
+func craftNativeReservation(size int64) int64 {
+	return min(size+(256<<10), artifacts.MaxStorageUploadBytes)
+}
+
+// nativeAgentOperationID names one agent change on the server: the request ID is the model's
+// and is unique only within its run, so the run is part of it.
+func nativeAgentOperationID(e *craftNativeAgentEntry, requestID string) string {
+	run := e.attempt.runID
+	if run == "" {
+		run = e.claimedRun
+	}
+	if run == "" {
+		run = e.workID
+	}
+	if e.chat != nil {
+		run = e.chat.authority.RunID
+	}
+	return run + ":" + requestID
 }

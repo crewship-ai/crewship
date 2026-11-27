@@ -67,6 +67,9 @@ func (m *craftNativeAgentManager) publishConfirmed(c craftNativeAgentConfirmed) 
 }
 
 func (m *craftNativeAgentManager) checkRun(ctx context.Context, tx *sql.Tx, e *craftNativeAgentEntry) error {
+	if e != nil && e.chat != nil {
+		return m.checkChatRun(ctx, tx, e)
+	}
 	if err := m.checkGrant(ctx, tx, e); err != nil {
 		return err
 	}

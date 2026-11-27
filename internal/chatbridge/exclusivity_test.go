@@ -81,6 +81,14 @@ func (b *blockingContainer) CopyToContainer(_ context.Context, _ string, _ strin
 	return fmt.Errorf("copy unsupported")
 }
 
+// groupExclusivityChatInfo is exclusivityChatInfo as a group chat, where a busy send still
+// leaves no trace.
+func groupExclusivityChatInfo() *ChatInfo {
+	info := exclusivityChatInfo()
+	info.Visibility = "group"
+	return info
+}
+
 func exclusivityChatInfo() *ChatInfo {
 	return &ChatInfo{
 		AgentID:     "agent-1",
@@ -100,7 +108,9 @@ func exclusivityChatInfo() *ChatInfo {
 // gets an agent_busy event; the fix makes the second sender bounce off the
 // per-chat run lock without ever touching the container.
 func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
-	resolver := &mockResolver{info: exclusivityChatInfo()}
+	// Two people in one chat is a group chat; a private chat keeps a refused message as not run
+	// (TestEveryRunRefusalKeepsThePersonsMessage).
+	resolver := &mockResolver{info: groupExclusivityChatInfo()}
 	ctr := &blockingContainer{
 		entered: make(chan struct{}),
 		proceed: make(chan struct{}),
@@ -117,7 +127,7 @@ func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
 
 	errA := make(chan error, 1)
 	go func() {
-		errA <- b.HandleChatMessage(context.Background(), "user-A", chatID, "hello from A", streamFnA)
+		errA <- b.HandleChatMessage(context.Background(), "user-A", chatID, "@test-agent hello from A", streamFnA)
 	}()
 
 	select {
@@ -133,7 +143,7 @@ func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
 	// right alongside the first, so it would never return promptly.
 	errB := make(chan error, 1)
 	go func() {
-		errB <- b.HandleChatMessage(context.Background(), "user-B", chatID, "hello from B", streamFnB)
+		errB <- b.HandleChatMessage(context.Background(), "user-B", chatID, "@test-agent hello from B", streamFnB)
 	}()
 	select {
 	case err := <-errB:
@@ -189,7 +199,7 @@ func TestHandleChatMessage_CrossUserExclusivity(t *testing.T) {
 // message in the transcript. After the fix a bounced send leaves NO trace:
 // no persisted turn, no message-count bump, no stream frames.
 func TestHandleChatMessage_BusyRejectionPersistsNothing(t *testing.T) {
-	resolver := &countingResolver{mockResolver: mockResolver{info: exclusivityChatInfo()}}
+	resolver := &countingResolver{mockResolver: mockResolver{info: groupExclusivityChatInfo()}}
 	ctr := &blockingContainer{
 		entered: make(chan struct{}),
 		proceed: make(chan struct{}),
@@ -207,7 +217,7 @@ func TestHandleChatMessage_BusyRejectionPersistsNothing(t *testing.T) {
 
 	errA := make(chan error, 1)
 	go func() {
-		errA <- b.HandleChatMessage(context.Background(), "user-A", chatID, "hello from A", func(ws.ChatEvent) {})
+		errA <- b.HandleChatMessage(context.Background(), "user-A", chatID, "@test-agent hello from A", func(ws.ChatEvent) {})
 	}()
 	select {
 	case <-ctr.entered:
@@ -219,7 +229,7 @@ func TestHandleChatMessage_BusyRejectionPersistsNothing(t *testing.T) {
 	var eventsB []ws.ChatEvent
 	streamFnB := func(e ws.ChatEvent) { muB.Lock(); eventsB = append(eventsB, e); muB.Unlock() }
 
-	err := b.HandleChatMessage(context.Background(), "user-B", chatID, "hello from B", streamFnB)
+	err := b.HandleChatMessage(context.Background(), "user-B", chatID, "@test-agent hello from B", streamFnB)
 	if !errors.Is(err, ws.ErrAgentBusy) {
 		t.Fatalf("expected ws.ErrAgentBusy from the bounced send, got: %v", err)
 	}
@@ -232,7 +242,7 @@ func TestHandleChatMessage_BusyRejectionPersistsNothing(t *testing.T) {
 		t.Fatalf("read conversation: %v", readErr)
 	}
 	for _, m := range msgs {
-		if m.Content == "hello from B" || m.AuthorUserID == "user-B" {
+		if m.Content == "@test-agent hello from B" || m.AuthorUserID == "user-B" {
 			t.Errorf("bounced message was persisted to the conversation: %+v", m)
 		}
 	}
