@@ -31,6 +31,7 @@ import { SidebarCollapseButton, SIDEBAR_WIDTH_COLLAPSED } from "@/components/lay
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { Segmented } from "@/components/ui/segmented"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
@@ -219,7 +220,15 @@ function ChatClientBody() {
   })
 
   const { workspaceId } = useWorkspace()
-  const isMobile = useChatCompactLayout()
+  const compactRequested = useChatCompactLayout()
+  const [isMobile, setCompactLayout] = useState(compactRequested)
+  const latestCompactRequest = useRef(compactRequested)
+  latestCompactRequest.current = compactRequested
+  useEffect(() => {
+    if (compactRequested === isMobile) return
+    const apply = () => setCompactLayout(latestCompactRequest.current)
+    if (navigationAllowed(apply)) apply()
+  }, [compactRequested, isMobile])
   // The phone bar (below md) is where SubBar takes over the title and the
   // Crews path gives way; the compact chat layout starts wider, at 900 px.
   const isPhone = useIsMobile()
@@ -462,14 +471,17 @@ function ChatClientBody() {
   const [pickedThread, setPickedThread] = useState<{ workspaceId: string | null; agentId: string; thread: ChatTreeThread } | null>(null)
   const selectThread = useCallback(
     (a: ChatTreeAgent, t: ChatTreeThread, push = true) => {
-      setMobilePanel("chat")
-      setAgentSlug(a.slug)
-      setSessionId(t.id)
-      setPickedThread({ workspaceId, agentId: a.id, thread: t })
-      writeUrl(a.slug, t.id, push)
-      markThreadRead(a.id, t.id)
+      const select = () => {
+        setMobilePanel("chat")
+        setAgentSlug(a.slug)
+        setSessionId(t.id)
+        setPickedThread({ workspaceId, agentId: a.id, thread: t })
+        writeUrl(a.slug, t.id, push)
+        markThreadRead(a.id, t.id)
+      }
+      if (!push || t.id === sessionId || navigationAllowed(select)) select()
     },
-    [writeUrl, markThreadRead, workspaceId],
+    [writeUrl, markThreadRead, workspaceId, sessionId],
   )
 
   /**
@@ -572,18 +584,21 @@ function ChatClientBody() {
 
   const startConversation = useCallback(
     (a: ChatTreeAgent, push = true) => {
+      const start = () => {
       // A locally minted id, not a POST. The server accepts a client-supplied
       // session_id and inserts OR IGNOREs on it, so the row appears when the
       // first message is sent — opening a conversation you never write in
       // must not leave one behind. Same contract chat-page-client relies on.
-      const draft = randomUUIDv4()
-      scopeChosenRef.current = true
-      setScope("direct")
-      setMobilePanel("chat")
-      setDraftConversation({ agent: a, id: draft })
-      setAgentSlug(a.slug)
-      setSessionId(draft)
-      writeUrl(a.slug, draft, push)
+        const draft = randomUUIDv4()
+        scopeChosenRef.current = true
+        setScope("direct")
+        setMobilePanel("chat")
+        setDraftConversation({ agent: a, id: draft })
+        setAgentSlug(a.slug)
+        setSessionId(draft)
+        writeUrl(a.slug, draft, push)
+      }
+      if (!push || navigationAllowed(start)) start()
     },
     [writeUrl],
   )

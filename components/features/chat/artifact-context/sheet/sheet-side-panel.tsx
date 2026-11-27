@@ -5,6 +5,7 @@ import { Maximize2, Minimize2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { HintTooltip } from "@/components/ui/hint-tooltip"
 import { usePage } from "@/hooks/use-pages"
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { ArtifactNativeEditor } from "@/components/features/artifacts-library/native-editor"
 import type { NativeCraftHandBack, NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { artifactsItemHref } from "../artifacts-href"
@@ -60,6 +61,9 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
 }) {
   const { page } = usePage(workspaceId, `@${pageId}`)
   const [status, setStatus] = useState<NativeCraftHostStatus>()
+  const prepareLeaveRef = useRef<(() => Promise<boolean>) | null>(null)
+  const prepareLeave = useCallback(() => prepareLeaveRef.current?.() ?? Promise.resolve(true), [])
+  useUnsavedNavigationGuard(Boolean(status?.holderIsMe || status?.dirty), "", prepareLeave)
   useEffect(() => { if (dirtyRef) dirtyRef.current = Boolean(status?.dirty) }, [dirtyRef, status?.dirty])
   useEffect(() => () => { if (dirtyRef) dirtyRef.current = false }, [dirtyRef])
   const statusSink = useRef(onStatus)
@@ -130,7 +134,7 @@ export function SheetSidePanel({ workspaceId, pageId, hidden, expanded, onExpand
       <div className="h-full w-full bg-primary opacity-0 transition-opacity [[data-active=true]>&]:opacity-60 motion-safe:[[data-active=true]>&]:animate-pulse" />
     </div>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <ArtifactNativeEditor workspaceId={workspaceId} pageId={pageId} fallback={null} onStatus={setStatus} handBackRef={handBackRef}
+      <ArtifactNativeEditor workspaceId={workspaceId} pageId={pageId} fallback={null} onStatus={setStatus} handBackRef={handBackRef} prepareLeaveRef={prepareLeaveRef}
         toolbar={bar} historyHref={artifactsItemHref(workspaceId, pageId)} />
     </div>
   </section>
