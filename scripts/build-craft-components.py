@@ -146,12 +146,42 @@ def remap(env, *pairs):
     return env
 
 
-def build_engine(c, source, fonts, cargo, env, target_dir):
+def cargo_build(cargo, source, env, target_dir, target, package, artifacts):
+    args = [str(cargo), 'build', '--release', '--locked', '--target', target, '-p', package]
+    if artifacts is None:
+        run(args, cwd=source, env=env)
+        return
+    target_output = target_dir / target
+    compiled = set()
+    args.append('--message-format=json-render-diagnostics')
+    with subprocess.Popen(args, cwd=source, env=env, stdout=subprocess.PIPE, text=True, encoding='utf-8') as proc:
+        for line in proc.stdout:
+            try:
+                message = json.loads(line)
+            except ValueError:
+                print(line, end='', flush=True)
+                continue
+            if message.get('reason') == 'compiler-message':
+                rendered = message['message'].get('rendered')
+                if rendered:
+                    print(rendered, end='', file=sys.stderr, flush=True)
+            if (message.get('reason') == 'compiler-artifact' and
+                    not {'custom-build', 'proc-macro'}.intersection(message['target']['kind']) and
+                    any(Path(name).is_relative_to(target_output) for name in message['filenames'])):
+                compiled.add(message['package_id'])
+        if proc.wait() != 0:
+            raise subprocess.CalledProcessError(proc.returncode, args)
+    if not compiled:
+        raise ValueError(f'{package}: Cargo reported no artifacts for {target}')
+    artifacts[target] = compiled
+
+
+def build_engine(c, source, fonts, cargo, env, target_dir, artifacts):
     env = remap(env, (source, '/' + c['application']), (fonts, '/craft-fonts'), (Path.home(), '/home'))
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts), CRAFT_FONTS_REQUIRED='1')
     # The build identity the engine reports with --version: the pinned source and its patch.
     env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
-    run([cargo, 'build', '--release', '--locked', '--target', 'wasm32-wasip1', '-p', c['cli_package']], cwd=source, env=env)
+    cargo_build(cargo, source, env, target_dir, 'wasm32-wasip1', c['cli_package'], artifacts)
     module = target_dir / 'wasm32-wasip1/release' / (c['cli_package'] + '.wasm')
     raw = module.read_bytes()
     if raw[:4] != b'\0asm':
@@ -159,17 +189,26 @@ def build_engine(c, source, fonts, cargo, env, target_dir):
     return raw
 
 
-def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, temp, rustc_version, bindgen_version):
+def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, temp, rustc_version, bindgen_version, artifacts):
     app, package = c['application'], c['web_package']
     env = remap(env, (source, '/' + app), (fonts, '/craft-fonts'), (Path.home(), '/home'))
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts))
+    profile = {'profile': 'release'}
+    if app == 'wordcraft':
+        # WordCraft links the full document engine into the browser. Keep its
+        # decoded editor bundle within the existing editor-origin budget.
+        env['CARGO_PROFILE_RELEASE_OPT_LEVEL'] = 'z'
+        profile['rust_opt_level'] = 'z'
     # The editor reports the same build identity as the engine (gridcraft:ready build).
     env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
-    run([cargo, 'build', '--release', '--locked', '--target', 'wasm32-unknown-unknown', '-p', package], cwd=source, env=env)
+    cargo_build(cargo, source, env, target_dir, 'wasm32-unknown-unknown', package, artifacts)
     out = temp / (app + '-web')
-    run([bindgen / 'wasm-bindgen', target_dir / 'wasm32-unknown-unknown/release' / (package + '.wasm'),
+    raw_wasm = target_dir / 'wasm32-unknown-unknown/release' / (package + '.wasm')
+    print(f'{app}: Rust editor WASM {raw_wasm.stat().st_size} bytes', flush=True)
+    run([bindgen / 'wasm-bindgen', raw_wasm,
          '--target', 'web', '--weak-refs', '--no-typescript', '--out-name', package, '--out-dir', out])
     wasm = out / (package + '_bg.wasm')
+    print(f'{app}: wasm-bindgen editor WASM {wasm.stat().st_size} bytes', flush=True)
     optimized = out / (package + '_bg.opt.wasm')
     run([binaryen / 'bin/wasm-opt', '-Oz', '--all-features', wasm, '-o', optimized])
     optimized.replace(wasm)
@@ -182,13 +221,19 @@ def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, te
         raise ValueError(app + ': unexpected editor index.html')
     (out / 'index.html').write_text(html)
     shutil.copyfile(source / 'assets/app-icon' / icon, out / icon)
-    files = {str(p.relative_to(out)): sha256_bytes(p.read_bytes()) for p in sorted(out.rglob('*')) if p.is_file()}
-    if sum((out / name).stat().st_size for name in files) > MAX_EDITOR_BYTES:
-        raise ValueError(app + ': editor bundle exceeds the editor origin limit')
+    assets = [p for p in sorted(out.rglob('*')) if p.is_file()]
+    sizes = {str(p.relative_to(out)): p.stat().st_size for p in assets}
+    for name, size in sizes.items():
+        print(f'{app}: editor asset {name} {size} bytes', flush=True)
+    decoded_size = sum(sizes.values())
+    print(f'{app}: decoded editor bundle {decoded_size} bytes (limit {MAX_EDITOR_BYTES})', flush=True)
+    if decoded_size > MAX_EDITOR_BYTES:
+        raise ValueError(f'{app}: editor bundle exceeds the editor origin limit by {decoded_size - MAX_EDITOR_BYTES} bytes')
+    files = {str(p.relative_to(out)): sha256_bytes(p.read_bytes()) for p in assets}
     lock = sha256_bytes((source / 'Cargo.lock').read_bytes())
     manifest = json.dumps({'files': files, 'source_commit': c['commit'], 'toolchain': {
         'cargo_lock_sha256': lock, 'fonts_commit': fonts_commit(fonts), 'patch_sha256': c['patch_sha256'],
-        'profile': 'release', 'rustc': rustc_version, 'wasm_bindgen': bindgen_version}}, indent=2, sort_keys=True) + '\n'
+        **profile, 'rustc': rustc_version, 'wasm_bindgen': bindgen_version}}, indent=2, sort_keys=True) + '\n'
     (out / 'manifest.json').write_text(manifest)
     return out, sha256_bytes(manifest.encode())
 
@@ -197,27 +242,35 @@ def fonts_commit(fonts):
     return run(['git', '-C', fonts, 'rev-parse', 'HEAD'], capture=True, env=mooring.git_environment()).decode().strip()
 
 
-def crate_inventory(c, source, cargo, env):
-    """Every crate linked into either target, with its declared license."""
+def crate_inventory(c, source, cargo, env, artifacts=None):
+    """The runtime crates of each target with their declared licenses."""
     crates = {}
     # metadata resolves the whole lock file, more than the build fetched: fetch
     # it once (--locked, checksums from Cargo.lock), then read it offline.
     run([cargo, 'fetch', '--locked'], cwd=source, env=env)
-    for target in ('wasm32-wasip1', 'wasm32-unknown-unknown'):
+    for target, root in [('wasm32-wasip1', c['cli_package']), ('wasm32-unknown-unknown', c['web_package'])]:
         meta = json.loads(run([cargo, 'metadata', '--locked', '--offline', '--format-version', '1',
                                '--filter-platform', target], cwd=source, env=env, capture=True))
         packages = {p['id']: p for p in meta['packages']}
-        nodes = {n['id']: n for n in meta['resolve']['nodes']}
-        roots = [p['id'] for p in meta['packages'] if p['name'] in (c['cli_package'], c['web_package'])]
-        stack, seen = list(roots), set()
-        while stack:
-            pid = stack.pop()
-            if pid in seen:
-                continue
-            seen.add(pid)
-            for dep in nodes[pid]['deps']:
-                if any(k['kind'] in (None, 'normal') for k in dep['dep_kinds']):
-                    stack.append(dep['pkg'])
+        if artifacts is not None:
+            seen = artifacts[target]
+            if not seen <= packages.keys() or not any(packages[pid]['name'] == root for pid in seen):
+                raise ValueError(f'{root}: Cargo artifact evidence does not match the {target} metadata')
+            print(f"{root} {target} target crates: " +
+                  ', '.join(sorted(f"{packages[pid]['name']}@{packages[pid]['version']}" for pid in seen)), flush=True)
+        else:
+            # Keep the already-published Sheet inventory until its recipe is requalified.
+            nodes = {n['id']: n for n in meta['resolve']['nodes']}
+            roots = [p['id'] for p in meta['packages'] if p['name'] in (c['cli_package'], c['web_package'])]
+            stack, seen = list(roots), set()
+            while stack:
+                pid = stack.pop()
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                for dep in nodes[pid]['deps']:
+                    if any(k['kind'] in (None, 'normal') for k in dep['dep_kinds']):
+                        stack.append(dep['pkg'])
         for pid in seen:
             p = packages[pid]
             if not p.get('license') and not p.get('license_file'):
@@ -292,10 +345,37 @@ def license_allowed(expression):
         return False
 
 
-def check_licenses(crates):
-    refused = [f'{c["name"]} {c["version"]}: {c["license"]}' for c in crates if not license_allowed(c['license'])]
+WORD_JPEG_LICENSE = {
+    'name': 'jpeg-encoder',
+    'version': '0.7.1',
+    'license': '(MIT OR Apache-2.0) AND IJG',
+}
+WORD_JPEG_LOCK_PIN = {
+    'name': WORD_JPEG_LICENSE['name'],
+    'version': WORD_JPEG_LICENSE['version'],
+    'source': 'registry+https://github.com/rust-lang/crates.io-index',
+    'checksum': 'a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6',
+}
+
+
+def check_licenses(crates, application=None, lock_path=None):
+    notices = {}
+    refused = []
+    for crate in crates:
+        if license_allowed(crate['license']):
+            continue
+        if application == 'wordcraft' and crate == WORD_JPEG_LICENSE and lock_path is not None:
+            packages = tomllib.loads(lock_path.read_text())['package']
+            matches = [p for p in packages if p['name'] == crate['name'] and p['version'] == crate['version']]
+            if matches == [WORD_JPEG_LOCK_PIN]:
+                directory = RECIPE / 'notices/jpeg-encoder-0.7.1'
+                notices.update({f'jpeg-encoder-0.7.1/{name}': (directory / name).read_bytes()
+                                for name in ('ATTRIBUTION.md', 'LICENSE-IJG', 'LICENSE-MIT')})
+                continue
+        refused.append(f'{crate["name"]} {crate["version"]}: {crate["license"]}')
     if refused:
         raise ValueError('crates under a license the packages may not carry:\n  ' + '\n  '.join(refused))
+    return notices
 
 
 def sbom(component, crates, fonts_repository, fonts_commit_id):
@@ -378,16 +458,18 @@ def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
             target_dir = build_root / ('target-' + app)
             version = tomllib.loads((source / 'Cargo.toml').read_text()).get('workspace', {}).get('package', {}).get('version') \
                 or tomllib.loads((source / 'apps' / c['cli_package'] / 'Cargo.toml').read_text())['package']['version']
-            engine = add_file(stage, f'{app}/engine.wasm', build_engine(c, source, fonts, cargo, env, target_dir))
+            artifacts = {} if app == 'wordcraft' else None
+            engine = add_file(stage, f'{app}/engine.wasm', build_engine(c, source, fonts, cargo, env, target_dir, artifacts))
             editor_dir, editor_digest = build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, temp,
-                                                     rustc_version, config['tools']['wasm-bindgen']['version'])
+                                                     rustc_version, config['tools']['wasm-bindgen']['version'], artifacts)
             editor_files = [add_file(stage, f'{app}/editor/{editor_digest}/{p.relative_to(editor_dir)}', p.read_bytes())
                             for p in sorted(editor_dir.rglob('*')) if p.is_file()]
             notices = [add_file(stage, f'{app}/licenses/{name}', (source / name).read_bytes()) for name in c['notices']]
             for name, raw in font_notices(fonts).items():
                 notices.append(add_file(stage, f'{app}/licenses/craft-fonts/{name}', raw))
-            crates = crate_inventory(c, source, cargo, env)
-            check_licenses(crates)
+            crates = crate_inventory(c, source, cargo, env, artifacts)
+            for name, raw in check_licenses(crates, app, source / 'Cargo.lock').items():
+                notices.append(add_file(stage, f'{app}/licenses/{name}', raw))
             notices.append(add_file(stage, f'{app}/licenses/crates.json', json.dumps(crates, indent=1).encode() + b'\n'))
             component = {
                 'application': app, 'version': f'{version}+{c["commit"][:12]}', 'engine_revision': c['commit'],

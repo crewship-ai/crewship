@@ -190,7 +190,7 @@ func (m *craftNativeAgentManager) checkOriginalGrant(ctx context.Context, tx *sq
 		return errCraftNativeAgentDenied
 	}
 	proof, err := m.human.pageAuthority(ctx, tx, g.Source, g.Scope, true)
-	if err != nil || proof.application != g.Application || proof.workspaceEpoch != g.Proof.workspaceEpoch || proof.memberID != g.Proof.memberID || proof.memberRevision != g.Proof.memberRevision {
+	if err != nil || proof.application != g.Application || (g.Application == "wordcraft" && proof.pin != g.Proof.pin) || proof.workspaceEpoch != g.Proof.workspaceEpoch || proof.memberID != g.Proof.memberID || proof.memberRevision != g.Proof.memberRevision {
 		return errCraftNativeAgentDenied
 	}
 	// R71 §0.14/1 (#5235), rechecked on every agent write: ownership moving

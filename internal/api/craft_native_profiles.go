@@ -47,6 +47,21 @@ type CraftNativeDocumentProfile struct {
 	ChatSheetPreviewOnly bool
 }
 
+// craftNativeDocumentPin is the stored part of a document profile. The application
+// is read from the same row under Page authority.
+type craftNativeDocumentPin struct {
+	revision, sha256, bundle string
+}
+
+func (p craftNativeApplication) documentPin() craftNativeDocumentPin {
+	return craftNativeDocumentPin{p.Store.EngineRevision, p.Store.EngineSHA256, p.Store.EditorBundle}
+}
+
+type qualifiedNativeDocumentProfile struct {
+	application craftNativeApplication
+	profile     CraftNativeDocumentProfile
+}
+
 func craftNativePin(value string, size int) bool {
 	if len(value) != size || strings.ToLower(value) != value {
 		return false

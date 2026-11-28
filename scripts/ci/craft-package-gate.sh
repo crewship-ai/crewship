@@ -25,6 +25,20 @@ pins="$(tr -d '\n' < "$packages/catalog.txt")"
 [[ "$pins" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]] || { echo "bad catalog: $pins" >&2; exit 2; }
 for app in wordcraft gridcraft; do [ -f "$packages/crewship-craft-$app.craftpkg" ] || { echo "missing $app package" >&2; exit 2; }; done
 
+retained_source="$root/tools/craft-components/retained-word-source.json"
+retained_pin="$(jq -er .pin "$retained_source")"
+retained_bundle="$(jq -er .editor_bundle "$retained_source")"
+retained_archive=""
+word_profile=()
+if [[ ",$pins," != *",$retained_pin,"* ]]; then
+  : "${CRAFT_GATE_RETAINED_WORD_DIR:?a new Word package needs the signed retained Word release}"
+  python3 "$root/scripts/ci/verify-retained-word.py" "$CRAFT_GATE_RETAINED_WORD_DIR"
+  retained_archive="$(realpath "$CRAFT_GATE_RETAINED_WORD_DIR/crewship-craft-wordcraft.craftpkg")"
+  # Word editing is open while the new default remains uninstalled.
+  word_profile=(CREWSHIP_CRAFT_NATIVE_ENABLED=1 CREWSHIP_CRAFT_RETAINED_WORD_PIN="$retained_pin"
+    CREWSHIP_CRAFT_RETAINED_WORD_ARCHIVE="$retained_archive")
+fi
+
 state="$(mktemp -d "${TMPDIR:-/tmp}/craft-gate.XXXXXX")"
 server_pid=""
 cleanup() {
@@ -61,7 +75,7 @@ NEXTAUTH_SECRET="$(openssl rand -hex 32)" \
 ENCRYPTION_KEY="$(openssl rand -hex 32)" \
 CREWSHIP_CRAFT_COMPONENT_PINS="$pins" \
 CREWSHIP_CRAFT_COMPONENTS_DIR="$state/data/craft-components" \
-  "$binary" start >"$state/server.log" 2>&1 &
+  "${word_profile[@]}" "$binary" start >"$state/server.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 120); do
   curl -sf -o /dev/null "$origin/healthz" && break
@@ -83,12 +97,17 @@ cli_extra=()
 
 # The real install path: upload, verify against the pin, start without a restart.
 for app in word:wordcraft sheet:gridcraft; do
+  if [ -n "$retained_archive" ] && [ "$app" = word:wordcraft ]; then continue; fi
   run_crewship admin instance applications install "${app%%:*}" --file "$packages/crewship-craft-${app#*:}.craftpkg" --server "$origin"
-  run_crewship admin instance applications enable "${app%%:*}" --server "$origin"
+  if [ -z "$retained_archive" ]; then
+    run_crewship admin instance applications enable "${app%%:*}" --server "$origin"
+  fi
 done
 run_crewship admin instance applications --server "$origin" | tee "$output/applications.txt"
 
 cd "$root"
 CRAFT_GATE_ORIGIN="$origin" CRAFT_GATE_WORKSPACE="$workspace" CRAFT_GATE_LEGACY_DB="$state/data/crewship.db" \
+CRAFT_GATE_RETAINED_WORD_BUNDLE="${retained_archive:+$retained_bundle}" \
+CRAFT_GATE_NEW_WORD_PACKAGE="$packages/crewship-craft-wordcraft.craftpkg" \
 CRAFT_GATE_EMAIL=demo@crewship.ai CRAFT_GATE_PASSWORD=password123 CRAFT_GATE_OUTPUT="$output" \
   xvfb-run -a -s "-screen 0 1600x1200x24" pnpm exec playwright test --config=playwright.craft-packages.config.ts

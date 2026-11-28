@@ -32,14 +32,16 @@ See the [native Craft lease contract](/specs/craft-native) for admission and han
 
 ## Word and Sheet packages
 
-A release binary trusts exactly one package of Word and of Sheet: the manifest
-digests (pins) compiled into it. These variables work in a release binary too.
+A release binary carries a default package for Word and for Sheet. It may also
+trust a retained Word package for documents created with that exact profile.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_CRAFT_COMPONENTS_DIR` | `<data directory>/craft-components` | Where installed packages are kept (`craft_native.components_dir`). |
 | `CREWSHIP_CRAFT_COMPONENT_PINS` | the release's pins | `<application>=<version>=<manifest sha256>`, comma separated (`craft_native.component_pins`). **Replaces** the release's pins: Crewship then installs and runs the packages these pins name, including their engine and the editor code served to browsers. |
 | `CREWSHIP_CRAFT_COMPONENT_URL` | the release's download page | Where packages are downloaded from (`craft_native.component_url`), for a mirror. https, or http only to this machine. It does not change what is trusted: every package must still match a pin. |
+| `CREWSHIP_CRAFT_RETAINED_WORD_PIN` | the release's previous Word pin, when applicable | A second trusted Word package in the form `wordcraft=<version>=<manifest sha256>` (`craft_native.retained_word_pin`). Use `off` to revoke the retained package on restart. A custom default catalog requires an explicit retained pin. |
+| `CREWSHIP_CRAFT_RETAINED_WORD_ARCHIVE` | the installed package in the component store | An absolute path to a local Word `.craftpkg` (`craft_native.retained_word_archive`). Startup verifies the archive against the retained pin before installing it. Use this for offline upgrades and restores. |
 
 Setting `CREWSHIP_CRAFT_COMPONENT_PINS` is an operator's authority, of the same
 weight as choosing which binary to run: whoever can set the server's

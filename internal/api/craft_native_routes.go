@@ -12,11 +12,14 @@ import (
 // CraftNativeHTTPConfig is trusted startup policy for the separate native profile.
 // Its zero value keeps the profile and every lease mutation unavailable.
 type CraftNativeHTTPConfig struct {
-	Enabled       bool
-	Profiles      map[string]CraftNativeDocumentProfile
-	AgentsEnabled bool
-	AgentApply    CraftNativeAgentApply
-	AgentInspect  CraftNativeAgentInspect
+	Enabled  bool
+	Profiles map[string]CraftNativeDocumentProfile
+	// RetainedWordProfiles serve existing documents without changing their pins.
+	RetainedWordProfiles     []CraftNativeDocumentProfile
+	RequireWordCompatibility bool
+	AgentsEnabled            bool
+	AgentApply               CraftNativeAgentApply
+	AgentInspect             CraftNativeAgentInspect
 	// SheetComputed records a Sheet document the server's own engine wrote
 	// with every value recalculated (a finished import), so the engine session
 	// that later opens exactly those bytes keeps their values. Nil does nothing.
@@ -47,6 +50,7 @@ func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
 		profiles[key] = profile
 	}
 	c.Profiles = profiles
+	c.RetainedWordProfiles = append([]CraftNativeDocumentProfile(nil), c.RetainedWordProfiles...)
 	components := make(map[string]craftapps.Component, len(c.Components))
 	for key, component := range c.Components {
 		components[key] = component
@@ -95,6 +99,20 @@ func (r *Router) registerCraftNativeRoutes() {
 	}
 	d.computed = r.craftNativeHTTPConfig.SheetComputed
 	d.trusted = r.craftNativeHTTPConfig.SheetTrusted
+	d.requireWordCompatibility = r.craftNativeHTTPConfig.RequireWordCompatibility
+	for _, p := range r.craftNativeHTTPConfig.RetainedWordProfiles {
+		if p.Application != "wordcraft" || !p.Bundled || p.CompatEditors != "" {
+			r.logger.Error("retained WordCraft profile refused")
+			continue
+		}
+		apps, profiles, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{"wordcraft": p}, nil)
+		if err != nil {
+			r.logger.Error("retained WordCraft profile unavailable", "error", err)
+			continue
+		}
+		app := apps["wordcraft"]
+		d.retainedWord[app.documentPin()] = qualifiedNativeDocumentProfile{application: app, profile: profiles["wordcraft"]}
+	}
 	r.craftNativeDocuments = d
 	m.agents = newCraftNativeAgentManager(m, d, r.craftNativeHTTPConfig)
 	_ = m.agents.start(r.webhookHandler)

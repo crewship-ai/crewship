@@ -63,11 +63,12 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		craftNativeHTTPError(w, err)
 		return
 	}
-	profile, ok := d.application(proof.application)
-	if !ok || profile.Store.Application != proof.application {
-		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
+	qualified, ok := d.resolveDocument(proof.application, proof.pin)
+	if !ok {
+		craftNativeDocumentError(w, missingNativeDocumentProfile(proof.application))
 		return
 	}
+	profile := qualified.application
 	cfg := profile.Store
 	cfg.Enabled = true
 	cfg.Leases = h.leases
@@ -81,7 +82,7 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return mooring.EditLeasePrincipal{}, err
 		}
-		if current.application != proof.application || current.workspaceEpoch != proof.workspaceEpoch || current.memberID != proof.memberID || current.memberRevision != proof.memberRevision || current.record == nil || current.record.ID != rec.ID {
+		if current.application != proof.application || (proof.application == "wordcraft" && current.pin != proof.pin) || current.workspaceEpoch != proof.workspaceEpoch || current.memberID != proof.memberID || current.memberRevision != proof.memberRevision || current.record == nil || current.record.ID != rec.ID {
 			return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 		}
 		// The audit below decides on the custodian of this transaction's read.

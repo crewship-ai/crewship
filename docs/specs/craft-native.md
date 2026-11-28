@@ -97,6 +97,17 @@ Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
 Ordinary authentication and workspace membership remain required.
 
+An existing Word document selects its profile from its stored application,
+engine revision, engine SHA-256 and editor bundle, after Page authorization.
+Changing the default chooses a profile for subsequent creations. The server
+requires a qualified profile for each stored Word document before allowing new
+Word creations during a configured compatibility upgrade. A restored document
+whose package is unavailable keeps its original bytes, history and shared pin.
+Configure the retained pin and a local archive before an offline upgrade or
+restore. To roll back the default while continuing to serve newly created
+documents, use a binary that supports both profiles and keep the newer package
+trusted as the retained profile.
+
 ## Routes
 
 Authentication: ordinary human authentication and current workspace/Page access

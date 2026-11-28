@@ -45,6 +45,19 @@ func (s Store) Open(pin Pin) (*Installed, error) {
 	return &Installed{Pin: pin, Toolchain: m.Toolchain, Component: m.Component, Dir: dir, files: os.DirFS(dir)}, nil
 }
 
+// OpenVerified checks the manifest and every installed file before an upgrade
+// relies on this package for compatibility.
+func (s Store) OpenVerified(pin Pin) (*Installed, error) {
+	inst, err := s.Open(pin)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyAll(inst); err != nil {
+		return nil, err
+	}
+	return inst, nil
+}
+
 // Sweep removes what an interrupted download or installation left in the
 // store root (.download-* files, .staging-* directories). Installed packages
 // are never touched. Call it at startup, before any installation runs.

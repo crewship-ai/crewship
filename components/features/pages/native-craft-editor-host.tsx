@@ -15,7 +15,7 @@ import {apiFetch} from "@/lib/api-fetch"
 import {NativeCraftAgentStart} from "./native-craft-agent-start"
 import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
-import {createNativeDocumentClient,LegacyWorkbookError,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
+import {createNativeDocumentClient,LegacyWorkbookError,WordProfileUnavailableError,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
 import {createGridcraftNativePort} from "@/lib/mooring/gridcraft-native-port"
 import type {GridcraftOpened} from "@/lib/mooring/gridcraft-port"
@@ -1415,6 +1415,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    void loadProposals();proposalWatch=setInterval(()=>{if(viewNow.can_edit===true)void loadProposals()},5000)
   })().catch(cause=>{
    if(dead)return
+   if(cause instanceof WordProfileUnavailableError){
+    stop('This Word document requires a WordCraft package that is unavailable on this server.')
+    return
+   }
    if(cause instanceof LegacyWorkbookError){
     setLegacySource(true)
     stop(cause.code==='legacy_workbook_fidelity'

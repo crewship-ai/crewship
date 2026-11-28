@@ -1,17 +1,1250 @@
+diff --git a/apps/wordcraft-cli/src/main.rs b/apps/wordcraft-cli/src/main.rs
+index fe14ef4a09809ba48dbb2bee617d29b5d5af4c98..49a73b7567b6c95d301e98396d4e09349ae549ab 100644
+--- a/apps/wordcraft-cli/src/main.rs
++++ b/apps/wordcraft-cli/src/main.rs
+@@ -204,7 +204,13 @@ fn session(doc: wordcraft_doc::Document) -> Session {
+
+ /// The system region, read as the app reads it (locale variables, else the platform's locale).
+ fn system_region() -> wordcraft_engine::Region {
+-    wordcraft_engine::Region::from_locale_vars(|name| std::env::var(name).ok(), sys_locale::get_locale)
++    // sys-locale's JS backend probes a browser even on wasm32-wasip1.
++    // WASI can use locale variables and otherwise keeps the region default.
++    #[cfg(target_os = "wasi")]
++    let platform_locale = || None;
++    #[cfg(not(target_os = "wasi"))]
++    let platform_locale = sys_locale::get_locale;
++    wordcraft_engine::Region::from_locale_vars(|name| std::env::var(name).ok(), platform_locale)
+ }
+
+ /// The body text for `text`: the plain-text export, so list items keep their bullet or number label.
+@@ -1055,6 +1061,7 @@ fn main() -> ExitCode {
+     }
+     // Language packs installed in the suite's font store are used; `proof.installPack` installs
+     // only while the person has turned downloading on in the app.
++    #[cfg(not(target_arch = "wasm32"))]
+     wordcraft_engine::packs::use_font_store(false);
+     if let Some(source) = wordcraft_engine::packs::index_override() {
+         eprintln!("wordcraft-cli: Language packs come from a test source: {source}");
+diff --git a/apps/wordcraft-web/Cargo.toml b/apps/wordcraft-web/Cargo.toml
+index 78cbf5aa4ed96a71bf7c8a5b587290d039c46ebf..41532f3a6eddcbeee33f6f754427e2d8ba58fce9 100644
+--- a/apps/wordcraft-web/Cargo.toml
++++ b/apps/wordcraft-web/Cargo.toml
+@@ -32,7 +32,7 @@ web-time = "1.1"
+ wasm-bindgen = "0.2"
+ wasm-bindgen-futures = "0.4"
+ js-sys = "0.3"
+-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Blob", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MessageEvent", "UrlSearchParams", "CustomEvent", "CustomEventInit"] }
++web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Blob", "Location", "CssStyleDeclaration", "Event", "EventTarget", "BeforeUnloadEvent", "ClipboardEvent", "DataTransfer", "FileList", "File", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode", "MessageEvent", "MessagePort", "Url", "UrlSearchParams", "CustomEvent", "CustomEventInit"] }
+
+ [dev-dependencies]
+ # The in-memory settings files the host-author trial runs over.
+diff --git a/apps/wordcraft-web/src/capability.rs b/apps/wordcraft-web/src/capability.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..8063023842a1df9c8b76dcb2adfb3c4b61427411
+--- /dev/null
++++ b/apps/wordcraft-web/src/capability.rs
+@@ -0,0 +1,146 @@
++//! Control-only handshake and size bounds for an opt-in private native port.
++
++/// Native documents use the host's version limit, independently of small control messages.
++pub const MAX_NATIVE_BYTES: usize = 32 * 1024 * 1024;
++
++pub fn native_len_ok(length: usize) -> bool {
++    length > 0 && length <= MAX_NATIVE_BYTES
++}
++
++/// The immutable bundle comes from the fetched path, never a query supplied by the parent.
++pub fn bundle_from_path(path: &str) -> Option<&str> {
++    let path = path.strip_prefix("/_editor").or_else(|| path.strip_prefix("/workbook-editor")).unwrap_or(path);
++    let bundle = path.strip_prefix("/b/")?.strip_suffix("/index.html")?;
++    (bundle.len() == 64 && bundle.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))).then_some(bundle)
++}
++
++/// `protocol` and `origin` are obtained from the browser's URL parser. Require the supplied
++/// string to already be the canonical HTTP(S) origin, without path, credentials or query.
++pub fn canonical_origin(input: &str, protocol: &str, origin: &str) -> bool {
++    matches!(protocol, "http:" | "https:") && input == origin
++}
++
++pub fn connect_matches(value: &serde_json::Value, expected_bundle: &str, ports: usize) -> bool {
++    let Some(fields) = value.as_object() else { return false };
++    ports == 1
++        && fields.len() == 3
++        && value.get("type").and_then(serde_json::Value::as_str) == Some("wordcraft:connect")
++        && value.get("protocol").and_then(serde_json::Value::as_u64) == Some(1)
++        && value.get("bundle").and_then(serde_json::Value::as_str) == Some(expected_bundle)
++}
++
++/// Read JS byteLength as a Number before any u32 conversion: large buffers must not wrap.
++pub fn native_js_len_ok(length: f64) -> bool {
++    length.is_finite() && length.fract() == 0. && length > 0. && length <= MAX_NATIVE_BYTES as f64
++}
++
++/// A private-port access request is a small control frame, independent of document bytes.
++pub fn access_request(value: &serde_json::Value) -> Option<(String, bool)> {
++    let object = value.as_object()?;
++    if object.len() != 3 || value.get("type")?.as_str()? != "wordcraft:set-access" {
++        return None;
++    }
++    let id = value.get("requestId")?.as_str()?;
++    if id.is_empty() || id.len() > 128 {
++        return None;
++    }
++    Some((id.into(), value.get("readOnly")?.as_bool()?))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use serde_json::json;
++    const DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
++
++    #[test]
++    fn bundle_is_taken_only_from_a_qualified_path() {
++        assert_eq!(bundle_from_path(&format!("/b/{DIGEST}/index.html")), Some(DIGEST));
++        assert_eq!(bundle_from_path(&format!("/workbook-editor/b/{DIGEST}/index.html")), Some(DIGEST));
++        for path in [
++            format!("/other/b/{DIGEST}/index.html"),
++            format!("/b/{DIGEST}/other.html"),
++            format!("/b/{DIGEST}/index.html/"),
++            format!("/b/{}/index.html", DIGEST.to_uppercase()),
++            format!("/b/{DIGEST}/../index.html"),
++        ] {
++            assert_eq!(bundle_from_path(&path), None, "{path}");
++        }
++    }
++    #[test]
++    fn connect_has_exactly_three_keys_matching_one_bundle_and_one_port() {
++        let good = json!({"type":"wordcraft:connect","protocol":1,"bundle":DIGEST});
++        assert!(connect_matches(&good, DIGEST, 1));
++        assert!(!connect_matches(&good, DIGEST, 0));
++        assert!(!connect_matches(&good, DIGEST, 2));
++        assert!(!connect_matches(&good, &"a".repeat(64), 1));
++        for bad in [
++            json!({"type":"wordcraft:connect","protocol":1,"bundle":DIGEST,"extra":true}),
++            json!({"type":"wordcraft:connect","protocol":2,"bundle":DIGEST}),
++            json!({"type":"wordcraft:open","protocol":1,"bundle":DIGEST}),
++            json!({"type":"wordcraft:connect","protocol":1}),
++            json!([]),
++        ] {
++            assert!(!connect_matches(&bad, DIGEST, 1));
++        }
++    }
++    #[test]
++    fn parent_origin_must_be_the_exact_canonical_http_origin() {
++        assert!(canonical_origin("https://host.test", "https:", "https://host.test"));
++        assert!(canonical_origin("http://127.0.0.1:8090", "http:", "http://127.0.0.1:8090"));
++        for (raw, protocol, parsed) in [
++            ("null", "file:", "null"),
++            ("https://host.test/", "https:", "https://host.test"),
++            ("https://host.test/path", "https:", "https://host.test"),
++            ("https://user@host.test", "https:", "https://host.test"),
++            ("HTTPS://HOST.TEST", "https:", "https://host.test"),
++            ("ftp://host.test", "ftp:", "ftp://host.test"),
++        ] {
++            assert!(!canonical_origin(raw, protocol, parsed));
++        }
++    }
++    #[test]
++    fn native_binary_limit_accepts_more_than_four_mib_but_never_more_than_32() {
++        assert!(!native_len_ok(0));
++        assert!(native_len_ok(4 * 1024 * 1024 + 1));
++        assert!(native_len_ok(32 * 1024 * 1024));
++        assert!(!native_len_ok(32 * 1024 * 1024 + 1));
++    }
++    #[test]
++    fn qualified_same_host_editor_prefix_is_accepted() {
++        assert_eq!(bundle_from_path(&format!("/_editor/b/{DIGEST}/index.html")), Some(DIGEST));
++    }
++
++    #[test]
++    fn native_js_buffer_lengths_do_not_wrap_at_four_gib() {
++        assert!(native_js_len_ok(4_194_305.));
++        assert!(native_js_len_ok(33_554_432.));
++        for length in [0., -1., 0.5, f64::NAN, f64::INFINITY, 33_554_433., 4_294_967_297.] {
++            assert!(!native_js_len_ok(length), "{length}");
++        }
++    }
++}
++
++#[cfg(test)]
++mod access_tests {
++    use super::*;
++    use serde_json::json;
++
++    #[test]
++    fn native_access_control_requires_exact_keys_bounded_utf8_id_and_boolean() {
++        assert_eq!(access_request(&json!({"type":"wordcraft:set-access","requestId":"revoke","readOnly":true})), Some(("revoke".into(), true)));
++        assert_eq!(access_request(&json!({"type":"wordcraft:set-access","requestId":"allow","readOnly":false})), Some(("allow".into(), false)));
++        for bad in [
++            json!({"type":"wordcraft:set-access","requestId":"","readOnly":true}),
++            json!({"type":"wordcraft:set-access","requestId":"x".repeat(129),"readOnly":true}),
++            json!({"type":"wordcraft:set-access","requestId":"ž".repeat(65),"readOnly":true}),
++            json!({"type":"wordcraft:set-access","requestId":"x","readOnly":"true"}),
++            json!({"type":"wordcraft:set-access","requestId":"x","readOnly":null}),
++            json!({"type":"wordcraft:set-access","requestId":"x","readOnly":true,"extra":true}),
++            json!({"type":"wordcraft:open","requestId":"x","readOnly":true}),
++            json!([]),
++        ] {
++            assert_eq!(access_request(&bad), None, "{bad}");
++        }
++    }
++}
+diff --git a/apps/wordcraft-web/src/main.rs b/apps/wordcraft-web/src/main.rs
+index 11720849b7325da0a4d86ae1dc4277ccb58e3526..b52fc6cefea0fc0e9f93be83877619181e392f17 100644
+--- a/apps/wordcraft-web/src/main.rs
++++ b/apps/wordcraft-web/src/main.rs
+@@ -16,6 +16,15 @@
+ //! either host mode.
+ #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
++// The private Crewship protocol has native unit tests as well as browser coverage.
++#[cfg(any(target_arch = "wasm32", test))]
++mod capability;
++#[cfg(any(target_arch = "wasm32", test))]
++mod managed;
++#[cfg(any(target_arch = "wasm32", test))]
++mod snapshot;
++#[cfg(target_arch = "wasm32")]
++mod private_host;
+ #[cfg(any(target_arch = "wasm32", test))]
+ mod prefs;
+
+diff --git a/apps/wordcraft-web/src/managed.rs b/apps/wordcraft-web/src/managed.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca33f4b2e78290ed0269f1abf87fa096b24539ec
+--- /dev/null
++++ b/apps/wordcraft-web/src/managed.rs
+@@ -0,0 +1,227 @@
++//! Bounded native snapshot acknowledgements for opt-in host-managed saves.
++
++use std::collections::VecDeque;
++
++const MAX_AUTOMATIC_ALIASES: usize = 16;
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct SnapshotKey {
++    pub request_id: String,
++    pub document: String,
++    pub revision: String,
++}
++
++struct ManualSave {
++    request_id: String,
++    document: String,
++    ticket: u64,
++    snapshot: Option<SnapshotKey>,
++}
++
++#[derive(Debug, PartialEq, Eq)]
++pub struct Completion {
++    pub ticket: Option<u64>,
++    pub mark_saved: bool,
++}
++
++/// Keep a manual save independent of a bounded cohort of identical automatic snapshots.
++/// Any known cohort alias can settle that exact revision; newer edits still remain dirty.
++#[derive(Default)]
++pub struct ManagedSaves {
++    manual: Option<ManualSave>,
++    automatic: VecDeque<SnapshotKey>,
++}
++
++impl ManagedSaves {
++    pub fn pending(&self) -> bool {
++        self.manual.is_some()
++    }
++
++    pub fn start(&mut self, document: &str, ticket: u64) -> Result<String, String> {
++        if self.pending() {
++            return Err("native save already pending".into());
++        }
++        let request_id = format!("native-save-{ticket}");
++        self.manual = Some(ManualSave { request_id: request_id.clone(), document: document.into(), ticket, snapshot: None });
++        Ok(request_id)
++    }
++
++    pub fn check_export(&self, snapshot: &SnapshotKey) -> Result<(), String> {
++        if let Some(manual) = &self.manual
++            && manual.request_id == snapshot.request_id
++            && (manual.document != snapshot.document || manual.snapshot.as_ref().is_some_and(|old| old != snapshot))
++        {
++            return Err("manual save snapshot already bound to another document or revision".into());
++        }
++        Ok(())
++    }
++
++    /// Call only after the native snapshot was validated and successfully posted to the host.
++    pub fn exported(&mut self, snapshot: SnapshotKey) -> Result<(), String> {
++        self.check_export(&snapshot)?;
++        if let Some(manual) = &mut self.manual
++            && manual.request_id == snapshot.request_id
++        {
++            manual.snapshot = Some(snapshot);
++        } else {
++            if self.automatic.back().is_none_or(|old| old.document != snapshot.document || old.revision != snapshot.revision) {
++                self.automatic.clear();
++            }
++            if !self.automatic.contains(&snapshot) {
++                if self.automatic.len() >= MAX_AUTOMATIC_ALIASES {
++                    self.automatic.pop_front();
++                }
++                self.automatic.push_back(snapshot);
++            }
++        }
++        Ok(())
++    }
++
++    pub fn knows(&self, snapshot: &SnapshotKey) -> bool {
++        self.manual.as_ref().and_then(|m| m.snapshot.as_ref()) == Some(snapshot) || self.automatic.contains(snapshot)
++    }
++
++    pub fn knows_failure(&self, request_id: &str) -> bool {
++        self.manual.as_ref().is_some_and(|m| m.request_id == request_id)
++    }
++
++    pub fn acknowledge(&mut self, snapshot: &SnapshotKey, document: &str, revision: &str) -> Option<Completion> {
++        let ticket = if self.manual.as_ref().and_then(|m| m.snapshot.as_ref()) == Some(snapshot) {
++            self.manual.take().map(|m| m.ticket)
++        } else if self.automatic.contains(snapshot) {
++            self.automatic.clear();
++            None
++        } else {
++            return None;
++        };
++        Some(Completion { ticket, mark_saved: snapshot.document == document && snapshot.revision == revision })
++    }
++
++    pub fn fail(&mut self, request_id: &str) -> Option<u64> {
++        if self.knows_failure(request_id) { self.manual.take().map(|m| m.ticket) } else { None }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn key(id: &str, revision: &str) -> SnapshotKey {
++        SnapshotKey { request_id: id.into(), document: "document".into(), revision: revision.into() }
++    }
++    #[test]
++    fn stale_manual_ack_settles_its_ticket_after_a_newer_autosnapshot() {
++        let mut saves = ManagedSaves::default();
++        let id = saves.start("document", 7).unwrap();
++        let manual = key(&id, "r1");
++        saves.exported(manual.clone()).unwrap();
++        saves.exported(key("auto", "r2")).unwrap();
++        assert_eq!(saves.acknowledge(&manual, "document", "r2"), Some(Completion { ticket: Some(7), mark_saved: false }));
++        assert!(saves.start("document", 8).is_ok());
++    }
++    #[test]
++    fn only_an_exported_exact_document_and_revision_can_mark_saved() {
++        let mut saves = ManagedSaves::default();
++        let id = saves.start("document", 7).unwrap();
++        let manual = key(&id, "r1");
++        assert!(!saves.knows(&manual));
++        assert_eq!(saves.acknowledge(&manual, "document", "r1"), None);
++        saves.exported(manual.clone()).unwrap();
++        assert!(saves.knows(&manual));
++        let mut wrong = manual.clone();
++        wrong.document = "other".into();
++        assert_eq!(saves.acknowledge(&wrong, "document", "r1"), None);
++        assert_eq!(saves.acknowledge(&key("unknown", "r1"), "document", "r1"), None);
++        assert!(saves.start("document", 8).is_err());
++        assert_eq!(saves.acknowledge(&manual, "document", "r1"), Some(Completion { ticket: Some(7), mark_saved: true }));
++        assert_eq!(saves.acknowledge(&manual, "document", "r1"), None);
++    }
++    #[test]
++    fn changed_draft_or_document_keeps_dirty_but_completes_the_known_ticket() {
++        for (document, revision) in [("document", "r1:draft2"), ("replacement", "r1")] {
++            let mut saves = ManagedSaves::default();
++            let id = saves.start("document", 4).unwrap();
++            let snapshot = key(&id, "r1");
++            saves.exported(snapshot.clone()).unwrap();
++            assert_eq!(saves.acknowledge(&snapshot, document, revision), Some(Completion { ticket: Some(4), mark_saved: false }));
++        }
++    }
++    #[test]
++    fn manual_snapshot_cannot_be_overwritten_and_unknown_failure_cannot_consume_it() {
++        let mut saves = ManagedSaves::default();
++        let id = saves.start("document", 4).unwrap();
++        saves.exported(key(&id, "r1")).unwrap();
++        assert!(saves.exported(key(&id, "r2")).is_err());
++        let mut wrong = key(&id, "r1");
++        wrong.document = "replacement".into();
++        assert!(saves.exported(wrong).is_err());
++        assert_eq!(saves.fail("unknown"), None);
++        assert_eq!(saves.fail(&id), Some(4));
++        assert_eq!(saves.fail(&id), None);
++        assert!(saves.start("document", 5).is_ok());
++    }
++    #[test]
++    fn autosnapshot_ack_has_no_manual_ticket_and_requires_exact_current_token() {
++        let mut saves = ManagedSaves::default();
++        let snapshot = key("auto", "r1");
++        saves.exported(snapshot.clone()).unwrap();
++        assert_eq!(saves.acknowledge(&snapshot, "document", "r2"), Some(Completion { ticket: None, mark_saved: false }));
++        saves.exported(snapshot.clone()).unwrap();
++        assert_eq!(saves.acknowledge(&snapshot, "document", "r1"), Some(Completion { ticket: None, mark_saved: true }));
++    }
++    #[test]
++    fn identical_automatic_exports_keep_both_known_aliases_until_first_ack() {
++        let mut saves = ManagedSaves::default();
++        let a = key("auto-a", "r1");
++        let b = key("auto-b", "r1");
++        saves.exported(a.clone()).unwrap();
++        saves.exported(b.clone()).unwrap();
++        assert!(saves.knows(&a));
++        assert!(saves.knows(&b));
++        assert_eq!(saves.acknowledge(&key("unknown", "r1"), "document", "r1"), None);
++        assert_eq!(saves.acknowledge(&a, "document", "r1"), Some(Completion { ticket: None, mark_saved: true }));
++        assert_eq!(saves.acknowledge(&b, "document", "r1"), None);
++    }
++    #[test]
++    fn identical_automatic_alias_ack_cannot_clean_newer_edit_draft_or_document() {
++        for (document, revision) in [("document", "r2"), ("document", "r1:draft2"), ("other", "r1")] {
++            let mut saves = ManagedSaves::default();
++            let a = key("auto-a", "r1");
++            saves.exported(a.clone()).unwrap();
++            saves.exported(key("auto-b", "r1")).unwrap();
++            assert_eq!(saves.acknowledge(&a, document, revision), Some(Completion { ticket: None, mark_saved: false }));
++        }
++    }
++    #[test]
++    fn automatic_alias_cohort_is_bounded_and_changes_with_document_or_revision() {
++        let mut saves = ManagedSaves::default();
++        for i in 0..17 {
++            saves.exported(key(&format!("auto-{i}"), "r1")).unwrap();
++        }
++        assert!(!saves.knows(&key("auto-0", "r1")));
++        assert!(saves.knows(&key("auto-1", "r1")));
++        assert!(saves.knows(&key("auto-16", "r1")));
++        let fresh = key("fresh", "r2");
++        saves.exported(fresh.clone()).unwrap();
++        assert!(!saves.knows(&key("auto-16", "r1")));
++        assert!(saves.knows(&fresh));
++        let mut other = key("other-doc", "r2");
++        other.document = "replacement".into();
++        saves.exported(other.clone()).unwrap();
++        assert!(!saves.knows(&fresh));
++        assert!(saves.knows(&other));
++    }
++    #[test]
++    fn automatic_alias_ack_does_not_consume_a_manual_ticket() {
++        let mut saves = ManagedSaves::default();
++        let id = saves.start("document", 7).unwrap();
++        let manual = key(&id, "r1");
++        saves.exported(manual.clone()).unwrap();
++        let a = key("auto-a", "r1");
++        saves.exported(a.clone()).unwrap();
++        saves.exported(key("auto-b", "r1")).unwrap();
++        assert_eq!(saves.acknowledge(&a, "document", "r1"), Some(Completion { ticket: None, mark_saved: true }));
++        assert!(saves.pending());
++        assert_eq!(saves.acknowledge(&manual, "document", "r1"), Some(Completion { ticket: Some(7), mark_saved: true }));
++        assert!(!saves.pending());
++    }
++}
+diff --git a/apps/wordcraft-web/src/private_host.rs b/apps/wordcraft-web/src/private_host.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..51bed730735790c4f58a0f26de55a05545a2286b
+--- /dev/null
++++ b/apps/wordcraft-web/src/private_host.rs
+@@ -0,0 +1,476 @@
++//! Crewship's private MessagePort host. The upstream same-origin and in-page hosts use host.rs.
++use std::cell::{Cell, RefCell};
++use std::rc::Rc;
++
++use crate::managed::{ManagedSaves, SnapshotKey};
++use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++use wasm_bindgen::closure::Closure;
++use wordcraft_ui_egui::{Services, WordApp};
++
++#[derive(Clone, PartialEq, Eq)]
++enum Acknowledgement {
++    Saved(SnapshotKey),
++    Failed(String, String),
++}
++
++struct PendingOpen {
++    request_id: String,
++    name: String,
++    bytes: Vec<u8>,
++}
++
++#[derive(Clone)]
++struct PrivatePort {
++    bundle: String,
++    endpoint: Rc<RefCell<Option<web_sys::MessagePort>>>,
++    hello_sent: Rc<Cell<bool>>,
++    ready: Rc<Cell<bool>>,
++}
++
++#[derive(Clone)]
++pub struct Bridge {
++    port: PrivatePort,
++    next_save: Rc<Cell<u64>>,
++    managed_saves: Rc<RefCell<ManagedSaves>>,
++    acknowledgements: Rc<RefCell<Vec<Acknowledgement>>>,
++    window: web_sys::Window,
++    parent: web_sys::Window,
++    origin: String,
++    access: Rc<RefCell<Option<(String, bool)>>>,
++    snapshot: Rc<RefCell<Option<String>>>,
++    open: Rc<RefCell<Option<PendingOpen>>>,
++    observed: Rc<RefCell<crate::snapshot::RevisionObserver>>,
++}
++
++impl Bridge {
++    /// Trust the configured parent origin and the digest in the iframe's bundle path.
++    pub fn new_port(parent_origin: &str) -> Option<Self> {
++        let window = web_sys::window()?;
++        let parent = window.parent().ok().flatten()?;
++        if js_sys::Object::is(&parent, &window) {
++            return None;
++        }
++        let parsed = web_sys::Url::new(parent_origin).ok()?;
++        if !crate::capability::canonical_origin(parent_origin, &parsed.protocol(), &parsed.origin()) {
++            return None;
++        }
++        let path = window.location().pathname().ok()?;
++        let bundle = crate::capability::bundle_from_path(&path)?.to_owned();
++        Some(Self {
++            port: PrivatePort { bundle, endpoint: Rc::default(), hello_sent: Rc::default(), ready: Rc::default() },
++            next_save: Rc::default(),
++            managed_saves: Rc::default(),
++            acknowledgements: Rc::default(),
++            window,
++            parent,
++            origin: parent_origin.into(),
++            access: Rc::default(),
++            snapshot: Rc::default(),
++            open: Rc::default(),
++            observed: Rc::default(),
++        })
++    }
++
++    pub fn connect(&self, services: &mut Services, ctx: egui::Context) {
++        self.listen(ctx);
++        services.host_document_fixed = true;
++        services.print = None;
++        services.load_system_fonts = None;
++        let bridge = self.clone();
++        services.host_export = Some(Box::new(move |name, bytes| bridge.post_save(name, bytes)));
++        let bridge = self.clone();
++        services.host_save_pending = Some(Box::new(move || bridge.managed_saves.borrow().pending()));
++        let bridge = self.clone();
++        services.host_save_request = Some(Box::new(move |session, draft_revision| {
++            let ticket = bridge.next_save.get().wrapping_add(1);
++            bridge.next_save.set(ticket);
++            let document = crate::snapshot::document(session);
++            let revision = crate::snapshot::revision(session, draft_revision);
++            let request_id = bridge.managed_saves.borrow_mut().start(&document, ticket)?;
++            if bridge.send(&[
++                ("type", "wordcraft:save-request".into()),
++                ("requestId", request_id.as_str().into()),
++                ("document", document.as_str().into()),
++                ("revision", revision.as_str().into()),
++            ]) {
++                Ok(())
++            } else {
++                bridge.managed_saves.borrow_mut().fail(&request_id);
++                Err("couldn't request native save".into())
++            }
++        }));
++        let bridge = self.clone();
++        let reported: Rc<Cell<Option<bool>>> = Rc::default();
++        services.on_dirty = Some(Box::new(move |dirty: bool| {
++            if reported.get() != Some(dirty) && bridge.send(&[("type", "wordcraft:dirty".into()), ("dirty", dirty.into())]) {
++                reported.set(Some(dirty));
++            }
++        }));
++    }
++
++    pub fn post_ready(&self) {
++        self.port.ready.set(true);
++        self.send(&[
++            ("type", "wordcraft:ready".into()),
++            ("version", env!("CARGO_PKG_VERSION").into()),
++            ("accessProtocol", 1.into()),
++            ("readOnly", true.into()),
++        ]);
++    }
++
++    /// The app couldn't start (no WebGPU or WebGL2, for example): let the parent say so.
++    pub fn post_failed(&self, error: &str) {
++        self.send(&[("type", "wordcraft:failed".into()), ("error", error.into())]);
++    }
++
++    fn post_save(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
++        if !crate::capability::native_len_ok(bytes.len()) {
++            return Err("native file must be nonempty and at most 32 MiB".into());
++        }
++        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
++        let buffer = js_sys::Uint8Array::from(bytes).buffer();
++        let message = message(&[
++            ("type", "wordcraft:save".into()),
++            ("name", name.as_str().into()),
++            ("saveAs", false.into()),
++            ("bytes", buffer.clone().into()),
++        ])
++        .ok_or_else(|| "couldn't build the message".to_string())?;
++        self.transfer(&message, &buffer)
++    }
++
++    fn listen(&self, ctx: egui::Context) {
++        let snapshot = self.snapshot.clone();
++        let open = self.open.clone();
++        let bridge = self.clone();
++        let request_ctx = ctx.clone();
++        let receive: Rc<dyn Fn(JsValue)> = Rc::new(move |data: JsValue| {
++            if string(&data, "type").as_deref() == Some("wordcraft:set-access") {
++                let Some(object) = data.dyn_ref::<js_sys::Object>() else { return };
++                if js_sys::Object::keys(object).length() != 3 {
++                    return;
++                }
++                let Some(id) = bounded_string(&data, "requestId", 128) else { return };
++                let Some(value) = js_sys::Reflect::get(&data, &"readOnly".into()).ok().and_then(|v| v.as_bool()) else { return };
++                let Some(request) =
++                    crate::capability::access_request(&serde_json::json!({"type":"wordcraft:set-access","requestId":id,"readOnly":value}))
++                else {
++                    return;
++                };
++                let mut access = bridge.access.borrow_mut();
++                if access.is_some() {
++                    bridge.send(&[
++                        ("type", "wordcraft:access".into()),
++                        ("requestId", request.0.into()),
++                        ("error", "access request already pending".into()),
++                    ]);
++                    return;
++                }
++                *access = Some(request);
++                request_ctx.request_repaint();
++                return;
++            }
++            {
++                let kind = string(&data, "type");
++                let acknowledgement = match kind.as_deref() {
++                    Some("wordcraft:saved") => {
++                        let Some(request_id) = bounded_string(&data, "requestId", 128) else { return };
++                        let Some(document) = bounded_string(&data, "document", 128) else { return };
++                        let Some(revision) = bounded_string(&data, "revision", 128) else { return };
++                        let key = SnapshotKey { request_id, document, revision };
++                        if !bridge.managed_saves.borrow().knows(&key) {
++                            return;
++                        }
++                        Some(Acknowledgement::Saved(key))
++                    }
++                    Some("wordcraft:save-failed") => {
++                        let Some(id) = bounded_string(&data, "requestId", 128) else { return };
++                        if !bridge.managed_saves.borrow().knows_failure(&id) {
++                            return;
++                        }
++                        let Some(error) = bounded_string(&data, "error", 1024) else { return };
++                        Some(Acknowledgement::Failed(id, error))
++                    }
++                    _ => None,
++                };
++                if let Some(acknowledgement) = acknowledgement {
++                    let mut pending = bridge.acknowledgements.borrow_mut();
++                    let id = match &acknowledgement {
++                        Acknowledgement::Saved(key) => &key.request_id,
++                        Acknowledgement::Failed(id, _) => id,
++                    };
++                    let already_pending = pending.iter().any(|old| match old {
++                        Acknowledgement::Saved(key) => &key.request_id == id,
++                        Acknowledgement::Failed(old_id, _) => old_id == id,
++                    });
++                    if pending.len() < 2 && !already_pending {
++                        pending.push(acknowledgement);
++                        request_ctx.request_repaint();
++                    }
++                    return;
++                }
++            }
++            if string(&data, "type").as_deref() == Some("wordcraft:snapshot") {
++                let Some(id) = string(&data, "requestId").filter(|id| !id.is_empty() && id.len() <= 128) else { return };
++                if snapshot.borrow().is_some() {
++                    bridge.send(&[
++                        ("type", "wordcraft:snapshot-result".into()),
++                        ("requestId", id.into()),
++                        ("error", "snapshot already pending".into()),
++                    ]);
++                    return;
++                }
++                *snapshot.borrow_mut() = Some(id);
++                request_ctx.request_repaint();
++                return;
++            }
++            if string(&data, "type").as_deref() != Some("wordcraft:open") {
++                return;
++            }
++            let Some(request_id) = bounded_string(&data, "requestId", 128) else { return };
++            if open.borrow().is_some() {
++                bridge.post_open_error(&request_id, "open already pending");
++                return;
++            }
++            let name = string(&data, "name").filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "document.json".to_string());
++            let bytes = match bytes(&data, true) {
++                Ok(bytes) => bytes,
++                Err(error) => {
++                    bridge.post_open_error(&request_id, &error);
++                    return;
++                }
++            };
++            *open.borrow_mut() = Some(PendingOpen { request_id, name, bytes });
++            request_ctx.request_repaint();
++        });
++        self.listen_port(receive, ctx);
++    }
++
++    fn listen_port(&self, receive: Rc<dyn Fn(JsValue)>, ctx: egui::Context) {
++        let bridge = self.clone();
++        let on_connect = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
++            let state = &bridge.port;
++            if !state.hello_sent.get()
++                || state.endpoint.borrow().is_some()
++                || event.origin() != bridge.origin
++                || !event.source().is_some_and(|s| js_sys::Object::is(&s, &bridge.parent))
++            {
++                return;
++            }
++            let data = event.data();
++            let Some(object) = data.dyn_ref::<js_sys::Object>() else {
++                return;
++            };
++            if js_sys::Object::keys(object).length() != 3
++                || string(&data, "type").as_deref() != Some("wordcraft:connect")
++                || string(&data, "bundle").as_deref() != Some(state.bundle.as_str())
++                || js_sys::Reflect::get(&data, &"protocol".into()).ok().and_then(|v| v.as_f64()) != Some(1.)
++            {
++                return;
++            }
++            // Only three bounded primitive control fields can reach JSON.stringify; native
++            // document content is always binary and never passes through this conversion.
++            let valid = js_sys::JSON::stringify(&data)
++                .ok()
++                .and_then(|v| v.as_string())
++                .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
++                .is_some_and(|v| crate::capability::connect_matches(&v, &state.bundle, event.ports().length() as usize));
++            if !valid {
++                return;
++            }
++            let Ok(port) = event.ports().get(0).dyn_into::<web_sys::MessagePort>() else {
++                return;
++            };
++            let receive = receive.clone();
++            let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| receive(event.data()));
++            port.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
++            port.start();
++            *state.endpoint.borrow_mut() = Some(port);
++            on_message.forget();
++            if state.ready.get() {
++                bridge.post_ready();
++            }
++            ctx.request_repaint();
++        });
++        if self.window.add_event_listener_with_callback("message", on_connect.as_ref().unchecked_ref()).is_ok() {
++            on_connect.forget();
++            if self.window.document().is_some_and(|d| d.ready_state() == "complete") {
++                self.defer_hello();
++            } else {
++                let bridge = self.clone();
++                let on_load = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| bridge.defer_hello());
++                if self.window.add_event_listener_with_callback("load", on_load.as_ref().unchecked_ref()).is_ok() {
++                    on_load.forget();
++                }
++            }
++        }
++    }
++
++    fn defer_hello(&self) {
++        let bridge = self.clone();
++        let callback = Closure::<dyn FnMut()>::once(move || {
++            let port = &bridge.port;
++            if port.hello_sent.get() {
++                return;
++            }
++            let Some(value) = message(&[("type", "wordcraft:hello".into()), ("protocol", 1.into()), ("bundle", port.bundle.as_str().into())]) else {
++                return;
++            };
++            if bridge.parent.post_message(&value, &bridge.origin).is_ok() {
++                port.hello_sent.set(true);
++            }
++        });
++        // A task after child load also lets the parent's iframe load counter advance before
++        // its strict handshake verifier receives the hello.
++        if self.window.set_timeout_with_callback_and_timeout_and_arguments_0(callback.as_ref().unchecked_ref(), 0).is_ok() {
++            callback.forget();
++        }
++    }
++
++    /// Apply a queued host guard before any native input from this frame. Only then acknowledge
++    /// the request. This does not persist protection, flush drafts, or mark anything saved.
++    pub fn before_logic(&self, app: &mut WordApp) {
++        if let Some((request_id, value)) = self.access.borrow_mut().take() {
++            app.session.set_host_read_only(value);
++            self.send(&[("type", "wordcraft:access".into()), ("requestId", request_id.into()), ("readOnly", app.session.host_read_only().into())]);
++        }
++    }
++
++    /// Report native revisions independently of dirty state, then answer a pending native
++    /// snapshot request after the app has processed its inbox and commands. Pending comment/reply
++    /// drafts are committed through the same commands as Save. Neither is a save
++    /// acknowledgement; the host must confirm its own durable storage separately.
++    pub fn observe(&self, app: &mut WordApp, ctx: &egui::Context) {
++        // Never flush drafts on ACK. Compare the current token first: a known old manual save
++        // completes its ticket, but newer edits (including unblurred comment text) stay dirty.
++        for acknowledgement in std::mem::take(&mut *self.acknowledgements.borrow_mut()) {
++            match acknowledgement {
++                Acknowledgement::Saved(key) => {
++                    let document = crate::snapshot::document(&app.session);
++                    let revision = crate::snapshot::revision(&app.session, app.native_draft_revision());
++                    if let Some(completion) = self.managed_saves.borrow_mut().acknowledge(&key, &document, &revision) {
++                        if completion.mark_saved {
++                            app.session.dirty = false;
++                        }
++                        ctx.request_repaint();
++                    }
++                }
++                Acknowledgement::Failed(id, error) => {
++                    if self.managed_saves.borrow_mut().fail(&id).is_some() {
++                        app.status(error);
++                        ctx.request_repaint();
++                    }
++                }
++            }
++        }
++        if let Some(pending) = self.open.borrow_mut().take() {
++            match app.open_host_document(&pending.name, &pending.bytes) {
++                Ok(()) => {
++                    let document = crate::snapshot::document(&app.session);
++                    let revision = crate::snapshot::revision(&app.session, app.native_draft_revision());
++                    self.send(&[
++                        ("type", "wordcraft:opened".into()),
++                        ("requestId", pending.request_id.as_str().into()),
++                        ("document", document.as_str().into()),
++                        ("revision", revision.as_str().into()),
++                    ]);
++                }
++                Err(error) => self.post_open_error(&pending.request_id, &error),
++            }
++        }
++        let pending = self.snapshot.borrow_mut().take();
++        let prepared = if pending.is_some() { app.prepare_native_snapshot() } else { Ok(()) };
++        let session = &app.session;
++        let draft_revision = app.native_draft_revision();
++        let document = crate::snapshot::document(session);
++        let revision = crate::snapshot::revision(session, draft_revision);
++        if self.observed.borrow_mut().changed(session, draft_revision) {
++            self.send(&[("type", "wordcraft:changed".into()), ("document", document.as_str().into()), ("revision", revision.as_str().into())]);
++        }
++        let Some(id) = pending else { return };
++        let key = SnapshotKey { request_id: id.clone(), document: document.clone(), revision: revision.clone() };
++        let result = prepared
++            .and_then(|()| {
++                self.managed_saves.borrow().check_export(&key)?;
++                crate::snapshot::native_snapshot(session)
++            })
++            .and_then(|bytes| {
++                if !crate::capability::native_len_ok(bytes.len()) {
++                    return Err("native snapshot must be nonempty and at most 32 MiB".into());
++                }
++                let buffer = js_sys::Uint8Array::from(bytes.as_slice()).buffer();
++                let value = message(&[
++                    ("type", "wordcraft:snapshot-result".into()),
++                    ("requestId", id.as_str().into()),
++                    ("document", document.as_str().into()),
++                    ("revision", revision.as_str().into()),
++                    ("bytes", buffer.clone().into()),
++                ])
++                .ok_or_else(|| "couldn't build the snapshot message".to_string())?;
++                self.transfer(&value, &buffer)?;
++                self.managed_saves.borrow_mut().exported(key)?;
++                Ok(())
++            });
++        if let Err(error) = result {
++            self.send(&[("type", "wordcraft:snapshot-result".into()), ("requestId", id.as_str().into()), ("error", error.as_str().into())]);
++        }
++    }
++
++    fn post_open_error(&self, request_id: &str, error: &str) {
++        self.send(&[("type", "wordcraft:opened".into()), ("requestId", request_id.into()), ("error", error.into())]);
++    }
++
++    fn send(&self, fields: &[(&str, JsValue)]) -> bool {
++        message(fields).is_some_and(|m| self.port.endpoint.borrow().as_ref().is_some_and(|port| port.post_message(&m).is_ok()))
++    }
++
++    fn transfer(&self, value: &JsValue, buffer: &js_sys::ArrayBuffer) -> Result<(), String> {
++        self.port.endpoint.borrow().as_ref()
++            .ok_or_else(|| "private editor port is not connected".to_string())?
++            .post_message_with_transferable(value, &js_sys::Array::of1(buffer))
++            .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))
++    }
++
++}
++
++fn message(fields: &[(&str, JsValue)]) -> Option<js_sys::Object> {
++    let m = js_sys::Object::new();
++    for (key, value) in fields {
++        js_sys::Reflect::set(&m, &JsValue::from_str(key), value).ok()?;
++    }
++    Some(m)
++}
++
++fn string(data: &JsValue, key: &str) -> Option<String> {
++    js_sys::Reflect::get(data, &JsValue::from_str(key)).ok()?.as_string()
++}
++
++/// Check native bounds before copying any JS buffer into WASM. Legacy ID-less window Open
++/// retains its original behavior; correlated imports and all private-port imports are bounded.
++fn bytes(data: &JsValue, bounded: bool) -> Result<Vec<u8>, String> {
++    let bytes = js_sys::Reflect::get(data, &JsValue::from_str("bytes")).map_err(|_| "open requires document bytes")?;
++    let array = if let Some(array) = bytes.dyn_ref::<js_sys::Uint8Array>() {
++        array.clone()
++    } else if bytes.is_instance_of::<js_sys::ArrayBuffer>() {
++        js_sys::Uint8Array::new(&bytes)
++    } else {
++        return Err("open requires document bytes".into());
++    };
++    if bounded
++        && (!array.buffer().is_instance_of::<js_sys::ArrayBuffer>()
++            || !native_byte_length(array.as_ref())
++            || !native_byte_length(array.buffer().as_ref()))
++    {
++        return Err("native document must be nonempty and at most 32 MiB".into());
++    }
++    Ok(array.to_vec())
++}
++
++fn bounded_string(data: &JsValue, key: &str, max: usize) -> Option<String> {
++    string(data, key).filter(|value| !value.is_empty() && value.len() <= max)
++}
++
++fn native_byte_length(value: &JsValue) -> bool {
++    js_sys::Reflect::get(value, &"byteLength".into()).ok().and_then(|value| value.as_f64()).is_some_and(crate::capability::native_js_len_ok)
++}
+diff --git a/apps/wordcraft-web/src/snapshot.rs b/apps/wordcraft-web/src/snapshot.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb2f85e01dbe73bf3a0762d6c3bf144fe7c38a84
+--- /dev/null
++++ b/apps/wordcraft-web/src/snapshot.rs
+@@ -0,0 +1,122 @@
++//! Native JSON snapshots for a host that stores complete editor versions.
++
++use wordcraft_engine::Session;
++
++/// Serialize only the native model, without changing dirty state, undo or file identity.
++/// Parsing our own output also rejects values (such as a non-finite required float) that
++/// serialize but cannot be opened as a native Document.
++pub fn native_snapshot(session: &Session) -> Result<Vec<u8>, String> {
++    let bytes = wordcraft_engine::io::save_bytes("snapshot.json", &session.doc)?;
++    let _: wordcraft_doc::Document = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
++    Ok(bytes)
++}
++
++/// Native session identity, kept separate from the opaque revision and out of JS numbers.
++pub fn document(session: &Session) -> String {
++    session.document_id().to_string()
++}
++
++/// An opaque token: include document identity, and keep u64 values out of JS numbers.
++pub fn revision(session: &Session, draft_revision: u64) -> String {
++    format!("{}:{}:{}", session.document_id(), session.rev(), draft_revision)
++}
++
++#[derive(Default)]
++pub struct RevisionObserver(Option<(u64, u64, u64)>);
++
++impl RevisionObserver {
++    pub fn changed(&mut self, session: &Session, draft_revision: u64) -> bool {
++        let current = (session.document_id(), session.rev(), draft_revision);
++        if self.0 == Some(current) {
++            return false;
++        }
++        self.0 = Some(current);
++        true
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use wordcraft_doc::{InlineObject, Part, PartKind};
++    use wordcraft_engine::Session;
++
++    #[test]
++    fn native_snapshot_preserves_complete_model_and_does_not_mark_saved() {
++        let mut session = Session::new(wordcraft_engine::sample::sample_document());
++        session.doc.parts.insert(
++            600,
++            Part {
++                kind: PartKind::Comment,
++                blocks: vec![wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("Snapshot comment", Default::default()))],
++                ..Default::default()
++            },
++        );
++        session.doc.comments.insert(1, wordcraft_doc::Comment { author: "Tester".into(), part: 600, ..Default::default() });
++        let image = session.doc.add_media(vec![71; 3_200_000], "png");
++        let mut para = wordcraft_doc::Paragraph::with_text("\u{fffc}", Default::default());
++        para.objects.push(InlineObject::Image {
++            media: image,
++            w: 10.,
++            h: 10.,
++            alt: "Large image".into(),
++            float: Default::default(),
++            crop: [0.; 4],
++            fx: Default::default(),
++            ole: None,
++        });
++        session.doc.body.push(wordcraft_doc::para_block(para));
++        session.run("text.insert", &serde_json::json!({"text":"Edited "})).unwrap();
++        let document_id = session.document_id();
++        let revision = session.rev();
++        let undo_depth = session.undo_depth();
++        let before = serde_json::to_value(&session.doc).unwrap();
++        let bytes = native_snapshot(&session).unwrap();
++        assert!(bytes.len() > 4 * 1024 * 1024);
++        let reopened = wordcraft_engine::io::open_bytes("version.json", &bytes).unwrap();
++        assert_eq!(serde_json::to_value(&reopened).unwrap(), before);
++        assert_eq!(serde_json::to_value(&session.doc).unwrap(), before);
++        assert!(session.dirty);
++        assert_eq!(session.document_id(), document_id);
++        assert_eq!(session.rev(), revision);
++        assert_eq!(session.undo_depth(), undo_depth);
++    }
++    #[test]
++    fn changes_report_every_revision_even_while_the_document_stays_dirty() {
++        let mut session = Session::new(wordcraft_doc::Document::new());
++        let mut observer = RevisionObserver::default();
++        assert!(observer.changed(&session, 0));
++        assert!(!observer.changed(&session, 0));
++        session.run("text.insert", &serde_json::json!({"text":"first"})).unwrap();
++        assert!(session.dirty);
++        assert!(observer.changed(&session, 0));
++        let first = revision(&session, 0);
++        session.run("text.insert", &serde_json::json!({"text":"second"})).unwrap();
++        assert!(session.dirty);
++        assert!(observer.changed(&session, 0));
++        assert_ne!(revision(&session, 0), first);
++        assert!(!observer.changed(&session, 0));
++        session.set_document(wordcraft_doc::Document::new());
++        assert!(observer.changed(&session, 0));
++    }
++    #[test]
++    fn pending_draft_changes_are_reported_without_serializing_the_document() {
++        let session = Session::new(wordcraft_doc::Document::new());
++        let mut observer = RevisionObserver::default();
++        assert!(observer.changed(&session, 0));
++        assert!(observer.changed(&session, 1));
++        assert!(observer.changed(&session, 2));
++        assert!(!observer.changed(&session, 2));
++        assert_ne!(revision(&session, 1), revision(&session, 2));
++    }
++
++    #[test]
++    fn document_identity_is_an_opaque_string_stable_for_edits_and_new_for_replacement() {
++        let mut session = Session::new(wordcraft_doc::Document::new());
++        let original: String = document(&session);
++        session.run("text.insert", &serde_json::json!({"text":"edit"})).unwrap();
++        assert_eq!(document(&session), original);
++        session.set_document(wordcraft_doc::Document::new());
++        assert_ne!(document(&session), original);
++    }
++}
+diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
+index c1ee1ababb52197f1bf193fc565790eaccf770c5..2e90952a094b3e43093df0178d563e38fa21208a 100644
+--- a/apps/wordcraft-web/src/web.rs
++++ b/apps/wordcraft-web/src/web.rs
+@@ -41,8 +41,18 @@ pub fn start() {
+         // own stays the normal app with downloads. `data-host="page"` on the canvas opts a page
+         // in instead: it runs WordCraft in its own document and talks over DOM `CustomEvent`s
+         // on the canvas (`host`). The host guards leaving the page, so this one doesn't.
+-        let bridge = crate::host::Bridge::detect(&canvas);
++        let private = if query_param("host").as_deref() == Some("port") {
++            let Some(port) = query_param("parent_origin").and_then(|origin| crate::private_host::Bridge::new_port(&origin)) else {
++                log::error!("invalid private WordCraft host");
++                return;
++            };
++            Some(port)
++        } else {
++            None
++        };
++        let bridge = if private.is_none() { crate::host::Bridge::detect(&canvas) } else { None };
+         let app_bridge = bridge.clone();
++        let app_private = private.clone();
+         let dirty = Rc::new(Cell::new(false));
+         let mut options = eframe::WebOptions::default();
+         if query().contains("webgl")
+@@ -94,7 +104,7 @@ pub fn start() {
+
+                     // Files: the browser's pickers and downloads; a host page stores what is saved instead.
+                     let browser = Arc::new(BrowserFiles::new(waker(&ctx)));
+-                    if app_bridge.is_none()
++                    if app_bridge.is_none() && app_private.is_none()
+                         && let Err(e) = guard_unload(dirty.clone(), browser.clone())
+                     {
+                         log::error!("no unsaved-changes guard: {e}");
+@@ -114,45 +124,57 @@ pub fn start() {
+                     let (intake, sender) = FileIntake::new(Wake::new(waker(&ctx)));
+
+                     // In host mode the parent sends the document to edit; no sample meanwhile.
+-                    let sample = app_bridge.is_none() && query().contains("sample");
++                    let sample = app_bridge.is_none() && app_private.is_none() && query().contains("sample");
+                     let doc = if sample { wordcraft_engine::sample::sample_document() } else { wordcraft_engine::blank_document(&region) };
+                     let mut session = Session::new(doc);
+                     session.system_region = region;
++                    session.set_host_read_only(app_private.is_some());
+                     let messages = Rc::new(RefCell::new(Vec::new()));
+                     let mut services = services(&host, ctx.clone(), dirty, messages.clone(), intake);
+                     if let Some(bridge) = &app_bridge {
+                         bridge.connect(&mut services, sender.clone());
+                     }
+-                    let requests = crate::api::install(ctx.clone());
+-                    let mut app =
+-                        WordApp::new(session, services).with_host(host).with_settings(settings.clone()).with_control(ControlChannel::new(requests));
++                    if let Some(port) = &app_private {
++                        port.connect(&mut services, ctx.clone());
++                    }
++                    let mut app = WordApp::new(session, services).with_host(host).with_settings(settings.clone());
++                    // Managed documents show font substitutions in the status bar without blocking edits.
++                    if app_private.is_none() {
++                        app = app.with_control(ControlChannel::new(crate::api::install(ctx.clone())));
++                        app.tell_about_font_downloads();
++                    }
+                     app.autosave = false;
+-                    app.tell_about_font_downloads();
+                     // A region chosen in File › Options replaces the browser's for the first blank
+                     // document too (#838).
+                     if !sample && app.session.prefs.region.is_some() {
+                         let doc = app.session.blank_document();
+                         app.session.set_document(doc);
+                     }
+-                    // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    // A private port opens a specific document, so its first view is the editor.
++                    if !sample && app_private.is_none() {
+                         app.start_screen();
+                     }
+                     // The host's name for the user signs this visit's work, but isn't stored as the
+                     // browser's own preference, which a visit outside the host would restore.
+                     let mut author = None;
+-                    if app_bridge.is_some()
++                    if (app_bridge.is_some() || app_private.is_some())
+                         && let Some(name) = query_param("author")
+                     {
+                         let own = app.session.author.clone();
+                         crate::host::Bridge::set_author(&mut app, &name);
+                         author = crate::prefs::HostAuthor::new(&app.session.author, &own);
+                     }
+-                    Ok(Box::new(WebShell { app, sender, messages, settings, author }))
++                    Ok(Box::new(WebShell { app, sender, messages, settings, author, private: app_private }))
+                 }),
+             )
+             .await;
+         // Ready only once the runner is up: starting can still fail after the app is made.
++        if let Some(port) = &private {
++            match &result {
++                Ok(()) => port.post_ready(),
++                Err(e) => port.post_failed(&format!("{e:?}")),
++            }
++        }
+         if let Some(bridge) = &bridge {
+             match &result {
+                 Ok(()) => bridge.post_ready(),
+@@ -198,6 +220,7 @@ struct WebShell {
+     settings: SharedSettings<Prefs>,
+     /// Set when a host page named the user: its name is not kept in the stored preferences.
+     author: Option<crate::prefs::HostAuthor>,
++    private: Option<crate::private_host::Bridge>,
+ }
+
+ impl eframe::App for WebShell {
+@@ -209,7 +232,13 @@ impl eframe::App for WebShell {
+         for msg in msgs {
+             self.app.status(msg);
+         }
++        if let Some(port) = &self.private {
++            port.before_logic(&mut self.app);
++        }
+         self.app.logic(ctx);
++        if let Some(port) = &self.private {
++            port.observe(&mut self.app, ctx);
++        }
+         if let Some(author) = &self.author {
+             author.keep_own_author(&self.settings);
+         }
+diff --git a/crates/engine/src/cmd/file.rs b/crates/engine/src/cmd/file.rs
+index 35d5ceb18041ff72430383957694f9b4363342ce..b4d15ba668d5e32f81c77370d11aac1eed2d8fbb 100644
+--- a/crates/engine/src/cmd/file.rs
++++ b/crates/engine/src/cmd/file.rs
+@@ -92,6 +92,10 @@ pub fn specs() -> Vec<CommandSpec> {
+             .key("Mod+O / Mod+F12 / Mod+Alt+F2")
+             .params(r#"{"path": string, "data"?: base64 (the file's bytes; `path` then only names it), "password"?: string (for a password-protected Word or OpenDocument text file)}"#)
+             .pure(),
++        // Like a version restore, this whole-document edit owns its checkpoint and protection check.
++        CommandSpec::new("file.import", "Import into Current Document", "File › Open", import_document)
++            .params(r#"{"path": string (format name), "data": base64, "password"?: string} → replace the current document's contents without changing its identity; undoable"#)
++            .pure(),
+         CommandSpec::new("file.save", "Save", "File", save)
+             .key("Mod+S / Shift+F12 / Alt+Shift+F2")
+             .params(r#"{"path"?: string, "password"?: string (encrypt this and later saves with it, as file.encrypt does), "markup"?: bool (Print Markup for a PDF, PNG, HTML, Markdown or text copy: comments shown; default file.printMarkup), "format"?: "wordml2003" (an .xml file as a Word 2003 XML Document) | "flatopc" (as a Word XML Document, the default; saving over a Word 2003 XML file keeps that format), "strict"?: bool (a .pdf or .png only: refuse, writing nothing, if a character can't be drawn or a picture is missing; see file.strictReport)}"#)
+@@ -351,6 +355,40 @@ pub(crate) fn new_from_template(s: &mut Session, v: &Value) -> CmdResult {
+     sel_result(s)
+ }
+
++/// Import an entire file into the current host-owned document. Parsing completes before any
++/// edit, and the same whole-document protection rule as version restore applies. Opening a
++/// separate document remains `file.open`; imports keep identity, path, host access and history.
++fn import_document(s: &mut Session, v: &Value) -> CmdResult {
++    super::protect::check_version_restore(s)?;
++    let path = p::req_str(v, "path")?;
++    let data = p::req_str(v, "data")?;
++    let bytes = super::insert::base64_decode(data).ok_or_else(|| CmdError::Params("bad base64".into()))?;
++    let (doc, _) = crate::io::open_bytes_in(path, &bytes, p::str(v, "password"), &s.region()).map_err(CmdError::Failed)?;
++    s.checkpoint("Import Document");
++    s.doc = doc;
++    s.md_source = None;
++    s.doc.ensure_nonempty();
++    s.note_body_replaced();
++    s.math = None;
++    s.sel = crate::Selection::caret(s.doc.start_of(StoryRef::Body));
++    s.pending = None;
++    s.pending_move = None;
++    s.autocap = None;
++    s.widened = None;
++    s.originals.clear();
++    s.picture_looks.clear();
++    s.view.outline.collapsed.clear();
++    s.hf_return = None;
++    s.new_header_parts.clear();
++    s.also_selected.clear();
++    s.column = None;
++    s.column_mode = false;
++    s.bib_style = crate::doc_state::doc_bib_style(&s.doc);
++    s.touch();
++    s.relayout();
++    Ok(json!({"imported": true, "id": s.document_id(), "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count()}))
++}
++
+ /// Close a document with no window to ask about it (agents, headless sessions).
+ fn close_document(s: &mut Session, v: &Value) -> CmdResult {
+     let id = match v.get("id").filter(|x| !x.is_null()) {
 diff --git a/crates/engine/src/io.rs b/crates/engine/src/io.rs
-index 96025503..015d132c 100644
+index d142c9f00894fad854b91d1e1a8569c2f3619da7..bee386d03e80106113222cc47acd774a2905d39c 100644
 --- a/crates/engine/src/io.rs
 +++ b/crates/engine/src/io.rs
 @@ -2,7 +2,7 @@
- 
+
  use wordcraft_doc::Document;
- 
+
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  mod safe_save;
- 
+
  /// Formats WordCraft opens.
-@@ -102,27 +102,27 @@ pub fn wrong_password(err: &str) -> bool {
+@@ -114,27 +114,27 @@ pub fn wrong_password(err: &str) -> bool {
  /// Is the file at `path` empty, zero bytes long? File Explorer's New › Microsoft Word Document
  /// makes one, and `file.open` opens it as a new blank document (#1384). False for a file that
  /// can't be read: opening it says why.
@@ -20,14 +1253,14 @@ index 96025503..015d132c 100644
  pub fn is_empty_file(path: &std::path::Path) -> bool {
      crate::file_access::check_read(&path.to_string_lossy()).is_ok() && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == 0)
  }
- 
+
  /// [`is_empty_file`]: on the web files come through the browser, never by path.
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn is_empty_file(_path: &std::path::Path) -> bool {
      false
  }
- 
+
  /// The canonical form of `path` (symbolic links and `.`/`..` resolved), for telling whether two
  /// spellings name one file; `None` when it can't be resolved or is outside the readable roots.
 -#[cfg(not(target_arch = "wasm32"))]
@@ -36,37 +1269,37 @@ index 96025503..015d132c 100644
      crate::file_access::check_read(&path.to_string_lossy()).ok()?;
      std::fs::canonicalize(path).ok()
  }
- 
+
  /// [`canonical`]: on the web files come through the browser, never by path.
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub(crate) fn canonical(_path: &std::path::Path) -> Option<std::path::PathBuf> {
      None
  }
-@@ -407,13 +407,13 @@ pub fn open_path(path: &std::path::Path) -> Result<Document, String> {
+@@ -482,13 +482,13 @@ pub fn open_path(path: &std::path::Path) -> Result<Document, String> {
  }
- 
+
  /// [`open_path`] for a file that may be password-protected (see [`open_bytes_with`]).
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  pub fn open_path_with(path: &std::path::Path, password: Option<&str>) -> Result<(Document, bool), String> {
      open_path_in(path, password, &wordcraft_geom::Region::default())
  }
- 
+
  /// [`open_path_with`] in `region` (see [`open_bytes_in`]).
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  pub fn open_path_in(path: &std::path::Path, password: Option<&str>, region: &wordcraft_geom::Region) -> Result<(Document, bool), String> {
      let bytes = read_document(path)?;
      let name = path.to_string_lossy();
-@@ -430,14 +430,14 @@ pub fn open_path_in(path: &std::path::Path, password: Option<&str>, region: &wor
+@@ -505,14 +505,14 @@ pub fn open_path_in(path: &std::path::Path, password: Option<&str>, region: &wor
  }
- 
+
  /// Largest document file opened by path.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  const MAX_DOCUMENT: u64 = 2 << 30;
- 
+
  /// The bytes of the document at `path`, read as `file.open` reads a path: inside the automation
  /// read root, and only a regular file of at most 2 GB. A named pipe would block the open and a
  /// device such as `/dev/zero` would never end ([`read_regular_file`]). Public for the app, which
@@ -76,7 +1309,7 @@ index 96025503..015d132c 100644
  pub fn read_document(path: &std::path::Path) -> Result<Vec<u8>, String> {
      crate::file_access::check_read(&path.to_string_lossy())?;
      let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-@@ -462,7 +462,7 @@ pub fn read_document(path: &std::path::Path) -> Result<Vec<u8>, String> {
+@@ -537,7 +537,7 @@ pub fn read_document(path: &std::path::Path) -> Result<Vec<u8>, String> {
  /// (`http:`, `file:`…) and absolute paths are not followed. Each file is read at most once and
  /// at most `max_file` bytes of it; every reference, cached or not, counts against a budget for
  /// the whole document, so one large picture can't be multiplied by referencing it many times.
@@ -85,16 +1318,16 @@ index 96025503..015d132c 100644
  pub(crate) struct LocalImages {
      /// The folder, canonical; `None` when it can't be resolved (nothing loads then).
      dir: Option<std::path::PathBuf>,
-@@ -472,7 +472,7 @@ pub(crate) struct LocalImages {
+@@ -547,7 +547,7 @@ pub(crate) struct LocalImages {
      cache: std::cell::RefCell<Vec<(std::path::PathBuf, std::sync::Arc<Vec<u8>>)>>,
  }
- 
+
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  impl LocalImages {
      /// Largest picture file read.
      const MAX_FILE: u64 = 256 << 20;
-@@ -547,13 +547,13 @@ impl LocalImages {
+@@ -622,13 +622,13 @@ impl LocalImages {
  /// and may never end, so the path is checked before opening, the opened handle is checked again,
  /// and the read is bounded whatever length the file reports. Public for the app (a copied picture
  /// file, Paste Special).
@@ -104,13 +1337,13 @@ index 96025503..015d132c 100644
      let (file, meta) = open_regular_file(path).ok()?;
      read_bounded(file, &meta, limit).ok()
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn read_regular_file(_path: &std::path::Path, _limit: u64) -> Option<Vec<u8>> {
      None
  }
-@@ -562,7 +562,7 @@ pub fn read_regular_file(_path: &std::path::Path, _limit: u64) -> Option<Vec<u8>
+@@ -637,7 +637,7 @@ pub fn read_regular_file(_path: &std::path::Path, _limit: u64) -> Option<Vec<u8>
  /// anything else. A file whose opened handle reports more than `limit` bytes is refused before
  /// anything is read; the read stays bounded for a file that grows after the check. Public for the
  /// app (a copied picture file, Paste Special).
@@ -119,16 +1352,16 @@ index 96025503..015d132c 100644
  pub fn read_regular_file_within(path: &std::path::Path, limit: u64) -> Option<Vec<u8>> {
      let (file, meta) = open_regular_file(path).ok()?;
      if meta.len() > limit {
-@@ -571,7 +571,7 @@ pub fn read_regular_file_within(path: &std::path::Path, limit: u64) -> Option<Ve
+@@ -646,7 +646,7 @@ pub fn read_regular_file_within(path: &std::path::Path, limit: u64) -> Option<Ve
      read_bounded(file, &meta, limit).ok().filter(|b| b.len() as u64 <= limit)
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn read_regular_file_within(_path: &std::path::Path, _limit: u64) -> Option<Vec<u8>> {
      None
  }
-@@ -579,7 +579,7 @@ pub fn read_regular_file_within(_path: &std::path::Path, _limit: u64) -> Option<
+@@ -654,7 +654,7 @@ pub fn read_regular_file_within(_path: &std::path::Path, _limit: u64) -> Option<
  /// The regular file at `path`, opened once, with the opened handle's metadata. The path is
  /// checked before opening (a named pipe blocks in `open` until a writer appears) and the handle
  /// after (the path may have been swapped in between); anything but a regular file is "not a file".
@@ -137,16 +1370,16 @@ index 96025503..015d132c 100644
  fn open_regular_file(path: &std::path::Path) -> Result<(std::fs::File, std::fs::Metadata), String> {
      let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
      if !meta.is_file() {
-@@ -600,7 +600,7 @@ fn open_regular_file(path: &std::path::Path) -> Result<(std::fs::File, std::fs::
+@@ -675,7 +675,7 @@ fn open_regular_file(path: &std::path::Path) -> Result<(std::fs::File, std::fs::
  }
- 
+
  /// Up to `limit + 1` bytes of `file` (more than `limit` means too large), however long it says it is.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  fn read_bounded(file: std::fs::File, meta: &std::fs::Metadata, limit: u64) -> std::io::Result<Vec<u8>> {
      use std::io::Read;
      let mut out = Vec::with_capacity(usize::try_from(meta.len().min(limit)).unwrap_or(0));
-@@ -616,12 +616,12 @@ pub const MAX_READ_FILE: u64 = 2 << 30;
+@@ -691,12 +691,12 @@ pub const MAX_READ_FILE: u64 = 2 << 30;
  /// Every such read goes through here so the automation read root applies ([`crate::file_access`]).
  /// Only a regular file is read, and at most [`MAX_READ_FILE`] bytes of it: a named pipe blocks
  /// when opened and a device like `/dev/zero` never reaches end of file.
@@ -155,13 +1388,13 @@ index 96025503..015d132c 100644
  pub fn read_file(path: &str) -> Result<Vec<u8>, String> {
      read_file_capped(path, MAX_READ_FILE, "file")
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn read_file(path: &str) -> Result<Vec<u8>, String> {
      Err(format!("{path}: files are opened through the browser on the web"))
  }
-@@ -629,7 +629,7 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, String> {
+@@ -704,7 +704,7 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, String> {
  /// [`read_file`] for a file that must be a regular file of at most `max` bytes, checked before
  /// anything is read (a font named by the user, which could be any size). The file is opened once
  /// and the read stops past `max`, so a file swapped or grown after the check is refused too (#3666).
@@ -170,7 +1403,7 @@ index 96025503..015d132c 100644
  pub fn read_file_capped(path: &str, max: u64, what: &str) -> Result<Vec<u8>, String> {
      crate::file_access::check_read(path)?;
      let too_large = || format!("{path}: the {what} is larger than {} MB", max >> 20);
-@@ -647,7 +647,7 @@ pub fn read_file_capped(path: &str, max: u64, what: &str) -> Result<Vec<u8>, Str
+@@ -722,7 +722,7 @@ pub fn read_file_capped(path: &str, max: u64, what: &str) -> Result<Vec<u8>, Str
  /// The first `max` bytes of the file at `path` (fewer when it is shorter), inside the automation
  /// read root when there is one: enough to tell a file's format by its start. Only a regular file
  /// is opened: a named pipe would block the open until a writer appeared (#3666).
@@ -179,16 +1412,48 @@ index 96025503..015d132c 100644
  pub fn read_file_head(path: &str, max: u64) -> Result<Vec<u8>, String> {
      use std::io::Read;
      crate::file_access::check_read(path)?;
-@@ -658,7 +658,7 @@ pub fn read_file_head(path: &str, max: u64) -> Result<Vec<u8>, String> {
+@@ -739,13 +739,13 @@ pub fn wasm_read_file_fallback(path: &str) -> Result<Vec<u8>, String> {
  }
- 
+
+ /// Web fallback for [`read_file_capped`].
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn read_file_capped(path: &str, _max: u64, _what: &str) -> Result<Vec<u8>, String> {
+     wasm_read_file_fallback(path)
+ }
+
+ /// Web fallback for [`read_file_head`].
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn read_file_head(path: &str, _max: u64) -> Result<Vec<u8>, String> {
+     wasm_read_file_fallback(path)
+ }
+@@ -778,7 +778,7 @@ impl std::fmt::Display for FileCheckError {
+ ///
+ /// Ensures the path is within automation read and write roots, exists, is not a symbolic link,
+ /// is not a directory, is a regular writable file, and does not exceed `max` bytes.
+-#[cfg(not(target_arch = "wasm32"))]
++#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+ pub fn check_regular_file_setting(path: &std::path::Path, max: u64, key: &str) -> Result<(), FileCheckError> {
+     crate::file_access::check_read(&path.to_string_lossy()).map_err(FileCheckError::Access)?;
+     crate::file_access::check_write(&path.to_string_lossy()).map_err(FileCheckError::Access)?;
+@@ -815,13 +815,13 @@ pub fn check_regular_file_setting(path: &std::path::Path, max: u64, key: &str) -
+ }
+
+ /// Web fallback for [`check_regular_file_setting`].
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn check_regular_file_setting(path: &std::path::Path, _max: u64, _key: &str) -> Result<(), FileCheckError> {
+     Err(FileCheckError::Access(format!("{}: files are opened through the browser on the web", path.display())))
+ }
+
  /// An entry of [`list_dir`]: a file or folder (links followed).
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  #[derive(Clone, Debug)]
  pub struct DirEntry {
      pub name: String,
-@@ -673,7 +673,7 @@ pub struct DirEntry {
+@@ -836,7 +836,7 @@ pub struct DirEntry {
  /// The files and folders in the folder at `path`, inside the automation read root (entries
  /// leading outside it, and ones that can't be read, are left out); at most `max` entries are
  /// looked at, and `true` says the listing was cut short there.
@@ -197,26 +1462,26 @@ index 96025503..015d132c 100644
  pub fn list_dir(path: &std::path::Path, max: usize) -> Result<(Vec<DirEntry>, bool), String> {
      crate::file_access::check_read(&path.to_string_lossy())?;
      let read = std::fs::read_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
-@@ -700,7 +700,7 @@ pub fn list_dir(path: &std::path::Path, max: usize) -> Result<(Vec<DirEntry>, bo
- 
+@@ -863,7 +863,7 @@ pub fn list_dir(path: &std::path::Path, max: usize) -> Result<(Vec<DirEntry>, bo
+
  /// The title in the core properties of the Word package at `path` (a file of at most `max_file`
  /// bytes; at most `max_part` bytes of the part are read), inside the automation read root.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  pub fn package_title(path: &std::path::Path, max_file: u64, max_part: u64) -> Option<String> {
      crate::file_access::check_read(&path.to_string_lossy()).ok()?;
-     let file = std::fs::File::open(path).ok()?;
-@@ -711,7 +711,7 @@ pub fn package_title(path: &std::path::Path, max_file: u64, max_part: u64) -> Op
+     let (file, meta) = open_regular_file(path).ok()?;
+@@ -874,7 +874,7 @@ pub fn package_title(path: &std::path::Path, max_file: u64, max_part: u64) -> Op
  }
- 
+
  /// Rename without replacing another file, respecting both automation access roots.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  pub fn rename_file(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
      crate::file_access::check_read(&source.to_string_lossy())?;
      crate::file_access::check_write(&source.to_string_lossy())?;
-@@ -732,7 +732,7 @@ pub fn rename_file(source: &std::path::Path, destination: &std::path::Path) -> R
- 
+@@ -895,7 +895,7 @@ pub fn rename_file(source: &std::path::Path, destination: &std::path::Path) -> R
+
  /// Whether `destination` names `source` in the same directory spelled with different case, and
  /// the directory holds no entry spelled exactly as `destination`.
 -#[cfg(not(target_arch = "wasm32"))]
@@ -224,9 +1489,9 @@ index 96025503..015d132c 100644
  fn only_case_differs(source: &std::path::Path, destination: &std::path::Path) -> bool {
      let (Some(dir), Some(from), Some(to)) = (source.parent(), source.file_name(), destination.file_name()) else {
          return false;
-@@ -745,24 +745,24 @@ fn only_case_differs(source: &std::path::Path, destination: &std::path::Path) ->
+@@ -908,24 +908,24 @@ fn only_case_differs(source: &std::path::Path, destination: &std::path::Path) ->
  }
- 
+
  /// Write `bytes` to the file at `path`, inside the automation write root when there is one.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -235,61 +1500,66 @@ index 96025503..015d132c 100644
      // Like a document save: the old file is replaced only once the new bytes are fully written.
      safe_save::write(std::path::Path::new(path), bytes).map_err(|e| format!("{path}: {e}"))
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn write_file(path: &str, _bytes: &[u8]) -> Result<(), String> {
      Err(format!("{path}: files are saved through the browser on the web"))
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn open_path_with(path: &std::path::Path, _password: Option<&str>) -> Result<(Document, bool), String> {
      Err(format!("{}: files are opened through the browser on the web", path.display()))
  }
- 
+
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn open_path_in(path: &std::path::Path, password: Option<&str>, _region: &wordcraft_geom::Region) -> Result<(Document, bool), String> {
      open_path_with(path, password)
  }
-@@ -772,14 +772,14 @@ pub fn save_path(path: &std::path::Path, doc: &Document) -> Result<(), String> {
+@@ -935,7 +935,7 @@ pub fn save_path(path: &std::path::Path, doc: &Document) -> Result<(), String> {
  }
- 
+
  /// [`save_path`], encrypted with `password` as [`save_bytes_with`] does.
 -#[cfg(not(target_arch = "wasm32"))]
 +#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
  pub fn save_path_with(path: &std::path::Path, doc: &Document, password: Option<&str>, opts: &ExportOptions) -> Result<(), String> {
      crate::file_access::check_write(&path.to_string_lossy())?;
      let bytes = save_bytes_with(&path.to_string_lossy(), doc, password, opts)?;
-     safe_save::write(path, &bytes).map_err(|e| format!("{}: {e}", path.display()))
+@@ -943,20 +943,20 @@ pub fn save_path_with(path: &std::path::Path, doc: &Document, password: Option<&
  }
- 
+
+ /// Saves a document to `path` with optional password and export options on web targets.
 -#[cfg(target_arch = "wasm32")]
 +#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
  pub fn save_path_with(path: &std::path::Path, _doc: &Document, _password: Option<&str>, _opts: &ExportOptions) -> Result<(), String> {
      Err(format!("{}: files are saved through the browser on the web", path.display()))
  }
+
+ /// Write `text` to `path` as it is (a Markdown file's own text), as safely as [`save_path_with`].
+-#[cfg(not(target_arch = "wasm32"))]
++#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+ pub fn save_text_path(path: &std::path::Path, text: &str) -> Result<(), String> {
+     crate::file_access::check_write(&path.to_string_lossy())?;
+     safe_save::write(path, text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+ }
+
+ /// Write `text` to `path` as it is (a Markdown file's own text), as safely as [`save_path_with`].
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn save_text_path(path: &std::path::Path, _text: &str) -> Result<(), String> {
+     Err(format!("{}: files are saved through the browser on the web", path.display()))
+ }
 diff --git a/crates/engine/src/io/safe_save.rs b/crates/engine/src/io/safe_save.rs
-index 525e7a3d..663c259a 100644
+index e5c3b161b3157ed5ab1bc3a380dd076c15392b65..a10c32a317894e9e168342e70f371b280ca2fc19 100644
 --- a/crates/engine/src/io/safe_save.rs
 +++ b/crates/engine/src/io/safe_save.rs
-@@ -155,7 +155,7 @@ impl Temporary {
-         // A short name also works beside a destination already at the filename-length limit.
-         for _ in 0..128 {
-             let id = NEXT.fetch_add(1, Ordering::Relaxed);
--            let path = destination.with_file_name(format!(".wordcraft-save-{}-{id}.tmp", std::process::id()));
-+            let path = destination.with_file_name(format!(".wordcraft-save-{}-{id}.tmp", process_tag()));
-             let mut options = OpenOptions::new();
-             options.write(true).create_new(true);
-             #[cfg(unix)]
-@@ -449,3 +449,16 @@ mod tests {
-         assert_eq!(fs::read(&path).unwrap(), b"Saved again.");
-     }
- }
-+
-+/// A tag that keeps concurrent processes' temporary names apart. WASI has no
-+/// process ids; one WASI instance is one process with its own directory.
+@@ -11,6 +11,18 @@ use std::io::{self, Write};
+ use std::path::{Path, PathBuf};
+ use std::sync::atomic::{AtomicU64, Ordering};
+
++/// WASI instances have their own directory and no process ID.
 +fn process_tag() -> u32 {
 +    #[cfg(target_os = "wasi")]
 +    {
@@ -300,8 +1570,542 @@ index 525e7a3d..663c259a 100644
 +        std::process::id()
 +    }
 +}
++
+ /// Writes `bytes` safely to `path`, replacing an existing destination atomically via a
+ /// temporary file. If the destination's folder refuses the temporary file, a new file
+ /// is created directly and removed on failure; an existing file is left untouched.
+@@ -188,7 +200,7 @@ impl Temporary {
+         // A short name also works beside a destination already at the filename-length limit.
+         for _ in 0..128 {
+             let id = NEXT.fetch_add(1, Ordering::Relaxed);
+-            let path = destination.with_file_name(format!(".wordcraft-save-{}-{id}.tmp", std::process::id()));
++            let path = destination.with_file_name(format!(".wordcraft-save-{}-{id}.tmp", process_tag()));
+             let mut options = OpenOptions::new();
+             options.write(true).create_new(true);
+             #[cfg(unix)]
+@@ -240,7 +252,7 @@ mod tests {
+         fn new() -> Self {
+             static NEXT: AtomicU64 = AtomicU64::new(0);
+             let path =
+-                std::env::temp_dir().join(format!("wordcraft-save-owner-test-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
++                std::env::temp_dir().join(format!("wordcraft-save-owner-test-{}-{}", process_tag(), NEXT.fetch_add(1, Ordering::Relaxed)));
+             fs::create_dir(&path).unwrap();
+             Self(path)
+         }
+diff --git a/crates/engine/src/session.rs b/crates/engine/src/session.rs
+index e448d962fcded093906883af3a548827e9027f99..d20bf731fe0337819c0b8a1ab53de5f34705807a 100644
+--- a/crates/engine/src/session.rs
++++ b/crates/engine/src/session.rs
+@@ -16,6 +16,7 @@ pub use documents::{DocInfo, DocState};
+ use documents::{document_id_mark, next_document_id, untitled_name};
+ pub use views::WindowView;
+ mod history;
++mod host_access;
+ mod ime;
+ mod layout;
+ mod lifecycle;
+@@ -46,6 +47,8 @@ pub use view::{StylesPaneDock, ViewState};
+ /// every command works on; the other open documents wait in [`DocState`] values and are swapped
+ /// in when they become active (see [`Session::documents`]).
+ pub struct Session {
++    /// Ephemeral embedding-host authority, never part of DocState or native serialization.
++    host_read_only: bool,
+     pub doc: Document,
+     pub sel: Selection,
+     pub view: ViewState,
+diff --git a/crates/engine/src/session/documents.rs b/crates/engine/src/session/documents.rs
+index 40fdc8fdb85a6aaf57f62d46a74491e6bd5cc5c6..48c6cc5b74c3867196c73c016782db248510b8f8 100644
+--- a/crates/engine/src/session/documents.rs
++++ b/crates/engine/src/session/documents.rs
+@@ -252,6 +252,7 @@ impl Session {
+             // Shared by every open document.
+             // Names the document it belongs to, so it never applies to another one.
+             review_style: _,
++            host_read_only: _,
+             user_dict_path: _,
+             default_user_dict_path: _,
+             clipboard: _,
+diff --git a/crates/engine/src/session/host_access.rs b/crates/engine/src/session/host_access.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..dcb7ffd8a1ac025e4e1a43d7761d75537a1dc1c2
+--- /dev/null
++++ b/crates/engine/src/session/host_access.rs
+@@ -0,0 +1,180 @@
++//! Ephemeral authority supplied by an embedding host, outside the native Document.
++use super::Session;
++
++pub(super) const HOST_READ_ONLY: &str = "the host has made this document read-only";
++
++impl Session {
++    /// This visit's host access guard. It never changes document protection, undo or revisions.
++    pub fn host_read_only(&self) -> bool {
++        self.host_read_only
++    }
++
++    pub fn set_host_read_only(&mut self, value: bool) {
++        self.host_read_only = value;
++    }
++
++    /// Read-only authority is an explicit navigation/query allowlist. `pure` alone also
++    /// includes Undo, document replacement and saves, so it is insufficient for this guard.
++    pub fn host_command_allowed(&self, id: &str) -> bool {
++        if !self.host_read_only {
++            return true;
++        }
++        let Some(spec) = self.registry.get(id) else { return false };
++        if spec.mutates {
++            return false;
++        }
++        matches!(
++            id,
++            "view.marks"
++                | "view.printLayout"
++                | "view.webLayout"
++                | "view.draft"
++                | "view.outline"
++                | "view.readMode"
++                | "view.readColumnWidth"
++                | "view.readTextSize"
++                | "view.readLineSpacing"
++                | "view.readPageColor"
++                | "view.hideWhiteSpace"
++                | "view.focus"
++                | "view.fullScreenView"
++                | "view.ruler"
++                | "view.gridlines"
++                | "view.navigationPane"
++                | "view.zoom"
++                | "view.zoom100"
++                | "view.zoomIn"
++                | "view.zoomOut"
++                | "view.onePage"
++                | "view.multiplePages"
++                | "view.pageWidth"
++                | "view.darkMode"
++                | "view.interfaceTheme"
++                | "view.stylesPane"
++                | "view.stylesPaneDock"
++                | "view.commentsPane"
++                | "view.accessibilityPane"
++                | "view.altTextPane"
++                | "view.formatShapePane"
++                | "view.split"
++                | "view.fullScreen"
++                | "view.state"
++                | "view.numeral"
++                | "readAloud.playPause"
++                | "readAloud.next"
++                | "readAloud.previous"
++                | "readAloud.stop"
++                | "readAloud.speed"
++                | "readAloud.skipCitations"
++                | "readAloud.status"
++                | "caret.pastCitation"
++                | "outline.expand"
++                | "outline.collapse"
++                | "outline.toggle"
++                | "outline.selectSubtree"
++                | "outline.showLevel"
++                | "outline.showLevel1"
++                | "outline.showLevel2"
++                | "outline.showLevel3"
++                | "outline.showLevel4"
++                | "outline.showLevel5"
++                | "outline.showLevel6"
++                | "outline.showLevel7"
++                | "outline.showLevel8"
++                | "outline.showLevel9"
++                | "outline.showAll"
++                | "outline.firstLineOnly"
++                | "outline.showFormatting"
++                | "outline.close"
++                | "outline.state"
++                | "view.fieldCodes"
++                | "select.column"
++                | "caret.left"
++                | "caret.right"
++                | "caret.up"
++                | "caret.down"
++                | "caret.wordLeft"
++                | "caret.wordRight"
++                | "caret.home"
++                | "caret.end"
++                | "caret.paraUp"
++                | "caret.paraDown"
++                | "caret.docStart"
++                | "caret.docEnd"
++                | "caret.pageUp"
++                | "caret.pageDown"
++                | "caret.set"
++                | "select.all"
++                | "select.range"
++                | "select.word"
++                | "select.sentence"
++                | "select.paragraph"
++                | "select.dragUnit"
++                | "select.line"
++                | "select.text"
++                | "select.collapse"
++                | "select.addObject"
++                | "select.objects"
++                | "select.similar"
++                | "select.extend"
++                | "view.immersive"
++                | "view.vertical"
++                | "view.sideToSide"
++        ) || matches!(
++            id,
++            "edit.copy"
++                | "edit.clipboardPane"
++                | "edit.clipboardItems"
++                | "edit.undoHistory"
++                | "edit.find"
++                | "edit.advancedFind"
++                | "edit.findNext"
++                | "edit.findPrevious"
++                | "edit.findReplace"
++                | "edit.goto"
++                | "edit.goBack"
++                | "document.inspect"
++                | "document.text"
++                | "document.paragraph"
++                | "document.selection"
++                | "document.layout"
++                | "format.state"
++                | "list.get"
++                | "styles.list"
++                | "styles.inspector"
++                | "styles.inspect"
++                | "table.selectAt"
++                | "table.selectTable"
++                | "table.selectRow"
++                | "table.selectColumn"
++                | "table.selectCell"
++                | "table.viewGridlines"
++                | "review.comments"
++                | "review.nextComment"
++                | "review.previousComment"
++                | "review.nextChange"
++                | "review.previousChange"
++                | "review.changes"
++                | "review.wordCount"
++                | "review.issues"
++                | "review.suggestions"
++                | "review.thesaurus"
++                | "review.readAloud"
++                | "references.nextFootnote"
++                | "references.notes"
++                | "hf.next"
++                | "hf.previous"
++                | "fields.next"
++                | "fields.previous"
++                | "fields.selected"
++                | "link.targets"
++                | "font.list"
++                | "file.info"
++                | "file.privacy"
++                | "file.accessibility"
++                | "equation.get"
++                | "equation.gallery"
++                | "equation.structureActions"
++        )
++    }
++}
+diff --git a/crates/engine/src/session/layout.rs b/crates/engine/src/session/layout.rs
+index 9e17c9f191e8b3812b2955277842ddb098ec1c1b..3a3f439d23303192110ffa4a7ac4b5c3ed05379b 100644
+--- a/crates/engine/src/session/layout.rs
++++ b/crates/engine/src/session/layout.rs
+@@ -129,6 +129,9 @@ impl Session {
+     /// which is where the caret would be. The document, the selection, the undo history and Repeat
+     /// are untouched. `None` when the command fails or isn't allowed here.
+     pub fn preview_layout(&mut self, id: &str, params: &Value) -> Option<(Document, Selection, Arc<DocLayout>)> {
++        if !self.host_command_allowed(id) {
++            return None;
++        }
+         // The word being typed keeps going without a squiggle on the preview: the command moves
+         // the copy's caret off it and may split its paragraph, so it is found again by its place.
+         let typing = self.typing_word();
+diff --git a/crates/engine/src/session/lifecycle.rs b/crates/engine/src/session/lifecycle.rs
+index d7eefdbc626c7f60a870b79de6628299d670ad09..0ab9b9a9c86059215a2a7e1c57a58c3f70310112 100644
+--- a/crates/engine/src/session/lifecycle.rs
++++ b/crates/engine/src/session/lifecycle.rs
+@@ -88,6 +88,7 @@ impl Session {
+             go_back_step,
+         } = DocState::new(doc, 1, ViewState::default());
+         Session {
++            host_read_only: false,
+             doc,
+             sel,
+             view,
+diff --git a/crates/engine/src/session/run.rs b/crates/engine/src/session/run.rs
+index 3f5ed3fe6b1f6474036e8bc1bd2841d17a47c7a6..9b8eb29de03f3a7aa28bde1779a7565d3c04adb6 100644
+--- a/crates/engine/src/session/run.rs
++++ b/crates/engine/src/session/run.rs
+@@ -65,6 +65,20 @@ impl Session {
+     /// control channel). Mutating commands are undoable; a failed command leaves the document as
+     /// it was; a panic inside a command becomes an error.
+     pub fn run(&mut self, id: &str, params: &Value) -> Result<Value, CmdError> {
++        self.run_inner(id, params, false)
++    }
++
++    /// Install host-owned bytes through the existing Open command without unlocking user
++    /// commands. This fixed entry point cannot execute another command on the host's behalf.
++    pub fn open_from_host(&mut self, params: &Value) -> Result<Value, CmdError> {
++        self.run_inner("file.open", params, true)
++    }
++
++    fn run_inner(&mut self, id: &str, params: &Value, host_import: bool) -> Result<Value, CmdError> {
++        // Refuse before consuming undo joins, IME promises or any other session bookkeeping.
++        if !host_import && !self.host_command_allowed(id) {
++            return Err(CmdError::Disabled(super::host_access::HOST_READ_ONLY.into()));
++        }
+         if self.md_source.is_some()
+             && let Some(mutates) = self.registry.get(id).map(|spec| spec.mutates)
+         {
+diff --git a/crates/engine/src/session/snapshot.rs b/crates/engine/src/session/snapshot.rs
+index fb584c137a9944ac6a028545df6944b6beedea24..18c3eb609b0fd2bd397df1e75da9d08855fc48bf 100644
+--- a/crates/engine/src/session/snapshot.rs
++++ b/crates/engine/src/session/snapshot.rs
+@@ -69,6 +69,8 @@ impl Session {
+     /// whether a snapshot must cover it.
+     pub fn edit_snapshot(&self) -> EditSnapshot {
+         let Session {
++            // Host authority belongs to this visit, never to an edit snapshot or undo.
++            host_read_only: _,
+             doc,
+             sel,
+             view: _,
+@@ -270,6 +272,9 @@ impl Session {
+     /// Why command `id` can't run now, for greying it out: its own `enabled` check, then what
+     /// Restrict Editing refuses outright. `None` when it can run (or doesn't exist).
+     pub fn why_disabled(&self, id: &str) -> Option<&'static str> {
++        if !self.host_command_allowed(id) {
++            return Some(super::host_access::HOST_READ_ONLY);
++        }
+         let spec = self.registry.get(id)?;
+         (spec.enabled)(self)
+             .or_else(|| crate::cmd::md_source::refusal(self, id, spec.mutates))
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index 8f65c5c680042c98b749d9aea164864d354829f8..2630df118c937206b77a92bcd90709db17fc0d51 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -14,9 +14,11 @@ use crate::{Session, cmd};
+ mod bidi;
+ mod documents;
+ mod find_apostrophes;
++mod file_import;
+ mod fit_one_page;
+ mod font_sizes;
+ mod fonts;
++mod host_readonly;
+ mod ime_noop;
+ mod page_number_formats_in_lists;
+ mod para_tools;
+diff --git a/crates/engine/src/tests/file_import.rs b/crates/engine/src/tests/file_import.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..120249a7223f5393ddfa9fa01fe09cae8fbd51da
+--- /dev/null
++++ b/crates/engine/src/tests/file_import.rs
+@@ -0,0 +1,58 @@
++use super::*;
++
++#[test]
++fn native_managed_import_preserves_identity_is_dirty_and_undoable() {
++    let mut s = Session::new(wordcraft_doc::Document::from_text("existing server document"));
++    let id = s.document_id();
++    let source = wordcraft_doc::Document::from_text("imported document body");
++    let bytes = crate::io::save_bytes("source.docx", &source).unwrap();
++    s.run("file.import", &json!({"path":"source.docx","data":crate::cmd::insert::base64_encode(&bytes)})).unwrap();
++    assert_eq!(s.document_id(), id);
++    assert_eq!(s.documents().len(), 1);
++    assert_eq!(s.doc.plain_text(wordcraft_doc::StoryRef::Body), "imported document body");
++    assert!(s.dirty);
++    s.run("edit.undo", &json!({})).unwrap();
++    assert_eq!(s.document_id(), id);
++    assert_eq!(s.doc.plain_text(wordcraft_doc::StoryRef::Body), "existing server document");
++    s.run("edit.redo", &json!({})).unwrap();
++    assert_eq!(s.doc.plain_text(wordcraft_doc::StoryRef::Body), "imported document body");
++}
++
++#[test]
++fn native_managed_import_is_atomic_and_refuses_document_protection() {
++    let mut s = Session::new(wordcraft_doc::Document::from_text("private existing body"));
++    let before = serde_json::to_value(&s.doc).unwrap();
++    let id = s.document_id();
++    assert!(s.run("file.import", &json!({"path":"bad.docx","data":"bm90IGEgd29yZCBkb2N1bWVudA=="})).is_err());
++    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
++    s.run("review.restrict", &json!({"mode":"readOnly"})).unwrap();
++    let before = serde_json::to_value(&s.doc).unwrap();
++    let bytes = crate::io::save_bytes("copy.docx", &wordcraft_doc::Document::from_text("forbidden import")).unwrap();
++    assert!(s.run("file.import", &json!({"path":"copy.docx","data":crate::cmd::insert::base64_encode(&bytes)})).is_err());
++    assert_eq!(s.document_id(), id);
++    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
++}
++
++#[test]
++fn native_managed_import_retains_the_whole_rich_native_document() {
++    let mut source = Session::new(crate::sample::sample_document());
++    run(&mut source, "review.newComment", json!({"text":"authored comment"}));
++    source.sel = crate::Selection::caret(Pos::body(0, 0));
++    run(&mut source, "insert.header", json!({"text":"authored header"}));
++    source.sel = crate::Selection::caret(Pos::body(0, 0));
++    run(&mut source, "insert.footer", json!({"text":"authored footer"}));
++    source.sel = crate::Selection::caret(Pos::body(0, 0));
++    run(
++        &mut source,
++        "insert.picture",
++        json!({"data":"iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAYAAAB3AH1ZAAAAKElEQVR4nGMQibrznxJ8R0ODIsww6oBRB4w6YNQBow4YdcCoAwbaAQCfenQ9EOdSfAAAAABJRU5ErkJggg=="}),
++    );
++    let bytes = crate::io::save_bytes("rich.json", &source.doc).unwrap();
++    let expected = serde_json::to_value(&source.doc).unwrap();
++    let mut s = s();
++    let id = s.document_id();
++    run(&mut s, "file.import", json!({"path":"rich.json","data":crate::cmd::insert::base64_encode(&bytes)}));
++    assert_eq!(s.document_id(), id);
++    assert_eq!(serde_json::to_value(&s.doc).unwrap(), expected);
++    assert!(s.dirty);
++}
+diff --git a/crates/engine/src/tests/host_readonly.rs b/crates/engine/src/tests/host_readonly.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0cb20d1ccdbe04de873c403f836993dd560a88c9
+--- /dev/null
++++ b/crates/engine/src/tests/host_readonly.rs
+@@ -0,0 +1,133 @@
++use super::*;
++
++fn native(s: &Session) -> Vec<u8> {
++    serde_json::to_vec(&s.doc).unwrap()
++}
++
++#[test]
++fn native_host_readonly_is_ephemeral_and_blocks_all_registered_mutators() {
++    let mut s = s();
++    run(&mut s, "text.insert", json!({"text":"retained native text"}));
++    let bytes = native(&s);
++    let revision = s.rev();
++    let dirty = s.dirty;
++    assert!(!s.host_read_only());
++    s.set_host_read_only(true);
++    assert!(s.host_read_only());
++    let ids: Vec<_> = s.registry.all().iter().filter(|spec| spec.mutates).map(|spec| spec.id).collect();
++    assert!(ids.len() > 100);
++    for id in ids {
++        assert!(!s.host_command_allowed(id), "{id}");
++        let error = s.run(id, &json!({})).unwrap_err().to_string();
++        assert!(error.contains("read-only"), "{id}: {error}");
++        assert_eq!(native(&s), bytes, "{id}");
++        assert_eq!(s.rev(), revision, "{id}");
++        assert_eq!(s.dirty, dirty, "{id}");
++    }
++    s.set_host_read_only(false);
++    assert_eq!(native(&s), bytes);
++    assert_eq!(s.rev(), revision);
++    assert_eq!(s.dirty, dirty);
++    run(&mut s, "text.insert", json!({"text":" enabled"}));
++    assert_ne!(native(&s), bytes);
++}
++
++#[test]
++fn native_host_readonly_also_blocks_pure_document_and_file_authority() {
++    let mut s = s();
++    run(&mut s, "text.insert", json!({"text":"retained"}));
++    s.dirty = false;
++    s.set_host_read_only(true);
++    let bytes = native(&s);
++    let revision = s.rev();
++    let document = s.document_id();
++    for id in [
++        "file.new",
++        "file.open",
++        "file.save",
++        "file.saveAs",
++        "file.rename",
++        "file.encrypt",
++        "file.close",
++        "file.closeDocument",
++        "file.options",
++        "file.recover",
++        "file.newFromTemplate",
++        "edit.undo",
++        "edit.undoTo",
++        "edit.redo",
++        "edit.repeat",
++        "insert.closeHeader",
++        "tools.macros",
++        "equation.exit",
++    ] {
++        assert!(s.registry.get(id).is_some(), "missing fixture command {id}");
++        assert!(!s.host_command_allowed(id), "{id}");
++        assert!(s.run(id, &json!({})).unwrap_err().to_string().contains("read-only"), "{id}");
++        assert_eq!(native(&s), bytes, "{id}");
++        assert_eq!(s.rev(), revision, "{id}");
++        assert_eq!(s.document_id(), document, "{id}");
++        assert!(!s.dirty, "{id}");
++    }
++    assert!(!s.host_command_allowed("unknown.futureCommand"));
++}
++
++#[test]
++fn native_host_readonly_keeps_select_copy_find_and_view_working() {
++    let mut s = s();
++    run(&mut s, "text.insert", json!({"text":"find this native text"}));
++    s.set_host_read_only(true);
++    let bytes = native(&s);
++    let revision = s.rev();
++    run(&mut s, "caret.docStart", json!({}));
++    run(&mut s, "select.all", json!({}));
++    run(&mut s, "edit.copy", json!({}));
++    assert!(s.clipboard_text.contains("find this native text"));
++    run(&mut s, "edit.find", json!({"text":"native"}));
++    run(&mut s, "view.zoom", json!({"value":125}));
++    run(&mut s, "review.comments", json!({}));
++    assert_eq!(native(&s), bytes);
++    assert_eq!(s.rev(), revision);
++}
++
++#[test]
++fn native_host_readonly_trusted_import_does_not_unlock_interactive_commands() {
++    let mut s = s();
++    s.set_host_read_only(true);
++    let document = s.document_id();
++    let imported = wordcraft_doc::Document::from_text("host-owned imported native text");
++    let bytes = serde_json::to_vec(&imported).unwrap();
++    s.open_from_host(&json!({"path":"native.json","data":cmd::insert::base64_encode(&bytes)})).unwrap();
++    assert_ne!(s.document_id(), document);
++    assert!(s.host_read_only());
++    assert!(text(&s).contains("host-owned imported native text"));
++    let imported_document = s.document_id();
++    s.add_document(wordcraft_doc::Document::from_text("another trusted document"));
++    assert!(s.host_read_only());
++    s.switch_document(imported_document).unwrap();
++    assert!(s.host_read_only(), "switching open documents must not swap host authority");
++    let bytes = native(&s);
++    assert!(s.run("text.insert", &json!({"text":"forbidden"})).is_err());
++    assert_eq!(native(&s), bytes);
++    s.set_host_read_only(false);
++    assert!(s.doc.settings.protection.is_none());
++    s.doc.settings.protection = Some("readOnly".into());
++    assert!(s.run("text.insert", &json!({"text":"still forbidden"})).is_err());
++    assert_eq!(s.doc.settings.protection.as_deref(), Some("readOnly"));
++}
++
++#[test]
++fn native_host_readonly_refuses_a_full_document_import_before_any_state_change() {
++    let mut s = s();
++    run(&mut s, "text.insert", json!({"text":"retained host content"}));
++    let before = native(&s);
++    let id = s.document_id();
++    let revision = s.rev();
++    let imported = crate::io::save_bytes("picked.docx", &wordcraft_doc::Document::from_text("forbidden import")).unwrap();
++    s.set_host_read_only(true);
++    let error = s.run("file.import", &json!({"path":"picked.docx","data":crate::cmd::insert::base64_encode(&imported)})).unwrap_err().to_string();
++    assert!(error.contains("read-only"));
++    assert_eq!(s.document_id(), id);
++    assert_eq!(s.rev(), revision);
++    assert_eq!(native(&s), before);
++}
 diff --git a/crates/fonts/build.rs b/crates/fonts/build.rs
-index 6f2ced22..5583d0f3 100644
+index 8efb2ce3cebee39c974baf9aa337363c01b1952a..1a948267d51c1faf51b80bd9c5c332f064d0a655 100644
 --- a/crates/fonts/build.rs
 +++ b/crates/fonts/build.rs
 @@ -19,7 +19,7 @@ fn main() {
@@ -309,16 +2113,284 @@ index 6f2ced22..5583d0f3 100644
                  // Each CJK interface language needs its own face: without the Chinese one, Chinese
                  // menus fall back to the Japanese face and show boxes for simplified hanzi (#241).
 -                let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32");
-+                let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32") && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|o| o == "unknown");
++                let wasm = is_browser_target();
                  if std::env::var_os("CRAFT_FONTS_REQUIRED").is_some() && !wasm {
                      for s in REQUIRED_SCRIPTS.iter().filter(|s| !covered.iter().any(|c| c == *s)) {
                          println!("cargo::error=CRAFT_FONTS_DIR={}: no {s} font in fonts/manifest.txt (craft-fonts too old?)", dir.display());
-@@ -48,7 +48,7 @@ fn craft_fonts(dir: &std::path::Path) -> Result<(String, Vec<String>), String> {
+@@ -44,11 +44,16 @@ fn main() {
+ const REQUIRED_SCRIPTS: &[&str] = &["Jpan", "Hans"];
+
+ /// One `CraftFont { .. }` initialiser per manifest line, and the scripts the embedded fonts cover.
++fn is_browser_target() -> bool {
++    std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|arch| arch == "wasm32")
++        && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "unknown")
++}
++
+ fn craft_fonts(dir: &std::path::Path) -> Result<(String, Vec<String>), String> {
      let manifest = dir.join("fonts/manifest.txt");
      println!("cargo::rerun-if-changed={}", manifest.display());
      let text = std::fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
 -    let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32");
-+    let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32") && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|o| o == "unknown");
++    let wasm = is_browser_target();
      let mut out = String::new();
      let mut covered = Vec::new();
      for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+diff --git a/crates/ui-egui/src/app/commands.rs b/crates/ui-egui/src/app/commands.rs
+index 2c7b33632bfecba37d2cc1ec2bfce569da01f66c..bba608a96471dd23b16f3e7ab520243c9ad576f0 100644
+--- a/crates/ui-egui/src/app/commands.rs
++++ b/crates/ui-egui/src/app/commands.rs
+@@ -34,6 +34,7 @@ impl WordApp {
+     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
+     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
+     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        self.check_host_access(id)?;
+         // Undo and Redo act on whole steps: a SmartArt typing run still open is folded into its one step first,
+         // or Undo would take back only the last keystroke of it.
+         if matches!(id, "edit.undo" | "edit.undoTo" | "edit.redo") {
+@@ -112,6 +113,13 @@ impl WordApp {
+     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
+     /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
+     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
++        self.execute_inner(id, params, false)
++    }
++
++    fn execute_inner(&mut self, id: &str, params: Value, host_import: bool) -> Result<Value, String> {
++        if !host_import {
++            self.check_host_access(id)?;
++        }
+         self.clear_command_targets(id);
+         if let Some(error) = self.document_required_error(id) {
+             return Err(error);
+@@ -142,12 +150,26 @@ impl WordApp {
+             }
+             return r;
+         }
++        if id == "file.save" && self.services.host_save_request.is_some() {
++            self.prepare_native_snapshot()?;
++            if let Some(request) = &self.services.host_save_request {
++                request(&self.session, self.native_draft_revision())?;
++            }
++            return Ok(json!({"pending": "hostSave"}));
++        }
+         // Web: saving and exporting become downloads.
+         if self.browser_saves() && matches!(id, "file.save" | "file.saveAs" | "file.exportPdf" | "file.exportPng") {
+             let name = params.get("path").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| self.web_save_name(id));
+             // Inspect only the suffix bytes: no full-name allocation or UTF-8 slicing.
+             let has_pdf_suffix = name.as_bytes().last_chunk::<4>().is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"));
+             let name = if id == "file.exportPdf" && !has_pdf_suffix { format!("{name}.pdf") } else { name };
++            if let Some(export) = &self.services.host_export {
++                let opts = wordcraft_engine::cmd::file::export_options(&self.session, &params);
++                let password = params.get("password").and_then(Value::as_str);
++                let bytes = wordcraft_engine::io::save_bytes_with(&name, &self.session.doc, password, &opts)?;
++                export(&name, &bytes)?;
++                return Ok(json!({"downloaded":name, "bytes":bytes.len()}));
++            }
+             // A save with a password encrypts this and later saves (`file.save`'s `password`).
+             if matches!(id, "file.save" | "file.saveAs")
+                 && let Some(pw) = params.get("password").filter(|v| !v.is_null())
+@@ -230,10 +252,20 @@ impl WordApp {
+         let math_session = self.session.math.as_ref().map(|m| m.session);
+         let composing_before = !self.canvas.ime_preedit.is_empty();
+         let old_path = self.session.path.clone();
+-        let r = if self.ime_origin {
+-            self.session.run_ime(id, &params).map_err(|e| e.to_string())
++        if self.services.host_document_fixed && id == "file.open" && !host_import && params.get("data").is_some() && self.document_unsaved() {
++            return Err("Save the current document before importing another file.".into());
++        }
++        let command = if self.services.host_document_fixed && id == "file.open" && !host_import && params.get("data").is_some() {
++            "file.import"
++        } else {
++            id
++        };
++        let r = if host_import {
++            self.session.open_from_host(&params).map_err(|e| e.to_string())
++        } else if self.ime_origin {
++            self.session.run_ime(command, &params).map_err(|e| e.to_string())
+         } else {
+-            self.session.run(id, &params).map_err(|e| e.to_string())
++            self.session.run(command, &params).map_err(|e| e.to_string())
+         };
+         if self.session.ime_body_epoch() != body_epoch {
+             self.canvas.ime_interrupted_preedit |= composing_before;
+@@ -309,6 +341,110 @@ impl WordApp {
+         r
+     }
+
++    pub(crate) fn host_command_visible(&self, id: &str) -> bool {
++        if !self.services.host_document_fixed || id.is_empty() {
++            return true;
++        }
++        // The opaque host cannot read the current OS clipboard for a menu/button action.
++        // User paste events carry their own payload and keep using these engine commands.
++        if crate::system_clipboard::is_paste(id) {
++            return false;
++        }
++        if id.starts_with("ui.zotero.") || (!id.starts_with("ui.") && self.session.registry.get(id).is_none()) {
++            return false;
++        }
++        !matches!(
++            id,
++            "file.new"
++                | "file.import" // Binary-data API; the visible Open picker supplies its payload.
++                | "file.newFromTemplate"
++                | "file.close"
++                | "file.closeDocument"
++                | "file.switchDocument"
++                | "file.recover"
++                | "file.autosave"
++                | "file.saveTemplate"
++                | "file.encrypt"
++                | "file.rename"
++                | "references.researcher"
++                | "design.setDefault"
++                | "font.add"
++                | "font.remove"
++                | "font.loadSystem"
++                | "ui.saveAsTemplate"
++                | "view.newWindow"
++                | "ui.newWindow"
++                | "view.arrangeAll"
++                | "view.switchWindows"
++                | "view.fullScreen"
++                | "tools.templates"
++                | "tools.macros"
++                | "tools.recordMacro"
++                | "review.compare"
++                | "review.combine"
++                | "review.readAloud"
++                | "mailings.envelopes"
++                | "mailings.labels"
++                | "mailings.finish"
++                | "mailings.print"
++                | "mailings.printDocuments"
++                | "ui.discord"
++                | "ui.checkForUpdates"
++                | "help.checkForUpdates"
++        )
++    }
++
++    pub(crate) fn host_command_allowed(&self, id: &str) -> bool {
++        if !self.host_command_routable(id) {
++            return false;
++        }
++        let view_ui = matches!(
++            id,
++            "ui.tab"
++                | "ui.backstage"
++                | "ui.closeDialog"
++                | "ui.contextMenu"
++                | "ui.paneDock"
++                | "ui.collapseRibbon"
++                | "ui.focusRibbon"
++                | "ui.quickAccessToolbar"
++                | "ui.keytips"
++                | "ui.dark"
++                | "ui.zotero.status"
++        );
++        self.session.host_command_allowed(id) || (self.session.host_read_only() && view_ui)
++    }
++
++    fn check_host_access(&self, id: &str) -> Result<(), String> {
++        if !self.host_command_routable(id) {
++            return Err("this command is managed by the embedding host and is not available inside this document".into());
++        }
++        if self.host_command_allowed(id) { Ok(()) } else { Err("the host has made this document read-only".into()) }
++    }
++
++    fn host_command_routable(&self, id: &str) -> bool {
++        self.host_command_visible(id) || (self.services.host_document_fixed && crate::system_clipboard::is_paste(id))
++    }
++
++    /// The private port may bootstrap a read-only visit without enabling editor commands.
++    pub fn open_host_document(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
++        let data = wordcraft_engine::cmd::insert::base64_encode(bytes);
++        self.execute_inner("file.open", json!({"path": name, "data": data}), true)
++            .map(|_| ())
++    }
++
++    pub fn prepare_native_snapshot(&mut self) -> Result<(), String> {
++        if panes::has_comment_drafts(self) {
++            panes::flush_comment_drafts(self)?;
++        }
++        Ok(())
++    }
++
++    /// Include comment and reply drafts in the snapshot token before they are committed by Save.
++    pub fn native_draft_revision(&self) -> u64 {
++        panes::native_draft_revision(self)
++    }
++
+     /// Web: store a font added from bytes, or forget the removed ones ([`Services::store_font`]).
+     fn keep_web_font(&self, id: &str, params: &Value, result: &Value) {
+         match id {
+diff --git a/crates/ui-egui/src/app/files.rs b/crates/ui-egui/src/app/files.rs
+index 6e98ba438de7e0650d817efebd5b97bd7f5c232a..91f746639eaa6d503a1d71f10baacb7a32d268a6 100644
+--- a/crates/ui-egui/src/app/files.rs
++++ b/crates/ui-egui/src/app/files.rs
+@@ -276,6 +276,9 @@ impl WordApp {
+     /// Web: a save of this document is still in the browser's picker (#1315). The document
+     /// looks saved, but nothing is written yet, so New/Open ask first.
+     pub(crate) fn save_unconfirmed(&self) -> bool {
++        if self.services.host_save_pending.as_ref().is_some_and(|pending| pending()) {
++            return true;
++        }
+         let document = self.session.document_id();
+         self.saves_in_flight.iter().any(|s| s.marked_saved && s.document == document)
+     }
+diff --git a/crates/ui-egui/src/panes.rs b/crates/ui-egui/src/panes.rs
+index a873e521bf39fa6675f3a12c39af6cac4d6c85f5..cd50badcb2cae195870a0533fe4fbee0c0a7fbbc 100644
+--- a/crates/ui-egui/src/panes.rs
++++ b/crates/ui-egui/src/panes.rs
+@@ -20,7 +20,7 @@ mod side;
+ mod state;
+
+ use comments::comments;
+-pub(crate) use comments::{commit_comment, commit_reply, flush_comment_drafts, has_comment_drafts, state_has_drafts};
++pub(crate) use comments::{commit_comment, commit_reply, flush_comment_drafts, has_comment_drafts, native_draft_revision, state_has_drafts};
+ use host::Content;
+ #[cfg(test)]
+ pub(crate) use host::apply;
+diff --git a/crates/ui-egui/src/panes/comments.rs b/crates/ui-egui/src/panes/comments.rs
+index af654db70b19170400d0916a79ab6d66c27d53a1..c87fab440d2629a7b3daf9357e5f622d6ccca197 100644
+--- a/crates/ui-egui/src/panes/comments.rs
++++ b/crates/ui-egui/src/panes/comments.rs
+@@ -113,6 +113,19 @@ fn draft_of(app: &WordApp, id: u32) -> Option<String> {
+     app.canvas.comments.editing.as_ref().filter(|(t, i, _)| (t.0, *i) == key).map(|(_, _, text)| text.clone())
+ }
+
++pub(crate) fn native_draft_revision(app: &WordApp) -> u64 {
++    use std::hash::{Hash, Hasher};
++    let state = &app.canvas.comments;
++    if !state_has_drafts(state) {
++        return 0;
++    }
++    let mut hash = std::collections::hash_map::DefaultHasher::new();
++    state.editing.as_ref().map(|(thread, index, text)| (thread.0, index, text)).hash(&mut hash);
++    state.reply.hash(&mut hash);
++    state.selected.lead.as_ref().map(|thread| thread.0).hash(&mut hash);
++    hash.finish()
++}
++
+ /// Whether the open document has a comment or reply draft not yet written to it (typed, or
+ /// kept after the document refused it): closing the page would lose it.
+ pub(crate) fn has_comment_drafts(app: &WordApp) -> bool {
+diff --git a/crates/ui-egui/src/services.rs b/crates/ui-egui/src/services.rs
+index ff3090a89842d283f3c68d539b22c3dfca908fd6..2b5bf817df55c8e79a486279b53941e92f02159b 100644
+--- a/crates/ui-egui/src/services.rs
++++ b/crates/ui-egui/src/services.rs
+@@ -1,7 +1,15 @@
++pub type HostSaveRequest = Box<dyn Fn(&wordcraft_engine::Session, u64) -> Result<(), String>>;
++pub type HostExport = Box<dyn Fn(&str, &[u8]) -> Result<(), String>>;
++
+ /// Platform services injected by the host. Files, the clipboard, animations and preferences
+ /// reach the app through the framework's host, not through here.
+ #[derive(Default)]
+ pub struct Services {
++    /// One document whose lifetime and native saves belong to the private MessagePort host.
++    pub host_document_fixed: bool,
++    pub host_save_request: Option<HostSaveRequest>,
++    pub host_save_pending: Option<Box<dyn Fn() -> bool>>,
++    pub host_export: Option<HostExport>,
+     /// Printing: the print job layer over the host's jobs (desktop printers, the browser's print
+     /// dialog on the web).
+     pub print: Option<craft::print::spool::Spool>,

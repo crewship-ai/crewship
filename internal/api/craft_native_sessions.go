@@ -57,7 +57,7 @@ func (m *craftNativeHTTP) checkEntry(ctx context.Context, tx *sql.Tx, entry *cra
 	// generations move for every change whose recipients include this user or
 	// this Page. The broad workspace delivery epoch is deliberately not compared;
 	// it also moves for other Pages, other grantees and new members (dev3 F1).
-	if proof.application != entry.application || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
+	if proof.application != entry.application || (entry.application == "wordcraft" && proof.pin != entry.pin) || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
 		return proof, errCraftNativeAccess
 	}
 	if err = craftNativeGenerationsCurrent(ctx, tx, entry); err != nil {

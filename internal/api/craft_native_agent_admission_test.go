@@ -43,19 +43,29 @@ func nativeAgentAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, *craf
 	t.Helper()
 	f, source := originalSessionFixture(t)
 	f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native", source.UserID, "")
-	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,'wordcraft',?,?,?)`, f.rig.wsID, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
-	// The workspace agent artifact policy admits the agent's crew (#4681).
-	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, f.a.WorkspaceID)
-	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
-	// The bridge's instruction-only send: a saved mark in the author's private chat.
-	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
-	mustExec(t, f.rig.db, `UPDATE conversation_messages SET native_craft_instruction=1 WHERE id=?`, f.a.MessageID)
+	cfg := mooring.NativeStoreConfig{
+		Application: "wordcraft", EngineRevision: strings.Repeat("a", 40),
+		EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64),
+	}
+	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,?,?,?,?)`, f.rig.wsID, cfg.Application, cfg.EngineRevision, cfg.EngineSHA256, cfg.EditorBundle)
+	seedNativeAgentAdmission(t, f, f.a.MessageID)
 	u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
 	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
 	h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "native-agent-admission", now: time.Second})
-	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"wordcraft": {Store: mooring.NativeStoreConfig{Application: "wordcraft"}}})
+	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{cfg.Application: {Store: cfg}})
 	m := newCraftNativeAgentManager(h, d, CraftNativeHTTPConfig{AgentsEnabled: true})
 	return f, m, ctx
+}
+
+func seedNativeAgentAdmission(t *testing.T, f *artifactPrincipalFixture, instructions ...string) {
+	t.Helper()
+	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, f.a.WorkspaceID)
+	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
+	// The bridge records instructions in the author's private chat.
+	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
+	for _, message := range instructions {
+		mustExec(t, f.rig.db, `UPDATE conversation_messages SET native_craft_instruction=1 WHERE id=? AND session_id=? AND author_user_id=?`, message, f.a.ChatID, f.a.HumanUserID)
+	}
 }
 
 // The workspace agent artifact policy is the ceiling for native Craft agent

@@ -22,6 +22,7 @@ type craftNativeSession struct {
 	chatID                string
 	realtimeWrite         bool
 	realtimeDeadline      time.Duration
+	pin                   craftNativeDocumentPin
 	// Author-relevant user/Page generations, not the broad workspace epoch.
 	generations craftNativeGenerations
 	boot        string

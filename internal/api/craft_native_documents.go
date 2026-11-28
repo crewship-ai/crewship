@@ -28,9 +28,11 @@ type craftNativeDocumentsHTTP struct {
 	human *craftNativeHTTP
 	// mu guards applications and profiles: an application installed after
 	// startup (#5315) is added while requests are served.
-	mu           sync.RWMutex
-	applications map[string]craftNativeApplication
-	profiles     map[string]CraftNativeDocumentProfile
+	mu                       sync.RWMutex
+	applications             map[string]craftNativeApplication
+	profiles                 map[string]CraftNativeDocumentProfile
+	retainedWord             map[craftNativeDocumentPin]qualifiedNativeDocumentProfile
+	requireWordCompatibility bool
 	// imports holds the xlsx conversions in flight (craft_native_import.go).
 	imports *craftNativeImports
 	// computed records a document the server's engine computed (CraftNativeHTTPConfig.SheetComputed).
@@ -44,7 +46,7 @@ func newCraftNativeDocumentsHTTP(h *craftNativeHTTP, applications map[string]cra
 	for app, p := range applications {
 		profiles[app] = p
 	}
-	return &craftNativeDocumentsHTTP{human: h, applications: profiles, profiles: map[string]CraftNativeDocumentProfile{}}
+	return &craftNativeDocumentsHTTP{human: h, applications: profiles, profiles: map[string]CraftNativeDocumentProfile{}, retainedWord: map[craftNativeDocumentPin]qualifiedNativeDocumentProfile{}}
 }
 
 func (d *craftNativeDocumentsHTTP) application(app string) (craftNativeApplication, bool) {
@@ -65,6 +67,68 @@ func (d *craftNativeDocumentsHTTP) profile(app string) (CraftNativeDocumentProfi
 	defer d.mu.RUnlock()
 	p, ok := d.profiles[app]
 	return p, ok
+}
+
+// creationProfile chooses the current default for a new document. During an
+// upgrade with the new package still to install, a single retained package
+// remains the Word creation default until activation succeeds.
+func (d *craftNativeDocumentsHTTP) creationProfile(app string) (craftNativeApplication, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if current, ok := d.applications[app]; ok {
+		return current, true
+	}
+	if app == "wordcraft" && len(d.retainedWord) == 1 {
+		for _, retained := range d.retainedWord {
+			return retained.application, true
+		}
+	}
+	return craftNativeApplication{}, false
+}
+
+// resolveDocument selects a trusted runtime for an already authorized document.
+// Word pins are exact, including the editor bundle. Sheets retain their workbook
+// format and migration rules in NativeStore.
+func (d *craftNativeDocumentsHTTP) resolveDocument(app string, pin craftNativeDocumentPin) (qualifiedNativeDocumentProfile, bool) {
+	if d == nil {
+		return qualifiedNativeDocumentProfile{}, false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	application, ok := d.applications[app]
+	if app == "wordcraft" && (!ok || application.documentPin() != pin) {
+		retained, found := d.retainedWord[pin]
+		return retained, found
+	}
+	if !ok || application.Store.Application != app {
+		return qualifiedNativeDocumentProfile{}, false
+	}
+	return qualifiedNativeDocumentProfile{application: application, profile: d.profiles[app]}, true
+}
+
+// A Word upgrade cannot start creating documents on the new default while
+// any existing Word profile is unavailable. This runs under the same writer
+// fence as creation, including when a restore added documents since startup.
+func (d *craftNativeDocumentsHTTP) checkWordCreation(ctx context.Context, tx *sql.Tx, app string) error {
+	if app != "wordcraft" || !d.requireWordCompatibility {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT engine_revision,engine_sha256,editor_bundle
+		FROM craft_native_documents WHERE application_id='wordcraft'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pin craftNativeDocumentPin
+		if err := rows.Scan(&pin.revision, &pin.sha256, &pin.bundle); err != nil {
+			return err
+		}
+		if _, ok := d.resolveDocument(app, pin); !ok {
+			return errWordDocumentProfileUnavailable
+		}
+	}
+	return rows.Err()
 }
 
 // activate qualifies one profile exactly like a startup profile and serves
@@ -125,16 +189,27 @@ func (d *craftNativeDocumentsHTTP) bind(r *http.Request) (*http.Request, *craftN
 	}
 	bound = bound.WithContext(context.WithValue(bound.Context(), craftNativeReadCaptureKey{}, &craftNativeReadCapture{}))
 	entry, _ := bound.Context().Value(craftNativeContextKey{}).(*craftNativeSession)
-	profile, ok := d.application(entry.application)
-	if !ok || profile.Store.Application != entry.application {
-		return nil, nil, nil, zero, mooring.ErrNativeDisabled
+	qualified, ok := d.resolveDocument(entry.application, entry.pin)
+	if !ok {
+		return nil, nil, nil, zero, missingNativeDocumentProfile(entry.application)
 	}
+	profile := qualified.application
 	cfg := profile.Store
 	cfg.Enabled = d.human.enabled
 	cfg.Leases = d.human.leases
 	cfg.Authorize = d.human.authorizeNative
 	return bound, entry, mooring.NewNativeStore(d.human.pages.db, cfg), profile, nil
 }
+
+var errWordDocumentProfileUnavailable = errors.New("the qualified WordCraft package for this document is unavailable")
+
+func missingNativeDocumentProfile(app string) error {
+	if app == "wordcraft" {
+		return errWordDocumentProfileUnavailable
+	}
+	return mooring.ErrNativeDisabled
+}
+
 func craftNativeDocumentError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {
 		return
@@ -143,6 +218,8 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, errWordDocumentProfileUnavailable):
+		replyCode(w, http.StatusServiceUnavailable, "word_profile_unavailable", err.Error())
 	case errors.Is(err, mooring.ErrNativeDisabled):
 		replyError(w, 503, "native documents unavailable")
 	case errors.Is(err, artifacts.ErrVersionQuota):
