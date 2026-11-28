@@ -189,7 +189,7 @@ func TestSheetITCoWritePublicationIsCASAndIdempotent(t *testing.T) {
 // range.clear as edit.clearContents, formulas.calculateNow). A structural command (insert a row,
 // delete a sheet, rename) or an unknown one is refused with holder_human beside the person's lease
 // and stores nothing. The agent's toolset has no structural command at all, so without the person's
-// lease (Own) it is refused too, as an invalid request, and nothing is stored. Every command the
+// lease (Own) the tool rejects it as an unsupported engine operation and stores nothing. Every command the
 // agent may send is replayable: all of them together are published beside the person's lease.
 func TestSheetITCoWriteOnlyReplayableCommands(t *testing.T) {
 	rejected := []struct {
@@ -207,7 +207,7 @@ func TestSheetITCoWriteOnlyReplayableCommands(t *testing.T) {
 		cowrite      bool
 	}{
 		{"co-write", CraftSheetReasonHolderHuman, true},
-		{"own lease", CraftSheetReasonInvalid, false},
+		{"own lease", CraftSheetReasonEngineFailed, false},
 	} {
 		for _, order := range []string{"forward", "reverse"} {
 			t.Run(mode.name+"/"+order, func(t *testing.T) {
