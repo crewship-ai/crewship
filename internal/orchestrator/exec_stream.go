@@ -458,7 +458,11 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// test iterations under `go test -count>1` — through the stateless
 	// adapter singleton (#1235). Stateless adapters keep using ParseStreamLine.
 	parseLine := adapter.ParseStreamLine
-	if f, ok := adapter.(streamLineParserFactory); ok {
+	var chatClaude *claudeStreamState
+	if req.RequireCompleteChatOutput && adapter.Name() == "CLAUDE_CODE" {
+		chatClaude = newClaudeStreamState()
+		parseLine = chatClaude.parse
+	} else if f, ok := adapter.(streamLineParserFactory); ok {
 		parseLine = f.NewStreamLineParser()
 	}
 
@@ -557,7 +561,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		o.loggerForRun(req).Warn("run output reader failed", "agent_id", req.AgentID, "adapter", req.CLIAdapter)
 		outputErr = ErrRunOutputIncomplete
 	}
-	if ctx.Err() == nil && req.RequireCompleteChatOutput && adapter.Name() == "CLAUDE_CODE" && !sawResult && !sawError && sawContent {
+	if ctx.Err() == nil && chatClaude != nil && (chatClaude.hasUnfinishedTool() || (!sawResult && !sawError && sawContent)) {
 		outputErr = ErrRunOutputIncomplete
 	}
 

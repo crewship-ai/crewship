@@ -92,6 +92,15 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 		switch frame["type"] {
 		case "assistant", "result":
 			flush(parent)
+		case "tool", "user":
+			// Complete tool and user envelopes use structured redaction.
+		case "system":
+			switch frame["subtype"] {
+			case "init", "api_retry":
+				// Session and retry metadata are complete envelopes.
+			default:
+				omitAuditFragmentPayload(frame, "type", "subtype", "uuid", "parent_tool_use_id")
+			}
 		case "stream_event":
 			event, _ := frame["event"].(map[string]any)
 			switch event["type"] {
@@ -117,8 +126,9 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 				}
 			default:
 				omitAuditFragmentPayload(event, "type", "index")
-
 			}
+		default:
+			omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
 		}
 	}
 	for key, fragments := range groups {

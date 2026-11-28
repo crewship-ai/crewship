@@ -167,20 +167,41 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 // Claude normally streams text deltas before the complete assistant message.
 // Keep reconciliation state scoped to one run, including replay on recovery.
 func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
-	state := &claudeStreamState{
-		pending: make(map[string]*strings.Builder),
-		frames:  make(map[string][sha256.Size]byte),
-		tools:   make(map[string][sha256.Size]byte),
-	}
-	return func(line []byte, handler EventHandler) {
-		parseClaudeStreamLine(line, handler, state)
+	return newClaudeStreamState().parse
+}
+
+func newClaudeStreamState() *claudeStreamState {
+	return &claudeStreamState{
+		pending:      make(map[string]*strings.Builder),
+		frames:       make(map[string][sha256.Size]byte),
+		tools:        make(map[string][sha256.Size]byte),
+		startedTools: make(map[string]struct{}),
 	}
 }
 
 type claudeStreamState struct {
-	pending map[string]*strings.Builder
-	frames  map[string][sha256.Size]byte
-	tools   map[string][sha256.Size]byte
+	pending      map[string]*strings.Builder
+	frames       map[string][sha256.Size]byte
+	tools        map[string][sha256.Size]byte
+	startedTools map[string]struct{}
+}
+
+func (s *claudeStreamState) parse(line []byte, handler EventHandler) {
+	parseClaudeStreamLine(line, handler, s)
+}
+
+// A partial tool start proves the command began describing an invocation. A
+// clean terminal envelope is insufficient when its full call or result was
+// never seen. The observer checks after EOF so late tool results count.
+func (s *claudeStreamState) hasUnfinishedTool() bool {
+	for id := range s.startedTools {
+		_, sawCall := s.tools["tool_call"+"\x00"+id]
+		_, sawResult := s.tools["tool_result"+"\x00"+id]
+		if !sawCall || !sawResult {
+			return true
+		}
+	}
+	return false
 }
 
 // The same tool ID may be replayed. Changes to its input or outcome cannot
@@ -408,6 +429,12 @@ func parseClaudeStreamLine(line []byte, handler EventHandler, state *claudeStrea
 				delta = &eventDelta{Type: "text_delta", Text: start.Text}
 			case start.Type == "thinking" && start.Thinking != "":
 				delta = &eventDelta{Type: "thinking_delta", Thinking: start.Thinking}
+			case start.Type == "tool_use":
+				if start.ID == "" {
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+				} else {
+					state.startedTools[start.ID] = struct{}{}
+				}
 			}
 		}
 		if delta != nil {

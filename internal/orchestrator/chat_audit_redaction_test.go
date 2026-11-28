@@ -179,3 +179,35 @@ func TestStreamOutputOmitsAuditForUnverifiedAdapter(t *testing.T) {
 		t.Fatal("unverified chat output was copied to the journal")
 	}
 }
+
+func TestRedactChatAuditKeepsUnknownEnvelopesInOrderWithoutPayload(t *testing.T) {
+	const raw = `{"type":"system","subtype":"init","uuid":"one","model":"synthetic"}
+{"type":"future_delta","uuid":"two","partial":"unknown-secret-"}
+{"type":"assistant","uuid":"three","message":{"content":[{"type":"text","text":"safe output"}]}}
+{"type":"future_delta","uuid":"four","partial":"remaining-credential"}
+{"type":"result","uuid":"five","result":"safe result"}
+`
+	wire, err := redactChatAudit([]byte(raw), []string{"unknown-secret-remaining-credential"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(wire, []byte("unknown-secret-")) || bytes.Contains(wire, []byte("remaining-credential")) {
+		t.Fatal("a fragment in an unknown typed envelope survived")
+	}
+	var frames []struct {
+		UUID           string
+		Type           string
+		PayloadOmitted bool `json:"payload_omitted"`
+	}
+	if err := json.Unmarshal(wire, &frames); err != nil || len(frames) != 5 {
+		t.Fatalf("unexpected archive frames: %+v, %v", frames, err)
+	}
+	for i, id := range []string{"one", "two", "three", "four", "five"} {
+		if frames[i].UUID != id || frames[i].PayloadOmitted != (i == 1 || i == 3) {
+			t.Fatalf("archive frame at %d: %+v", i, frames[i])
+		}
+	}
+	if frames[1].Type != "future_delta" || frames[3].Type != "future_delta" {
+		t.Fatal("unknown type markers were discarded")
+	}
+}

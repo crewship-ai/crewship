@@ -365,3 +365,39 @@ func TestChatRunAuditFailureFallbackDoesNotConfirmACompleteTurn(t *testing.T) {
 		t.Fatalf("missing incomplete system turn after large record: %+v, %v", messages, err)
 	}
 }
+
+func TestChatRunAuditChecksToolStartAgainstLateResult(t *testing.T) {
+	const start = `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"observed-tool","name":"Test","input":{}}}}` + "\n"
+	const call = `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"observed-tool","name":"Test","input":{"synthetic":"input"}}]}}` + "\n"
+	const receipt = `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"observed-tool","content":"synthetic receipt"}]}}` + "\n"
+	const terminal = `{"type":"result","result":"finished"}` + "\n"
+	for _, tc := range []struct {
+		name, stream string
+		wantErr      error
+	}{
+		{"missing_call_and_receipt", start + terminal, orchestrator.ErrRunOutputIncomplete},
+		{"missing_receipt", start + call + terminal, orchestrator.ErrRunOutputIncomplete},
+		{"late_receipt", start + call + terminal + receipt, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &capResolver{info: baseInfo()}
+			bridge := testBridgeWithContainer(t, resolver, &scriptedContainer{agentOutput: tc.stream})
+			err := bridge.HandleChatMessage(t.Context(), "user-1", "audit-tool-start", "verify tool", func(ws.ChatEvent) {})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("run error %v, want %v", err, tc.wantErr)
+			}
+			messages, err := bridge.convStore.Read(t.Context(), "audit-tool-start", 0, 0)
+			if err != nil || len(messages) != 2 {
+				t.Fatalf("reload after tool audit: messages=%d err=%v", len(messages), err)
+			}
+			expected := orchestrator.ErrRunOutputIncomplete.Error()
+			if tc.wantErr == nil {
+				expected = "synthetic receipt"
+			}
+			parts := messages[1].Parts
+			if len(parts) == 0 || parts[len(parts)-1].Content != expected {
+				t.Fatalf("reload did not preserve the expected outcome %q: %+v", expected, parts)
+			}
+		})
+	}
+}
