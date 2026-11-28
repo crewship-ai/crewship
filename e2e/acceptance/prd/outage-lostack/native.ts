@@ -10,7 +10,7 @@ import { strFromU8, unzipSync } from "fflate"
 import * as net from "node:net"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
 import { readFileSync } from "node:fs"
-import { lockButton } from "../craft-session/frame"
+import { lockControls } from "../craft-session/frame"
 
 // The product's canonical blank Word (what lib/mooring/wordcraft-native-create.ts
 // sends); read as a file because the test loader needs import attributes for JSON.
@@ -154,12 +154,15 @@ const FRAME_TITLE: Record<NativeApp, string> = { wordcraft: "WordCraft editor", 
 const CLICK: Record<NativeApp, { x: number; y: number }> = { wordcraft: { x: 678, y: 324 }, gridcraft: { x: 54, y: 240 } }
 export const VIEWPORT = { width: 1440, height: 1000 }
 
-export const status = (page: Page) => page.getByRole("status").first().innerText().catch(() => "?")
+const documentStatuses = (page: Page) =>
+  page.getByRole("region", { name: /^(WordCraft document|GridCraft workbook)$/ }).getByRole("status")
+
+export const status = (page: Page) => documentStatuses(page).first().innerText().catch(() => "?")
 
 export async function openEditor(page: Page, ref: NativeRef): Promise<void> {
   page.setDefaultTimeout(60_000)
   await page.goto(editorURL(ref))
-  await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor()
+  await documentStatuses(page).filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor()
 }
 
 export async function frameOf(page: Page, app: NativeApp): Promise<Frame> {
@@ -177,8 +180,9 @@ async function barrier(page: Page, app: NativeApp) {
 
 /** Takes the edit lease through the UI and focuses the document. */
 export async function acquire(page: Page, app: NativeApp): Promise<Frame> {
-  await (await lockButton(page, "Take over editing")).click()
-  await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor()
+  await lockControls(page)
+  await page.getByRole("button", { name: app === "wordcraft" ? "Edit" : "Take over editing", exact: true }).click({ timeout: 60_000 })
+  await documentStatuses(page).filter({ hasText: "Ready to edit" }).first().waitFor()
   const f = await frameOf(page, app)
   await pause(800)
   await f.locator("canvas").first().click({ position: CLICK[app] })
@@ -187,8 +191,9 @@ export async function acquire(page: Page, app: NativeApp): Promise<Frame> {
 }
 
 export async function release(page: Page): Promise<void> {
-  await (await lockButton(page, "Hand back")).click()
-  await page.getByRole("status").filter({ hasText: "Read-only" }).first().waitFor()
+  const controls = await lockControls(page)
+  await controls.getByRole("button", { name: /^(Finish editing|Hand back)$/ }).click({ timeout: 60_000 })
+  await documentStatuses(page).filter({ hasText: "Read-only" }).first().waitFor()
   await pause(500)
 }
 

@@ -184,7 +184,8 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
 })
 
 async function openEditor(page: Page) {
-  await expect(page.getByTestId("sheet-panel-state")).toHaveAttribute("data-editing", "true")
+  // The editor starts read-only while software WebGL initializes and write access is verified.
+  await expect(page.getByTestId("sheet-panel-state")).toHaveAttribute("data-editing", "true", { timeout: 30_000 })
   const frame = await native.frameOf(page, "gridcraft")
   await frame.locator("canvas").first().click({ position: { x: 54, y: 240 } })
   return frame
@@ -412,7 +413,7 @@ for (const race of ["saved revision", "same cell", "other cell", "other sheet", 
       expect((await workbookCell(page, head.bytes, sheet, address)).value).toBe("agent")
       if (headOnly) {
         await panel.getByRole("button", { name: "Close Sheet" }).click()
-        await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
+        await page.getByTestId("sheet-chat-card").getByRole("button", { name: `Open ${name}`, exact: true }).click()
         await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", finalVersion)
         const reopened = await readWorkbook(context.request, craft)
         expect((await workbookCell(page, reopened.bytes, "Data", "B2")).value).toBe("human")
@@ -463,8 +464,8 @@ for (const transition of ["switch chat", "narrow window"] as const) {
       expect(hasValue(stored.bytes, "saved base")).toBe(true)
       expect(hasValue(stored.bytes, marker)).toBe(false)
       if (await panel.isHidden()) await open.click()
-      await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", ref.initVersion)
       await openEditor(page)
+      await expect(panel.getByTestId("sheet-panel-state")).toHaveAttribute("data-version", ref.initVersion)
       const copy = panel.getByRole("button", { name: "Keep a copy", exact: true })
       await expect(copy, "the edit before autosave is available as a local draft").toBeVisible()
       const downloading = page.waitForEvent("download")
