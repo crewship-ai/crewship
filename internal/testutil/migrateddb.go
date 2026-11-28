@@ -184,6 +184,24 @@ func MigratedDB(t testing.TB) *database.DB {
 	return MigratedDBAt(t, filepath.Join(migratedTestDir(t), "test.db"))
 }
 
+// MigratedDBWithFullSync opens a private migrated fixture with SQLite's
+// production FULL synchronous mode applied when each connection opens.
+func MigratedDBWithFullSync(t testing.TB) *database.DB {
+	t.Helper()
+	var dir string
+	if actualEvidenceEnabled() {
+		var err error
+		dir, err = newActualEvidenceDBDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		registerTestDirCleanup(t, dir)
+	} else {
+		dir = migratedTestDir(t)
+	}
+	return migratedDBAt(t, filepath.Join(dir, "test.db"), database.WithSynchronous(database.SynchronousFull))
+}
+
 // MigratedSQLDB is MigratedDB for the common case where the caller only wants
 // the *sql.DB handle.
 func MigratedSQLDB(t testing.TB) *sql.DB {
@@ -200,10 +218,15 @@ func MigratedSQLDB(t testing.TB) *sql.DB {
 // migratedTestDir).
 func MigratedDBAt(t testing.TB, path string) *database.DB {
 	t.Helper()
+	return migratedDBAt(t, path, testSynchronous)
+}
+
+func migratedDBAt(t testing.TB, path string, syncMode database.Option) *database.DB {
+	t.Helper()
 	if _, err := templatePath(); err != nil {
 		t.Fatalf("testutil: build migrated template: %v", err)
 	}
-	db, err := openMigratedCopy(path)
+	db, err := openMigratedCopy(path, syncMode)
 	if err != nil {
 		t.Fatalf("testutil: %v", err)
 	}
@@ -226,7 +249,7 @@ func NewMigratedDB() (*database.DB, func(), error) {
 		return nil, nil, err
 	}
 	path := filepath.Join(dir, "test.db")
-	db, err := openMigratedCopy(path)
+	db, err := openMigratedCopy(path, testSynchronous)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, nil, err
@@ -237,7 +260,7 @@ func NewMigratedDB() (*database.DB, func(), error) {
 	}, nil
 }
 
-func openMigratedCopy(path string) (*database.DB, error) {
+func openMigratedCopy(path string, syncMode database.Option) (*database.DB, error) {
 	template, err := templatePath()
 	if err != nil {
 		return nil, err
@@ -251,7 +274,7 @@ func openMigratedCopy(path string) (*database.DB, error) {
 	if err := secureActualDB(path); err != nil {
 		return nil, err
 	}
-	db, err := database.Open("file:"+path, testSynchronous)
+	db, err := database.Open("file:"+path, syncMode)
 	if err != nil {
 		return nil, fmt.Errorf("open migrated db: %w", err)
 	}

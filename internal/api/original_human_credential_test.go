@@ -18,7 +18,11 @@ import (
 
 func originalSessionFixture(t *testing.T) (*artifactPrincipalFixture, *auth.OriginalCredential) {
 	t.Helper()
-	f := newArtifactPrincipalFixture(t)
+	return seedOriginalSessionFixture(t, newArtifactPrincipalFixture(t))
+}
+
+func seedOriginalSessionFixture(t *testing.T, f *artifactPrincipalFixture) (*artifactPrincipalFixture, *auth.OriginalCredential) {
+	t.Helper()
 	expiry := time.Now().Add(time.Hour).UTC()
 	mustExec(t, f.rig.db, `INSERT INTO user_sessions(id,user_id,expires_at) VALUES('original-session',?,?)`, f.a.HumanUserID, expiry.Format(time.RFC3339Nano))
 	source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, &AuthUser{ID: f.a.HumanUserID, SessionID: "original-session", CredentialExpiresAt: expiry.Add(-time.Minute)}, AuthKindSession, "")

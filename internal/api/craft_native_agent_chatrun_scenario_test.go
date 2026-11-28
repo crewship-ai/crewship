@@ -30,6 +30,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/sidecar"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"golang.org/x/net/websocket"
 )
@@ -199,30 +200,36 @@ type chatRunScenario struct {
 	host     *httptest.Server
 }
 
-// fullSynchronousPool sets synchronous=FULL on every connection the pool will
-// hand out, as the server's DSN does. The pragma is per connection: set with one
-// Exec, a second connection (the socket path opens one) stays NORMAL and the
-// agent's writer refuses it, which read as a Sheet that was never attached.
-func fullSynchronousPool(t *testing.T, db *sql.DB) {
+func craftScenarioSessionFixture(t *testing.T) (*artifactPrincipalFixture, *auth.OriginalCredential) {
 	t.Helper()
+	db := testutil.MigratedDBWithFullSync(t)
 	const size = 8
 	db.SetMaxOpenConns(size)
 	db.SetMaxIdleConns(size)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
-	conns := make([]*sql.Conn, 0, size)
-	for range size {
-		c, err := db.Conn(t.Context())
+	return seedOriginalSessionFixture(t, newArtifactPrincipalFixtureWithRig(t, pagesTransferSetupWithDB(t, db)))
+}
+
+func TestCraftScenarioConnectionsUseFullSync(t *testing.T) {
+	f, _ := craftScenarioSessionFixture(t)
+	db := f.rig.db
+	// Hold the existing connection while borrowing a second, newly opened
+	// one. The DSN must configure both connections without prewarming the pool.
+	db.SetMaxIdleConns(1)
+	for i := 0; i < 2; i++ {
+		conn, err := db.Conn(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = c.ExecContext(t.Context(), `PRAGMA synchronous=FULL`); err != nil {
-			t.Fatal(err)
+		defer conn.Close()
+		if i == 1 && db.Stats().InUse != 2 {
+			t.Fatalf("expected two simultaneously borrowed connections, got %d", db.Stats().InUse)
 		}
-		conns = append(conns, c)
-	}
-	for _, c := range conns {
-		_ = c.Close()
+		var syncMode int
+		if err := conn.QueryRowContext(t.Context(), "PRAGMA synchronous").Scan(&syncMode); err != nil || syncMode != 2 {
+			t.Fatalf("pooled connection %d: synchronous=%d err=%v", i+1, syncMode, err)
+		}
 	}
 }
 
@@ -240,9 +247,8 @@ func (s *chatRunScenario) seedSheet(id, owner string) {
 func newChatRunScenario(t *testing.T, flagOn bool) *chatRunScenario {
 	t.Helper()
 	const master = "synthetic-chatrun-scenario-master"
-	f, source := originalSessionFixture(t)
+	f, source := craftScenarioSessionFixture(t)
 	db, workspace := f.rig.db, f.a.WorkspaceID
-	fullSynchronousPool(t, db)
 	mustExec(t, db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
 	mustExec(t, db, `DELETE FROM chat_participants WHERE chat_id=?`, f.a.ChatID)
 	mustExec(t, db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, workspace)

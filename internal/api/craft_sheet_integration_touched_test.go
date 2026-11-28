@@ -97,24 +97,26 @@ func TestSheetITUndoByTheAddressesTheSaveTouched(t *testing.T) {
 // A malformed X-Craft-Touched stores nothing: 400, the head and the operations unchanged. A sheet
 // the workbook does not have is no malformed input (see TestSheetITTouchedOnASheetNotInTheWorkbook).
 func TestSheetITInvalidTouchedStoresNothing(t *testing.T) {
+	s := newSheetITScenario(t)
+	human, generation, _ := s.sitTouchedSetup()
+	before := len(s.opsRows())
+	sheets := s.headSheets(human)
+	sheets["Other"]["A3"] = "X3"
+	body := sitWorkbook(sheets["L"], sheets["Other"])
 	for name, header := range map[string]string{
 		"no sheet":       `["B8"]`,
 		"not an address": `["'L'!ZZZZZ0"]`,
 		"not json":       `B8`,
 		"too many":       `[` + strings.TrimSuffix(strings.Repeat(`"'L'!A1",`, 2001), ",") + `]`,
 	} {
-		t.Run(name, func(t *testing.T) {
-			s := newSheetITScenario(t)
-			human, generationH, _ := s.sitTouchedSetup()
-			before := len(s.opsRows())
-			sheets := s.headSheets(human)
-			sheets["Other"]["A3"] = "X3"
-			body := sitWorkbook(sheets["L"], sheets["Other"])
-			w := s.humanSaveWith(human, generationH, "2", body, "sit-bad-"+strings.ReplaceAll(name, " ", "-"), "", map[string]string{"X-Craft-Touched": header})
-			if w.Code != 400 || s.head() != 2 || len(s.opsRows()) != before {
-				t.Errorf("touched %s: %d %.200s, head %d, ops %d→%d", name, w.Code, w.Body, s.head(), before, len(s.opsRows()))
-			}
-		})
+		w := s.humanSaveWith(human, generation, "2", body, "sit-bad-"+strings.ReplaceAll(name, " ", "-"), "", map[string]string{"X-Craft-Touched": header})
+		if w.Code != 400 || s.head() != 2 || len(s.opsRows()) != before {
+			t.Errorf("touched %s: %d %.200s, head %d, ops %d→%d", name, w.Code, w.Body, s.head(), before, len(s.opsRows()))
+		}
+	}
+	w := s.humanSaveWith(human, generation, "2", body, "sit-valid-after-refusals", "", map[string]string{"X-Craft-Touched": `["'Other'!A3"]`})
+	if w.Code != 200 || s.head() != 3 || len(s.opsRows()) != before+1 {
+		t.Fatalf("valid save after malformed touched ranges: %d %.200s", w.Code, w.Body)
 	}
 }
 

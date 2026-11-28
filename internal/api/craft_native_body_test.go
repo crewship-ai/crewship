@@ -70,16 +70,17 @@ func TestSnapshotBodyGzipCannotExceedWhatItDeclared(t *testing.T) {
 }
 
 func TestSnapshotBodyGzipBombStopsAtTheCeiling(t *testing.T) {
-	// 200 MiB of zeros compresses to about 200 KiB; declared at the maximum
-	bomb := gz(t, make([]byte, 200<<20))
-	_, _, open := snapshotRequest(bomb, "gzip", strconv.Itoa(45<<20))
+	// Highly compressible data declares the maximum and expands past it.
+	const ceiling = 45 << 20
+	bomb := gz(t, make([]byte, ceiling+(64<<10)))
+	_, _, open := snapshotRequest(bomb, "gzip", strconv.Itoa(ceiling))
 	r, _, err := open()
 	if err != nil {
 		t.Fatal(err)
 	}
 	n, err := io.Copy(io.Discard, r)
-	if err == nil || n > 45<<20 {
-		t.Fatalf("bomb read %d bytes, err %v", n, err)
+	if err == nil || n != ceiling {
+		t.Fatalf("bomb read %d bytes, want %d with an error, got %v", n, ceiling, err)
 	}
 }
 

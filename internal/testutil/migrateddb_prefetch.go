@@ -195,7 +195,7 @@ func openPrefetched() (prefetchedItem, error) {
 		return prefetchedItem{}, err
 	}
 	path := filepath.Join(dir, "test.db")
-	db, err := openMigratedCopy(path)
+	db, err := openMigratedCopy(path, testSynchronous)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return prefetchedItem{}, err

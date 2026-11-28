@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -270,31 +271,49 @@ func TestSheetITWorkbookSaveRefusesBombsEncryptedAndOversize(t *testing.T) {
 // (uncompressed) random part that fills it up.
 func sitLargeWorkbook(t *testing.T, size int) []byte {
 	t.Helper()
-	pad := size - len(sitWorkbook(sitInitialL(), sitInitialOther(), sitPart{"xl/media/pad.bin", ""}))
-	for range 4 {
-		r := rand.New(rand.NewPCG(3, 4))
-		raw := make([]byte, pad)
-		for i := range raw {
-			raw[i] = byte(r.Uint32())
-		}
-		parts := sitBaseParts()
-		parts = append(parts, sitPart{"xl/worksheets/sheet1.xml", sitSheetXML(sitInitialL())}, sitPart{"xl/worksheets/sheet2.xml", sitSheetXML(sitInitialOther())})
+	parts := sitBaseParts()
+	parts = append(parts, sitPart{"xl/worksheets/sheet1.xml", sitSheetXML(sitInitialL())}, sitPart{"xl/worksheets/sheet2.xml", sitSheetXML(sitInitialOther())})
+	build := func(padding []byte) []byte {
 		var buf bytes.Buffer
+		if len(padding) != 0 {
+			buf.Grow(size)
+		}
 		zw := zip.NewWriter(&buf)
 		for _, p := range parts {
-			w, _ := zw.CreateHeader(&zip.FileHeader{Name: p.name, Method: zip.Deflate})
-			_, _ = w.Write([]byte(p.body))
+			w, err := zw.CreateHeader(&zip.FileHeader{Name: p.name, Method: zip.Deflate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.Write([]byte(p.body)); err != nil {
+				t.Fatal(err)
+			}
 		}
-		w, _ := zw.CreateHeader(&zip.FileHeader{Name: "xl/media/pad.bin", Method: zip.Store})
-		_, _ = w.Write(raw)
-		_ = zw.Close()
-		if buf.Len() == size {
-			return buf.Bytes()
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: "xl/media/pad.bin", Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
 		}
-		pad += size - buf.Len()
+		if _, err := w.Write(padding); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
 	}
-	t.Fatalf("could not build a workbook of %d bytes", size)
-	return nil
+	pad := size - len(build(nil))
+	if pad < 0 {
+		t.Fatalf("workbook headers exceed target size %d", size)
+	}
+	rng := rand.New(rand.NewPCG(3, 4))
+	padding := make([]byte, (pad+7)&^7)
+	for i := 0; i < len(padding); i += 8 {
+		binary.LittleEndian.PutUint64(padding[i:i+8], rng.Uint64())
+	}
+	workbook := build(padding[:pad])
+	if len(workbook) != size {
+		t.Fatalf("workbook size %d, want %d", len(workbook), size)
+	}
+	return workbook
 }
 
 // 32 MiB is the workbook limit of the JSON editor. A file just under it is saved; the storage

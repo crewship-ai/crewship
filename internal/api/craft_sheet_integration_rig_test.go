@@ -537,10 +537,14 @@ type sitScenario struct {
 	agentN string
 }
 
+var sitDefaultWorkbook = sync.OnceValue(func() []byte {
+	return sitWorkbook(sitInitialL(), sitInitialOther())
+})
+
 func newSheetITScenario(t *testing.T, initial ...[]byte) *sitScenario {
 	t.Helper()
 	if len(initial) == 0 {
-		return newSheetITScenarioWithWorkbook(t, sitWorkbook(sitInitialL(), sitInitialOther()), "workbook.xlsm", mooring.WorkbookMediaTypeXLSM)
+		return newSheetITScenarioWithWorkbook(t, bytes.Clone(sitDefaultWorkbook()), "workbook.xlsm", mooring.WorkbookMediaTypeXLSM)
 	}
 	format, err := mooring.DetectWorkbook(initial[0])
 	if err != nil {
@@ -555,9 +559,8 @@ func newSheetITScenario(t *testing.T, initial ...[]byte) *sitScenario {
 func newSheetITScenarioWithWorkbook(t *testing.T, v1 []byte, entryPoint, mediaType string) *sitScenario {
 	t.Helper()
 	const master = "synthetic-sit-workbook-master"
-	f, source := originalSessionFixture(t)
+	f, source := craftScenarioSessionFixture(t)
 	db, workspace := f.rig.db, f.a.WorkspaceID
-	fullSynchronousPool(t, db)
 	mustExec(t, db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
 	mustExec(t, db, `DELETE FROM chat_participants WHERE chat_id=?`, f.a.ChatID)
 	mustExec(t, db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, workspace)
