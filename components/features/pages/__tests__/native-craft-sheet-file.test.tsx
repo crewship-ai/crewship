@@ -1,6 +1,7 @@
 import type {NativeDraft} from '@/lib/mooring/native-draft'
 import type {NativeSaveRequest} from '@/lib/mooring/single-editor-save'
 import type {NativeDocumentClient} from '@/lib/mooring/native-document-client'
+import type {NativeVersionList} from '@/lib/mooring/native-versions'
 // A Sheet whose stored document is the workbook file itself (mooring protocol 2): the host
 // opens the file as it is, says when values are Excel's, asks before the first edit what
 // saving here would change, and offers the original file (version 1) for download.
@@ -39,6 +40,7 @@ function makeClient(format:'xlsx'|'xlsm'){
   open:vi.fn().mockResolvedValue({sessionId:'diagnostic-session',applicationId:'gridcraft'}),
   read:vi.fn().mockResolvedValue({version:'3',bytes:workbook,applicationId:'gridcraft',...(serverBuild?{engineBuild:serverBuild}:{}),format,fileName:`Plan.${format}`,size:String(workbook.length),contentHash:'sha256:'+'0'.repeat(64),enginePin:'a'.repeat(64),editorBundle:'b'.repeat(64),editorURL:`https://editor.example/b/${'b'.repeat(64)}/index.html`,quota:{usedBytes:'1',limitBytes:'9999',warning:false,retention:'keep-all'}}),
   lease:vi.fn().mockResolvedValue(vacant),leaseAction:vi.fn<NativeDocumentClient['leaseAction']>(async()=>vacant),
+  versions:vi.fn<NativeDocumentClient['versions']>().mockResolvedValue(null),
   events:vi.fn(()=>new Promise<void>(()=>{})),reauthorize:vi.fn().mockResolvedValue(true),proposals:vi.fn().mockResolvedValue([]),close:vi.fn(),save:vi.fn(),
   exportXlsx:vi.fn(async(_signal:AbortSignal,version?:string)=>({blob:new Blob(['PK']),filename:`Plan.${format}`,version:version??'3'})),
  }
@@ -51,20 +53,22 @@ let client:ReturnType<typeof makeClient>
 const digest=webcrypto.subtle.digest.bind(webcrypto.subtle)
 let hashes:Promise<ArrayBuffer>[],network:ReturnType<typeof vi.fn>
 async function settle(ms=500){let remaining=ms;do{const step=Math.min(100,remaining);await act(async()=>{await vi.advanceTimersByTimeAsync(step);await Promise.all(hashes)});remaining-=step}while(remaining>0)}
-async function mount(format:'xlsx'|'xlsm'='xlsx',toolbar?:HTMLElement,realtimeChatId?:string, generation?:string){
+async function mount(format:'xlsx'|'xlsm'='xlsx',toolbar?:HTMLElement,realtimeChatId?:string, generation?:string, versions?:NativeVersionList){
  client=makeClient(format);mock.client.mockReturnValue(client)
+ if(versions)client.versions.mockResolvedValue(versions)
  if(generation){
   client.open.mockResolvedValue({sessionId:'diagnostic-session',applicationId:'gridcraft',realtime:{canWrite:true,generation:'1'}})
   client.lease.mockResolvedValue({realtime_sheet:true,can_edit:true,can_write:true,holder:null,generation})
  }
  const warn=vi.spyOn(console,'warn')
- render(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="diagnostic-page" humanId="diagnostic-human" enabled realtimeChatId={realtimeChatId} {...(toolbar?{toolbar,historyHref:'/artifacts/diagnostic-page'}:{})} />)
+ const view=render(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="diagnostic-page" humanId="diagnostic-human" enabled realtimeChatId={realtimeChatId} {...(toolbar?{toolbar,historyHref:'/artifacts/diagnostic-page'}:{})} />)
  await settle()
  // A start that failed says which step refused, as codes only: show them instead of a missing button.
  expect(warn.mock.calls.flat().map(String).filter(line=>line.startsWith('native_')),'native start codes').toEqual([])
  expect(screen.queryByRole('alert'),'no refusal while opening').toBeNull()
  expect(document.querySelector('iframe'),'the editor frame is mounted').not.toBeNull()
  expect(sent.map(m=>m.type),'what the host sent the editor').toContain('gridcraft:open')
+ return view
 }
 beforeEach(()=>{
  vi.useFakeTimers();vi.stubGlobal('crypto',webcrypto);hashes=[]
@@ -425,6 +429,26 @@ describe('a Sheet beside the chat, with one bar above the grid',()=>{
   expect(items).toEqual(['Download .xlsx','Download original (version 1)','Version history'])
   expect(screen.getByRole('menu')).toHaveTextContent(SAVED_NOTE)
   expect(screen.getByRole('menuitem',{name:'Version history'})).toHaveAttribute('href','/artifacts/diagnostic-page')
+ })
+ it('opens realtime history in the chat after reopen and leaves restoration disabled until editing is ready',async()=>{
+  const versions:NativeVersionList={currentVersion:'3',truncated:false,versions:[
+   {version:'3',createdAt:'2026-01-03T00:00:00Z',author:{actorId:'human',kind:'human',displayName:'Editor'},current:true,format:'xlsx'},
+   {version:'2',createdAt:'2026-01-02T00:00:00Z',author:{actorId:'human',kind:'human',displayName:'Editor'},current:false,format:'xlsx'},
+  ]}
+  for(let open=0;open<2;open++){
+   const view=await mount('xlsx',bar,'chat-1',undefined,versions)
+   await openMenu()
+   const history=screen.getByRole('menuitem',{name:'Version history'})
+   expect(history).not.toHaveAttribute('href')
+   fireEvent.click(history)
+   await settle(100)
+   const dialog=screen.getByRole('dialog',{name:'Version history'})
+   expect(within(dialog).getByText('Editing must be ready before you can restore a version.')).toBeVisible()
+   expect(within(dialog).getByRole('button',{name:'Restore'})).toBeDisabled()
+   expect(dialog).not.toHaveTextContent(/Take over editing|Hand back|Edit anyway|Keep reading/i)
+   expect(client.leaseAction).not.toHaveBeenCalled()
+   view.unmount()
+  }
  })
  it('explains Take over editing in the bar in one sentence, on keyboard focus',async()=>{
   await mount('xlsx',bar)

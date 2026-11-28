@@ -176,6 +176,24 @@ test("Sheet reconciles a committed save whose reply was lost", async ({ browser 
     await page.getByRole("menuitem", { name: /^Download Excel/ }).click()
     const exported = await (await downloading).createReadStream()
     expect(hasValue(Buffer.concat(await exported.toArray()), "lost acknowledgement cell")).toBe(true)
+
+    const verifyHistory = async () => {
+      const chatURL = page.url()
+      await panel.getByRole("button", { name: "More for this Sheet" }).click()
+      await page.getByRole("menuitem", { name: "Version history" }).click()
+      const history = page.getByRole("dialog", { name: "Version history" })
+      await expect(history.getByText("Latest", { exact: true })).toBeVisible()
+      await expect(history).not.toContainText(/Take over editing|Hand back|Edit anyway|Keep reading/i)
+      await expect(panel.getByRole("button", { name: /^(Take over editing|Edit anyway)$/i })).toHaveCount(0)
+      await expect(page).toHaveURL(chatURL)
+      await history.getByRole("button", {name: "Close", exact: true}).click()
+    }
+    await panel.getByRole("button", { name: "Expand Sheet" }).click()
+    await verifyHistory()
+    await page.reload()
+    if (await panel.isHidden()) await page.getByRole("button", { name: `Open ${name}`, exact: true }).click()
+    await openEditor(page)
+    await verifyHistory()
   } finally {
     const events = await page.evaluate(() => window.sheetTestEvents).catch(() => [])
     await info.attach("editor revisions", { body: JSON.stringify(events ?? [], null, 2), contentType: "application/json" })

@@ -8,6 +8,7 @@ import {registerDocumentDraftWriter} from "@/lib/document-queue"
 import {LocalDraftReadRevoked,PendingSheetDraftCapture} from "@/lib/local-draft-seal"
 import {Bot,MoreHorizontal,RotateCcw} from "lucide-react"
 import {Button} from "@/components/ui/button"
+import {Dialog,DialogContent,DialogTitle} from "@/components/ui/dialog"
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from "@/components/ui/dropdown-menu"
 import {TooltipProvider} from "@/components/ui/tooltip"
 import {HintTooltip} from "@/components/ui/hint-tooltip"
@@ -211,6 +212,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
  const stopAgent=React.useRef<()=>void>(()=>{})
  const history=React.useRef<{load:(signal:AbortSignal)=>Promise<NativeVersionList|null>;loadVersion:(version:string,signal:AbortSignal)=>Promise<NativeVersionDocument>;restore:(version:string)=>void}>({load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}}),[historyKey,setHistoryKey]=React.useState(0),[openedVersion,setOpenedVersion]=React.useState<string>()
+ const [sheetHistoryOpen,setSheetHistoryOpen]=React.useState(false)
  const [proposals,setProposals]=React.useState<NativeProposal[]>([]),decide=React.useRef<(id:string,decision:'accept'|'reject')=>void>(()=>{}),compareProposal=React.useRef<(proposal:NativeProposal)=>void>(()=>{})
  const [quotaFull,setQuotaFull]=React.useState(false),downloadDraft=React.useRef<()=>void>(()=>{}),retrySave=React.useRef<()=>void>(()=>{})
  const compare=React.useRef<(draft:NativeDraft,scope?:string)=>void>(()=>{}),reconcile=React.useRef<(refocus?:boolean)=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
@@ -258,7 +260,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setOpenedFile(undefined);setFidelityAsk(false);setFidelityLoss(null);setFidelityKept(false);fidelity.current={warnings:0,accepted:false}
-  setOfferWithdrawn(false);setAccessCheck(false);setStateScope(identityKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setExporting(false);setExportNote(undefined);setExportRefused(undefined);setPublishedVersion(undefined);setHistoryKey(0);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setAppOff(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
+  setOfferWithdrawn(false);setAccessCheck(false);setStateScope(identityKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setExporting(false);setExportNote(undefined);setExportRefused(undefined);setPublishedVersion(undefined);setHistoryKey(0);setSheetHistoryOpen(false);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setAppOff(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
   setRealtimeDetail(undefined);setPresenceLabel(undefined)
   setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined);setAgentNotice(undefined);setAgentWorking(false);setTakeNotice(undefined);setLegacySource(false)
   const lifetime=new AbortController()
@@ -1477,6 +1479,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const mayDownload=readVerified&&!retainedBuffer&&!connectionRetired&&applicationId==='gridcraft'&&exportRefused?.reason!=='forbidden'
  const downloadBlocked=exporting||(exportRefused?.reason==='too_large'&&exportRefused.version===(savedVersion??openedVersion??''))
  const savedValues=Boolean(openedFile&&readVerified&&!connectionRetired&&!openedFile.calculated)
+ const historyInSheetPanel=Boolean(realtimeSheet&&toolbar)
+ const historyReady=readVerified&&historyKey>0&&!connectionRetired
+ const restoreHint=realtimeSheet
+  ? view.can_edit===true?'Editing must be ready before you can restore a version.':'You need permission to edit this Sheet to restore a version.'
+  : view.can_edit===true?'Take over editing to restore a version.':'Only the person editing the document now can restore a version.'
+ const versionHistory=historyReady?<NativeCraftVersionHistory embedded={historyInSheetPanel||Boolean(placeHistory)}
+  load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)}
+  scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`}
+  canRestore={view.can_edit===true&&ownsEditor} restoreHint={restoreHint} pending={busy}
+  onRestore={version=>history.current.restore(version)}/>:null
  const bar=toolbar&&stateScope===identityKey&&enabled?createPortal(<TooltipProvider><div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
   {!realtimeSheet&&<NativeCraftLeaseBar variant="inline" view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>}
   {!realtimeSheet&&readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<HintTooltip hint={TAKE_OVER_HINT}><Button size="sm" disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button></HintTooltip>}
@@ -1488,7 +1500,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     {savedValues&&<><HintTooltip hint={SAVED_VALUES_HINT} side="left"><p className="px-2 py-1.5 text-xs text-muted-foreground">{SAVED_VALUES_NOTE}</p></HintTooltip><DropdownMenuSeparator/></>}
     {mayDownload&&<DropdownMenuItem disabled={downloadBlocked} onSelect={()=>downloadXlsx.current()}><span>{realtimeSheet?'Download Excel':`Download .${openedFile?.format??'xlsx'}`}{dirty&&<small className="block text-muted-foreground">Last saved version, without unsaved changes</small>}</span></DropdownMenuItem>}
     {mayDownload&&openedFile&&<DropdownMenuItem disabled={exporting} onSelect={()=>downloadXlsx.current('1')}>{realtimeSheet?'Download original':'Download original (version 1)'}</DropdownMenuItem>}
-    {historyHref&&<DropdownMenuItem asChild><a href={historyHref} target="_blank" rel="noopener noreferrer">Version history</a></DropdownMenuItem>}
+    {historyInSheetPanel?<DropdownMenuItem disabled={!historyReady} onSelect={()=>setSheetHistoryOpen(true)}>Version history</DropdownMenuItem>:historyHref&&<DropdownMenuItem asChild><a href={historyHref} target="_blank" rel="noopener noreferrer">Version history</a></DropdownMenuItem>}
     {mayPublish&&<DropdownMenuItem disabled={busy} onSelect={()=>publishPreview.current()}>{realtimeSheet?'Share preview':'Publish preview'}</DropdownMenuItem>}
    </DropdownMenuContent></DropdownMenu>
  </div></TooltipProvider>,toolbar):null
@@ -1522,7 +1534,17 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    <summary className="cursor-pointer text-muted-foreground">What this editor keeps as it is in this workbook</summary>
    <ul className="mt-1 list-disc space-y-1 pl-5">{openedFile.warnings.map(w=><li key={w.code}>{sheetWarningText(w.code,w.count)}</li>)}</ul>
   </details>}
-  {readVerified&&historyKey>0&&!connectionRetired&&(placeHistory?placeHistory(<NativeCraftVersionHistory embedded load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Take over editing to restore a version.':'Only the person editing the document now can restore a version.'} pending={busy} onRestore={version=>history.current.restore(version)}/>):<NativeCraftVersionHistory load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Take over editing to restore a version.':'Only the person editing the document now can restore a version.'} pending={busy} onRestore={version=>history.current.restore(version)}/>)}
+  {versionHistory&&(historyInSheetPanel
+   ? <Dialog open={sheetHistoryOpen} onOpenChange={setSheetHistoryOpen}>
+     <DialogContent aria-describedby={undefined} onCloseAutoFocus={event=>{
+      const menu=toolbar?.querySelector<HTMLButtonElement>('button[aria-label="More for this Sheet"]')
+      if(menu?.isConnected){event.preventDefault();menu.focus()}
+     }}>
+      <DialogTitle>Version history</DialogTitle>
+      {versionHistory}
+     </DialogContent>
+    </Dialog>
+   : placeHistory?placeHistory(versionHistory):versionHistory)}
   {saveTrace?.reason==='document_too_large'&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>This workbook is larger than the 32 MiB a Sheet can save, so it is NOT saved on the server.</b> Your changes stay in this editor. Do not close the tab; remove data or split the workbook, or download it as a file.</p></div>}
   {/* One sentence and two actions; the detail folded, so the grid keeps its room. */}
   {conflictShown&&<div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-y px-3 py-1.5 text-sm">
