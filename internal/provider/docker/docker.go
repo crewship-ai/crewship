@@ -1995,9 +1995,9 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 
 	pr, pw := io.Pipe()
 	go func() {
-		defer pw.Close()
 		defer resp.Close()
-		_, _ = stdcopy.StdCopy(pw, pw, resp.Reader)
+		_, err := stdcopy.StdCopy(pw, pw, resp.Reader)
+		_ = pw.CloseWithError(err)
 	}()
 
 	return &provider.ExecResult{

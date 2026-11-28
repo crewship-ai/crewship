@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -247,6 +249,18 @@ func NewStore(basePath string, logger *slog.Logger, opts ...Option) *Store {
 	return s
 }
 
+// Bound stored turns and use the same limit when reading them. Streamed
+// tool activity can make a complete turn much larger than one tool response.
+const maxMessageBytes = 16 * 1024 * 1024
+
+var ErrMessageTooLarge = errors.New("conversation message exceeds storage limit")
+
+func newMessageScanner(reader io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxMessageBytes+2)
+	return scanner
+}
+
 // Append writes a message to the session's JSONL file, creating it if needed.
 func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error {
 	if err := ctx.Err(); err != nil {
@@ -265,6 +279,9 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
+	}
+	if len(data) > maxMessageBytes {
+		return ErrMessageTooLarge
 	}
 	data = append(data, '\n')
 
@@ -447,8 +464,7 @@ func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, i
 	defer f.Close()
 
 	var messages []Message
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := newMessageScanner(f)
 
 	eligible := 0
 	for scanner.Scan() {
@@ -502,8 +518,7 @@ func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int)
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := newMessageScanner(f)
 
 	// ring holds at most maxMessages entries; head is the index of the
 	// oldest retained message. Once full we overwrite the oldest, so the

@@ -1558,6 +1558,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		costCancel()
 	}
+	if auditErr := logBuf.Finish(); auditErr != nil {
+		b.logger.Warn("failed to finish agent audit log", "run_id", runID, "error", auditErr)
+		if runErr == nil {
+			runErr = orchestrator.ErrRunOutputIncomplete
+		}
+	}
 	if runErr != nil {
 		if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
 			// Preserve partial replies when the observer or execution detaches. An
@@ -1665,7 +1671,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// reload still shows what the agent said and why the run failed.
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
-		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
+		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) || errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
 			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg, alreadySaved)
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
@@ -1736,9 +1742,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The ledger was billed right after the run (see above), so this only has
 	// to stamp the record.
 	orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
-	if err := updateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
-		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
-	}
 
 	// Build compact tool summary for conversation context (cap at 10 entries
 	// — keep the comment honest with the slice bound below to avoid future
@@ -1771,8 +1774,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Timestamp:   repliedAt,
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
-		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
-		return fmt.Errorf("persist assistant message: %w", err)
+		b.persistInBandFailureTurn(ctx, chatID, info, "", nil, orchestrator.ErrRunOutputIncomplete.Error(), alreadySaved)
+		msg := orchestrator.ErrRunOutputIncomplete.Error()
+		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return orchestrator.ErrRunOutputIncomplete
+	}
+	if err := b.convStore.SyncSession(ctx, chatID); err != nil {
+		b.logger.Error("failed to sync assistant message", "error", err, "chat_id", chatID)
+		msg := orchestrator.ErrRunOutputIncomplete.Error()
+		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return orchestrator.ErrRunOutputIncomplete
+	}
+	if err := updateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
+		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 
 	// Update message count in DB (user + assistant = 2 messages)

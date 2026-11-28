@@ -163,6 +163,15 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseClaudeCodeStreamJSON(line, handler)
 }
 
+// Claude normally streams text deltas before the complete assistant message.
+// Reconcile both per parent so a missing delta cannot discard complete text.
+func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
+	pending := make(map[string]*strings.Builder)
+	return func(line []byte, handler EventHandler) {
+		parseClaudeStreamLine(line, handler, pending)
+	}
+}
+
 // SetupSystemPrompt drops canonical memory files even though Claude Code
 // receives its prompt via --system-prompt, which replaces the default prompt
 // outright. Reasoning: --setting-sources "" suppresses CLAUDE.md
@@ -212,6 +221,10 @@ func (claudeCodeAdapter) WriteMCPConfig(
 // and emits zero-or-more AgentEvents. Extracted from Orchestrator.handleStreamJSONLine
 // so the adapter is stateless and easy to unit-test without a full Orchestrator.
 func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
+	parseClaudeStreamLine(line, handler, nil)
+}
+
+func parseClaudeStreamLine(line []byte, handler EventHandler, pending map[string]*strings.Builder) {
 	if handler == nil {
 		return
 	}
@@ -316,6 +329,12 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		if msg.Event != nil && msg.Event.Delta != nil {
 			switch msg.Event.Delta.Type {
 			case "text_delta":
+				if pending != nil {
+					if pending[parentID] == nil {
+						pending[parentID] = new(strings.Builder)
+					}
+					pending[parentID].WriteString(msg.Event.Delta.Text)
+				}
 				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "thinking_delta":
 				handler(AgentEvent{
@@ -328,13 +347,34 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		}
 
 	case "assistant":
-		// With --include-partial-messages on (always), text and thinking
-		// were streamed via stream_event already — only emit tool blocks
-		// here so we don't duplicate the visible text.
+		var streamed string
+		if p := pending[parentID]; p != nil {
+			streamed = p.String()
+			delete(pending, parentID)
+		}
+		matched := true
 		for _, block := range msg.Content {
 			switch block.Type {
-			case "thinking", "text":
-				// Already delivered via deltas — skip.
+			case "thinking":
+				// Thinking remains on the partial stream.
+			case "text":
+				if pending == nil || block.Text == "" || !matched {
+					continue
+				}
+				text := block.Text
+				switch {
+				case strings.HasPrefix(streamed, text):
+					streamed = streamed[len(text):]
+					continue
+				case strings.HasPrefix(text, streamed):
+					text = text[len(streamed):]
+					streamed = ""
+				default:
+					matched = false
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+					continue
+				}
+				handler(AgentEvent{Type: "text", Content: text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "tool_use":
 				name := block.Name
 				if name == "" {
