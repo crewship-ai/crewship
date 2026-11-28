@@ -868,6 +868,24 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range chatSourceSchemaRoutes() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	result["GET /api/v1/chats/{chatId}/runs/{runId}/audit"] = DomainSchema{
+		Response: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"status": map[string]any{"type": "string", "enum": []string{"archived", "incomplete", "omitted"}},
+				"events": map[string]any{
+					"type":        "array",
+					"description": "Available credential-redacted wire envelopes in capture order. Payloads may be marked omitted.",
+					"items":       map[string]any{"type": "object", "additionalProperties": true},
+				},
+			},
+			"required":             []string{"status"},
+			"additionalProperties": false,
+		},
+		SuccessHeaders: map[string]any{
+			"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"private, no-store"}}},
+		},
+	}
 
 	return result
 }

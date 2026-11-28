@@ -74,6 +74,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}/logs](#agent-proxy-endpoints) | Get agent logs |
 | POST | [/api/v1/agents/{agentId}/stop](#agent-proxy-endpoints) | Stop a running agent |
 | GET | [/api/v1/chats/{chatId}/messages](#chat-messages) | Get messages for a chat session |
+| GET | [/api/v1/chats/{chatId}/runs/{runId}/audit](#chat-run-audit) | Read one private agent run audit |
 
 ## Status & Metrics
 
@@ -2196,6 +2197,36 @@ Get messages for a specific chat session. Proxied through crewshipd. Supports `?
 |---|---|
 | `403` | Caller lacks `read`-tier role, or is not a member of the chat's workspace |
 | `502` | Sidecar IPC call failed |
+
+### Chat run audit
+
+```
+GET /api/v1/chats/{chatId}/runs/{runId}/audit
+```
+
+**Auth:** Authenticate in the chat's workspace with a read-tier role and
+trusted access to the chat. The current chat audience is checked before
+the audit is released. A journal reference lists the IDs needed to request
+the audit. Access is checked independently of the reference.
+
+**Request:** Supply the chat ID and run ID in the path, and select the
+chat's workspace with `X-Workspace-ID` or `workspace_id`. This request
+takes no body.
+
+**Response:** `200 OK` with `Cache-Control: private, no-store`. The
+`status` is `archived`, `incomplete`, or `omitted`. If present, the
+`events` array contains available credential-redacted output in capture
+order. An unfinished archive can return `incomplete` without events.
+Strict privacy and adapters without verified redaction report `omitted`
+without events.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid workspace selection |
+| `401` | Authentication required |
+| `403` | Read-tier workspace role required |
+| `404` | Chat or audit unavailable to the current reader |
+| `500` | Audit read or authorization check failed |
 
 ### Explicit preferences in the peer API
 
