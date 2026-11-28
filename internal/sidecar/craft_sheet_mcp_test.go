@@ -77,17 +77,20 @@ func TestCraftSheetApplyDescriptionSaysPivotTablesAreNotRefreshed(t *testing.T) 
 
 // The agent learns from the tool itself that range.clear exists and that every write in a Sheet
 // kept as its file names its sheet.
-func TestCraftSheetApplyDescriptionNamesTheSheetAndTheClear(t *testing.T) {
+func TestCraftSheetApplyDescriptionNamesTheSheetClearAndLiteralInput(t *testing.T) {
 	d := craftSheetDescription("apply")
-	for _, want := range []string{"range.clear params{range,sheet?}", "name the sheet in every write with params.sheet", "'L'!B8"} {
+	for _, want := range []string{"range.clear params{range,sheet?}", "name the sheet in every write with params.sheet", "'L'!B8", "start the string input with an apostrophe"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("apply description lacks %q", want)
 		}
 	}
 }
 
-func TestCraftSheetReadDescriptionFindsAColumnByHeader(t *testing.T) {
-	if d := craftSheetDescription("read"); !strings.Contains(d, "range.columnByHeader,params:{header,sheet?,matchCase?}") {
-		t.Fatalf("read description %q", d)
+func TestCraftSheetReadDescriptionExplainsSheetNamesAndHeaderLookup(t *testing.T) {
+	d := craftSheetDescription("read")
+	for _, want := range []string{`{range:"A1:D5",sheet:"Data"}`, "Use plain A1 addresses", "range.columnByHeader,params:{header,sheet?,matchCase?}"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("read description lacks %q", want)
+		}
 	}
 }
