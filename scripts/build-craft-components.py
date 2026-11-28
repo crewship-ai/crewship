@@ -109,8 +109,9 @@ def rust_env(rust_bin, version, targets):
 
 def compress(raw, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # Level 19 keeps the default 8 MiB window, which every zstd decoder accepts.
-    compressed = subprocess.run(['zstd', '-19', '-q', '-c', '--no-progress'], input=raw, check=True, capture_output=True).stdout
+    # Level 19 keeps the default 8 MiB window. Fix the worker count because
+    # zstd otherwise varies its default with the host CPU count.
+    compressed = subprocess.run(['zstd', '-19', '-T1', '-q', '-c', '--no-progress'], input=raw, check=True, capture_output=True).stdout
     destination.write_bytes(compressed)
     return compressed
 
