@@ -821,6 +821,19 @@ original feature surface. Executables are operator-pinned and rehashed before
 executing the same file descriptor; document paths are private host-generated
 files, with no shell interpretation or inherited host credentials.
 
+For a workbook attached to the current chat, `craft_sheet_apply` also
+accepts a standalone `range.replace` command. Its parameters are `sheet`,
+`range` (an unqualified A1 address or rectangle of at most 10,000 cells and
+200 columns), a nonempty `find`, `replace` (which may be empty), and
+`match: "prefix"`. The server matches the exact case-sensitive prefix of
+literal text in the fenced workbook version. It keeps unmatched cells,
+formulas and nontext types unchanged, and writes replacements as text.
+The existing engine write and version path records the exact ranges and
+typed inverse for Undo. The receipt returns `changed_cells`; zero retains
+the existing version. An identical request ID and packet returns the
+original outcome without applying again. The tool response leaves out
+the expanded cell values.
+
 Pivot tables are not refreshed by an agent change. A change to the data a pivot
 table (or a `GETPIVOTDATA` formula) reads leaves the pivot's saved values as
 they were, the way a spreadsheet does until its pivot tables are refreshed. The

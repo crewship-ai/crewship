@@ -30,18 +30,19 @@ type craftNativeAgentToolRequest struct {
 	Summary     string          `json:"summary,omitempty"`
 }
 type craftNativeAgentToolAttempt struct {
-	input             [32]byte
-	lease             mooring.EditLease
-	base              int64
-	hash              string
-	revision          string
-	attempted         bool
-	receipt           *mooring.NativeSaveReceipt
-	isProposal        bool
-	proposalID        string
-	proposalCandidate []byte // retained only while this proposal's commit is unknown
-	proposalErr       error
-	undoable          bool // the server kept what this change replaced
+	input              [32]byte
+	lease              mooring.EditLease
+	base               int64
+	hash               string
+	revision           string
+	attempted          bool
+	receipt            *mooring.NativeSaveReceipt
+	isProposal         bool
+	proposalID         string
+	proposalCandidate  []byte // retained only while this proposal's commit is unknown
+	proposalErr        error
+	undoable           bool // the server kept what this change replaced
+	replacementSummary *craftNativeChangeSummary
 	// signatureInvalidated: the workbook's XML package signature was kept but no longer matches.
 	signatureInvalidated bool
 }
@@ -547,8 +548,13 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if e.tool.uncertain {
 		return zero, mooring.ErrNativeUnconfirmed
 	}
+	replacement, err := parseCraftWorkbookReplace(input.Commands)
+	if err != nil || replacement != nil && (!store.Workbook() || e.chat == nil) {
+		return zero, ErrCraftNativeAgentEngine
+	}
 	// A co-write is replayed by the person's editor over their work: only commands it can replay.
-	if e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{}) {
+	// Server-side replacement is expanded to replayable writes against the fenced head below.
+	if replacement == nil && e.tool.lease.CoWrite != (mooring.EditLeasePrincipal{}) {
 		if _, replayable := craftNativeAgentResolvedOps(input.Commands); !replayable {
 			return zero, mooring.ErrEditLeaseBusy
 		}
@@ -629,28 +635,48 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	defer upload.Close()
 	active = upload.Context(active)
 	record := craftNativeAgentSheetRecord(e)
-	undoable := store.Workbook()
-	if undoable {
-		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(input.Commands)).end()
-		ops, err := resolveCraftWorkbookOps(input.Commands)
+	commands := input.Commands
+	var replacedInputs [][][]any
+	if replacement != nil {
+		commands, replacedInputs, err = replacement.plan(active, m.config.AgentInspect, profile, native)
 		if err != nil {
 			forgetNativeAgentAttempt(e, input.RequestID, attempt)
 			return zero, err
 		}
-		inverse, complete := craftUndoCapture(active, m.config.AgentInspect, profile, native, ops)
+		summary := nativeAgentChangeSummary(commands)
+		attempt.replacementSummary = &summary
+	}
+	undoable := store.Workbook() && len(commands) > 0
+	if undoable {
+		defer m.sheetPresence(active, e, craftSheetPresenceWriteRanges(commands)).end()
+		ops, err := resolveCraftWorkbookOps(commands)
+		if err != nil {
+			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+			return zero, err
+		}
+		var inverse json.RawMessage
+		var complete bool
+		if replacement != nil {
+			inverse, complete = craftInverseFrom(ops, replacedInputs)
+		} else {
+			inverse, complete = craftUndoCapture(active, m.config.AgentInspect, profile, native, ops)
+		}
 		if !complete || !craftVersionOpsFit(ops, inverse) || record == nil {
 			forgetNativeAgentAttempt(e, input.RequestID, attempt)
 			return zero, errCraftNativeAgentUndoUnavailable
 		}
 		record = craftNativeAgentWorkbookRecord(e, store, base, input.RequestID, ops, inverse, record)
 	}
-	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
-	if err != nil {
-		if errors.Is(err, ErrCraftNativeSheetBusy) {
-			// Nothing ran: the same request ID stays retryable.
-			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+	candidate := native
+	if len(commands) > 0 {
+		candidate, err = m.config.AgentApply(active, profile, native, commands)
+		if err != nil {
+			if errors.Is(err, ErrCraftNativeSheetBusy) {
+				// Nothing ran: the same request ID stays retryable.
+				forgetNativeAgentAttempt(e, input.RequestID, attempt)
+			}
+			return zero, err
 		}
-		return zero, err
 	}
 	if len(candidate) == 0 || len(candidate) > limit {
 		return zero, ErrCraftNativeAgentEngine
@@ -676,7 +702,7 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	attempt.receipt = &receipt
 	attempt.undoable = attempt.undoable && !receipt.Unchanged
 	e.chat.rememberApply(input, receipt)
-	attempt.signatureInvalidated = store.Workbook() && craftWorkbookSigned(native)
+	attempt.signatureInvalidated = !receipt.Unchanged && store.Workbook() && craftWorkbookSigned(native)
 	rememberNativeAgentReceipt(e.tool, receipt)
 	e.tool.uncertainAttempt = nil
 	e.tool.uncertain = false

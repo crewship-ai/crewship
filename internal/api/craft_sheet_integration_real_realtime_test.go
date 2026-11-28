@@ -257,3 +257,80 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 	}
 	check(s.stored(5), []any{"number before", "boolean before", "null before", "string before", "literal before"})
 }
+
+func TestSheetITChatRangeReplaceWithTheRealEngine(t *testing.T) {
+	engine := newRealSheetEngine(t)
+	adapter := NewCraftNativeSheetAgentAdapter(engine)
+	base := realSheetTestNamedWorkbook(t, "Data", sitCells{
+		"A1": "L_007", "A2": "L_=1+1", "A3": "l_small", "A4": "inside L_label",
+		"A5": "=1+1|2", "A6": "L_'quoted", "B1": "L_outside",
+	})
+	s := newSheetITScenarioWithWorkbook(t, base, "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
+	s.m.config.AgentApply, s.m.config.AgentInspect = adapter.Apply, adapter.Inspect
+	s.send("Replace the exact prefix in Data", true)
+	call := s.agent()
+	generation := s.acquire(call)
+
+	apply := func(base, id, find, replace, match string) map[string]any {
+		return map[string]any{"generation": generation, "base_version": base, "request_id": id, "commands": sitCommands(
+			sitCmd("range.replace", map[string]any{"sheet": "Data", "range": "A1:A6", "find": find, "replace": replace, "match": match}),
+		)}
+	}
+	for _, args := range []map[string]any{
+		apply("1", "bad-match", "L_", "Loan_", "contains"),
+		apply("1", "empty-find", "", "Loan_", "prefix"),
+	} {
+		if response, refused := s.toolCall(call, "craft_sheet_apply", args); !refused || s.head() != 1 {
+			t.Fatalf("invalid replace: refused=%v head=%d: %s", refused, s.head(), response)
+		}
+	}
+	args := apply("1", "literal-replace", "L_", "", "prefix")
+	result := s.tool(call, "craft_sheet_apply", args)
+	if retry := s.tool(call, "craft_sheet_apply", args); result != retry {
+		t.Fatalf("replace retry changed the result: %s / %s", result, retry)
+	}
+	var changed craftNativeChatApplyResult
+	if err := json.Unmarshal([]byte(result), &changed); err != nil || changed.Version != 2 || changed.ChangedCells != 3 ||
+		changed.Summary.CellsChanged != 3 || !changed.Undoable || !changed.CommandsOmitted || len(changed.Commands) != 0 {
+		t.Fatalf("bad replace receipt: %s (%v)", result, err)
+	}
+	if response, refused := s.toolCall(call, "craft_sheet_apply", apply("1", "literal-replace", "L_", "other", "prefix")); !refused || s.head() != 2 {
+		t.Fatalf("same ID accepted different input: refused=%v head=%d: %s", refused, s.head(), response)
+	}
+	noMatch := apply("2", "no-match", "Missing", "Other", "prefix")
+	first := s.tool(call, "craft_sheet_apply", noMatch)
+	if retry := s.tool(call, "craft_sheet_apply", noMatch); first != retry || s.head() != 2 || len(s.opsRows()) != 1 {
+		t.Fatalf("zero-match retry changed the receipt or head: %s / %s, head %d", first, retry, s.head())
+	}
+	var unchanged craftNativeChatApplyResult
+	if err := json.Unmarshal([]byte(first), &unchanged); err != nil || unchanged.Version != 2 ||
+		unchanged.ChangedCells != 0 || unchanged.Undoable || !strings.Contains(string(unchanged.Receipt), `"unchanged":true`) {
+		t.Fatalf("bad zero-match receipt: %s (%v)", first, err)
+	}
+
+	read := func(version int64, expected [][]any) {
+		t.Helper()
+		workbook := s.stored(version)
+		session, release, err := engine.Open(t.Context(), workbook)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		values, err := session.ReadRange(t.Context(), "'Data'!A1:B6", true)
+		if err != nil || !reflect.DeepEqual(values.Values, expected) {
+			t.Fatalf("version %d: got %#v want %#v, %v", version, values.Values, expected, err)
+		}
+		literal, err := session.GetCell(t.Context(), "'Data'!A2")
+		if err != nil || literal.Formula != "" {
+			t.Fatalf("literal formula-looking value became a formula: %+v, %v", literal, err)
+		}
+	}
+	read(2, [][]any{{"007", "L_outside"}, {"=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {"=1+1", nil}, {"'quoted", nil}})
+	s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
+	human := s.humanSession()
+	response := s.undo(human, s.humanLease(human), changed.OperationID)
+	if response.Code != 201 || !strings.Contains(response.Body.String(), `"restored":3`) {
+		t.Fatalf("undo: %d %s", response.Code, response.Body)
+	}
+	read(3, [][]any{{"L_007", "L_outside"}, {"L_=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {"=1+1", nil}, {"L_'quoted", nil}})
+}

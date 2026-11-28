@@ -166,7 +166,7 @@ func nativeCraftToolDescription(op string) string {
 		return "Apply allowlisted original-engine commands using exact generation, base_version and a new request_id. Word caret.docStart/docEnd params{} and text.insert params{text}; Sheet cell.set params{cell,input,sheet?} and range.setValues params{range,values:[[...]],sheet?} (at most 1000 rows by 200 columns) accept numbers, booleans, null and literal text; formulas are unavailable in this tool. Only a committed Node receipt proves Saved. Retain the exact original request for uncertain reconciliation; never blindly retry or change its base."
 	}
 }
-func nativeCraftToolSchema(op string) json.RawMessage {
+func nativeCraftToolSchema(op string, extraCommands ...string) json.RawMessage {
 	props := map[string]any{}
 	required := []string{}
 	positive := map[string]any{"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 19}
@@ -174,7 +174,8 @@ func nativeCraftToolSchema(op string) json.RawMessage {
 		props["generation"] = positive
 		required = append(required, "generation")
 	}
-	command := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"command", "params"}, "properties": map[string]any{"command": map[string]any{"type": "string", "enum": []string{"caret.docStart", "caret.docEnd", "text.insert", "cell.set", "range.setValues", "text", "cell.get", "sheet.read", "document.inspect"}}, "params": map[string]any{"type": "object"}}}
+	commands := append([]string{"caret.docStart", "caret.docEnd", "text.insert", "cell.set", "range.setValues", "text", "cell.get", "sheet.read", "document.inspect"}, extraCommands...)
+	command := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"command", "params"}, "properties": map[string]any{"command": map[string]any{"type": "string", "enum": commands}, "params": map[string]any{"type": "object"}}}
 	if op == "read" {
 		props["query"] = command
 	}

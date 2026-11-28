@@ -332,22 +332,34 @@ func (b *craftNativeChatBuffer) finish(ctx context.Context, w http.ResponseWrite
 		var slug string
 		_ = m.human.pages.db.QueryRow(`SELECT slug FROM pages WHERE id=? AND workspace_id=?`, e.grant.Scope.ArtifactID, e.grant.Scope.WorkspaceID).Scan(&slug)
 		if versionErr == nil && version > 0 && slug != "" {
-			result := craftNativeChatApplyResult{PageID: e.grant.Scope.ArtifactID, Slug: slug, Version: version, ChangedCells: nativeAgentChangedCells(input.Commands), ContentHash: receipt.ContentHash, Receipt: json.RawMessage(b.body.Bytes())}
+			result := craftNativeChatApplyResult{PageID: e.grant.Scope.ArtifactID, Slug: slug, Version: version, ContentHash: receipt.ContentHash, Receipt: json.RawMessage(b.body.Bytes())}
 			result.BaseVersion, _ = strconv.ParseInt(receipt.BaseVersion, 10, 64)
-			result.OperationID, result.Summary = nativeAgentOperationID(e, input.RequestID), nativeAgentChangeSummary(input.Commands)
+			result.OperationID = nativeAgentOperationID(e, input.RequestID)
+			var replacement *craftNativeChangeSummary
 			e.callMu.Lock()
 			if e.tool != nil {
 				if attempt := e.tool.requests[input.RequestID]; attempt != nil {
 					result.Undoable = attempt.undoable
 					result.SignatureInvalidated = attempt.signatureInvalidated
+					replacement = attempt.replacementSummary
 				}
 			}
 			e.callMu.Unlock()
-			var compact bytes.Buffer
-			if len(input.Commands) <= craftNativeChatCommandsLimit && json.Compact(&compact, input.Commands) == nil {
-				result.Commands = json.RawMessage(compact.Bytes())
+			if replacement != nil {
+				result.Summary = *replacement
+				result.CommandsOmitted = !receipt.Unchanged && replacement.CellsChanged > 0
+				if !receipt.Unchanged {
+					result.ChangedCells = replacement.CellsChanged
+				}
 			} else {
-				result.CommandsOmitted = true
+				result.Summary = nativeAgentChangeSummary(input.Commands)
+				result.ChangedCells = result.Summary.CellsChanged
+				var compact bytes.Buffer
+				if len(input.Commands) <= craftNativeChatCommandsLimit && json.Compact(&compact, input.Commands) == nil {
+					result.Commands = json.RawMessage(compact.Bytes())
+				} else {
+					result.CommandsOmitted = true
+				}
 			}
 			writeJSON(w, http.StatusOK, result)
 			return
