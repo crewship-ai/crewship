@@ -1054,7 +1054,7 @@ index 0000000000000000000000000000000000000000..bb2f85e01dbe73bf3a0762d6c3bf144f
 +    }
 +}
 diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
-index c1ee1ababb52197f1bf193fc565790eaccf770c5..6fcb7096e15456306fe1278ecb0330ea696a2cd0 100644
+index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7bc48b2c8 100644
 --- a/apps/wordcraft-web/src/web.rs
 +++ b/apps/wordcraft-web/src/web.rs
 @@ -41,8 +41,18 @@ pub fn start() {
@@ -1114,7 +1114,16 @@ index c1ee1ababb52197f1bf193fc565790eaccf770c5..6fcb7096e15456306fe1278ecb0330ea
                      app.autosave = false;
                      app.tell_about_font_downloads();
                      // A region chosen in File › Options replaces the browser's for the first blank
-@@ -141,18 +156,24 @@ pub fn start() {
+@@ -134,25 +149,31 @@ pub fn start() {
+                         let doc = app.session.blank_document();
+                         app.session.set_document(doc);
+                     }
+-                    // No document to show: start on File › Home, as the desktop app does (#766).
+-                    if !sample {
++                    // A private port opens a specific document, so its first view is the editor.
++                    if !sample && app_private.is_none() {
+                         app.start_screen();
+                     }
                      // The host's name for the user signs this visit's work, but isn't stored as the
                      // browser's own preference, which a visit outside the host would restore.
                      let mut author = None;
