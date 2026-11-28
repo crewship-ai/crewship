@@ -169,7 +169,7 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
 	state := &claudeStreamState{
 		pending: make(map[string]*strings.Builder),
-		frames:  make(map[string]struct{}),
+		frames:  make(map[string][sha256.Size]byte),
 		tools:   make(map[string][sha256.Size]byte),
 	}
 	return func(line []byte, handler EventHandler) {
@@ -179,7 +179,7 @@ func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
 
 type claudeStreamState struct {
 	pending map[string]*strings.Builder
-	frames  map[string]struct{}
+	frames  map[string][sha256.Size]byte
 	tools   map[string][sha256.Size]byte
 }
 
@@ -302,10 +302,14 @@ func parseClaudeStreamLine(line []byte, handler EventHandler, state *claudeStrea
 	if state != nil {
 		pending = state.pending
 		if msg.UUID != "" {
-			if _, seen := state.frames[msg.UUID]; seen {
+			digest := sha256.Sum256(line)
+			if previous, seen := state.frames[msg.UUID]; seen {
+				if previous != digest {
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+				}
 				return
 			}
-			state.frames[msg.UUID] = struct{}{}
+			state.frames[msg.UUID] = digest
 		}
 		inner := handler
 		handler = func(e AgentEvent) {
@@ -394,21 +398,32 @@ func parseClaudeStreamLine(line []byte, handler EventHandler, state *claudeStrea
 
 	switch msg.Type {
 	case "stream_event":
-		// Token-level streaming (when --include-partial-messages is used).
-		if msg.Event != nil && msg.Event.Delta != nil {
-			switch msg.Event.Delta.Type {
+		if msg.Event == nil {
+			break
+		}
+		delta := msg.Event.Delta
+		if start := msg.Event.ContentBlock; state != nil && msg.Event.Type == "content_block_start" && start != nil {
+			switch {
+			case start.Type == "text" && start.Text != "":
+				delta = &eventDelta{Type: "text_delta", Text: start.Text}
+			case start.Type == "thinking" && start.Thinking != "":
+				delta = &eventDelta{Type: "thinking_delta", Thinking: start.Thinking}
+			}
+		}
+		if delta != nil {
+			switch delta.Type {
 			case "text_delta":
 				if pending != nil {
 					if pending[parentID] == nil {
 						pending[parentID] = new(strings.Builder)
 					}
-					pending[parentID].WriteString(msg.Event.Delta.Text)
+					pending[parentID].WriteString(delta.Text)
 				}
-				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
+				handler(AgentEvent{Type: "text", Content: delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "thinking_delta":
 				handler(AgentEvent{
 					Type:      "thinking",
-					Content:   msg.Event.Delta.Thinking,
+					Content:   delta.Thinking,
 					Metadata:  tagSubagent(map[string]interface{}{"streaming": true}),
 					Timestamp: time.Now(),
 				})

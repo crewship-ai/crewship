@@ -49,11 +49,12 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 	scrub := scrubber.New()
 	scrub.AddSecretValues(secrets...)
 	groups := make(map[auditFragmentKey][]auditFragment)
+	seen := make(map[string]struct{})
 	var frames []any
 	flush := func(parent string) {
 		for key, fragments := range groups {
 			if key.parent == parent {
-				redactAuditFragments(scrub, fragments)
+				redactAuditFragments(scrub, key.field, fragments)
 				delete(groups, key)
 			}
 		}
@@ -67,7 +68,7 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			continue
 		}
 		if trimmed[0] != '{' && trimmed[0] != '[' {
-			frames = append(frames, map[string]any{"type": "text_output", "text": string(line)})
+			frames = append(frames, map[string]any{"type": "text_output", "payload_omitted": true})
 			continue
 		}
 		value, err := decodeAuditJSON(line)
@@ -78,6 +79,15 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			return nil, errChatAuditUnavailable
 		}
 		frames = append(frames, frame)
+		if uuid, _ := frame["uuid"].(string); uuid != "" {
+			if _, replayed := seen[uuid]; replayed {
+				// Keep replay envelopes for correlation. Their payload must
+				// not break reconstruction of the original delta sequence.
+				omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
+				continue
+			}
+			seen[uuid] = struct{}{}
+		}
 		parent, _ := frame["parent_tool_use_id"].(string)
 		switch frame["type"] {
 		case "assistant", "result":
@@ -85,35 +95,34 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 		case "stream_event":
 			event, _ := frame["event"].(map[string]any)
 			switch event["type"] {
-			case "message_start", "message_stop":
+			case "message_start":
 				flush(parent)
-			case "content_block_delta":
-				delta, _ := event["delta"].(map[string]any)
-				index, _ := event["index"].(json.Number)
-				field := ""
-				switch delta["type"] {
-				case "input_json_delta":
-					field = "partial_json"
-				case "text_delta":
-					field = "text"
-				case "thinking_delta":
-					field = "thinking"
-				}
-				if field != "" {
-					key := auditFragmentKey{parent, string(index), field}
-					groups[key] = append(groups[key], auditFragment{delta, field})
-				} else {
-					for name := range delta {
-						if name != "type" {
-							delta[name] = "[REDACTED]"
-						}
+				if message, ok := event["message"].(map[string]any); ok {
+					if content, isEmptyArray := message["content"].([]any); !isEmptyArray || len(content) > 0 {
+						delete(message, "content")
+						message["payload_omitted"] = true
 					}
 				}
+			case "message_stop":
+				flush(parent)
+				omitAuditFragmentPayload(event, "type")
+			case "content_block_start", "content_block_delta":
+				recordAuditFragment(groups, parent, event)
+			case "content_block_stop":
+				omitAuditFragmentPayload(event, "type", "index")
+			case "message_delta":
+				// Preserve terminal metadata and aggregate usage.
+				if delta, ok := event["delta"].(map[string]any); ok {
+					omitAuditFragmentPayload(delta, "stop_reason", "stop_sequence")
+				}
+			default:
+				omitAuditFragmentPayload(event, "type", "index")
+
 			}
 		}
 	}
-	for _, fragments := range groups {
-		redactAuditFragments(scrub, fragments)
+	for key, fragments := range groups {
+		redactAuditFragments(scrub, key.field, fragments)
 	}
 	for i, frame := range frames {
 		frames[i] = scrubAuditJSON(scrub, frame)
@@ -139,25 +148,98 @@ func decodeAuditJSON(raw []byte) (any, error) {
 	return value, err
 }
 
-func redactAuditFragments(scrub *scrubber.Scrubber, fragments []auditFragment) {
+func recordAuditFragment(groups map[auditFragmentKey][]auditFragment, parent string, event map[string]any) {
+	index, indexed := event["index"].(json.Number)
+	var fields map[string]any
+	var field, group string
+	if event["type"] == "content_block_start" {
+		fields, _ = event["content_block"].(map[string]any)
+		if fields == nil {
+			omitAuditFragmentPayload(event, "type", "index")
+			return
+		}
+		omitAuditFragmentPayload(event, "type", "index", "content_block")
+		switch fields["type"] {
+		case "text", "thinking":
+			field, _ = fields["type"].(string)
+			group = field
+		case "tool_use":
+			// An empty initial object is the normal preamble to JSON
+			// deltas. A nonempty object is safe on its own, but cannot be
+			// joined unambiguously to a subsequent delta sequence.
+			if input, ok := fields["input"].(map[string]any); ok && len(input) == 0 && indexed {
+				omitAuditFragmentPayload(fields, "type", "id", "name", "input")
+				return
+			}
+			field, group = "input", "partial_json"
+		}
+	} else {
+		fields, _ = event["delta"].(map[string]any)
+		if fields == nil {
+			omitAuditFragmentPayload(event, "type", "index")
+			return
+		}
+		omitAuditFragmentPayload(event, "type", "index", "delta")
+		switch fields["type"] {
+		case "input_json_delta":
+			field = "partial_json"
+		case "text_delta":
+			field = "text"
+		case "thinking_delta":
+			field = "thinking"
+		}
+		group = field
+	}
+	if field == "" || !indexed {
+		omitAuditFragmentPayload(fields, "type", "id")
+		return
+	}
+	omitAuditFragmentPayload(fields, "type", "id", "name", field)
+	key := auditFragmentKey{parent, string(index), group}
+	groups[key] = append(groups[key], auditFragment{fields, field})
+}
+
+func omitAuditFragmentPayload(fields map[string]any, structuralKeys ...string) {
+	omitted := false
+	for name := range fields {
+		structural := false
+		for _, key := range structuralKeys {
+			if name == key {
+				structural = true
+				break
+			}
+		}
+		if !structural {
+			delete(fields, name)
+			omitted = true
+		}
+	}
+	if omitted {
+		fields["payload_omitted"] = true
+	}
+}
+
+func redactAuditFragments(scrub *scrubber.Scrubber, kind string, fragments []auditFragment) {
+	if len(fragments) == 1 && fragments[0].field == "input" {
+		return // The complete structured input is scrubbed with its envelope.
+	}
 	var joined strings.Builder
 	for _, fragment := range fragments {
-		text, _ := fragment.fields[fragment.field].(string)
+		text, ok := fragment.fields[fragment.field].(string)
+		if !ok || fragment.field == "input" {
+			for _, uncertain := range fragments {
+				delete(uncertain.fields, uncertain.field)
+				uncertain.fields["payload_omitted"] = true
+			}
+			return
+		}
 		joined.WriteString(text)
 	}
 	original := joined.String()
-	redacted := scrubAuditText(scrub, original)
-	if fragments[0].field == "partial_json" {
-		value, err := decodeAuditJSON([]byte(original))
-		if err != nil {
+	redacted, _ := scrubAuditJSON(scrub, original).(string)
+	if kind == "partial_json" {
+		if _, err := decodeAuditJSON([]byte(original)); err != nil {
 			redacted = "[REDACTED]"
-		} else {
-			clean := scrubAuditJSON(scrub, value)
-			before, _ := json.Marshal(value)
-			after, _ := json.Marshal(clean)
-			if !bytes.Equal(before, after) {
-				redacted = string(after)
-			}
 		}
 	}
 	if redacted == original {

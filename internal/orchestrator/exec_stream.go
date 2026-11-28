@@ -398,8 +398,9 @@ type imageSource struct {
 }
 
 type streamEvent struct {
-	Type  string      `json:"type"`
-	Delta *eventDelta `json:"delta,omitempty"`
+	Type         string        `json:"type"`
+	Delta        *eventDelta   `json:"delta,omitempty"`
+	ContentBlock *contentBlock `json:"content_block,omitempty"`
 }
 
 type eventDelta struct {
@@ -636,10 +637,10 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 			outputErr = ErrRunOutputIncomplete
 		}
 		cancelAudit()
-		// A capture uses the same redaction for returned diagnostics. An
-		// omitted capture keeps the existing adapter exit diagnostics.
+		// Keep the archive behind its chat authorization boundary. Exit
+		// diagnostics for these runs come from the process status.
 		if capture != nil {
-			captureBuf = wire[:min(len(wire), captureCap)]
+			captureBuf = nil
 		}
 	}
 	if req.strictContentPrivacy || (req.HostOutputDir != "" && auditStatus == "") {

@@ -1927,7 +1927,8 @@ func (b *Bridge) persistInBandFailureTurn(
 		Timestamp:  time.Now().UTC(),
 	}
 	err := b.convStore.Append(ctx, chatID, message)
-	if errors.Is(err, conversation.ErrMessageTooLarge) {
+	completeTurn := !errors.Is(err, conversation.ErrMessageTooLarge)
+	if !completeTurn {
 		message.Role = conversation.RoleSystem
 		message.RunResults = nil
 		message.Content = orchestrator.ErrRunOutputIncomplete.Error()
@@ -1949,7 +1950,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	if err := b.resolver.IncrementMessageCount(ctx, chatID, delta); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
-	return true
+	return completeTurn
 }
 
 // classifyCrewRuntimeError maps a raw EnsureCrewRuntime failure to a stable code

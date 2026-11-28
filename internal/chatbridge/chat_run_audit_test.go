@@ -90,7 +90,7 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 			}
 			delta := func(kind, field, value string) {
 				emit(map[string]any{"type": "stream_event", "event": map[string]any{
-					"type": "content_block_delta", "delta": map[string]any{"type": kind, field: value},
+					"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": kind, field: value},
 				}})
 			}
 			delta("text_delta", "text", "before tools")
@@ -326,5 +326,42 @@ func TestChatRunAuditReaderErrorOverridesTerminalSuccess(t *testing.T) {
 	}
 	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
 		t.Fatalf("run updates %v", resolver.runUpdates)
+	}
+}
+
+func TestChatRunAuditComparesReplayedEnvelopeContent(t *testing.T) {
+	const first = `{"type":"stream_event","uuid":"first","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"begin "}}}` + "\n"
+	const second = `{"type":"stream_event","uuid":"second","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"finish"}}}` + "\n"
+	const actual = `{"type":"assistant","uuid":"assistant","message":{"content":[{"type":"text","text":"begin finish"}]}}` + "\n"
+	const terminal = `{"type":"result","subtype":"success","result":"finished"}` + "\n"
+	for _, tc := range []struct {
+		name, duplicate string
+		wantErr         error
+	}{{"identical_replay", second, nil}, {"conflicting_uuid", strings.Replace(second, "finish", "altered", 1), orchestrator.ErrRunOutputIncomplete}} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &capResolver{info: baseInfo()}
+			bridge := testBridgeWithContainer(t, resolver, &scriptedContainer{agentOutput: first + second + tc.duplicate + actual + terminal})
+			err := bridge.HandleChatMessage(t.Context(), "user-1", "audit-envelope-replay", "verify replay", func(ws.ChatEvent) {})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("run error %v, want %v", err, tc.wantErr)
+			}
+			messages, err := bridge.convStore.Read(t.Context(), "audit-envelope-replay", 0, 0)
+			if err != nil || len(messages) != 2 || messages[1].Content != "begin finish" {
+				t.Fatalf("canonical text after replay: %+v, %v", messages, err)
+			}
+		})
+	}
+}
+
+func TestChatRunAuditFailureFallbackDoesNotConfirmACompleteTurn(t *testing.T) {
+	info := baseInfo()
+	bridge := testBridgeWithContainer(t, &capResolver{info: info}, &scriptedContainer{})
+	parts := []conversation.Part{{Type: "tool_result", Content: strings.Repeat("a", 16<<20)}}
+	if complete := bridge.persistInBandFailureTurn(t.Context(), "audit-fallback", info, "", parts, nil, "CLI failed", false); complete {
+		t.Fatal("system fallback was mistaken for a complete failure turn")
+	}
+	messages, err := bridge.convStore.Read(t.Context(), "audit-fallback", 0, 0)
+	if err != nil || len(messages) != 1 || messages[0].Role != conversation.RoleSystem || messages[0].Content != orchestrator.ErrRunOutputIncomplete.Error() {
+		t.Fatalf("missing incomplete system turn after large record: %+v, %v", messages, err)
 	}
 }

@@ -59,6 +59,38 @@ func TestRedactChatAuditProtectsEscapedAndFragmentedCredentials(t *testing.T) {
 	}
 }
 
+func TestRedactChatAuditJoinsInitialContentAndOmitsUnknownPayload(t *testing.T) {
+	const raw = `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"audit-initial-"}}}
+{"type":"stream_event","uuid":"midpoint","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"private-"}}}
+{"type":"stream_event","uuid":"midpoint","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"private-"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"material"}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"audit-thinking-"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"private-material"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"{\"value\":\"audit-nested-\\u00"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"70rivate-material\",\"safe\":\"keep-this\"}"}}}
+line fragment should never appear
+second diagnostic line should never appear
+{"type":"stream_event","event":{"type":"content_block_start","index":3,"content_block":{"type":"future_payload","data":"unknown-body"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"orphan-without-index"}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":4,"content_block":{"type":"tool_use","id":"draft-tool","input":{"arg":"ambiguous-input"}}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":4,"delta":{"type":"input_json_delta","partial_json":"ambiguous-continuation"}}}
+`
+	wire, err := redactChatAudit([]byte(raw), []string{"audit-initial-private-material", "audit-thinking-private-material", "audit-nested-private-material"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"audit-initial-", "audit-thinking-", "audit-nested-", "private-", "material", "line fragment", "second diagnostic", "unknown-body", "orphan-without-index", "ambiguous-input", "ambiguous-continuation"} {
+		if bytes.Contains(wire, []byte(forbidden)) {
+			t.Errorf("archive exposed unverified content %q", forbidden)
+		}
+	}
+	for _, retained := range []string{"keep-this", "payload_omitted", "text_output", "future_payload", "draft-tool"} {
+		if !bytes.Contains(wire, []byte(retained)) {
+			t.Errorf("archive discarded expected structure: %q", retained)
+		}
+	}
+}
+
 func TestRedactChatAuditRefusesBrokenOrOversizedOutput(t *testing.T) {
 	for _, raw := range []string{`{"type":"assistant",`, strings.Repeat("a", maxChatAuditBytes+1)} {
 		data, err := redactChatAudit([]byte(raw), nil)
