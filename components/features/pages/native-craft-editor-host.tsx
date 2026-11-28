@@ -8,7 +8,7 @@ import {registerDocumentDraftWriter} from "@/lib/document-queue"
 import {LocalDraftReadRevoked,PendingSheetDraftCapture} from "@/lib/local-draft-seal"
 import {Bot,MoreHorizontal,RotateCcw} from "lucide-react"
 import {Button} from "@/components/ui/button"
-import {Dialog,DialogContent,DialogTitle} from "@/components/ui/dialog"
+import {CreateSurface,CreateSurfaceBody,CreateSurfaceHeader} from "@/components/layout/create-surface"
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuSeparator,DropdownMenuTrigger} from "@/components/ui/dropdown-menu"
 import {TooltipProvider} from "@/components/ui/tooltip"
 import {HintTooltip} from "@/components/ui/hint-tooltip"
@@ -1535,15 +1535,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
    <ul className="mt-1 list-disc space-y-1 pl-5">{openedFile.warnings.map(w=><li key={w.code}>{sheetWarningText(w.code,w.count)}</li>)}</ul>
   </details>}
   {versionHistory&&(historyInSheetPanel
-   ? <Dialog open={sheetHistoryOpen} onOpenChange={setSheetHistoryOpen}>
-     <DialogContent aria-describedby={undefined} onCloseAutoFocus={event=>{
-      const menu=toolbar?.querySelector<HTMLButtonElement>('button[aria-label="More for this Sheet"]')
-      if(menu?.isConnected){event.preventDefault();menu.focus()}
-     }}>
-      <DialogTitle>Version history</DialogTitle>
-      {versionHistory}
-     </DialogContent>
-    </Dialog>
+   ? <CreateSurface open={sheetHistoryOpen} onOpenChange={setSheetHistoryOpen}
+     restoreOpenerFocus restoreFocusTo={toolbar?.querySelector<HTMLButtonElement>('button[aria-label="More for this Sheet"]')}>
+     <CreateSurfaceHeader title="Version history" onClose={()=>setSheetHistoryOpen(false)}/>
+     <CreateSurfaceBody>{versionHistory}</CreateSurfaceBody>
+    </CreateSurface>
    : placeHistory?placeHistory(versionHistory):versionHistory)}
   {saveTrace?.reason==='document_too_large'&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>This workbook is larger than the 32 MiB a Sheet can save, so it is NOT saved on the server.</b> Your changes stay in this editor. Do not close the tab; remove data or split the workbook, or download it as a file.</p></div>}
   {/* One sentence and two actions; the detail folded, so the grid keeps its room. */}
