@@ -140,14 +140,25 @@ def fetch_fonts(recipe, temp):
     return fonts
 
 
-def remap(env, *pairs):
+def remap(env, app, source, fonts, target_dir):
     env = dict(env)
-    env['RUSTFLAGS'] = ' '.join(f'--remap-path-prefix={a}={b}' for a, b in pairs)
+    home = Path.home()
+    cargo_home = source / env['CARGO_HOME'] if env.get('CARGO_HOME') else home / '.cargo'
+    # rustc uses the last matching prefix. Cover both Cargo dependencies outside
+    # HOME and generated sources included through OUT_DIR, even with --build-dir.
+    pairs = (
+        (home, '/home'),
+        (cargo_home.resolve(), '/home/.cargo'),
+        (source, '/' + app),
+        (fonts, '/craft-fonts'),
+        (target_dir, '/craft-target/' + app),
+    )
+    env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(f'--remap-path-prefix={a}={b}' for a, b in pairs)
     return env
 
 
 def build_engine(c, source, fonts, cargo, env, target_dir):
-    env = remap(env, (source, '/' + c['application']), (fonts, '/craft-fonts'), (Path.home(), '/home'))
+    env = remap(env, c['application'], source, fonts, target_dir)
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts), CRAFT_FONTS_REQUIRED='1')
     # The build identity the engine reports with --version: the pinned source and its patch.
     env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])
@@ -161,7 +172,7 @@ def build_engine(c, source, fonts, cargo, env, target_dir):
 
 def build_editor(c, source, fonts, cargo, env, target_dir, bindgen, binaryen, temp, rustc_version, bindgen_version):
     app, package = c['application'], c['web_package']
-    env = remap(env, (source, '/' + app), (fonts, '/craft-fonts'), (Path.home(), '/home'))
+    env = remap(env, app, source, fonts, target_dir)
     env.update(CARGO_TARGET_DIR=str(target_dir), CRAFT_FONTS_DIR=str(fonts))
     # The editor reports the same build identity as the engine (gridcraft:ready build).
     env.update(CRAFT_SOURCE_COMMIT=c['commit'], CRAFT_PATCH_SHA256=c['patch_sha256'])

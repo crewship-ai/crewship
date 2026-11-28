@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 _spec = importlib.util.spec_from_file_location('build_craft_components', Path(__file__).with_name('build-craft-components.py'))
 build = importlib.util.module_from_spec(_spec)
@@ -85,6 +86,27 @@ class DocumentFormat(unittest.TestCase):
         recipe = build.load_recipe()
         sheet = next(c for c in recipe['components'] if c['application'] == 'gridcraft')
         self.assertEqual(build.document_format(sheet), {'document_format': 'workbook'})
+
+
+class ReproduciblePaths(unittest.TestCase):
+    def test_cargo_and_generated_sources_have_stable_virtual_paths(self):
+        with tempfile.TemporaryDirectory(prefix='craft build ') as scratch:
+            scratch = Path(scratch).resolve()
+            home = scratch / 'home'
+            source = home / 'repo' / 'source'
+            fonts = home / 'repo' / 'fonts'
+            target = scratch / 'external target'
+            cargo_home = scratch / 'external cargo'
+            for env, cargo in [({}, home / '.cargo'), ({'CARGO_HOME': str(cargo_home)}, cargo_home)]:
+                with patch.object(Path, 'home', return_value=home):
+                    remapped = build.remap(env, 'gridcraft', source, fonts, target)
+                self.assertEqual(remapped['CARGO_ENCODED_RUSTFLAGS'].split('\x1f'), [
+                    f'--remap-path-prefix={home}=/home',
+                    f'--remap-path-prefix={cargo}=/home/.cargo',
+                    f'--remap-path-prefix={source}=/gridcraft',
+                    f'--remap-path-prefix={fonts}=/craft-fonts',
+                    f'--remap-path-prefix={target}=/craft-target/gridcraft',
+                ])
 
 
 class ExpectedCatalog(unittest.TestCase):
