@@ -83,7 +83,7 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			if _, replayed := seen[uuid]; replayed {
 				// Keep replay envelopes for correlation. Their payload must
 				// not break reconstruction of the original delta sequence.
-				omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
+				omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
 				continue
 			}
 			seen[uuid] = struct{}{}
@@ -99,10 +99,14 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			case "init", "api_retry":
 				// Session and retry metadata are complete envelopes.
 			default:
-				omitAuditFragmentPayload(frame, "type", "subtype", "uuid", "parent_tool_use_id")
+				omitAuditEnvelopePayload(frame, "type", "subtype", "uuid", "parent_tool_use_id")
 			}
 		case "stream_event":
-			event, _ := frame["event"].(map[string]any)
+			event, ok := frame["event"].(map[string]any)
+			if !ok {
+				omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
+				continue
+			}
 			switch event["type"] {
 			case "message_start":
 				flush(parent)
@@ -126,9 +130,17 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 				}
 			default:
 				omitAuditFragmentPayload(event, "type", "index")
+				keepAuditScalar(event, "type", func(value any) bool {
+					_, ok := value.(string)
+					return ok
+				})
+				keepAuditScalar(event, "index", func(value any) bool {
+					_, ok := value.(json.Number)
+					return ok
+				})
 			}
 		default:
-			omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
+			omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
 		}
 	}
 	for key, fragments := range groups {
@@ -207,6 +219,25 @@ func recordAuditFragment(groups map[auditFragmentKey][]auditFragment, parent str
 	omitAuditFragmentPayload(fields, "type", "id", "name", field)
 	key := auditFragmentKey{parent, string(index), group}
 	groups[key] = append(groups[key], auditFragment{fields, field})
+}
+
+func omitAuditEnvelopePayload(fields map[string]any, identifierKeys ...string) {
+	omitAuditFragmentPayload(fields, identifierKeys...)
+	for _, key := range identifierKeys {
+		if value, present := fields[key]; present {
+			if _, valid := value.(string); !valid {
+				delete(fields, key)
+				fields["payload_omitted"] = true
+			}
+		}
+	}
+}
+
+func keepAuditScalar(fields map[string]any, key string, valid func(any) bool) {
+	if value, present := fields[key]; present && !valid(value) {
+		delete(fields, key)
+		fields["payload_omitted"] = true
+	}
 }
 
 func omitAuditFragmentPayload(fields map[string]any, structuralKeys ...string) {

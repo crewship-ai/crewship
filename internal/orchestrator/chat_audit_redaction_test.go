@@ -185,7 +185,11 @@ func TestRedactChatAuditKeepsUnknownEnvelopesInOrderWithoutPayload(t *testing.T)
 {"type":"future_delta","uuid":"two","partial":"unknown-secret-"}
 {"type":"assistant","uuid":"three","message":{"content":[{"type":"text","text":"safe output"}]}}
 {"type":"future_delta","uuid":"four","partial":"remaining-credential"}
-{"type":"result","uuid":"five","result":"safe result"}
+{"type":"future_delta","uuid":{"incorrect":"unknown-secret-"},"parent_tool_use_id":["remaining-credential"]}
+{"type":{"bad":"remaining-credential"},"uuid":"six"}
+{"type":"stream_event","uuid":"seven","event":"remaining-credential"}
+{"type":"stream_event","uuid":"eight","event":{"type":"future_delta","index":{"bad":"remaining-credential"},"data":"unknown-secret-"}}
+{"type":"result","uuid":"nine","result":"safe result"}
 `
 	wire, err := redactChatAudit([]byte(raw), []string{"unknown-secret-remaining-credential"})
 	if err != nil {
@@ -198,12 +202,17 @@ func TestRedactChatAuditKeepsUnknownEnvelopesInOrderWithoutPayload(t *testing.T)
 		UUID           string
 		Type           string
 		PayloadOmitted bool `json:"payload_omitted"`
+		Event          struct {
+			PayloadOmitted bool `json:"payload_omitted"`
+		}
 	}
-	if err := json.Unmarshal(wire, &frames); err != nil || len(frames) != 5 {
+	wantIDs := []string{"one", "two", "three", "four", "", "six", "seven", "eight", "nine"}
+	if err := json.Unmarshal(wire, &frames); err != nil || len(frames) != len(wantIDs) {
 		t.Fatalf("unexpected archive frames: %+v, %v", frames, err)
 	}
-	for i, id := range []string{"one", "two", "three", "four", "five"} {
-		if frames[i].UUID != id || frames[i].PayloadOmitted != (i == 1 || i == 3) {
+	for i, id := range wantIDs {
+		wantOmission := i != 0 && i != 2 && i != 8
+		if frames[i].UUID != id || (frames[i].PayloadOmitted || frames[i].Event.PayloadOmitted) != wantOmission {
 			t.Fatalf("archive frame at %d: %+v", i, frames[i])
 		}
 	}
