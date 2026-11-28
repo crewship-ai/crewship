@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -435,7 +437,13 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		closeReader()
 	}()
 
-	scanner := bufio.NewScanner(result.Reader)
+	var source io.Reader = result.Reader
+	var capture *chatAuditCapture
+	if req.RecordChatAudit != nil && !req.strictContentPrivacy {
+		capture = new(chatAuditCapture)
+		source = io.TeeReader(source, capture)
+	}
+	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 
 	adapter := getAdapter(req.CLIAdapter)
@@ -605,7 +613,32 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// store is slow or stuck. ExecID lives on the provider ExecResult so we
 	// record it in the payload for correlation with the exec.command end
 	// event.
-	if req.HostOutputDir != "" || req.strictContentPrivacy {
+	auditStatus := ""
+	if req.RecordChatAudit != nil {
+		auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), endOfStreamEmitTimeout)
+		var wire []byte
+		auditStatus = conversation.RunAuditOmitted
+		if capture != nil {
+			auditStatus = conversation.RunAuditIncomplete
+			if !capture.overflow {
+				wire, _ = redactChatAudit(capture.raw.Bytes(), secretValues)
+			}
+			if wire != nil && outputErr == nil && ctx.Err() == nil {
+				auditStatus = conversation.RunAuditArchived
+			} else {
+				outputErr = ErrRunOutputIncomplete
+			}
+		}
+		if err := req.RecordChatAudit(auditCtx, auditStatus, wire); err != nil {
+			auditStatus = ""
+			outputErr = ErrRunOutputIncomplete
+		}
+		cancelAudit()
+		// The audit archive processes credentials split across protocol frames.
+		// Any legacy preview must use that same safe data.
+		captureBuf = wire[:min(len(wire), captureCap)]
+	}
+	if req.strictContentPrivacy || (req.HostOutputDir != "" && auditStatus == "") {
 		return string(captureBuf), outputErr
 	}
 	emitCtx := ctx
@@ -635,6 +668,13 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	}
 	if result != nil && result.ExecID != "" {
 		payload["exec_id"] = result.ExecID
+	}
+	if auditStatus != "" {
+		payload["audit_status"] = auditStatus
+		payload["audit_ref"] = map[string]string{"chat_id": req.ChatID, "run_id": req.RunID}
+	}
+	if req.HostOutputDir != "" {
+		delete(payload, "output")
 	}
 	_, _ = o.journalForRun(req).Emit(emitCtx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,

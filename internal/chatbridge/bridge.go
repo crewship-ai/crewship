@@ -1502,7 +1502,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
 	runCtx, chatWork := b.bindHostChatWork(ctx, &req, runID)
 	defer chatWork.Close()
-	runErr := b.orch.RunAgent(runCtx, req, handler)
+	auditEnabled, auditErr := b.convStore.BeginRunAudit(runCtx, chatID, runID)
+	if auditEnabled {
+		req.RecordChatAudit = func(ctx context.Context, status string, wire []byte) error {
+			return b.convStore.FinishRunAudit(ctx, chatID, runID, status, wire)
+		}
+	}
+	var runErr error
+	if auditErr != nil {
+		b.logger.Warn("cannot start durable chat audit", "run_id", runID, "error", auditErr)
+		runErr = orchestrator.ErrRunOutputIncomplete
+	} else {
+		runErr = b.orch.RunAgent(runCtx, req, handler)
+	}
 	chatWork.Stop()
 	// Settlement keeps the turn's own context. Only a work-item stop that was
 	// delivered before the run returned, and that the run reported, makes

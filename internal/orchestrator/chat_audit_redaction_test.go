@@ -1,0 +1,89 @@
+package orchestrator
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/provider"
+)
+
+func TestRedactChatAuditProtectsEscapedAndFragmentedCredentials(t *testing.T) {
+	const secret = "audit-test-registered-credential-01753089"
+	var raw bytes.Buffer
+	encoder := json.NewEncoder(&raw)
+	emit := func(frame map[string]any) {
+		t.Helper()
+		if err := encoder.Encode(frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fragment := func(id, kind, field, text string) {
+		emit(map[string]any{"type": "stream_event", "uuid": id, "event": map[string]any{
+			"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": kind, field: text},
+		}})
+	}
+	const prefix = "audit-test-registered-"
+	const suffix = "credential-01753089"
+	fragment("text1", "text_delta", "text", prefix)
+	fragment("text2", "text_delta", "text", suffix)
+	fragment("input1", "input_json_delta", "partial_json", `{"argument":"audit-test-registered-\u00`)
+	fragment("input2", "input_json_delta", "partial_json", `63redential-01753089","safe":"keep"}`)
+	emit(map[string]any{"type": "assistant", "uuid": "full", "input": map[string]any{"arg": secret}, "meta": []any{secret}})
+	emit(map[string]any{"type": "result", "uuid": "terminal", "result": secret})
+
+	got, err := redactChatAudit(raw.Bytes(), []string{secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, denied := range []string{secret, prefix, suffix, "redential-01753089"} {
+		if bytes.Contains(got, []byte(denied)) {
+			t.Fatalf("credential fragment survived redaction: %q", denied)
+		}
+	}
+	for _, expected := range []string{`"uuid":"text1"`, `"uuid":"text2"`, `"uuid":"input1"`, `"uuid":"input2"`, `"uuid":"full"`, `"uuid":"terminal"`, "keep", "REDACTED"} {
+		if !bytes.Contains(got, []byte(expected)) {
+			t.Errorf("missing %s", expected)
+		}
+	}
+	var frames []json.RawMessage
+	if err := json.Unmarshal(got, &frames); err != nil || len(frames) != 6 {
+		t.Fatal("redaction dropped a wire envelope")
+	}
+}
+
+func TestRedactChatAuditRefusesBrokenOrOversizedOutput(t *testing.T) {
+	for _, raw := range []string{`{"type":"assistant",`, strings.Repeat("a", maxChatAuditBytes+1)} {
+		data, err := redactChatAudit([]byte(raw), nil)
+		if err == nil || data != nil {
+			t.Fatal("unverifiable output must not be published")
+		}
+	}
+}
+
+func TestStreamOutputOmitsContentAuditForStrictPrivacy(t *testing.T) {
+	r := &chunkRecorder{}
+	o := New(nil, newMemState(), slog.New(slog.DiscardHandler))
+	o.SetJournal(r)
+	const content = `{"type":"result","result":"private synthetic content"}` + "\n"
+	var status string
+	var retained []byte
+	req := AgentRunRequest{
+		ChatID: "audit-chat", RunID: "audit-run", CLIAdapter: "CLAUDE_CODE", strictContentPrivacy: true,
+		RecordChatAudit: func(_ context.Context, auditStatus string, wire []byte) error {
+			status, retained = auditStatus, wire
+			return nil
+		},
+	}
+	_, err := o.streamOutput(t.Context(), &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(content))}, req, func(AgentEvent) {}, nil)
+	if err != nil || status != "omitted" || retained != nil {
+		t.Fatalf("private audit: status=%s has content=%v err=%v", status, retained != nil, err)
+	}
+	if r.findFirst("exec.output_chunk") != nil {
+		t.Fatal("private output appeared in the journal")
+	}
+}
