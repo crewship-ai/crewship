@@ -1466,7 +1466,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   }
   motion?.addEventListener('change',paintPresence)
   return()=>{motion?.removeEventListener('change',paintPresence);clearTimeout(presenceTimer);unsubscribeAgent();unregisterUndo();agentQueue.dispose();closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};retrySave.current=()=>{};downloadXlsx.current=()=>{};downloadOriginalWorkbook.current=()=>{};stop('Editor closed',true)}
- },[enabled,humanId,workspaceId,pageId,scopeKey,identityKey,realtimeChatId])
+ },[enabled,humanId,workspaceId,pageId,scopeKey,identityKey,realtimeChatId,realtimeSheet])
  function copy(draft:NativeDraft){
   // A workbook file draft is downloaded as the workbook it is (it starts with the zip signature).
   const named=draft as NativeDraft&{format?:unknown;name?:unknown},zip=draft.bytes[0]===0x50&&draft.bytes[1]===0x4b
@@ -1579,10 +1579,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   <div className="pointer-events-none relative z-10 h-0"><div className="absolute inset-x-2 top-2 flex flex-col items-center gap-1 text-sm">
    {realtimeSheet&&presenceLabel&&<p role="status" data-testid="sheet-agent-presence">{presenceLabel} is working…</p>}
    {!realtimeSheet&&agentWorking&&<p role="status" data-testid="agent-working" className="max-w-full rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">The agent is changing the Sheet…</p>}
-   <div aria-live="polite" data-take-over-notice={takeNotice??''} data-edit-attempt={attemptState} className="max-w-full">{takeNotice&&!connectionRetired&&<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">
+   {!realtimeSheet&&<div aria-live="polite" data-take-over-notice={takeNotice??''} data-edit-attempt={attemptState} className="max-w-full">{takeNotice&&!connectionRetired&&<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border bg-popover px-3 py-1.5 text-popover-foreground shadow-sm">
     <span>{takeNotice==='taking'?'Taking over editing…':takeNotice==='taken'?'You are editing now.':takeNotice==='viewer'?'You can view this Sheet but not edit it.':takeNotice==='dropped'?'What you typed was not entered. Click the cell and type it again.':view.holder?.kind==='agent'?`${view.holder.display_name.trim()||'The agent'} is changing this Sheet. You can edit when it is done.`:view.holder&&(view.holder.actor_id===`user:${humanId}`||view.holder.actor_id===humanId)?'You are editing this Sheet in another tab or window.':`${view.holder?.display_name.trim()||'Someone'} is editing this Sheet. Use Request edit to ask for it.`}</span>
     <Button size="xs" variant="ghost" className="coarse:min-h-[44px]" onClick={()=>setTakeNotice(undefined)}>Dismiss</Button>
-   </div>}</div>
+   </div>}</div>}
   </div></div>
   <div ref={mount} tabIndex={-1} className={editorHidden?'hidden':'relative min-h-0 flex-1'} aria-busy={busy||accessCheck}/>
  </section>
