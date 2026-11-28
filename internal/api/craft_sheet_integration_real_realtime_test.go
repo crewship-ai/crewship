@@ -134,7 +134,7 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 	engine := newRealSheetEngine(t)
 	adapter := NewCraftNativeSheetAgentAdapter(engine)
 	profile := CraftNativeDocumentProfile{Application: "gridcraft"}
-	base := realSheetTestNamedWorkbook(t, "Data", sitCells{"B2": "number before", "B3": "boolean before", "B4": "null before"})
+	base := realSheetTestNamedWorkbook(t, "Data", sitCells{"B2": "number before", "B3": "boolean before", "B4": "null before", "B5": "string before", "B6": "literal before"})
 	s := newSheetITScenarioWithWorkbook(t, base, "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
 	s.m.config.AgentApply, s.m.config.AgentInspect = adapter.Apply, adapter.Inspect
 	s.send("Update cells in Data", true)
@@ -146,7 +146,7 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 		{"range": "Data!B2", "sheet": "Data"},
 	} {
 		text, refused := s.read(call, sitCmd("sheet.read", params))
-		if !refused || !strings.Contains(text, `"reason":"invalid_request"`) {
+		if !refused || !strings.Contains(text, `"reason":"invalid_request"`) || !strings.Contains(text, craftSheetInvalidReadQuery) {
 			t.Fatalf("qualified read: refused=%v response=%s", refused, text)
 		}
 	}
@@ -158,16 +158,18 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 	apply := func(base, id string, commands ...map[string]any) map[string]any {
 		return map[string]any{"generation": generation, "base_version": base, "request_id": id, "commands": sitCommands(commands...)}
 	}
-	// The first production failure's command and request ID, using this test's live lease and base.
+	// The first failed dev1 command and request ID, using this test's live lease and base.
 	numeric := apply("1", "set-data-b2-to-42-20261128", sitCmd("cell.set", map[string]any{"cell": "B2", "input": 42, "sheet": "Data"}))
 	for _, invalid := range []struct {
-		input  any
+		name   string
+		params map[string]any
 		reason string
 	}{
-		{map[string]any{"number": 42}, CraftSheetReasonInvalid},
-		{"=1+1", CraftSheetReasonFormula},
+		{"object", map[string]any{"cell": "B2", "input": map[string]any{"number": 42}, "sheet": "Data"}, CraftSheetReasonInvalid},
+		{"missing", map[string]any{"cell": "B2", "sheet": "Data"}, CraftSheetReasonInvalid},
+		{"formula", map[string]any{"cell": "B2", "input": "=1+1", "sheet": "Data"}, CraftSheetReasonFormula},
 	} {
-		args := apply("1", "refuse-"+invalid.reason, sitCmd("cell.set", map[string]any{"cell": "B2", "input": invalid.input, "sheet": "Data"}))
+		args := apply("1", "refuse-"+invalid.name, sitCmd("cell.set", invalid.params))
 		text, refused := s.toolCall(call, "craft_sheet_apply", args)
 		if !refused || !strings.Contains(text, `"reason":"`+invalid.reason+`"`) || s.head() != 1 || len(s.opsRows()) != 0 {
 			t.Fatalf("invalid write: refused=%v response=%s head=%d", refused, text, s.head())
@@ -178,9 +180,11 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 	if receipt != retry || s.head() != 2 || len(s.opsRows()) != 1 {
 		t.Fatalf("retry changed the receipt or head: %s / %s, head %d", receipt, retry, s.head())
 	}
-	more := apply("2", "typed-boolean-null",
+	more := apply("2", "typed-boolean-null-and-text",
 		sitCmd("cell.set", map[string]any{"cell": "B3", "input": true, "sheet": "Data"}),
-		sitCmd("cell.set", map[string]any{"cell": "B4", "input": nil, "sheet": "Data"}))
+		sitCmd("cell.set", map[string]any{"cell": "B4", "input": nil, "sheet": "Data"}),
+		sitCmd("cell.set", map[string]any{"cell": "B5", "input": "42", "sheet": "Data"}),
+		sitCmd("cell.set", map[string]any{"cell": "B6", "input": "'42", "sheet": "Data"}))
 	second := s.tool(call, "craft_sheet_apply", more)
 	operation := func(text string) string {
 		t.Helper()
@@ -204,7 +208,7 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer release()
-		values, err := cold.ReadRange(t.Context(), "'Data'!B2:B4", false)
+		values, err := cold.ReadRange(t.Context(), "'Data'!B2:B6", false)
 		if err != nil || len(values.Values) != len(wanted) {
 			t.Fatalf("read cold workbook: %+v (%v)", values, err)
 		}
@@ -214,13 +218,16 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 			}
 		}
 	}
-	wanted := []any{float64(42), true, nil}
+	// Existing cell entry interprets "42" as a number and "'42" as text.
+	wanted := []any{float64(42), true, nil, float64(42), "42"}
 	check(s.stored(3), wanted)
 	rows := s.opsRows()
 	if len(rows) != 2 || !rows[0].Replayable || !rows[1].Replayable ||
 		!strings.Contains(rows[0].Ops, `"values":[[42]]`) ||
 		!strings.Contains(rows[1].Ops, `"values":[[true]]`) ||
-		!strings.Contains(rows[1].Ops, `"values":[[null]]`) {
+		!strings.Contains(rows[1].Ops, `"values":[[null]]`) ||
+		!strings.Contains(rows[1].Ops, `"input":"42"`) ||
+		!strings.Contains(rows[1].Ops, `"input":"'42"`) {
 		t.Fatalf("typed replay journal: %+v", rows)
 	}
 	replayed := base
@@ -236,11 +243,17 @@ func TestSheetITChatToolScalarContractWithTheRealEngine(t *testing.T) {
 	s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
 	human := s.humanSession()
 	lease := s.humanLease(human)
-	for i, id := range []string{operation(second), operation(receipt)} {
-		response := s.undo(human, lease, id)
-		if response.Code != 201 || !strings.Contains(response.Body.String(), fmt.Sprintf(`"restored":%d`, 2-i)) {
-			t.Fatalf("undo %d: %d %s", i, response.Code, response.Body)
+	for _, undo := range []struct {
+		id       string
+		restored int
+	}{
+		{operation(second), 4},
+		{operation(receipt), 1},
+	} {
+		response := s.undo(human, lease, undo.id)
+		if response.Code != 201 || !strings.Contains(response.Body.String(), fmt.Sprintf(`"restored":%d`, undo.restored)) {
+			t.Fatalf("undo %s: %d %s", undo.id, response.Code, response.Body)
 		}
 	}
-	check(s.stored(5), []any{"number before", "boolean before", "null before"})
+	check(s.stored(5), []any{"number before", "boolean before", "null before", "string before", "literal before"})
 }

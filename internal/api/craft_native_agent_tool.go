@@ -403,7 +403,7 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 		if len(input.Query) > 0 {
 			if e.chat != nil && e.grant.Application == "gridcraft" {
 				if _, err := nativeAgentEngineCommands("gridcraft", input.Query, true); err != nil {
-					replyError(w, http.StatusBadRequest, "invalid Sheet query; use an A1 address and a separate sheet")
+					replyError(w, http.StatusBadRequest, craftSheetInvalidReadQuery)
 					return
 				}
 			}

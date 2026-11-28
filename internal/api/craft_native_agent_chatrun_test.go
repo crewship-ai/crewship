@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -12,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -978,10 +978,16 @@ func TestChatRunSheetKeepsTheProposalReceipt(t *testing.T) {
 }
 
 func TestChatRunSheetEngineFailureLogsOnlyControlledFields(t *testing.T) {
-	var logs bytes.Buffer
+	logFile, err := os.CreateTemp(t.TempDir(), "engine-failure-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
 	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	slog.SetDefault(slog.New(slog.NewTextHandler(logFile, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		_ = logFile.Close()
+	})
 
 	b := &craftNativeChatBuffer{header: http.Header{}}
 	b.WriteHeader(http.StatusUnprocessableEntity)
@@ -991,7 +997,11 @@ func TestChatRunSheetEngineFailureLogsOnlyControlledFields(t *testing.T) {
 	if w.Code != 422 || !strings.Contains(w.Body.String(), CraftSheetReasonEngineFailed) {
 		t.Fatalf("response: %d %s", w.Code, w.Body)
 	}
-	log := logs.String()
+	raw, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
 	for _, want := range []string{"level=WARN", "operation=read", "status=422", "reason=engine_failed", "cause=unprocessable_tool_result"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("missing %q in %s", want, log)

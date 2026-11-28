@@ -62,6 +62,7 @@ const (
 	CraftSheetReasonConsentStale    = "consent_stale"
 	CraftSheetReasonNotUndoable     = "not_undoable"
 	craftSheetReasonUnavailableText = "Native Craft agents are not available."
+	craftSheetInvalidReadQuery      = "Use a plain A1 address for range or cell and pass the sheet name separately."
 )
 
 var craftSheetReasonText = map[string]string{
@@ -1013,8 +1014,8 @@ func nativeAgentChangeSummary(commands json.RawMessage) craftNativeChangeSummary
 	return out
 }
 
-// craftNativeChatPassThrough keeps a refusal that tells the agent what to fix: a write without its
-// sheet (invalid_request with the instruction) and a fidelity loss with its parts.
+// craftNativeChatPassThrough keeps known guidance about Sheet addresses and
+// fidelity refusals with their affected parts.
 func craftNativeChatPassThrough(w http.ResponseWriter, status int, reason string, body []byte) bool {
 	var answer struct {
 		Error  string          `json:"error"`
@@ -1027,7 +1028,7 @@ func craftNativeChatPassThrough(w http.ResponseWriter, status int, reason string
 	switch {
 	case reason == CraftSheetReasonFidelityLoss && len(answer.Parts) > 0:
 		writeJSON(w, status, map[string]any{"error": answer.Error, "reason": reason, "parts": answer.Parts})
-	case reason == CraftSheetReasonInvalid && answer.Error == errCraftNativeSheetNameRequired.Error():
+	case reason == CraftSheetReasonInvalid && (answer.Error == errCraftNativeSheetNameRequired.Error() || answer.Error == craftSheetInvalidReadQuery):
 		writeJSON(w, status, map[string]string{"error": answer.Error, "reason": reason})
 	default:
 		return false
