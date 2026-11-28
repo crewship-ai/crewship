@@ -349,9 +349,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// IntentExcludeOperational entry below.
 
 	// === Operational state (DO NOT export) ==========================
-	"audit_logs":     IntentExcludeOperational,
-	"backup_locks":   IntentExcludeOperational,
-	"backup_catalog": IntentExcludeOperational,
+	"audit_logs": IntentExcludeOperational,
+	// Full database snapshots retain the private chat run archive. Portable
+	// workspace and crew exports omit its more tightly scoped diagnostics.
+	"chat_run_audits": IntentExcludeOperational,
+	"backup_locks":    IntentExcludeOperational,
+	"backup_catalog":  IntentExcludeOperational,
 	// backup_restore_origins records "this workspace was created by
 	// restoring that bundle" so the DR resume can be authorised on
 	// evidence (#1716). It is a fact about THIS instance's history: a

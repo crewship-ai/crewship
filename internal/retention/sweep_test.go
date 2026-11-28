@@ -189,12 +189,16 @@ func TestSweepChatsTakesItsMessagesAlong(t *testing.T) {
 	exec(t, db, `INSERT INTO agents (id, workspace_id, name, slug) VALUES ('ag1','ws1','Agent','agent')`)
 	exec(t, db, `INSERT INTO chats (id, agent_id, workspace_id, created_at, updated_at, last_activity_at) VALUES ('c1','ag1','ws1',?,?,?)`, ago(40), ago(40), ago(40))
 	exec(t, db, `INSERT INTO conversation_messages (id, session_id, agent_id, role, content) VALUES ('m1','c1','ag1','user','hello')`)
+	exec(t, db, `INSERT INTO chat_run_audits (chat_id, run_id, status, wire) VALUES ('c1','run','archived',?)`, []byte(`[{"type":"result"}]`))
 	exec(t, db, `INSERT INTO inbox_items (id, workspace_id, kind, source_id, title, state, blocking, resolved_at) VALUES ('ib','ws1','message','chat_reply_c1_u1','t','resolved',0,?)`, ago(40))
 	if _, _, err := SweepChats(context.Background(), db, "ws1", 30, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(t, db, `SELECT COUNT(*) FROM conversation_messages WHERE session_id = 'c1'`) + count(t, db, `SELECT COUNT(*) FROM inbox_items WHERE id = 'ib'`); n != 0 {
 		t.Fatalf("%d rows of a swept chat survived", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM chat_run_audits WHERE chat_id = 'c1'`); n != 0 {
+		t.Fatalf("%d run audits of a swept chat survived", n)
 	}
 }
 

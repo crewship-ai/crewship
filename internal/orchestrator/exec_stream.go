@@ -437,16 +437,18 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		closeReader()
 	}()
 
+	adapter := getAdapter(req.CLIAdapter)
 	var source io.Reader = result.Reader
 	var capture *chatAuditCapture
-	if req.RecordChatAudit != nil && !req.strictContentPrivacy {
+	// Only retain wire formats with tested credential reconstruction across
+	// their streamed fragment boundaries.
+	if req.RecordChatAudit != nil && !req.strictContentPrivacy && adapter.Name() == "CLAUDE_CODE" {
 		capture = new(chatAuditCapture)
 		source = io.TeeReader(source, capture)
 	}
 	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 
-	adapter := getAdapter(req.CLIAdapter)
 	useStreamJSON := adapter.UseStreamJSON()
 
 	// Per-stream parser state: adapters whose line parsing carries cross-line
@@ -634,9 +636,11 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 			outputErr = ErrRunOutputIncomplete
 		}
 		cancelAudit()
-		// The audit archive processes credentials split across protocol frames.
-		// Any legacy preview must use that same safe data.
-		captureBuf = wire[:min(len(wire), captureCap)]
+		// A capture uses the same redaction for returned diagnostics. An
+		// omitted capture keeps the existing adapter exit diagnostics.
+		if capture != nil {
+			captureBuf = wire[:min(len(wire), captureCap)]
+		}
 	}
 	if req.strictContentPrivacy || (req.HostOutputDir != "" && auditStatus == "") {
 		return string(captureBuf), outputErr

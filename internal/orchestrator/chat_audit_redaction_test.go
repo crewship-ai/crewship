@@ -113,3 +113,34 @@ func TestStreamOutputJournalReferencesPrivateChatAudit(t *testing.T) {
 		t.Fatal("private chat capture was copied to the journal")
 	}
 }
+
+func TestStreamOutputOmitsAuditForUnverifiedAdapter(t *testing.T) {
+	recorder := &chunkRecorder{}
+	o := New(nil, newMemState(), slog.New(slog.DiscardHandler))
+	o.SetJournal(recorder)
+	const content = `{"type":"turn.completed","usage":{"input_tokens":1}}` + "\n"
+	recorded := false
+	req := AgentRunRequest{
+		ChatID: "audit-chat", RunID: "audit-run", CLIAdapter: "CODEX_CLI",
+		RecordChatAudit: func(_ context.Context, status string, wire []byte) error {
+			recorded = true
+			if status != "omitted" || wire != nil {
+				t.Fatalf("unverified adapter recorded %s with %d bytes", status, len(wire))
+			}
+			return nil
+		},
+	}
+	if _, err := o.streamOutput(t.Context(), &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(content))}, req, func(AgentEvent) {}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !recorded {
+		t.Fatal("audit omission was not persisted")
+	}
+	entry := recorder.findFirst("exec.output_chunk")
+	if entry == nil || entry.Payload["audit_status"] != "omitted" {
+		t.Fatal("audit omission was not reflected in the journal")
+	}
+	if _, containsOutput := entry.Payload["output"]; containsOutput {
+		t.Fatal("unverified chat output was copied to the journal")
+	}
+}

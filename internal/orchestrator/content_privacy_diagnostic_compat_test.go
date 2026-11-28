@@ -13,8 +13,7 @@ import (
 
 func TestOrdinaryRunRetainsLoopAndInspectDiagnostics(t *testing.T) {
 	const marker = "synthetic-ordinary-diagnostic"
-	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"loop","name":"` + marker + `","input":{"value":"ordinary"}}]}}` + "\n"
-	for _, opts := range []covRunOpts{{stream: strings.Repeat(line, loopGuardThreshold)}, {agentInspectErr: errors.New(marker)}} {
+	for _, opts := range []covRunOpts{{stream: loopGuardClaudeStream(marker)}, {agentInspectErr: errors.New(marker)}} {
 		var log bytes.Buffer
 		o := New(covNewRunContainer(opts), newMemState(), slog.New(slog.NewJSONHandler(&log, nil)))
 		_ = o.RunAgent(context.Background(), covRunReq(), nil)

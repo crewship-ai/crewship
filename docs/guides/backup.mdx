@@ -214,6 +214,8 @@ Runtime authority is never carried: editing leases and lease requests, delivery 
 
 ## Create a workspace backup
 
+The manifest marks private chat run archives as omitted with `contents.chat_run_audits_omitted`. An encrypted instance backup retains the archives in its database snapshot.
+
 ```bash
 crewship backup create --scope=workspace
 # Passphrase: ********

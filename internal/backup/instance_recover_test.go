@@ -24,6 +24,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -182,9 +183,25 @@ func TestInstanceBackupRecoverRoundTrip(t *testing.T) {
 		VALUES ('br_inflight', 'manual', 'instance', 'running', 'copy', '2026-09-30T14:52:12Z')`); err != nil {
 		t.Fatal(err)
 	}
+	const auditWire = `[{"type":"result","result":"synthetic run audit"}]`
+	for _, stmt := range []string{
+		`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('audit-member', 'ws_e2e_1', 'u_admin', 'OWNER'), ('lab-member', 'ws_lab', 'u_lab', 'OWNER')`,
+		`INSERT INTO chats (id, agent_id, workspace_id, created_by, title, visibility) VALUES ('audit-chat', 'a_alice', 'ws_e2e_1', 'u_admin', 'Private synthetic audit', 'private')`,
+	} {
+		if _, err := f.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO chat_run_audits (chat_id, run_id, status, wire)
+		VALUES ('audit-chat', 'completed-run', 'archived', ?), ('audit-chat', 'interrupted-run', 'staged', ?)`, []byte(auditWire), []byte(auditWire)); err != nil {
+		t.Fatal(err)
+	}
 	created := f.create(t, true)
 
 	m := created.Manifest
+	if m.Contents.ChatRunAuditsOmitted || m.Contents.TableRowCounts["chat_run_audits"] != 2 {
+		t.Fatal("instance manifest does not account for both audit records")
+	}
 	if m.Scope != backup.ScopeInstance || m.Contents.Instance == nil || !m.Encryption.Enabled {
 		t.Fatalf("manifest = %+v", m)
 	}
@@ -258,6 +275,23 @@ func TestInstanceBackupRecoverRoundTrip(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM sessions`) + count(`SELECT COUNT(*) FROM user_sessions`); n != 0 {
 		t.Errorf("%d sessions survived the restore", n)
+	}
+	for run, wantStatus := range map[string]string{"completed-run": "archived", "interrupted-run": "staged"} {
+		var status string
+		var wire []byte
+		err := restored.QueryRowContext(ctx, `SELECT status, wire FROM chat_run_audits WHERE chat_id='audit-chat' AND run_id=?`, run).Scan(&status, &wire)
+		if err != nil || status != wantStatus || string(wire) != auditWire {
+			t.Fatalf("restored audit %s: status %s, bytes %d, err %v", run, status, len(wire), err)
+		}
+	}
+	for _, reader := range []struct {
+		user, workspace string
+		want            bool
+	}{{"u_admin", "ws_e2e_1", true}, {"u_lab", "ws_lab", false}} {
+		allowed, err := chataudience.CanReadArtifactConversation(ctx, restored, "audit-chat", reader.user, reader.workspace, true)
+		if err != nil || allowed != reader.want {
+			t.Fatalf("restored audit audience for %s: allowed %v, err %v", reader.user, allowed, err)
+		}
 	}
 	if n := count(`SELECT COUNT(*) FROM memory_versions WHERE payload_ref = ?`, filepath.Join(dataDir, "memory", "versions", f.memSHA[:2], f.memSHA)); n != 1 {
 		t.Error("memory_versions.payload_ref still points at the source")

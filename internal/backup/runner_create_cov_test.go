@@ -170,6 +170,15 @@ func TestCreateBackup_RecipientsMode(t *testing.T) {
 	ctx := context.Background()
 	db := openMigratedDBCov(t)
 	wsID, _ := seedCovWorkspace(t, db, "recip")
+	if _, err := db.ExecContext(ctx, `INSERT INTO chats (id, agent_id, workspace_id, title)
+		VALUES ('audit-chat', 'a_cov_recip', ?, 'Synthetic private run')`, wsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO chat_run_audits (chat_id, run_id, status, wire)
+		VALUES ('audit-chat', 'audit-run', 'archived', ?)`, []byte(`[{"type":"result","result":"synthetic private capture"}]`)); err != nil {
+		t.Fatal(err)
+	}
+
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +193,9 @@ func TestCreateBackup_RecipientsMode(t *testing.T) {
 		t.Fatalf("CreateBackup: %v", err)
 	}
 	m := res.Manifest
+	if _, exported := m.Contents.TableRowCounts["chat_run_audits"]; !m.Contents.ChatRunAuditsOmitted || exported {
+		t.Fatal("portable bundle must declare and exclude private chat run audits")
+	}
 	if !m.Encryption.Enabled || m.Encryption.Algorithm != EncryptionAlgorithm {
 		t.Errorf("encryption = %+v", m.Encryption)
 	}
@@ -191,7 +203,8 @@ func TestCreateBackup_RecipientsMode(t *testing.T) {
 		t.Errorf("recipients = %v", m.Encryption.Recipients)
 	}
 	// Restorable with the matching identity.
-	restored, err := RestoreBackup(ctx, openMigratedDBCov(t), RestoreOptions{
+	targetDB := openMigratedDBCov(t)
+	restored, err := RestoreBackup(ctx, targetDB, RestoreOptions{
 		Path:       res.Path,
 		Identities: []age.Identity{id},
 		Actor:      covAdminActor(),
@@ -201,6 +214,10 @@ func TestCreateBackup_RecipientsMode(t *testing.T) {
 	}
 	if restored.RowsInserted <= 0 {
 		t.Errorf("rows inserted = %d", restored.RowsInserted)
+	}
+	var auditCount int
+	if err := targetDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chat_run_audits`).Scan(&auditCount); err != nil || auditCount != 0 {
+		t.Fatalf("portable restore contains %d audit records: %v", auditCount, err)
 	}
 }
 
