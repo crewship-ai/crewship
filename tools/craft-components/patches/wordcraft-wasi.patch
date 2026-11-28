@@ -1054,7 +1054,7 @@ index 0000000000000000000000000000000000000000..bb2f85e01dbe73bf3a0762d6c3bf144f
 +    }
 +}
 diff --git a/apps/wordcraft-web/src/web.rs b/apps/wordcraft-web/src/web.rs
-index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7bc48b2c8 100644
+index c1ee1ababb52197f1bf193fc565790eaccf770c5..2e90952a094b3e43093df0178d563e38fa21208a 100644
 --- a/apps/wordcraft-web/src/web.rs
 +++ b/apps/wordcraft-web/src/web.rs
 @@ -41,8 +41,18 @@ pub fn start() {
@@ -1086,7 +1086,7 @@ index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7
                          && let Err(e) = guard_unload(dirty.clone(), browser.clone())
                      {
                          log::error!("no unsaved-changes guard: {e}");
-@@ -114,18 +124,23 @@ pub fn start() {
+@@ -114,45 +124,57 @@ pub fn start() {
                      let (intake, sender) = FileIntake::new(Wake::new(waker(&ctx)));
 
                      // In host mode the parent sends the document to edit; no sample meanwhile.
@@ -1108,13 +1108,16 @@ index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7
 +                        port.connect(&mut services, ctx.clone());
 +                    }
 +                    let mut app = WordApp::new(session, services).with_host(host).with_settings(settings.clone());
++                    // Managed documents show font substitutions in the status bar without blocking edits.
 +                    if app_private.is_none() {
 +                        app = app.with_control(ControlChannel::new(crate::api::install(ctx.clone())));
++                        app.tell_about_font_downloads();
 +                    }
                      app.autosave = false;
-                     app.tell_about_font_downloads();
+-                    app.tell_about_font_downloads();
                      // A region chosen in File › Options replaces the browser's for the first blank
-@@ -134,25 +149,31 @@ pub fn start() {
+                     // document too (#838).
+                     if !sample && app.session.prefs.region.is_some() {
                          let doc = app.session.blank_document();
                          app.session.set_document(doc);
                      }
@@ -1150,7 +1153,7 @@ index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7
          if let Some(bridge) = &bridge {
              match &result {
                  Ok(()) => bridge.post_ready(),
-@@ -198,6 +219,7 @@ struct WebShell {
+@@ -198,6 +220,7 @@ struct WebShell {
      settings: SharedSettings<Prefs>,
      /// Set when a host page named the user: its name is not kept in the stored preferences.
      author: Option<crate::prefs::HostAuthor>,
@@ -1158,7 +1161,7 @@ index c1ee1ababb52197f1bf193fc565790eaccf770c5..59848c0a5bd51cc6b66a76bda137bdd7
  }
 
  impl eframe::App for WebShell {
-@@ -209,7 +231,13 @@ impl eframe::App for WebShell {
+@@ -209,7 +232,13 @@ impl eframe::App for WebShell {
          for msg in msgs {
              self.app.status(msg);
          }
