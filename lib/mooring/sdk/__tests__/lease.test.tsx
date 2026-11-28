@@ -149,15 +149,13 @@ describe("Mooring SDK lease actions", () => {
   })
 
   it("never auto-saves a draft after hand-off: later input stays local", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     const r = saveRig({ generation: "3" })
     r.type("final words")
     const t = transport()
-    const handing = createLeaseActions(t, signal).handOff(held({ handoff_requested_by: [bob] }), "req-bob", { generation: "3", flush: () => r.controller.flush(), confirmedVersion: () => r.controller.confirmedVersion(), revokeWrite: () => r.controller.revokeWrite() })
-    await vi.runAllTimersAsync()
-    await handing
+    await createLeaseActions(t, signal).handOff(held({ handoff_requested_by: [bob] }), "req-bob", { generation: "3", flush: () => r.controller.flush(), confirmedVersion: () => r.controller.confirmedVersion(), revokeWrite: () => r.controller.revokeWrite() })
     expect(r.transport.save).toHaveBeenCalledOnce()
     expect(new TextDecoder().decode(r.transport.save.mock.calls[0][0].bytes)).toBe("final words")
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     r.type("typed after hand-off")
     await vi.advanceTimersByTimeAsync(5_000)
     await r.controller.save().catch(() => {})
