@@ -154,7 +154,9 @@ const FRAME_TITLE: Record<NativeApp, string> = { wordcraft: "WordCraft editor", 
 const CLICK: Record<NativeApp, { x: number; y: number }> = { wordcraft: { x: 678, y: 324 }, gridcraft: { x: 54, y: 240 } }
 export const VIEWPORT = { width: 1440, height: 1000 }
 
-export const status = (page: Page) => page.getByRole("status").first().innerText().catch(() => "?")
+export const status = (page: Page) =>
+  page.getByRole("region", { name: /^(WordCraft document|GridCraft workbook)$/ })
+    .locator('div[role="status"]').first().innerText().catch(() => "?")
 
 export async function openEditor(page: Page, ref: NativeRef): Promise<void> {
   page.setDefaultTimeout(60_000)
