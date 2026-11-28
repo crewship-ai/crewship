@@ -1,8 +1,23 @@
 diff --git a/apps/wordcraft-cli/src/main.rs b/apps/wordcraft-cli/src/main.rs
-index 505fed7ce39dbfb3e4e7b1f59d1a31c7f5970b0e..7f0cacfae9da1ff15278ee7349966538926926e5 100644
+index fe14ef4a09809ba48dbb2bee617d29b5d5af4c98..49a73b7567b6c95d301e98396d4e09349ae549ab 100644
 --- a/apps/wordcraft-cli/src/main.rs
 +++ b/apps/wordcraft-cli/src/main.rs
-@@ -1044,6 +1044,7 @@ fn main() -> ExitCode {
+@@ -204,7 +204,13 @@ fn session(doc: wordcraft_doc::Document) -> Session {
+
+ /// The system region, read as the app reads it (locale variables, else the platform's locale).
+ fn system_region() -> wordcraft_engine::Region {
+-    wordcraft_engine::Region::from_locale_vars(|name| std::env::var(name).ok(), sys_locale::get_locale)
++    // sys-locale's JS backend probes a browser even on wasm32-wasip1.
++    // WASI can use locale variables and otherwise keeps the region default.
++    #[cfg(target_os = "wasi")]
++    let platform_locale = || None;
++    #[cfg(not(target_os = "wasi"))]
++    let platform_locale = sys_locale::get_locale;
++    wordcraft_engine::Region::from_locale_vars(|name| std::env::var(name).ok(), platform_locale)
+ }
+
+ /// The body text for `text`: the plain-text export, so list items keep their bullet or number label.
+@@ -1055,6 +1061,7 @@ fn main() -> ExitCode {
      }
      // Language packs installed in the suite's font store are used; `proof.installPack` installs
      // only while the person has turned downloading on in the app.

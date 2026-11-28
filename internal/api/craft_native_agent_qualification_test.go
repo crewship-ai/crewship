@@ -201,6 +201,8 @@ func qualifyNativeAgentHTTP(t *testing.T, p CraftNativeDocumentProfile, initial 
 		t.Fatal("pinned original input", err)
 	}
 	f, source := originalSessionFixture(t)
+	const secondInstruction = "principal-next-message"
+	seedNativeAgentAdmission(t, f, f.a.MessageID, secondInstruction)
 	f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native local qualification", source.UserID, "")
 	// Create this owned Page's immutable profile once, at its real pin.
 	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,?,?,?,?)`, f.rig.wsID, p.Application, p.EngineRevision, p.CLISHA256, p.EditorBundle)
@@ -304,7 +306,7 @@ func qualifyNativeAgentHTTP(t *testing.T, p CraftNativeDocumentProfile, initial 
 		t.Fatal("actual human receipt missing")
 	}
 	var previousRun string
-	for index, message := range []string{f.a.MessageID, "principal-next-message"} {
+	for index, message := range []string{f.a.MessageID, secondInstruction} {
 		var accepted struct {
 			WorkID string `json:"work_id"`
 		}
