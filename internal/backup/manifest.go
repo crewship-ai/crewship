@@ -153,6 +153,10 @@ type Contents struct {
 	Workspace        *WorkspaceSummary `json:"workspace,omitempty" yaml:"workspace,omitempty"`
 	Crews            []CrewSummary     `json:"crews,omitempty" yaml:"crews,omitempty"`
 
+	// ChatRunAuditsOmitted signals that a portable export excludes the
+	// private run archives stored in the full instance database snapshot.
+	ChatRunAuditsOmitted bool `json:"chat_run_audits_omitted,omitempty" yaml:"chat_run_audits_omitted,omitempty"`
+
 	// Instance-scope only (V1.5, CRE-129). Nil for MVP bundles.
 	CredstoreIncluded      bool `json:"credstore_included,omitempty" yaml:"credstore_included,omitempty"`
 	AuthKeysIncluded       bool `json:"auth_keys_included,omitempty" yaml:"auth_keys_included,omitempty"`

@@ -912,6 +912,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// on 2026-05-22 audit (issue #539); sibling POST route at line 412
 	// already wraps the full chain.
 	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(wsCtx(http.HandlerFunc(proxy.ChatMessages))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/runs/{runId}/audit", authed(wsCtx(http.HandlerFunc(proxy.ChatRunAudit))))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents).
 	// AssignmentHandler is constructed here so the public list endpoint

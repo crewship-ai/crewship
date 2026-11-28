@@ -124,3 +124,22 @@ func TestRunAgent_AdapterExecError(t *testing.T) {
 		})
 	}
 }
+
+func TestRunAgent_AdapterExecErrorKeepsAuditContentPrivate(t *testing.T) {
+	const stream = `{"type":"result","result":"content for the authorized audit reader"}` + "\n"
+	o := New(covNewRunContainer(covRunOpts{agentExit: 1, stream: stream}), newMemState(), covQuietLogger())
+	req := covRunReq()
+	var wire []byte
+	req.RecordChatAudit = func(_ context.Context, _ string, content []byte) error {
+		wire = content
+		return nil
+	}
+	err := o.RunAgent(t.Context(), req, nil)
+	var execErr *AdapterExecError
+	if !errors.As(err, &execErr) || execErr.ExitCode != 1 || execErr.Output != "" || strings.Contains(err.Error(), "authorized audit reader") {
+		t.Fatalf("unsafe or missing process diagnostics: %v", err)
+	}
+	if !strings.Contains(string(wire), "authorized audit reader") {
+		t.Fatal("content for the audit endpoint was not retained")
+	}
+}

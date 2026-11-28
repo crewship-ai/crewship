@@ -614,6 +614,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		migrations = AppliedMigrationVersions(ctx, db)
 	}
 	contents := buildContents(target, level, captures)
+	contents.ChatRunAuditsOmitted = true
 	contents.ServiceSnapshots = serviceSnapshotCount
 	if memoryBlobsResult != nil {
 		contents.MemoryBlobsIncluded = memoryBlobsResult.Included

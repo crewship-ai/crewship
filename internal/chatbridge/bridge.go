@@ -1431,6 +1431,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// caller: scheduler, webhook, routine step, agent-start IPC.
 	req.SuppressSessionStream = true
 	req = withoutMemoryForArtifacts(req, hasArtifactRefs)
+	req.RequireCompleteChatOutput = true
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
 	// On subsequent messages the container is warm — no progress noise.
@@ -1590,7 +1591,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
 	runCtx, chatWork := b.bindHostChatWork(ctx, &req, runID)
 	defer chatWork.Close()
-	runErr := b.orch.RunAgent(runCtx, req, handler)
+	auditEnabled, auditErr := b.convStore.BeginRunAudit(runCtx, chatID, runID)
+	if auditEnabled {
+		req.RecordChatAudit = func(ctx context.Context, status string, wire []byte) error {
+			return b.convStore.FinishRunAudit(ctx, chatID, runID, status, wire)
+		}
+	}
+	var runErr error
+	if auditErr != nil {
+		b.logger.Warn("cannot start durable chat audit", "run_id", runID, "error", auditErr)
+		runErr = orchestrator.ErrRunOutputIncomplete
+	} else {
+		runErr = b.orch.RunAgent(runCtx, req, handler)
+	}
 	chatWork.Stop()
 	// Settlement keeps the turn's own context. Only a work-item stop that was
 	// delivered before the run returned, and that the run reported, makes
@@ -1647,6 +1660,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		costCancel()
 	}
+	logErr := logBuf.Finish()
+	if logErr != nil {
+		b.logger.Warn("failed to finish agent audit log", "run_id", runID, "error", logErr)
+		if runErr == nil {
+			runErr = orchestrator.ErrRunOutputIncomplete
+		}
+	}
 	if runErr != nil {
 		if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
 			// Preserve partial replies when the observer or execution detaches. An
@@ -1657,13 +1677,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
-					RunID:     runID,
-					ID:        generateMsgID(),
-					AgentID:   info.AgentID,
-					Role:      conversation.RoleAssistant,
-					Content:   acc.Text(),
-					Parts:     partAcc.Parts(),
-					Timestamp: repliedAt,
+					RunID:      runID,
+					ID:         generateMsgID(),
+					AgentID:    info.AgentID,
+					Role:       conversation.RoleAssistant,
+					Content:    acc.Text(),
+					Parts:      partAcc.Parts(),
+					RunResults: partAcc.Results(),
+					Timestamp:  repliedAt,
 				})
 				_ = countTurn(cleanCtx, 2)
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
@@ -1720,13 +1741,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
-					RunID:     runID,
-					ID:        generateMsgID(),
-					AgentID:   info.AgentID,
-					Role:      conversation.RoleAssistant,
-					Content:   acc.Text(),
-					Parts:     partAcc.Parts(),
-					Timestamp: repliedAt,
+					RunID:      runID,
+					ID:         generateMsgID(),
+					AgentID:    info.AgentID,
+					Role:       conversation.RoleAssistant,
+					Content:    acc.Text(),
+					Parts:      partAcc.Parts(),
+					RunResults: partAcc.Results(),
+					Timestamp:  repliedAt,
 				})
 				_ = countTurn(cleanCtx, 2)
 				// The partial reply is persisted — it counts as "a reply
@@ -1742,7 +1764,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 
 		errMsg := runErr.Error()
-		if err := updateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
+		var failureMeta map[string]any
+		if errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
+			failureMeta = map[string]any{"reason": "run_record_incomplete"}
+		}
+		if err := updateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, failureMeta)); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		// In-band failure: the CLI exited 0 and then reported that the turn
@@ -1754,8 +1780,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// reload still shows what the agent said and why the run failed.
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
-		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
-			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg, alreadySaved)
+		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) || errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
+			saved := b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), partAcc.Results(), errMsg, alreadySaved)
+			if auditEnabled && saved && logErr == nil && errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
+				if err := b.convStore.PublishRunAudit(ctx, chatID, runID); err != nil {
+					b.logger.Warn("failed to publish chat audit", "run_id", runID, "error", err)
+				}
+			}
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
 		// non-zero inside the container) the same way container-start
@@ -1825,9 +1856,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The ledger was billed right after the run (see above), so this only has
 	// to stamp the record.
 	orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
-	if err := updateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
-		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
-	}
 
 	// Build compact tool summary for conversation context (cap at 10 entries
 	// — keep the comment honest with the slice bound below to avoid future
@@ -1855,13 +1883,31 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Role:        conversation.RoleAssistant,
 		Content:     acc.Text(),
 		Parts:       partAcc.Parts(),
+		RunResults:  partAcc.Results(),
 		ToolSummary: toolSummary,
 		Metadata:    assistantMetadata,
 		Timestamp:   repliedAt,
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
-		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
-		return fmt.Errorf("persist assistant message: %w", err)
+		b.persistInBandFailureTurn(ctx, chatID, info, "", nil, nil, orchestrator.ErrRunOutputIncomplete.Error(), alreadySaved)
+		msg := orchestrator.ErrRunOutputIncomplete.Error()
+		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return orchestrator.ErrRunOutputIncomplete
+	}
+	commitErr := b.convStore.SyncSession(ctx, chatID)
+	if commitErr == nil && auditEnabled {
+		commitErr = b.convStore.PublishRunAudit(ctx, chatID, runID)
+	}
+	if commitErr != nil {
+		b.logger.Error("failed to commit chat run records", "error", commitErr, "chat_id", chatID)
+		msg := orchestrator.ErrRunOutputIncomplete.Error()
+		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return orchestrator.ErrRunOutputIncomplete
+	}
+	if err := updateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
+		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 
 	// Update message count in DB (user + assistant = 2 messages)
@@ -1942,10 +1988,10 @@ func (b *Bridge) persistInBandFailureTurn(
 	chatID string,
 	info *ChatInfo,
 	text string,
-	parts []conversation.Part,
+	parts, results []conversation.Part,
 	reason string,
 	userAlreadyCounted bool,
-) {
+) bool {
 	role := conversation.RoleAssistant
 	content := text
 	if text == "" && len(parts) == 0 {
@@ -1959,17 +2005,31 @@ func (b *Bridge) persistInBandFailureTurn(
 	failParts := make([]conversation.Part, 0, len(parts)+1)
 	failParts = append(failParts, parts...)
 	failParts = append(failParts, conversation.Part{Type: "error", Content: reason})
-	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		RunID:     journal.RunIDFromContext(ctx),
-		ID:        generateMsgID(),
-		AgentID:   info.AgentID,
-		Role:      role,
-		Content:   content,
-		Parts:     failParts,
-		Timestamp: time.Now().UTC(),
-	}); err != nil {
-		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)
-		return
+	message := conversation.Message{
+		RunID:      journal.RunIDFromContext(ctx),
+		ID:         generateMsgID(),
+		AgentID:    info.AgentID,
+		Role:       role,
+		Content:    content,
+		Parts:      failParts,
+		RunResults: results,
+		Timestamp:  time.Now().UTC(),
+	}
+	err := b.convStore.Append(ctx, chatID, message)
+	completeTurn := !errors.Is(err, conversation.ErrMessageTooLarge)
+	if !completeTurn {
+		message.Role = conversation.RoleSystem
+		message.RunResults = nil
+		message.Content = orchestrator.ErrRunOutputIncomplete.Error()
+		message.Parts = []conversation.Part{{Type: "error", Content: message.Content}}
+		err = b.convStore.Append(ctx, chatID, message)
+	}
+	if err == nil {
+		err = b.convStore.SyncSession(ctx, chatID)
+	}
+	if err != nil {
+		b.logger.Error("failed to persist failure turn", "error", err, "chat_id", chatID)
+		return false
 	}
 	// user turn + failure turn (the user turn may have been counted when saved)
 	delta := 2
@@ -1979,6 +2039,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	if err := b.resolver.IncrementMessageCount(ctx, chatID, delta); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
+	return completeTurn
 }
 
 // classifyCrewRuntimeError maps a raw EnsureCrewRuntime failure to a stable code

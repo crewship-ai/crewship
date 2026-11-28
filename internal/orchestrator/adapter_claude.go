@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -163,6 +164,79 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseClaudeCodeStreamJSON(line, handler)
 }
 
+// Claude normally streams text deltas before the complete assistant message.
+// Keep reconciliation state scoped to one run, including replay on recovery.
+func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
+	return newClaudeStreamState().parse
+}
+
+func newClaudeStreamState() *claudeStreamState {
+	return &claudeStreamState{
+		pending:      make(map[string]*strings.Builder),
+		frames:       make(map[string][sha256.Size]byte),
+		tools:        make(map[string][sha256.Size]byte),
+		startedTools: make(map[string]struct{}),
+	}
+}
+
+type claudeStreamState struct {
+	pending      map[string]*strings.Builder
+	frames       map[string][sha256.Size]byte
+	tools        map[string][sha256.Size]byte
+	startedTools map[string]struct{}
+}
+
+func (s *claudeStreamState) parse(line []byte, handler EventHandler) {
+	parseClaudeStreamLine(line, handler, s)
+}
+
+// A partial tool start proves the command began describing an invocation. A
+// clean terminal envelope is insufficient when its full call or result was
+// never seen. The observer checks after EOF so late tool results count.
+func (s *claudeStreamState) hasUnfinishedTool() bool {
+	for id := range s.startedTools {
+		_, sawCall := s.tools["tool_call"+"\x00"+id]
+		_, sawResult := s.tools["tool_result"+"\x00"+id]
+		if !sawCall || !sawResult {
+			return true
+		}
+	}
+	return false
+}
+
+// The same tool ID may be replayed. Changes to its input or outcome cannot
+// safely be interpreted as a duplicate or as another invocation.
+func (s *claudeStreamState) toolEvent(e AgentEvent) (duplicate, incomplete bool) {
+	meta, _ := e.Metadata.(map[string]any)
+	var idKey string
+	switch e.Type {
+	case "tool_call":
+		idKey = "tool_id"
+	case "tool_result":
+		idKey = "tool_use_id"
+	default:
+		return false, false
+	}
+	id, _ := meta[idKey].(string)
+	if id == "" {
+		return false, true
+	}
+	data, err := json.Marshal(struct {
+		Content string
+		Meta    map[string]any
+	}{e.Content, meta})
+	if err != nil {
+		return false, true
+	}
+	key := e.Type + "\x00" + id
+	digest := sha256.Sum256(data)
+	if previous, seen := s.tools[key]; seen {
+		return true, previous != digest
+	}
+	s.tools[key] = digest
+	return false, false
+}
+
 // SetupSystemPrompt drops canonical memory files even though Claude Code
 // receives its prompt via --system-prompt, which replaces the default prompt
 // outright. Reasoning: --setting-sources "" suppresses CLAUDE.md
@@ -212,6 +286,10 @@ func (claudeCodeAdapter) WriteMCPConfig(
 // and emits zero-or-more AgentEvents. Extracted from Orchestrator.handleStreamJSONLine
 // so the adapter is stateless and easy to unit-test without a full Orchestrator.
 func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
+	parseClaudeStreamLine(line, handler, nil)
+}
+
+func parseClaudeStreamLine(line []byte, handler EventHandler, state *claudeStreamState) {
 	if handler == nil {
 		return
 	}
@@ -241,7 +319,34 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 	// as visibly wrong rather than as silence.
 	var msg streamJSONMessage
 	err := json.Unmarshal(line, &msg)
+	var pending map[string]*strings.Builder
+	if state != nil {
+		pending = state.pending
+		if msg.UUID != "" {
+			digest := sha256.Sum256(line)
+			if previous, seen := state.frames[msg.UUID]; seen {
+				if previous != digest {
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+				}
+				return
+			}
+			state.frames[msg.UUID] = digest
+		}
+		inner := handler
+		handler = func(e AgentEvent) {
+			duplicate, incomplete := state.toolEvent(e)
+			if incomplete {
+				inner(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+			}
+			if !duplicate {
+				inner(e)
+			}
+		}
+	}
 	if err != nil && msg.Type == "" {
+		if state != nil && len(line) > 0 && line[0] == '{' {
+			handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+		}
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}
@@ -288,7 +393,9 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 	// counts, so the error is discarded and the length is the test.
 	if len(msg.Content) == 0 && len(msg.Message) > 0 {
 		var nested nestedMessage
-		_ = json.Unmarshal(msg.Message, &nested)
+		if nestedErr := json.Unmarshal(msg.Message, &nested); nestedErr != nil && state != nil {
+			handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+		}
 		if len(nested.Content) > 0 {
 			msg.Content = nested.Content
 		}
@@ -312,15 +419,38 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 
 	switch msg.Type {
 	case "stream_event":
-		// Token-level streaming (when --include-partial-messages is used).
-		if msg.Event != nil && msg.Event.Delta != nil {
-			switch msg.Event.Delta.Type {
+		if msg.Event == nil {
+			break
+		}
+		delta := msg.Event.Delta
+		if start := msg.Event.ContentBlock; state != nil && msg.Event.Type == "content_block_start" && start != nil {
+			switch {
+			case start.Type == "text" && start.Text != "":
+				delta = &eventDelta{Type: "text_delta", Text: start.Text}
+			case start.Type == "thinking" && start.Thinking != "":
+				delta = &eventDelta{Type: "thinking_delta", Thinking: start.Thinking}
+			case start.Type == "tool_use":
+				if start.ID == "" {
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+				} else {
+					state.startedTools[start.ID] = struct{}{}
+				}
+			}
+		}
+		if delta != nil {
+			switch delta.Type {
 			case "text_delta":
-				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
+				if pending != nil {
+					if pending[parentID] == nil {
+						pending[parentID] = new(strings.Builder)
+					}
+					pending[parentID].WriteString(delta.Text)
+				}
+				handler(AgentEvent{Type: "text", Content: delta.Text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "thinking_delta":
 				handler(AgentEvent{
 					Type:      "thinking",
-					Content:   msg.Event.Delta.Thinking,
+					Content:   delta.Thinking,
 					Metadata:  tagSubagent(map[string]interface{}{"streaming": true}),
 					Timestamp: time.Now(),
 				})
@@ -328,13 +458,34 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		}
 
 	case "assistant":
-		// With --include-partial-messages on (always), text and thinking
-		// were streamed via stream_event already — only emit tool blocks
-		// here so we don't duplicate the visible text.
+		var streamed string
+		if p := pending[parentID]; p != nil {
+			streamed = p.String()
+			delete(pending, parentID)
+		}
+		matched := true
 		for _, block := range msg.Content {
 			switch block.Type {
-			case "thinking", "text":
-				// Already delivered via deltas — skip.
+			case "thinking":
+				// Thinking remains on the partial stream.
+			case "text":
+				if pending == nil || block.Text == "" || !matched {
+					continue
+				}
+				text := block.Text
+				switch {
+				case strings.HasPrefix(streamed, text):
+					streamed = streamed[len(text):]
+					continue
+				case strings.HasPrefix(text, streamed):
+					text = text[len(streamed):]
+					streamed = ""
+				default:
+					matched = false
+					handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+					continue
+				}
+				handler(AgentEvent{Type: "text", Content: text, Metadata: tagSubagent(nil), Timestamp: time.Now()})
 			case "tool_use":
 				name := block.Name
 				if name == "" {

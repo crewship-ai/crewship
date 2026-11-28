@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -66,6 +68,7 @@ type Message struct {
 	Role        Role      `json:"role"`
 	Content     string    `json:"content"`
 	Parts       []Part    `json:"parts,omitempty"`
+	RunResults  []Part    `json:"run_results,omitempty"`
 	ToolName    string    `json:"tool_name,omitempty"`
 	ToolSummary string    `json:"tool_summary,omitempty"`
 	Metadata    any       `json:"metadata,omitempty"`
@@ -114,7 +117,8 @@ func (m Message) NormalizedParts() []Part {
 // (type, content, metadata) that every CLI adapter emits and it produces the
 // same parts regardless of which CLI ran.
 type PartAccumulator struct {
-	parts []Part
+	parts   []Part
+	results []Part
 	// open tracks the index of the current coalescing part (-1 when none),
 	// and openType its type, so consecutive same-type deltas append in place.
 	open     int
@@ -163,16 +167,22 @@ func (a *PartAccumulator) Add(eventType, content string, metadata any) {
 		})
 		a.closeRun()
 	case "tool_result":
+		toolID := metaString(metadata, "tool_use_id")
+		if toolID == "" {
+			toolID = metaString(metadata, "tool_id")
+		}
 		a.parts = append(a.parts, Part{
 			Type:     "tool_result",
 			Content:  content,
-			ToolID:   metaString(metadata, "tool_id"),
+			ToolID:   toolID,
 			Metadata: metadata,
 		})
 		a.closeRun()
 	case "image":
 		a.parts = append(a.parts, Part{Type: "image", Content: content, Metadata: metadata})
 		a.closeRun()
+	case "result":
+		a.results = append(a.results, Part{Type: eventType, Content: content, Metadata: metadata})
 	default:
 		// status / system / result / error and any future transport event:
 		// not conversation content, never persisted as a part.
@@ -190,6 +200,11 @@ func (a *PartAccumulator) closeRun() {
 // Parts returns the assembled ordered parts. Safe to call once at end of turn.
 func (a *PartAccumulator) Parts() []Part {
 	return a.parts
+}
+
+// Results carries non-rendered terminal envelopes alongside the chat parts.
+func (a *PartAccumulator) Results() []Part {
+	return a.results
 }
 
 // SearchHit is a single conversation_messages row returned by Search,
@@ -247,6 +262,18 @@ func NewStore(basePath string, logger *slog.Logger, opts ...Option) *Store {
 	return s
 }
 
+// Bound stored turns and use the same limit when reading them. Streamed
+// tool activity can make a complete turn much larger than one tool response.
+const maxMessageBytes = 16 * 1024 * 1024
+
+var ErrMessageTooLarge = errors.New("conversation message exceeds storage limit")
+
+func newMessageScanner(reader io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxMessageBytes+2)
+	return scanner
+}
+
 // Append writes a message to the session's JSONL file, creating it if needed.
 func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error {
 	if err := ctx.Err(); err != nil {
@@ -265,6 +292,9 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
+	}
+	if len(data) > maxMessageBytes {
+		return ErrMessageTooLarge
 	}
 	data = append(data, '\n')
 
@@ -447,8 +477,7 @@ func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, i
 	defer f.Close()
 
 	var messages []Message
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := newMessageScanner(f)
 
 	eligible := 0
 	for scanner.Scan() {
@@ -502,8 +531,7 @@ func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int)
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner := newMessageScanner(f)
 
 	// ring holds at most maxMessages entries; head is the index of the
 	// oldest retained message. Once full we overwrite the oldest, so the

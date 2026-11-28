@@ -115,6 +115,18 @@ func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
 	return nil
 }
 
+func (w *Writer) syncAgent(crewID, agentID string) error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if f := w.files[fileKey{crewID: crewID, agentID: agentID}]; f != nil {
+		return f.Sync()
+	}
+	return nil
+}
+
 // Flush syncs all open log files to disk. A nil receiver is a no-op — see
 // Append; Flush and Close are reached from deferred cleanup, where a panic is
 // hardest to attribute back to the missing writer.

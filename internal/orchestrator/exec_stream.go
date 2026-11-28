@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -21,6 +24,8 @@ import (
 // enough that a stuck store can't pin the goroutine indefinitely.
 const endOfStreamEmitTimeout = 5 * time.Second
 
+var ErrRunOutputIncomplete = errors.New("The run record is incomplete.")
+
 // streamJSONMessage represents a line from Claude Code --output-format stream-json.
 // The format varies: top-level messages have "type" like "assistant", "result", "system";
 // stream events have type "stream_event" with nested "event" containing deltas.
@@ -31,6 +36,7 @@ type streamJSONMessage struct {
 	// that keeps a structurally broken line visible as raw text. See the
 	// comment on the unmarshal there.
 	Type string `json:"type"`
+	UUID string `json:"uuid,omitempty"`
 	// Subtype is the second discriminator — the whole init branch and the
 	// error_max_turns classification hang off it. See tolerantSubtype.
 	Subtype tolerantSubtype `json:"subtype,omitempty"`
@@ -392,8 +398,9 @@ type imageSource struct {
 }
 
 type streamEvent struct {
-	Type  string      `json:"type"`
-	Delta *eventDelta `json:"delta,omitempty"`
+	Type         string        `json:"type"`
+	Delta        *eventDelta   `json:"delta,omitempty"`
+	ContentBlock *contentBlock `json:"content_block,omitempty"`
 }
 
 type eventDelta struct {
@@ -417,7 +424,7 @@ type eventDelta struct {
 // it never passes through wrapScrubHandler (which only ever sees parsed
 // AgentEvents) and needs its own pass through the scrubber before it reaches
 // the journal.
-func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler, secretValues []string) string {
+func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler, secretValues []string) (string, error) {
 	var closeOnce sync.Once
 	closeReader := func() {
 		closeOnce.Do(func() {
@@ -431,10 +438,18 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		closeReader()
 	}()
 
-	scanner := bufio.NewScanner(result.Reader)
+	adapter := getAdapter(req.CLIAdapter)
+	var source io.Reader = result.Reader
+	var capture *chatAuditCapture
+	// Only retain wire formats with tested credential reconstruction across
+	// their streamed fragment boundaries.
+	if req.RecordChatAudit != nil && !req.strictContentPrivacy && adapter.Name() == "CLAUDE_CODE" {
+		capture = new(chatAuditCapture)
+		source = io.TeeReader(source, capture)
+	}
+	scanner := bufio.NewScanner(source)
 	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 
-	adapter := getAdapter(req.CLIAdapter)
 	useStreamJSON := adapter.UseStreamJSON()
 
 	// Per-stream parser state: adapters whose line parsing carries cross-line
@@ -443,7 +458,11 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// test iterations under `go test -count>1` — through the stateless
 	// adapter singleton (#1235). Stateless adapters keep using ParseStreamLine.
 	parseLine := adapter.ParseStreamLine
-	if f, ok := adapter.(streamLineParserFactory); ok {
+	var chatClaude *claudeStreamState
+	if req.RequireCompleteChatOutput && adapter.Name() == "CLAUDE_CODE" {
+		chatClaude = newClaudeStreamState()
+		parseLine = chatClaude.parse
+	} else if f, ok := adapter.(streamLineParserFactory); ok {
 		parseLine = f.NewStreamLineParser()
 	}
 
@@ -455,6 +474,8 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// check after the read loop.
 	sawResult := false
 	sawError := false
+	sawContent := false
+	var outputErr error
 	// PR-F4 "scan path 2" (#947): every adapter's parser emits tool_result
 	// events through this wrapper — it is the single production seam (the
 	// parseLine resolved above has no other caller) — so the MINJA tool-return scan
@@ -469,6 +490,13 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 				e = scanToolResultEvent(e)
 			}
 			switch e.Type {
+			case "audit_incomplete":
+				if req.RequireCompleteChatOutput {
+					outputErr = ErrRunOutputIncomplete
+				}
+				return
+			case "text", "thinking", "tool_call", "tool_result", "image":
+				sawContent = true
 			case "result":
 				sawResult = true
 			case "error":
@@ -530,7 +558,11 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		o.loggerForRun(req).Debug("scanner error", "error", err, "agent_id", req.AgentID)
+		o.loggerForRun(req).Warn("run output reader failed", "agent_id", req.AgentID, "adapter", req.CLIAdapter)
+		outputErr = ErrRunOutputIncomplete
+	}
+	if ctx.Err() == nil && chatClaude != nil && (chatClaude.hasUnfinishedTool() || (!sawResult && !sawError && sawContent)) {
+		outputErr = ErrRunOutputIncomplete
 	}
 
 	// Terminal-envelope resilience: the CLI produced output but exited
@@ -542,7 +574,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// the workload remains alive; that path requires a retained terminal
 	// record and must never infer success from transport EOF.
 	if req.DurableOutputDir == "" && req.HostOutputDir == "" && useStreamJSON && handler != nil && !sawResult && !sawError &&
-		ctx.Err() == nil && totalBytes > 0 {
+		ctx.Err() == nil && totalBytes > 0 && outputErr == nil {
 		o.loggerForRun(req).Warn("stream ended without terminal result — synthesizing",
 			"agent_id", req.AgentID,
 			"adapter", req.CLIAdapter,
@@ -588,8 +620,35 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// store is slow or stuck. ExecID lives on the provider ExecResult so we
 	// record it in the payload for correlation with the exec.command end
 	// event.
-	if req.HostOutputDir != "" || req.strictContentPrivacy {
-		return string(captureBuf)
+	auditStatus := ""
+	if req.RecordChatAudit != nil {
+		auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), endOfStreamEmitTimeout)
+		var wire []byte
+		auditStatus = conversation.RunAuditOmitted
+		if capture != nil {
+			auditStatus = conversation.RunAuditIncomplete
+			if !capture.overflow {
+				wire, _ = redactChatAudit(capture.raw.Bytes(), secretValues)
+			}
+			if wire != nil && outputErr == nil && ctx.Err() == nil {
+				auditStatus = conversation.RunAuditStaged
+			} else {
+				outputErr = ErrRunOutputIncomplete
+			}
+		}
+		if err := req.RecordChatAudit(auditCtx, auditStatus, wire); err != nil {
+			auditStatus = ""
+			outputErr = ErrRunOutputIncomplete
+		}
+		cancelAudit()
+		// Keep the archive behind its chat authorization boundary. Exit
+		// diagnostics for these runs come from the process status.
+		if capture != nil {
+			captureBuf = nil
+		}
+	}
+	if req.strictContentPrivacy || (req.HostOutputDir != "" && auditStatus == "") {
+		return string(captureBuf), outputErr
 	}
 	emitCtx := ctx
 	if emitCtx.Err() != nil {
@@ -614,9 +673,17 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		"output":      outScrub.Scrub(string(captureBuf)),
 		"total_bytes": totalBytes,
 		"truncated":   totalBytes > int64(len(captureBuf)),
+		"incomplete":  outputErr != nil,
 	}
 	if result != nil && result.ExecID != "" {
 		payload["exec_id"] = result.ExecID
+	}
+	if auditStatus != "" {
+		payload["audit_status"] = auditStatus
+		payload["audit_ref"] = map[string]string{"chat_id": req.ChatID, "run_id": req.RunID}
+	}
+	if req.HostOutputDir != "" || req.RecordChatAudit != nil {
+		delete(payload, "output")
 	}
 	_, _ = o.journalForRun(req).Emit(emitCtx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
@@ -631,7 +698,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		Refs:        map[string]any{"chat_id": req.ChatID},
 	})
 
-	return string(captureBuf)
+	return string(captureBuf), outputErr
 }
 
 // emitToolResultBlock sends a tool_result event for the given content block.

@@ -10,11 +10,18 @@ import (
 	"testing"
 )
 
+func loopGuardClaudeStream(toolName string) string {
+	var stream strings.Builder
+	for i := range loopGuardThreshold {
+		fmt.Fprintf(&stream, `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"loop-%d","name":%q,"input":{"private":"value"}}]}}`+"\n", i, toolName)
+	}
+	return stream.String()
+}
+
 func TestReviewStrictPrivacyLoopToolMetadataNeverReachesHostLog(t *testing.T) {
 	const marker = "synthetic-private-tool-name"
-	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"loop","name":"` + marker + `","input":{"private":"value"}}]}}` + "\n"
 	var log bytes.Buffer
-	o := New(covNewRunContainer(covRunOpts{stream: strings.Repeat(line, loopGuardThreshold)}), newMemState(), slog.New(slog.NewJSONHandler(&log, nil)))
+	o := New(covNewRunContainer(covRunOpts{stream: loopGuardClaudeStream(marker)}), newMemState(), slog.New(slog.NewJSONHandler(&log, nil)))
 	_ = o.RunAgent(context.Background(), covRunReq().WithStrictContentPrivacy(), nil)
 	if !strings.Contains(log.String(), "loop guard tripped") {
 		t.Fatal("fixture did not trigger actual loop guard")

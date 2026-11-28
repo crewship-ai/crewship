@@ -39,6 +39,7 @@ POST /api/v1/pages/{slug}/craft/document/undo        the edit-lease holder rever
 GET /api/v1/pages/{slug}/craft/document/export.xlsx editor download; the CLI reads workbook bytes through craft version
 GET /api/v1/chats/{chatId}/artifact-refs             private chat composer attachment list
 POST /api/v1/pages/{slug}/craft/document/migrate-workbook  editor startup calls this automatically on first open; the CLI exposes the original through craft original-workbook
+GET /api/v1/chats/{chatId}/runs/{runId}/audit     sensitive run diagnostics addressed by a chat journal reference; read through the authenticated chat API with its current trusted audience check
 
 # --- Pre-existing gaps: authenticated routes with no command when this gate was
 # introduced (2026-09-15). Listed so the count can only go down; each needs a

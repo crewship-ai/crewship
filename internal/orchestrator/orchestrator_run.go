@@ -1109,7 +1109,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			scrubHandler(event)
 		}
 	})
-	rawOutput := o.streamOutput(execCtx, result, req, tappedHandler, secretValues)
+	rawOutput, outputErr := o.streamOutput(execCtx, result, req, tappedHandler, secretValues)
 	// Drain the stream scrubber's overlap buffer now the stream has ended,
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
@@ -1340,10 +1340,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// the command exited non-zero — the default warn+ filter surfaces
 	// failures without consumers having to parse payload.
 	endSeverity := "info"
-	if exitCode != 0 || inBand.failed() {
+	if exitCode != 0 || inBand.failed() || outputErr != nil {
 		endSeverity = "warn"
 	}
 	endPayload := map[string]any{"exit_code": exitCode, "running": running}
+	if outputErr != nil {
+		endPayload["run_record_incomplete"] = true
+	}
 	if inBand.failed() {
 		// An exit-0 run the agent itself called failed must not read as a clean
 		// exec in Crow's Nest just because the process was polite about it.
@@ -1469,6 +1472,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// never confirms a chat cancellation someone else asked for.
 		status = "cancelled"
 		execErr = ErrAgentStopped
+	} else if outputErr != nil && exitCode == 0 {
+		status = "error"
+		execErr = outputErr
 	} else if exitCode != 0 {
 		status = "error"
 		o.loggerForRun(req).Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)

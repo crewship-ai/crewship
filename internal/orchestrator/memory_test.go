@@ -502,13 +502,6 @@ func TestBuildMemoryContext_NoCrewForSoloAgent(t *testing.T) {
 func TestRunAgentWithMemoryEnabled(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// Set up mock that responds to cat and other commands
-	agentOutput, agentWriter := io.Pipe()
-	go func() {
-		agentWriter.Write([]byte("agent response with memory\n"))
-		agentWriter.Close()
-	}()
-
 	callCount := 0
 	mc := &mockContainer{
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
@@ -546,7 +539,7 @@ func TestRunAgentWithMemoryEnabled(t *testing.T) {
 			// Agent exec (last call) — return agent output
 			return &provider.ExecResult{
 				ExecID: "agent-exec",
-				Reader: agentOutput,
+				Reader: io.NopCloser(strings.NewReader("agent response with memory\n")),
 			}, nil
 		},
 		inspectResult: struct {

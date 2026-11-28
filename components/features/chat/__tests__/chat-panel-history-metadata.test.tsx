@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 
 // =============================================================================
 // The last hop of the ask-envelope chain.
@@ -97,10 +97,9 @@ beforeEach(() => {
       const url = String(input)
       if (url.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
       if (url.includes("/messages")) {
-        return new Response(JSON.stringify(historyResponse()), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
+        const headers = new Headers({ "Content-Type": "application/json" })
+        if (url.includes("/chats/interrupted-audit/")) headers.set("X-Crewship-Chat-Audit-Incomplete", "true")
+        return new Response(JSON.stringify(historyResponse()), { status: 200, headers })
       }
       // Participants, agent detail and anything else the panel probes on
       // mount: empty is fine, none of it is what this file is about.
@@ -124,6 +123,14 @@ function renderPanel(sessionId = "chat-1") {
 }
 
 describe("chat panel history → loadHistory", () => {
+  it("shows an incomplete audit after reload and clears it when another chat opens", async () => {
+    const view = renderPanel("interrupted-audit")
+    const notice = "A run in this conversation has an incomplete record."
+    expect(await screen.findByText(notice)).toBeVisible()
+    view.rerender(<ChatPanel agentId="agent-1" sessionId="chat-1" agentName="Riley" agentSlug="riley" />)
+    await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument())
+  })
+
   it("carries a user message's metadata through, so a reload keeps the ask envelope", async () => {
     renderPanel()
 

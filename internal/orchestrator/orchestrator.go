@@ -162,6 +162,11 @@ type AgentRunRequest struct {
 	// a turn of their own. Default false — a new dispatch path is watchable by
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
+	// RequireCompleteChatOutput protects the durable transcript owned by the chat bridge.
+	RequireCompleteChatOutput bool
+	// RecordChatAudit stores bounded, credential-redacted capture under the caller's chat and run.
+	// Privacy-restricted runs pass an omitted status and no content.
+	RecordChatAudit       func(context.Context, string, []byte) error
 	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
 	withoutMemory         bool              // Host-only: no memory read, no memory tools (WithoutMemory).
 	mooringDocumentTools  bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.

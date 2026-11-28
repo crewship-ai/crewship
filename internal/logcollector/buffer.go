@@ -19,11 +19,12 @@ type OutputBuffer struct {
 	crewID  string
 	agentID string
 
-	mu    sync.Mutex
-	buf   strings.Builder
-	ts    time.Time
-	evt   string // current buffered event type
-	timer *time.Timer
+	mu       sync.Mutex
+	buf      strings.Builder
+	ts       time.Time
+	evt      string // current buffered event type
+	timer    *time.Timer
+	writeErr error
 }
 
 // NewOutputBuffer creates an OutputBuffer that aggregates streaming token
@@ -68,16 +69,17 @@ func (ob *OutputBuffer) Append(entry LogEntry) error {
 	if ob == nil {
 		return nil
 	}
+	ob.mu.Lock()
+	defer ob.mu.Unlock()
 	if !isStreamedEvent(entry.Event) {
-		ob.flush()
+		if err := ob.flushLocked(); err != nil {
+			return err
+		}
 		if entry.Level == "" {
 			entry.Level = eventLevel(entry.Event)
 		}
-		return ob.writer.Append(ob.crewID, ob.agentID, entry)
+		return ob.appendLocked(entry)
 	}
-
-	ob.mu.Lock()
-	defer ob.mu.Unlock()
 
 	// Flush if event type changed (e.g. text → thinking)
 	if ob.buf.Len() > 0 && ob.evt != entry.Event {
@@ -109,17 +111,29 @@ func (ob *OutputBuffer) Close() {
 	}
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
-	if ob.timer != nil {
-		ob.timer.Stop()
-		ob.timer = nil
-	}
 	_ = ob.flushLocked()
 }
 
-func (ob *OutputBuffer) flush() {
+// Finish flushes and syncs the run's output before a caller publishes success.
+func (ob *OutputBuffer) Finish() error {
+	if ob == nil {
+		return nil
+	}
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 	_ = ob.flushLocked()
+	if ob.writeErr != nil {
+		return ob.writeErr
+	}
+	return ob.writer.syncAgent(ob.crewID, ob.agentID)
+}
+
+func (ob *OutputBuffer) appendLocked(entry LogEntry) error {
+	err := ob.writer.Append(ob.crewID, ob.agentID, entry)
+	if err != nil && ob.writeErr == nil {
+		ob.writeErr = err
+	}
+	return err
 }
 
 func (ob *OutputBuffer) flushLocked() error {
@@ -135,7 +149,7 @@ func (ob *OutputBuffer) flushLocked() error {
 	ob.buf.Reset()
 	ob.evt = ""
 
-	return ob.writer.Append(ob.crewID, ob.agentID, LogEntry{
+	return ob.appendLocked(LogEntry{
 		Timestamp: ob.ts,
 		Level:     "info",
 		Agent:     ob.agentID,
