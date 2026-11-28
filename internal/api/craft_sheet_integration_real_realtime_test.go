@@ -4,10 +4,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -346,9 +348,9 @@ func TestSheetITChatRangeReplaceWideAndRejectsOversizedPlans(t *testing.T) {
 		cells[craftUndoA1(1, row)] = "L_sparse"
 	}
 	s := newSheetITScenarioWithWorkbook(t, realSheetTestNamedWorkbook(t, "Data", cells), "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
-	applyCalls := 0
+	var applyCalls atomic.Int32
 	s.m.config.AgentApply = func(ctx context.Context, profile CraftNativeDocumentProfile, raw []byte, commands json.RawMessage) ([]byte, error) {
-		applyCalls++
+		applyCalls.Add(1)
 		return adapter.Apply(ctx, profile, raw, commands)
 	}
 	s.m.config.AgentInspect = func(ctx context.Context, profile CraftNativeDocumentProfile, raw []byte, query json.RawMessage) (json.RawMessage, error) {
@@ -374,14 +376,14 @@ func TestSheetITChatRangeReplaceWideAndRejectsOversizedPlans(t *testing.T) {
 		{"expanded-byte-limit", "A1:BM1", strings.Repeat("x", 8192)},
 	} {
 		result, refused := apply(tc.id, tc.address, tc.replacement)
-		if !refused || s.head() != 1 || len(s.opsRows()) != 0 || applyCalls != 0 {
-			t.Fatalf("%s: refusal=%v head=%d engine calls=%d: %s", tc.id, refused, s.head(), applyCalls, result)
+		if !refused || s.head() != 1 || len(s.opsRows()) != 0 || applyCalls.Load() != 0 {
+			t.Fatalf("%s: refusal=%v head=%d engine calls=%d: %s", tc.id, refused, s.head(), applyCalls.Load(), result)
 		}
 	}
 	answer, refused := apply("wide", "A1:BM1", "Loan_")
 	var result craftNativeChatApplyResult
 	if err := json.Unmarshal([]byte(answer), &result); err != nil || refused || result.ChangedCells != 65 || result.Version != 2 ||
-		!reflect.DeepEqual(result.Summary.Ranges, []string{"'Data'!A1:BM1"}) || applyCalls != 1 {
-		t.Fatalf("wide replacement: refused=%v engine calls=%d response=%s err=%v", refused, applyCalls, answer, err)
+		!reflect.DeepEqual(result.Summary.Ranges, []string{"'Data'!A1:BM1"}) || applyCalls.Load() != 1 {
+		t.Fatalf("wide replacement: refused=%v engine calls=%d response=%s err=%v", refused, applyCalls.Load(), answer, err)
 	}
 }
