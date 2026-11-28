@@ -83,7 +83,7 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			if _, replayed := seen[uuid]; replayed {
 				// Keep replay envelopes for correlation. Their payload must
 				// not break reconstruction of the original delta sequence.
-				omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
+				omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
 				continue
 			}
 			seen[uuid] = struct{}{}
@@ -99,22 +99,33 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			case "init", "api_retry":
 				// Session and retry metadata are complete envelopes.
 			default:
-				omitAuditEnvelopePayload(frame, "type", "subtype", "uuid", "parent_tool_use_id")
+				omitAuditFragmentPayload(frame, "type", "subtype", "uuid", "parent_tool_use_id")
 			}
 		case "stream_event":
 			event, ok := frame["event"].(map[string]any)
+			// Keep the parsed event separately so it does not bypass the
+			// outer envelope's scalar validation.
+			if ok {
+				delete(frame, "event")
+			}
+			omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id", "session_id")
 			if !ok {
-				omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
 				continue
 			}
+			frame["event"] = event
 			switch event["type"] {
 			case "message_start":
 				flush(parent)
 				if message, ok := event["message"].(map[string]any); ok {
-					if content, isEmptyArray := message["content"].([]any); !isEmptyArray || len(content) > 0 {
-						delete(message, "content")
-						message["payload_omitted"] = true
+					omitAuditFragmentPayload(event, "type", "message")
+					content, isArray := message["content"].([]any)
+					if isArray && len(content) == 0 {
+						omitAuditFragmentPayload(message, "type", "id", "model", "role", "usage", "content")
+					} else {
+						omitAuditFragmentPayload(message, "type", "id", "model", "role", "usage")
 					}
+				} else {
+					omitAuditFragmentPayload(event, "type")
 				}
 			case "message_stop":
 				flush(parent)
@@ -126,21 +137,16 @@ func redactChatAudit(raw []byte, secrets []string) ([]byte, error) {
 			case "message_delta":
 				// Preserve terminal metadata and aggregate usage.
 				if delta, ok := event["delta"].(map[string]any); ok {
+					omitAuditFragmentPayload(event, "type", "delta", "usage")
 					omitAuditFragmentPayload(delta, "stop_reason", "stop_sequence")
+				} else {
+					omitAuditFragmentPayload(event, "type", "usage")
 				}
 			default:
 				omitAuditFragmentPayload(event, "type", "index")
-				keepAuditScalar(event, "type", func(value any) bool {
-					_, ok := value.(string)
-					return ok
-				})
-				keepAuditScalar(event, "index", func(value any) bool {
-					_, ok := value.(json.Number)
-					return ok
-				})
 			}
 		default:
-			omitAuditEnvelopePayload(frame, "type", "uuid", "parent_tool_use_id")
+			omitAuditFragmentPayload(frame, "type", "uuid", "parent_tool_use_id")
 		}
 	}
 	for key, fragments := range groups {
@@ -221,42 +227,39 @@ func recordAuditFragment(groups map[auditFragmentKey][]auditFragment, parent str
 	groups[key] = append(groups[key], auditFragment{fields, field})
 }
 
-func omitAuditEnvelopePayload(fields map[string]any, identifierKeys ...string) {
-	omitAuditFragmentPayload(fields, identifierKeys...)
-	for _, key := range identifierKeys {
-		if value, present := fields[key]; present {
-			if _, valid := value.(string); !valid {
-				delete(fields, key)
-				fields["payload_omitted"] = true
-			}
-		}
-	}
-}
-
-func keepAuditScalar(fields map[string]any, key string, valid func(any) bool) {
-	if value, present := fields[key]; present && !valid(value) {
-		delete(fields, key)
-		fields["payload_omitted"] = true
-	}
-}
-
 func omitAuditFragmentPayload(fields map[string]any, structuralKeys ...string) {
 	omitted := false
-	for name := range fields {
-		structural := false
+	for name, value := range fields {
+		keep := false
 		for _, key := range structuralKeys {
 			if name == key {
-				structural = true
+				keep = validAuditField(name, value)
 				break
 			}
 		}
-		if !structural {
+		if !keep {
 			delete(fields, name)
 			omitted = true
 		}
 	}
 	if omitted {
 		fields["payload_omitted"] = true
+	}
+}
+
+func validAuditField(name string, value any) bool {
+	switch name {
+	case "type", "subtype", "id", "name", "uuid", "parent_tool_use_id", "session_id", "model", "role":
+		_, valid := value.(string)
+		return valid
+	case "index":
+		_, valid := value.(json.Number)
+		return valid
+	case "stop_reason", "stop_sequence":
+		_, valid := value.(string)
+		return value == nil || valid
+	default:
+		return true
 	}
 }
 
