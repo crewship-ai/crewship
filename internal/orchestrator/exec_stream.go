@@ -624,7 +624,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 				wire, _ = redactChatAudit(capture.raw.Bytes(), secretValues)
 			}
 			if wire != nil && outputErr == nil && ctx.Err() == nil {
-				auditStatus = conversation.RunAuditArchived
+				auditStatus = conversation.RunAuditStaged
 			} else {
 				outputErr = ErrRunOutputIncomplete
 			}
@@ -673,7 +673,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		payload["audit_status"] = auditStatus
 		payload["audit_ref"] = map[string]string{"chat_id": req.ChatID, "run_id": req.RunID}
 	}
-	if req.HostOutputDir != "" {
+	if req.HostOutputDir != "" || req.RecordChatAudit != nil {
 		delete(payload, "output")
 	}
 	_, _ = o.journalForRun(req).Emit(emitCtx, JournalEntry{

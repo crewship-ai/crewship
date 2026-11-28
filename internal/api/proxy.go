@@ -379,7 +379,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusCode == http.StatusOK {
 		var incomplete bool
 		if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS (
-			SELECT 1 FROM chat_run_audits WHERE chat_id = ? AND status = 'incomplete'
+			SELECT 1 FROM chat_run_audits WHERE chat_id = ? AND status IN ('incomplete', 'staged')
 		)`, chatID).Scan(&incomplete); err != nil {
 			h.logger.Debug("read chat audit status", "error", err)
 		} else if incomplete {

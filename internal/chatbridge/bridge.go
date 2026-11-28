@@ -1571,8 +1571,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		costCancel()
 	}
-	if auditErr := logBuf.Finish(); auditErr != nil {
-		b.logger.Warn("failed to finish agent audit log", "run_id", runID, "error", auditErr)
+	logErr := logBuf.Finish()
+	if logErr != nil {
+		b.logger.Warn("failed to finish agent audit log", "run_id", runID, "error", logErr)
 		if runErr == nil {
 			runErr = orchestrator.ErrRunOutputIncomplete
 		}
@@ -1691,7 +1692,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
 		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) || errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
-			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), partAcc.Results(), errMsg, alreadySaved)
+			saved := b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), partAcc.Results(), errMsg, alreadySaved)
+			if auditEnabled && saved && logErr == nil && errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
+				if err := b.convStore.PublishRunAudit(ctx, chatID, runID); err != nil {
+					b.logger.Warn("failed to publish chat audit", "run_id", runID, "error", err)
+				}
+			}
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
 		// non-zero inside the container) the same way container-start
@@ -1800,8 +1806,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: msg})
 		return orchestrator.ErrRunOutputIncomplete
 	}
-	if err := b.convStore.SyncSession(ctx, chatID); err != nil {
-		b.logger.Error("failed to sync assistant message", "error", err, "chat_id", chatID)
+	persistErr := b.convStore.SyncSession(ctx, chatID)
+	if persistErr == nil && auditEnabled {
+		persistErr = b.convStore.PublishRunAudit(ctx, chatID, runID)
+	}
+	if persistErr != nil {
+		b.logger.Error("failed to commit chat run records", "error", persistErr, "chat_id", chatID)
 		msg := orchestrator.ErrRunOutputIncomplete.Error()
 		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
 		streamFn(ws.ChatEvent{Type: "error", Content: msg})
@@ -1892,7 +1902,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	parts, results []conversation.Part,
 	reason string,
 	userAlreadyCounted bool,
-) {
+) bool {
 	role := conversation.RoleAssistant
 	content := text
 	if text == "" && len(parts) == 0 {
@@ -1929,7 +1939,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	}
 	if err != nil {
 		b.logger.Error("failed to persist failure turn", "error", err, "chat_id", chatID)
-		return
+		return false
 	}
 	// user turn + failure turn (the user turn may have been counted when saved)
 	delta := 2
@@ -1939,6 +1949,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	if err := b.resolver.IncrementMessageCount(ctx, chatID, delta); err != nil {
 		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
+	return true
 }
 
 // classifyCrewRuntimeError maps a raw EnsureCrewRuntime failure to a stable code

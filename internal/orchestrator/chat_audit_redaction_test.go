@@ -87,3 +87,29 @@ func TestStreamOutputOmitsContentAuditForStrictPrivacy(t *testing.T) {
 		t.Fatal("private output appeared in the journal")
 	}
 }
+
+func TestStreamOutputJournalReferencesPrivateChatAudit(t *testing.T) {
+	recorder := &chunkRecorder{}
+	o := New(nil, newMemState(), slog.New(slog.DiscardHandler))
+	o.SetJournal(recorder)
+	const content = `{"type":"result","result":"synthetic chat content"}` + "\n"
+	req := AgentRunRequest{
+		ChatID: "audit-chat", RunID: "audit-run", CLIAdapter: "CLAUDE_CODE",
+		RecordChatAudit: func(_ context.Context, status string, wire []byte) error {
+			if status != "staged" || !strings.Contains(string(wire), "synthetic chat content") {
+				t.Fatal("complete capture was not staged")
+			}
+			return nil
+		},
+	}
+	if _, err := o.streamOutput(t.Context(), &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(content))}, req, func(AgentEvent) {}, nil); err != nil {
+		t.Fatal(err)
+	}
+	entry := recorder.findFirst("exec.output_chunk")
+	if entry == nil || entry.Payload["audit_ref"] == nil {
+		t.Fatal("missing chat audit reference")
+	}
+	if _, containsOutput := entry.Payload["output"]; containsOutput {
+		t.Fatal("private chat capture was copied to the journal")
+	}
+}

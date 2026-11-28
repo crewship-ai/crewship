@@ -39,7 +39,13 @@ func TestChatRunAuditFollowsChatAudienceAndDeletion(t *testing.T) {
 		t.Fatalf("audit after restart before publication: %s", got)
 	}
 	wire := []byte(`[{"type":"result","result":"synthetic done"}]`)
-	if err := storeFor().FinishRunAudit(t.Context(), chatID, runID, conversation.RunAuditArchived, wire); err != nil {
+	if err := storeFor().FinishRunAudit(t.Context(), chatID, runID, conversation.RunAuditStaged, wire); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(http.StatusOK, wsID, runID); !strings.Contains(got, `"status":"incomplete"`) || strings.Contains(got, "events") {
+		t.Fatalf("audit after restart with only the capture committed: %s", got)
+	}
+	if err := storeFor().PublishRunAudit(t.Context(), chatID, runID); err != nil {
 		t.Fatal(err)
 	}
 	if got := get(http.StatusOK, wsID, runID); !strings.Contains(got, `"status":"archived"`) || !strings.Contains(got, "synthetic done") {

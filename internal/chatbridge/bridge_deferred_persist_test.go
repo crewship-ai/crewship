@@ -185,7 +185,7 @@ func TestInBandFailureTurnDoesNotRecountASavedUserTurn(t *testing.T) {
 			info := &ChatInfo{AgentID: "a1", WorkspaceID: "ws-1"}
 			res := &deltaResolver{mockResolver: mockResolver{info: info}}
 			b := testBridgeWithContainer(t, res, &failContainer{})
-			b.persistInBandFailureTurn(context.Background(), "sess-1", info, "", nil, "cancelled", tc.userCounted)
+			b.persistInBandFailureTurn(context.Background(), "sess-1", info, "", nil, nil, "cancelled", tc.userCounted)
 			if got := res.total.Load(); got != tc.wantIncrease {
 				t.Fatalf("count increase = %d, want %d", got, tc.wantIncrease)
 			}

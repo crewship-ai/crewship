@@ -35,7 +35,8 @@ func (h *ProxyHandler) ChatRunAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	var status string
 	var wire []byte
-	err = h.db.QueryRowContext(ctx, `SELECT status, wire
+	err = h.db.QueryRowContext(ctx, `SELECT CASE WHEN status = 'staged' THEN 'incomplete' ELSE status END,
+		CASE WHEN status = 'staged' THEN NULL ELSE wire END
 		FROM chat_run_audits WHERE chat_id = ? AND run_id = ?`, chatID, runID).Scan(&status, &wire)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Run audit not found")
