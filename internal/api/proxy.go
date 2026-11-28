@@ -376,6 +376,16 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if resp.StatusCode == http.StatusOK {
+		var incomplete bool
+		if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS (
+			SELECT 1 FROM chat_run_audits WHERE chat_id = ? AND status = 'incomplete'
+		)`, chatID).Scan(&incomplete); err != nil {
+			h.logger.Debug("read chat audit status", "error", err)
+		} else if incomplete {
+			w.Header().Set("X-Crewship-Chat-Audit-Incomplete", "true")
+		}
+	}
 	if canReadCosts(r.Context()) {
 		h.proxyJSON(w, resp)
 		return

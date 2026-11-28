@@ -33,10 +33,6 @@ func (h *ProxyHandler) ChatRunAudit(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return
 	}
-	if restrictedChatHistory(h.db, w, r) {
-		return
-	}
-
 	var status string
 	var wire []byte
 	err = h.db.QueryRowContext(ctx, `SELECT status, wire
@@ -49,7 +45,7 @@ func (h *ProxyHandler) ChatRunAudit(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read chat run audit", err)
 		return
 	}
-	allowed, err = chataudience.CanReadArtifactConversation(ctx, h.db, chatID, user.ID, workspace, false)
+	allowed, err = chataudience.CanReadArtifactConversation(ctx, h.db, chatID, user.ID, workspace, true)
 	if err != nil {
 		replyInternalError(w, h.logger, "authorize chat run audit", err)
 		return

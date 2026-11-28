@@ -16,6 +16,10 @@ A "session" in Crewship is intentionally durable. It's a `chats` row scoped to o
 
 This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(dashboard)/chat/chat-client.tsx`, with the column in `components/features/chat/conversations-sidebar.tsx` and the rooms in `components/features/conversations/`) and the persistence layer lives in `internal/api/agent_chats.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
 
+## Run audits
+
+Chat history displays a notice when a run has an incomplete record. A run audit keeps the available ordered output events after credential redaction. A capture interrupted by a restart can remain incomplete. Privacy-restricted runs omit content. Audits follow the chat's access and deletion, and journal references use the chat and run IDs.
+
 ## When to use it
 
 Most chat surface usage is self-evident — "talk to the agent" — but the durable-session design unlocks several flows worth reaching for explicitly:
@@ -324,6 +328,7 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | `POST` | `/api/v1/agents/{agentId}/chats` | Create a session. Body: `{session_id?, origin?}`. `origin` is one of `UI / CLI / WEBHOOK / CRON / AGENT` — anything else is stored as `NULL`. Returns `{"id": "<chatId>"}`. |
 | `GET` | `/api/v1/agents/{agentId}/chats` | List the agent's sessions, ordered by most recent activity. Each row carries `last_activity_at` (bumped on every message append) and `unread_count` — messages the **calling user** hasn't read, their own excluded. `?q=` searches titles on the server before pagination, `?chat_id=`/`?routine_id=` narrow to one chat or one routine's chats, and `?source=1` attaches each chat's persisted issue/routine source. |
 | `PUT` | `/api/v1/agents/{agentId}/chats/{chatId}/read` | Mark the session read for the calling user: advances their per-chat read cursor (`unread_count` drops to 0) and clears the paired "agent replied" inbox notification. Returns `{chat_id, last_read_at}`. Cross-tenant or mis-nested ids return `404`. |
+| `GET` | `/api/v1/chats/{chatId}/runs/{runId}/audit` | Read one run audit with the current chat's trusted read authority. The response includes the capture status and available credential-redacted events in stream order. |
 | `DELETE` | `/api/v1/agents/{agentId}/chats/{chatId}` | Delete the session, its messages, read cursors, its "agent replied" inbox items, and its uploaded attachment blobs (`/output/<agentSlug>/attachments/<chatId>/`) — irreversible. Allowed for the chat's creator or anyone with agent-edit rights. `routine iterate` uses this to remove its one-shot grader/optimizer sessions. Returns `204`; cross-tenant or mis-nested ids return `404`; a chat with delegation records (assignments) returns `409` — it is audit history and cannot be deleted. The attachment cleanup is best-effort and runs after the delete commits: a storage error is logged but does not fail the `204`. |
 
 ### Messages

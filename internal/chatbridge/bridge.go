@@ -1587,13 +1587,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
-					RunID:     runID,
-					ID:        generateMsgID(),
-					AgentID:   info.AgentID,
-					Role:      conversation.RoleAssistant,
-					Content:   acc.Text(),
-					Parts:     partAcc.Parts(),
-					Timestamp: repliedAt,
+					RunID:      runID,
+					ID:         generateMsgID(),
+					AgentID:    info.AgentID,
+					Role:       conversation.RoleAssistant,
+					Content:    acc.Text(),
+					Parts:      partAcc.Parts(),
+					RunResults: partAcc.Results(),
+					Timestamp:  repliedAt,
 				})
 				_ = countTurn(cleanCtx, 2)
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
@@ -1650,13 +1651,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
-					RunID:     runID,
-					ID:        generateMsgID(),
-					AgentID:   info.AgentID,
-					Role:      conversation.RoleAssistant,
-					Content:   acc.Text(),
-					Parts:     partAcc.Parts(),
-					Timestamp: repliedAt,
+					RunID:      runID,
+					ID:         generateMsgID(),
+					AgentID:    info.AgentID,
+					Role:       conversation.RoleAssistant,
+					Content:    acc.Text(),
+					Parts:      partAcc.Parts(),
+					RunResults: partAcc.Results(),
+					Timestamp:  repliedAt,
 				})
 				_ = countTurn(cleanCtx, 2)
 				// The partial reply is persisted — it counts as "a reply
@@ -1689,7 +1691,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// Without this, the (correct) FAILED status would cost the user text
 		// they could previously see.
 		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) || errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
-			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg, alreadySaved)
+			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), partAcc.Results(), errMsg, alreadySaved)
 		}
 		// Classify adapter-exec failures (the CLI process itself exiting
 		// non-zero inside the container) the same way container-start
@@ -1786,12 +1788,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Role:        conversation.RoleAssistant,
 		Content:     acc.Text(),
 		Parts:       partAcc.Parts(),
+		RunResults:  partAcc.Results(),
 		ToolSummary: toolSummary,
 		Metadata:    assistantMetadata,
 		Timestamp:   repliedAt,
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
-		b.persistInBandFailureTurn(ctx, chatID, info, "", nil, orchestrator.ErrRunOutputIncomplete.Error(), alreadySaved)
+		b.persistInBandFailureTurn(ctx, chatID, info, "", nil, nil, orchestrator.ErrRunOutputIncomplete.Error(), alreadySaved)
 		msg := orchestrator.ErrRunOutputIncomplete.Error()
 		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
 		streamFn(ws.ChatEvent{Type: "error", Content: msg})
@@ -1886,7 +1889,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	chatID string,
 	info *ChatInfo,
 	text string,
-	parts []conversation.Part,
+	parts, results []conversation.Part,
 	reason string,
 	userAlreadyCounted bool,
 ) {
@@ -1904,17 +1907,19 @@ func (b *Bridge) persistInBandFailureTurn(
 	failParts = append(failParts, parts...)
 	failParts = append(failParts, conversation.Part{Type: "error", Content: reason})
 	message := conversation.Message{
-		RunID:     journal.RunIDFromContext(ctx),
-		ID:        generateMsgID(),
-		AgentID:   info.AgentID,
-		Role:      role,
-		Content:   content,
-		Parts:     failParts,
-		Timestamp: time.Now().UTC(),
+		RunID:      journal.RunIDFromContext(ctx),
+		ID:         generateMsgID(),
+		AgentID:    info.AgentID,
+		Role:       role,
+		Content:    content,
+		Parts:      failParts,
+		RunResults: results,
+		Timestamp:  time.Now().UTC(),
 	}
 	err := b.convStore.Append(ctx, chatID, message)
 	if errors.Is(err, conversation.ErrMessageTooLarge) {
 		message.Role = conversation.RoleSystem
+		message.RunResults = nil
 		message.Content = orchestrator.ErrRunOutputIncomplete.Error()
 		message.Parts = []conversation.Part{{Type: "error", Content: message.Content}}
 		err = b.convStore.Append(ctx, chatID, message)

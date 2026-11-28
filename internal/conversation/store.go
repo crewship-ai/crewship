@@ -68,6 +68,7 @@ type Message struct {
 	Role        Role      `json:"role"`
 	Content     string    `json:"content"`
 	Parts       []Part    `json:"parts,omitempty"`
+	RunResults  []Part    `json:"run_results,omitempty"`
 	ToolName    string    `json:"tool_name,omitempty"`
 	ToolSummary string    `json:"tool_summary,omitempty"`
 	Metadata    any       `json:"metadata,omitempty"`
@@ -116,7 +117,8 @@ func (m Message) NormalizedParts() []Part {
 // (type, content, metadata) that every CLI adapter emits and it produces the
 // same parts regardless of which CLI ran.
 type PartAccumulator struct {
-	parts []Part
+	parts   []Part
+	results []Part
 	// open tracks the index of the current coalescing part (-1 when none),
 	// and openType its type, so consecutive same-type deltas append in place.
 	open     int
@@ -179,6 +181,8 @@ func (a *PartAccumulator) Add(eventType, content string, metadata any) {
 	case "image":
 		a.parts = append(a.parts, Part{Type: "image", Content: content, Metadata: metadata})
 		a.closeRun()
+	case "result":
+		a.results = append(a.results, Part{Type: eventType, Content: content, Metadata: metadata})
 	default:
 		// status / system / result / error and any future transport event:
 		// not conversation content, never persisted as a part.
@@ -196,6 +200,11 @@ func (a *PartAccumulator) closeRun() {
 // Parts returns the assembled ordered parts. Safe to call once at end of turn.
 func (a *PartAccumulator) Parts() []Part {
 	return a.parts
+}
+
+// Results carries non-rendered terminal envelopes alongside the chat parts.
+func (a *PartAccumulator) Results() []Part {
+	return a.results
 }
 
 // SearchHit is a single conversation_messages row returned by Search,

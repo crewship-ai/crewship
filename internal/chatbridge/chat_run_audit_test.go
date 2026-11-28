@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -149,7 +150,18 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 
 			dir := t.TempDir()
 			logger := slog.New(slog.DiscardHandler)
-			conv := conversation.NewStore(dir, logger)
+			db := testutil.MigratedDB(t).DB
+			for _, statement := range []string{
+				`INSERT INTO workspaces(id,name,slug) VALUES('ws-1','Workspace','audit-workspace')`,
+				`INSERT INTO users(id,email) VALUES('user-1','audit-user@example.test')`,
+				`INSERT INTO agents(id,workspace_id,name,slug) VALUES('agent-1','ws-1','Agent','audit-agent')`,
+				`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('audit-synthetic','ws-1','agent-1','user-1','private')`,
+			} {
+				if _, err := db.ExecContext(t.Context(), statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			conv := conversation.NewStore(dir, logger, conversation.WithDB(db))
 			log := logcollector.NewWriter(dir, logger)
 			resolver := &capResolver{info: baseInfo()}
 			container := &scriptedContainer{agentOutput: wire.String()}
@@ -205,6 +217,45 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 				}
 			}
 			checkEvents("persisted message", persisted)
+			if len(messages[1].RunResults) != 1 || messages[1].RunResults[0].Content != "after tools" {
+				t.Fatalf("terminal result missing in the durable message")
+			}
+			var status string
+			var archive []byte
+			if err := db.QueryRowContext(t.Context(), `SELECT status, wire FROM chat_run_audits WHERE chat_id=? AND run_id=?`,
+				"audit-synthetic", messages[1].RunID).Scan(&status, &archive); err != nil || status != conversation.RunAuditArchived {
+				t.Fatalf("archive status %s: %v", status, err)
+			}
+			var frames []struct {
+				Type    string
+				Message struct {
+					Content []struct {
+						Type      string
+						ID        string
+						ToolUseID string `json:"tool_use_id"`
+						Content   string
+						IsError   bool `json:"is_error"`
+					}
+				}
+			}
+			if err := json.Unmarshal(archive, &frames); err != nil || len(frames) == 0 || frames[len(frames)-1].Type != "result" {
+				t.Fatalf("archive has no terminal frame: %v", err)
+			}
+			var archived []auditedToolEvent
+			seenCalls, seenResults := map[string]bool{}, map[string]bool{}
+			for _, frame := range frames {
+				for _, block := range frame.Message.Content {
+					switch {
+					case block.Type == "tool_use" && !seenCalls[block.ID]:
+						seenCalls[block.ID] = true
+						archived = append(archived, auditedToolEvent{"tool_call", block.ID, "", false})
+					case block.Type == "tool_result" && !seenResults[block.ToolUseID]:
+						seenResults[block.ToolUseID] = true
+						archived = append(archived, auditedToolEvent{"tool_result", block.ToolUseID, block.Content, block.IsError})
+					}
+				}
+			}
+			checkEvents("retained wire, unique tool events", archived)
 			if !strings.Contains(messages[1].Content, "after tools") {
 				t.Errorf("final assistant text missing after reload: %q", messages[1].Content)
 			}

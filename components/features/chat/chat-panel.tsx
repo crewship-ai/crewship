@@ -478,6 +478,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope,isDraft])
 
+  const [incompleteAuditScope, setIncompleteAuditScope] = useState<string>()
   const { turns, sendMessage, stopGeneration, stopping, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
     realtimeEnabled: sessionRealtime,
@@ -656,7 +657,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     // reading it as existence is what skipped the create and lost the
     // conversation. Only messages that actually came back are proof, and that
     // is recorded below.
-    const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry" | "denied"> => {
+    const fetchOnce = async (): Promise<{ messages: HistoryMessage[]; incompleteAudit?: boolean } | "retry" | "denied"> => {
       try {
         const sourceWasConfirmed = confirmedRowsRef.current.has(chatReadScope)
         const r = await apiFetch(`/api/v1/chats/${sessionSegment}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
@@ -664,14 +665,14 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         if (r.status === 404) return sourceWasConfirmed ? "denied" : { messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
-        return { messages: (data?.messages ?? []) as HistoryMessage[] }
+        return { messages: (data?.messages ?? []) as HistoryMessage[], incompleteAudit: r.headers?.get("X-Crewship-Chat-Audit-Incomplete") === "true" }
       } catch {
         return "retry"
       }
     }
 
     const run = async () => {
-      let result: { messages: HistoryMessage[] } | "retry" | "denied" = "retry"
+      let result: { messages: HistoryMessage[]; incompleteAudit?: boolean } | "retry" | "denied" = "retry"
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
         if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
         result = await fetchOnce()
@@ -698,7 +699,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         return
       }
 
-      const { messages } = result
+      const { messages, incompleteAudit } = result
+      setIncompleteAuditScope(incompleteAudit ? chatReadScope : undefined)
       historySignatureRef.current = messagesSignature(messages)
       // Messages exist ⇒ the chat they belong to exists. This is the one
       // reading of a history response that is safe, and it is what lets a
@@ -1492,6 +1494,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     <Conversation>
       <MessageAnchorRelease sessionId={sessionId} sendNonce={pinNonce} />
       <ConversationContent className="mx-auto w-full max-w-3xl">
+        {incompleteAuditScope === chatReadScope && !historyDenied && !isStreaming && (
+          <p role="status" className="border-b px-4 py-2 text-sm text-muted-foreground">A run in this conversation has an incomplete record.</p>
+        )}
         {turns.length === 0 && !historyLoading && (
           agentMeta && canChat ? (
             // The agent card and "what this agent can do" — who you are
