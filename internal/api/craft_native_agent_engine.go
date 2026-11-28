@@ -144,12 +144,14 @@ func nativeAgentEngineScalar(value string) bool {
 // Sheet limits for one agent request. The request body is separately capped at
 // 256 KiB, and the engine's reply at 1 MiB, so these keep one call predictable.
 const (
-	nativeAgentWriteRows  = 1000
-	nativeAgentWriteCols  = 200
-	nativeAgentReadCells  = 10000
-	nativeAgentSheetMax   = 31
-	nativeAgentMaxColumns = 16384
-	nativeAgentMaxRows    = 1048576
+	nativeAgentWriteRows    = 1000
+	nativeAgentCommandBytes = 256 << 10
+	nativeAgentMaxCommands  = 64
+	nativeAgentWriteCols    = 200
+	nativeAgentReadCells    = 10000
+	nativeAgentSheetMax     = 31
+	nativeAgentMaxColumns   = 16384
+	nativeAgentMaxRows      = 1048576
 )
 
 // nativeAgentEngineParams is nativeAgentEngineObject with optional keys: every
@@ -333,7 +335,7 @@ func nativeAgentEngineCommands(application string, raw json.RawMessage, inspect 
 }
 
 func nativeAgentEngineCommandsFor(application string, raw json.RawMessage, inspect bool, rules nativeAgentEngineRules) ([]nativeAgentEngineCommand, error) {
-	if len(raw) == 0 || len(raw) > 256<<10 || !utf8.Valid(raw) {
+	if len(raw) == 0 || len(raw) > nativeAgentCommandBytes || !utf8.Valid(raw) {
 		return nil, ErrCraftNativeAgentEngine
 	}
 	canonical, err := mooring.CanonicalJSON(raw)
@@ -343,7 +345,7 @@ func nativeAgentEngineCommandsFor(application string, raw json.RawMessage, inspe
 	var entries []json.RawMessage
 	if inspect {
 		entries = []json.RawMessage{canonical}
-	} else if json.Unmarshal(canonical, &entries) != nil || len(entries) == 0 || len(entries) > 64 {
+	} else if json.Unmarshal(canonical, &entries) != nil || len(entries) == 0 || len(entries) > nativeAgentMaxCommands {
 		return nil, ErrCraftNativeAgentEngine
 	}
 	commands := make([]nativeAgentEngineCommand, 0, len(entries))

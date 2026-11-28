@@ -334,3 +334,54 @@ func TestSheetITChatRangeReplaceWithTheRealEngine(t *testing.T) {
 	}
 	read(3, [][]any{{"L_007", "L_outside"}, {"L_=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {`="L_formula"`, nil}, {"L_'quoted", nil}})
 }
+
+func TestSheetITChatRangeReplaceWideAndRejectsOversizedPlans(t *testing.T) {
+	engine := newRealSheetEngine(t)
+	adapter := NewCraftNativeSheetAgentAdapter(engine)
+	cells := sitCells{}
+	for col := 1; col <= 65; col++ {
+		cells[craftUndoA1(col, 1)] = fmt.Sprintf("L_%03d", col)
+	}
+	for row := 2; row <= 130; row += 2 {
+		cells[craftUndoA1(1, row)] = "L_sparse"
+	}
+	s := newSheetITScenarioWithWorkbook(t, realSheetTestNamedWorkbook(t, "Data", cells), "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
+	applyCalls := 0
+	s.m.config.AgentApply = func(ctx context.Context, profile CraftNativeDocumentProfile, raw []byte, commands json.RawMessage) ([]byte, error) {
+		applyCalls++
+		return adapter.Apply(ctx, profile, raw, commands)
+	}
+	s.m.config.AgentInspect = func(ctx context.Context, profile CraftNativeDocumentProfile, raw []byte, query json.RawMessage) (json.RawMessage, error) {
+		var count int
+		if err := s.f.rig.db.QueryRowContext(ctx, "SELECT count(*) FROM artifact_storage_reservations").Scan(&count); err != nil || count != 0 {
+			t.Errorf("replace read reserved storage before finishing its plan: %d, %v", count, err)
+		}
+		return adapter.Inspect(ctx, profile, raw, query)
+	}
+	s.send("Replace the prefix across the first row", true)
+	call := s.agent()
+	generation := s.acquire(call)
+	apply := func(id, address, replacement string) (string, bool) {
+		t.Helper()
+		return s.toolCall(call, "craft_sheet_apply", map[string]any{
+			"generation": generation, "base_version": "1", "request_id": id, "commands": sitCommands(
+				sitCmd("range.replace", map[string]any{"sheet": "Data", "range": address, "find": "L_", "replace": replacement, "match": "prefix"}),
+			),
+		})
+	}
+	for _, tc := range []struct{ id, address, replacement string }{
+		{"too-many-disjoint-blocks", "A2:A130", "Loan_"},
+		{"expanded-byte-limit", "A1:BM1", strings.Repeat("x", 8192)},
+	} {
+		result, refused := apply(tc.id, tc.address, tc.replacement)
+		if !refused || s.head() != 1 || len(s.opsRows()) != 0 || applyCalls != 0 {
+			t.Fatalf("%s: refusal=%v head=%d engine calls=%d: %s", tc.id, refused, s.head(), applyCalls, result)
+		}
+	}
+	answer, refused := apply("wide", "A1:BM1", "Loan_")
+	var result craftNativeChatApplyResult
+	if err := json.Unmarshal([]byte(answer), &result); err != nil || refused || result.ChangedCells != 65 || result.Version != 2 ||
+		!reflect.DeepEqual(result.Summary.Ranges, []string{"'Data'!A1:BM1"}) || applyCalls != 1 {
+		t.Fatalf("wide replacement: refused=%v engine calls=%d response=%s err=%v", refused, applyCalls, answer, err)
+	}
+}

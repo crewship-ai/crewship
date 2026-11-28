@@ -829,9 +829,11 @@ accepts a standalone `range.replace` command. Its parameters are `sheet`,
 literal text in the fenced workbook version. It keeps unmatched cells,
 formulas and nontext types unchanged, and writes replacements as text.
 The existing engine write and version path records the exact ranges and
-typed inverse for Undo. The receipt returns `changed_cells`; zero retains
-the existing version. An identical request ID and packet returns the
-original outcome without applying again. The tool response leaves out
+typed inverse for Undo. The replacement must fit in at most 64 contiguous
+write blocks and 256 KiB of expanded commands. A larger expansion is refused
+before writing cells. The receipt returns `changed_cells`; zero retains
+the existing version. An identical request ID and packet in the same run
+returns the original outcome without applying again. The tool response leaves out
 the expanded cell values.
 
 Pivot tables are not refreshed by an agent change. A change to the data a pivot

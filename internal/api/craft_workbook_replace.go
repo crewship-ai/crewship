@@ -74,52 +74,82 @@ func (r craftWorkbookReplace) plan(ctx context.Context, inspect CraftNativeAgent
 		}
 	}
 
-	var commands []json.RawMessage
-	var original [][][]any
-	// Merge contiguous matches down a column so a large column replacement
-	// needs a single engine write. Never include unmatched cells in a write.
-	for col := range r.area.width() {
-		for row := 0; row < r.area.height(); {
-			first := row
-			var old, next [][]any
-			for row < r.area.height() && len(old) < nativeAgentWriteRows {
-				value, isString := view.Result.Values[row][col].(string)
+	type span struct{ first, last int }
+	type block struct {
+		startRow int
+		columns  span
+		old, new [][]any
+	}
+	var blocks []block
+	var prior map[span]int
+	var writeBytes, inverseBytes int
+	// Turn each row's consecutive matches into runs, then extend any
+	// identical run from the preceding row without enclosing unmatched cells.
+	for row, values := range view.Result.Values {
+		current := make(map[span]int)
+		for col := 0; col < len(values); {
+			first := col
+			var old, next []any
+			for col < len(values) {
+				value, isString := values[col].(string)
 				// The typed Undo read prefixes only literal text with an
 				// apostrophe. Numbers, booleans, blanks and formulas stay put.
 				text, literal := strings.CutPrefix(value, "'")
 				tail, matches := strings.CutPrefix(text, r.find)
-				replacement := "'" + r.replacement + tail
-				if !isString || !literal || !matches || replacement == value {
+				if !isString || !literal || !matches || r.find == r.replacement {
 					break
 				}
-				if len(replacement) > craftsession.MaxInputBytes {
+
+				length := 1 + len(r.replacement) + len(tail)
+				writeBytes += length
+				inverseBytes += len(value)
+				if length > craftsession.MaxInputBytes || writeBytes > nativeAgentCommandBytes ||
+					writeBytes+inverseBytes > craftVersionOpsMaxBytes {
 					return nil, nil, ErrCraftNativeAgentEngine
 				}
-				next = append(next, []any{replacement})
-				old = append(old, []any{value})
-				row++
+				next = append(next, "'"+r.replacement+tail)
+				old = append(old, value)
+				col++
 			}
 			if len(old) == 0 {
-				row++
+				col++
 				continue
 			}
-			if len(commands) == 64 {
-				return nil, nil, ErrCraftNativeAgentEngine
+
+			columns := span{first, col - 1}
+			index, continues := prior[columns]
+			if !continues || len(blocks[index].old) == nativeAgentWriteRows {
+				if len(blocks) == nativeAgentMaxCommands {
+					return nil, nil, ErrCraftNativeAgentEngine
+				}
+				index = len(blocks)
+				blocks = append(blocks, block{startRow: row, columns: columns})
 			}
-			address := craftUndoA1(r.area.col1+col, r.area.row1+first)
-			if len(old) > 1 {
-				address += ":" + craftUndoA1(r.area.col1+col, r.area.row1+row-1)
-			}
-			command, _ := json.Marshal(map[string]any{"command": "range.setValues", "params": map[string]any{"range": address, "sheet": r.sheet, "values": next}})
-			commands = append(commands, command)
-			original = append(original, old)
+			blocks[index].old = append(blocks[index].old, old)
+			blocks[index].new = append(blocks[index].new, next)
+			current[columns] = index
 		}
+		prior = current
 	}
-	if len(commands) == 0 {
+	if len(blocks) == 0 {
 		return nil, nil, nil
 	}
+	commands := make([]json.RawMessage, 0, len(blocks))
+	original := make([][][]any, 0, len(blocks))
+	for _, block := range blocks {
+		address := craftUndoA1(r.area.col1+block.columns.first, r.area.row1+block.startRow)
+		if len(block.old) > 1 || block.columns.first != block.columns.last {
+			address += ":" + craftUndoA1(r.area.col1+block.columns.last, r.area.row1+block.startRow+len(block.old)-1)
+		}
+		command, err := json.Marshal(map[string]any{"command": "range.setValues", "params": map[string]any{"range": address, "sheet": r.sheet, "values": block.new}})
+		if err != nil {
+			return nil, nil, ErrCraftNativeAgentEngine
+		}
+		commands = append(commands, command)
+		original = append(original, block.old)
+	}
 	writes, err := json.Marshal(commands)
-	if err != nil {
+	if err != nil || len(writes) > nativeAgentCommandBytes {
 		return nil, nil, ErrCraftNativeAgentEngine
 	}
 	return writes, original, nil
