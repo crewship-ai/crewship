@@ -76061,11 +76061,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "events": {
+                      "description": "Available credential-redacted wire envelopes in capture order. Payloads may be marked omitted.",
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "status": {
+                      "enum": [
+                        "archived",
+                        "incomplete",
+                        "omitted"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
                   "type": "object"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "private, no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
