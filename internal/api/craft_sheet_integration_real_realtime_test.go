@@ -263,7 +263,7 @@ func TestSheetITChatRangeReplaceWithTheRealEngine(t *testing.T) {
 	adapter := NewCraftNativeSheetAgentAdapter(engine)
 	base := realSheetTestNamedWorkbook(t, "Data", sitCells{
 		"A1": "L_007", "A2": "L_=1+1", "A3": "l_small", "A4": "inside L_label",
-		"A5": "=1+1|2", "A6": "L_'quoted", "B1": "L_outside",
+		"A5": `="L_formula"|L_formula`, "A6": "L_'quoted", "B1": "L_outside",
 	})
 	s := newSheetITScenarioWithWorkbook(t, base, "workbook.xlsx", mooring.WorkbookMediaTypeXLSX)
 	s.m.config.AgentApply, s.m.config.AgentInspect = adapter.Apply, adapter.Inspect
@@ -325,12 +325,12 @@ func TestSheetITChatRangeReplaceWithTheRealEngine(t *testing.T) {
 			t.Fatalf("literal formula-looking value became a formula: %+v, %v", literal, err)
 		}
 	}
-	read(2, [][]any{{"007", "L_outside"}, {"=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {"=1+1", nil}, {"'quoted", nil}})
+	read(2, [][]any{{"007", "L_outside"}, {"=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {`="L_formula"`, nil}, {"'quoted", nil}})
 	s.tool(call, "craft_sheet_release", map[string]any{"generation": generation})
 	human := s.humanSession()
 	response := s.undo(human, s.humanLease(human), changed.OperationID)
 	if response.Code != 201 || !strings.Contains(response.Body.String(), `"restored":3`) {
 		t.Fatalf("undo: %d %s", response.Code, response.Body)
 	}
-	read(3, [][]any{{"L_007", "L_outside"}, {"L_=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {"=1+1", nil}, {"L_'quoted", nil}})
+	read(3, [][]any{{"L_007", "L_outside"}, {"L_=1+1", nil}, {"l_small", nil}, {"inside L_label", nil}, {`="L_formula"`, nil}, {"L_'quoted", nil}})
 }

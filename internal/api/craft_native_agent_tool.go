@@ -625,15 +625,7 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	}()
 	defer func() { cancel(); <-done }()
 	limit := nativeAgentCandidateLimit(store)
-	upload, err := store.ReserveUpload(active, e.grant.Scope, craftNativeReservation(int64(limit)))
-	if err != nil {
-		// Refused before the engine ran: nothing was attempted, so the same
-		// request ID must stay retryable.
-		forgetNativeAgentAttempt(e, input.RequestID, attempt)
-		return zero, err
-	}
-	defer upload.Close()
-	active = upload.Context(active)
+
 	record := craftNativeAgentSheetRecord(e)
 	commands := input.Commands
 	var replacedInputs [][][]any
@@ -645,6 +637,16 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		}
 		summary := nativeAgentChangeSummary(commands)
 		attempt.replacementSummary = &summary
+	}
+	if len(commands) > 0 {
+		upload, err := store.ReserveUpload(active, e.grant.Scope, craftNativeReservation(int64(limit)))
+		if err != nil {
+			// Refused before the engine wrote, so the request ID stays retryable.
+			forgetNativeAgentAttempt(e, input.RequestID, attempt)
+			return zero, err
+		}
+		defer upload.Close()
+		active = upload.Context(active)
 	}
 	undoable := store.Workbook() && len(commands) > 0
 	if undoable {
