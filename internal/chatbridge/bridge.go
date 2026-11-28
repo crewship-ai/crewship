@@ -1806,12 +1806,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: msg})
 		return orchestrator.ErrRunOutputIncomplete
 	}
-	persistErr := b.convStore.SyncSession(ctx, chatID)
-	if persistErr == nil && auditEnabled {
-		persistErr = b.convStore.PublishRunAudit(ctx, chatID, runID)
+	commitErr := b.convStore.SyncSession(ctx, chatID)
+	if commitErr == nil && auditEnabled {
+		commitErr = b.convStore.PublishRunAudit(ctx, chatID, runID)
 	}
-	if persistErr != nil {
-		b.logger.Error("failed to commit chat run records", "error", persistErr, "chat_id", chatID)
+	if commitErr != nil {
+		b.logger.Error("failed to commit chat run records", "error", commitErr, "chat_id", chatID)
 		msg := orchestrator.ErrRunOutputIncomplete.Error()
 		_ = updateRun(ctx, runID, "FAILED", nil, &msg, terminalRunMeta(startedAt, acc, map[string]any{"reason": "run_record_incomplete"}))
 		streamFn(ws.ChatEvent{Type: "error", Content: msg})
