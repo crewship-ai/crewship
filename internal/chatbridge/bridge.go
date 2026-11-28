@@ -1345,6 +1345,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// orchestrator-level publication exists for the paths that have no such
 	// caller: scheduler, webhook, routine step, agent-start IPC.
 	req.SuppressSessionStream = true
+	req.RequireCompleteChatOutput = true
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
 	// On subsequent messages the container is warm — no progress noise.

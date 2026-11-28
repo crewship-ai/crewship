@@ -476,7 +476,9 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 			}
 			switch e.Type {
 			case "audit_incomplete":
-				outputErr = ErrRunOutputIncomplete
+				if req.RequireCompleteChatOutput {
+					outputErr = ErrRunOutputIncomplete
+				}
 				return
 			case "text", "thinking", "tool_call", "tool_result", "image":
 				sawContent = true
@@ -544,7 +546,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		o.loggerForRun(req).Warn("run output reader failed", "agent_id", req.AgentID, "adapter", req.CLIAdapter)
 		outputErr = ErrRunOutputIncomplete
 	}
-	if ctx.Err() == nil && adapter.Name() == "CLAUDE_CODE" && !sawResult && !sawError && sawContent {
+	if ctx.Err() == nil && req.RequireCompleteChatOutput && adapter.Name() == "CLAUDE_CODE" && !sawResult && !sawError && sawContent {
 		outputErr = ErrRunOutputIncomplete
 	}
 

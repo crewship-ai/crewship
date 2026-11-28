@@ -162,23 +162,25 @@ type AgentRunRequest struct {
 	// a turn of their own. Default false — a new dispatch path is watchable by
 	// construction, which is the point of #1823.
 	SuppressSessionStream bool
-	strictContentPrivacy  bool              // Host-only; JSON cannot create or clear this policy.
-	mooringDocumentTools  bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.
-	nativeCraftTools      bool              // Host-only confirmed whole-native-document task.
-	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
-	AllowedDomains        []string          // Extra allowed domains for restricted mode
-	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
-	LocalModelBaseURL     string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
-	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961). On the sidecar-routed path it is NOT emitted at all — options.apiKey carries a dummy and the real key is held by the sidecar's CredStore. On the direct path it is inlined into OPENCODE_CONFIG_CONTENT, which IS an agent env var, so the key is visible in the container. See localModelConfigEnv.
-	LocalModelHeaders     map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
-	MemoryMB              int
-	CPUs                  float64
-	TTLHours              int
-	MCPServers            []MCPServerConfig // Resolved MCP server configs for this agent
-	CrewMCPConfigJSON     string            // Raw crew .mcp.json (merged with agent's at runtime)
-	AgentMCPConfigJSON    string            // Raw agent .mcp.json additions
-	PreferredLanguage     string            // Workspace language (e.g. "Czech", "English")
-	Skills                []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
+	// RequireCompleteChatOutput protects the durable transcript owned by the chat bridge.
+	RequireCompleteChatOutput bool
+	strictContentPrivacy      bool              // Host-only; JSON cannot create or clear this policy.
+	mooringDocumentTools      bool              // Host-only actual D1 task: fixed MCP surface, no builtin tools.
+	nativeCraftTools          bool              // Host-only confirmed whole-native-document task.
+	NetworkMode               string            // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains            []string          // Extra allowed domains for restricted mode
+	AllowPrivateEndpoints     bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
+	LocalModelBaseURL         string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
+	LocalModelAPIKey          string            // Optional bearer token for an authenticated local endpoint (#961). On the sidecar-routed path it is NOT emitted at all — options.apiKey carries a dummy and the real key is held by the sidecar's CredStore. On the direct path it is inlined into OPENCODE_CONFIG_CONTENT, which IS an agent env var, so the key is visible in the container. See localModelConfigEnv.
+	LocalModelHeaders         map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
+	MemoryMB                  int
+	CPUs                      float64
+	TTLHours                  int
+	MCPServers                []MCPServerConfig // Resolved MCP server configs for this agent
+	CrewMCPConfigJSON         string            // Raw crew .mcp.json (merged with agent's at runtime)
+	AgentMCPConfigJSON        string            // Raw agent .mcp.json additions
+	PreferredLanguage         string            // Workspace language (e.g. "Czech", "English")
+	Skills                    []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
 
 	// PR-E F6 — PERSONA + per-user peer card injection. RoleTitle
 	// seeds the DefaultPersona fallback when both PERSONA layers
