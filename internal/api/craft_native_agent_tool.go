@@ -401,6 +401,12 @@ func (m *craftNativeAgentManager) serveToolCall(w http.ResponseWriter, r *http.R
 			defer activity.end()
 		}
 		if len(input.Query) > 0 {
+			if e.chat != nil && e.grant.Application == "gridcraft" {
+				if _, err := nativeAgentEngineCommands("gridcraft", input.Query, true); err != nil {
+					replyError(w, http.StatusBadRequest, "invalid Sheet query; use an A1 address and a separate sheet")
+					return
+				}
+			}
 			native, err := nativeAgentDocumentBytes(state)
 			if err != nil {
 				craftNativeDocumentError(w, err)
@@ -880,6 +886,8 @@ func craftNativeAgentResolvedOps(commands json.RawMessage) (json.RawMessage, boo
 	return ops, err == nil
 }
 
+var errCraftNativeCellSetValue = errors.New("invalid cell.set value")
+
 func resolveCraftWorkbookOps(commands json.RawMessage) (json.RawMessage, error) {
 	var entries []struct {
 		Command string                     `json:"command"`
@@ -901,6 +909,17 @@ func resolveCraftWorkbookOps(commands json.RawMessage) (json.RawMessage, error) 
 		key := "range"
 		if e.Command == "cell.set" {
 			key = "cell"
+			value := bytes.TrimSpace(e.Params["input"])
+			if len(value) == 0 {
+				return nil, errCraftNativeCellSetValue
+			}
+			if value[0] != '"' {
+				if nativeAgentEngineValue(value, nativeAgentEngineRules{}) != nil {
+					return nil, errCraftNativeCellSetValue
+				}
+				e.Command, e.Params = "range.setValues", nativeAgentCellSetBlock(e.Params)
+				key = "range"
+			}
 		}
 		if raw, err := json.Marshal(e.Params); err == nil {
 			lifted, ok := nativeAgentLiftSheet(e.Command, raw)
@@ -1007,6 +1026,8 @@ func nativeAgentChangeRefused(w http.ResponseWriter, err error) bool {
 		replyChatSheetRefusal(w, http.StatusConflict, CraftSheetReasonNotUndoable)
 	case errors.Is(err, errCraftNativeAgentFormula):
 		replyChatSheetRefusal(w, http.StatusBadRequest, CraftSheetReasonFormula)
+	case errors.Is(err, errCraftNativeCellSetValue):
+		replyChatSheetRefusal(w, http.StatusBadRequest, CraftSheetReasonInvalid)
 	case errors.Is(err, errCraftNativeSheetNameRequired):
 		writeJSON(w, 400, map[string]string{"error": errCraftNativeSheetNameRequired.Error(), "reason": CraftSheetReasonInvalid})
 	case errors.As(err, &loss):

@@ -318,6 +318,16 @@ func nativeAgentEngineValue(raw json.RawMessage, rules nativeAgentEngineRules) e
 	return ErrCraftNativeAgentEngine
 }
 
+// nativeAgentCellSetBlock expresses a typed cell.set as a single-cell block.
+func nativeAgentCellSetBlock(p map[string]json.RawMessage) map[string]json.RawMessage {
+	values, _ := json.Marshal([][]json.RawMessage{{p["input"]}})
+	block := map[string]json.RawMessage{"range": p["cell"], "values": values}
+	if sheet, ok := p["sheet"]; ok {
+		block["sheet"] = sheet
+	}
+	return block
+}
+
 func nativeAgentEngineCommands(application string, raw json.RawMessage, inspect bool) ([]nativeAgentEngineCommand, error) {
 	return nativeAgentEngineCommandsFor(application, raw, inspect, nativeAgentEngineRules{})
 }
@@ -362,13 +372,19 @@ func nativeAgentEngineCommandsFor(application string, raw json.RawMessage, inspe
 			ok = ok && json.Unmarshal(p["text"], &text) == nil && len(text) > 0 && len(text) <= 64<<10 && utf8.ValidString(text)
 			mutates = true
 		case application == "gridcraft" && !inspect && name == "cell.set":
-			var input string
 			var p map[string]json.RawMessage
 			p, ok = nativeAgentEngineParams(params, []string{"cell", "input"}, "sheet")
-			ok = ok && nativeAgentEngineCell(p["cell"]) && nativeAgentEngineOptionalSheet(p) && len(p["input"]) > 0 && p["input"][0] == '"' && json.Unmarshal(p["input"], &input) == nil && len(input) <= 32<<10 && utf8.ValidString(input)
+			ok = ok && nativeAgentEngineCell(p["cell"]) && nativeAgentEngineOptionalSheet(p)
 			if ok {
-				if err := rules.checkText(input); err != nil {
+				if err := nativeAgentEngineValue(p["input"], rules); err != nil {
 					return nil, err
+				}
+				if bytes.TrimSpace(p["input"])[0] != '"' {
+					name = "range.setValues"
+					params, err = json.Marshal(nativeAgentCellSetBlock(p))
+					if err != nil {
+						return nil, ErrCraftNativeAgentEngine
+					}
 				}
 			}
 			mutates = true

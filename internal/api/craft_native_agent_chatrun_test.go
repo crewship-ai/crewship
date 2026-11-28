@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -969,8 +971,33 @@ func TestChatRunSheetKeepsTheProposalReceipt(t *testing.T) {
 	b.WriteHeader(http.StatusCreated)
 	_, _ = b.Write([]byte(receipt))
 	w := httptest.NewRecorder()
-	b.finish(w, nil, nil, craftNativeAgentToolRequest{Operation: "propose"}, true)
+	b.finish(t.Context(), w, nil, nil, craftNativeAgentToolRequest{Operation: "propose"}, true)
 	if w.Code != http.StatusCreated || w.Body.String() != receipt {
 		t.Fatalf("proposal receipt: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestChatRunSheetEngineFailureLogsOnlyControlledFields(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	b := &craftNativeChatBuffer{header: http.Header{}}
+	b.WriteHeader(http.StatusUnprocessableEntity)
+	_, _ = b.Write([]byte(`{"error":"private cell text"}`))
+	w := httptest.NewRecorder()
+	b.finish(t.Context(), w, nil, nil, craftNativeAgentToolRequest{Operation: "read"}, true)
+	if w.Code != 422 || !strings.Contains(w.Body.String(), CraftSheetReasonEngineFailed) {
+		t.Fatalf("response: %d %s", w.Code, w.Body)
+	}
+	log := logs.String()
+	for _, want := range []string{"level=WARN", "operation=read", "status=422", "reason=engine_failed", "cause=unprocessable_tool_result"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("missing %q in %s", want, log)
+		}
+	}
+	if strings.Count(log, "craft chat run sheet operation failed") != 1 || strings.Contains(log, "private cell text") {
+		t.Fatalf("unexpected diagnostic: %s", log)
 	}
 }

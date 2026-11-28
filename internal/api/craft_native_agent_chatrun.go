@@ -221,7 +221,7 @@ func (m *craftNativeAgentManager) chatRunTool(w http.ResponseWriter, r *http.Req
 	// longer covers what would be changed.
 	if parseErr == nil && input.Operation == "apply" {
 		if stale, err := m.chatRunConsentStale(r.Context(), e, input.BaseVersion, input.RequestID); err != nil {
-			replyChatSheetRefusal(w, 503, CraftSheetReasonEngineFailed)
+			replyChatRunEngineFailure(r.Context(), w, http.StatusServiceUnavailable, input.Operation, "consent_lookup")
 			return
 		} else if stale {
 			replyChatSheetRefusal(w, http.StatusConflict, CraftSheetReasonConsentStale)
@@ -233,7 +233,7 @@ func (m *craftNativeAgentManager) chatRunTool(w http.ResponseWriter, r *http.Req
 	if e.chat.viaAgentFiles && buffered.status == http.StatusOK {
 		m.auditChatRunAgentFileRead(r.Context(), e)
 	}
-	buffered.finish(w, m, e, input, parseErr == nil)
+	buffered.finish(r.Context(), w, m, e, input, parseErr == nil)
 }
 
 // replyChatRunGate passes the run gate's refusal on. A valid run token whose run
@@ -314,7 +314,7 @@ func (b *craftNativeChatBuffer) Write(p []byte) (int, error) {
 	return b.body.Write(p)
 }
 
-func (b *craftNativeChatBuffer) finish(w http.ResponseWriter, m *craftNativeAgentManager, e *craftNativeAgentEntry, input craftNativeAgentToolRequest, parsed bool) {
+func (b *craftNativeChatBuffer) finish(ctx context.Context, w http.ResponseWriter, m *craftNativeAgentManager, e *craftNativeAgentEntry, input craftNativeAgentToolRequest, parsed bool) {
 	for k, v := range b.header {
 		w.Header()[k] = v
 	}
@@ -360,11 +360,34 @@ func (b *craftNativeChatBuffer) finish(w http.ResponseWriter, m *craftNativeAgen
 		if craftNativeChatPassThrough(w, status, reason, b.body.Bytes()) {
 			return
 		}
+		if reason == CraftSheetReasonEngineFailed {
+			cause := "tool_status"
+			switch status {
+			case http.StatusUnprocessableEntity:
+				cause = "unprocessable_tool_result"
+			case http.StatusServiceUnavailable:
+				cause = "tool_unavailable"
+			}
+			replyChatRunEngineFailure(ctx, w, status, input.Operation, cause)
+			return
+		}
 		replyChatSheetRefusal(w, status, reason)
 		return
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(b.body.Bytes())
+}
+
+// replyChatRunEngineFailure reports only controlled labels, never tool data or engine errors.
+func replyChatRunEngineFailure(ctx context.Context, w http.ResponseWriter, status int, operation, cause string) {
+	switch operation {
+	case "read", "acquire", "renew", "release", "apply", "propose":
+	default:
+		operation = "unknown"
+	}
+	slog.WarnContext(ctx, "craft chat run sheet operation failed",
+		"operation", operation, "status", status, "reason", CraftSheetReasonEngineFailed, "cause", cause)
+	replyChatSheetRefusal(w, status, CraftSheetReasonEngineFailed)
 }
 
 // craftNativeChatReason names a failed tool call from its status and the

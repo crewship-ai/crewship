@@ -28,7 +28,7 @@ func craftSheetDescription(op string) string {
 func craftSheetDescriptionText(op string) string {
 	switch op {
 	case "read":
-		return "Read the Sheet the person attached to this message. Queries: {command:cell.get,params:{cell:A1,sheet?}}, {command:sheet.read,params:{range:A1:D10,sheet?,formulas?}} (at most 10000 cells) {command:document.inspect,params:{}} for the sheet list, and {command:range.columnByHeader,params:{header,sheet?,matchCase?}} for every column under a header text on every sheet ({columns:[{sheet,headerCell,range}]}, range null when nothing is under it). Read never takes the lease. Only a Sheet the person attached to this very message is available; anything else is refused as not_attached."
+		return "Read the Sheet the person attached to this message. Queries: {command:cell.get,params:{cell:A1,sheet?}}, {command:sheet.read,params:{range:A1:D10,sheet?,formulas?}} (at most 10000 cells). Use plain A1 addresses in range and cell. Pass the sheet name separately, for example {range:\"A1:D5\",sheet:\"Data\"}. Use {command:document.inspect,params:{}} for the sheet list, and {command:range.columnByHeader,params:{header,sheet?,matchCase?}} for every column under a header text on every sheet ({columns:[{sheet,headerCell,range}]}, range null when nothing is under it). Read never takes the lease. Only a Sheet the person attached to this very message is available; anything else is refused as not_attached."
 	case "acquire":
 		return "Take the edit lease on the attached Sheet under your own identity before changing it. If the person is editing, it is refused with reason holder_human: do not retry, say so."
 	case "renew":

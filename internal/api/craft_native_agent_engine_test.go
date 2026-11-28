@@ -62,10 +62,10 @@ func TestCraftNativeAgentCLIRejectsUnsafeCommandsBeforeExecution(t *testing.T) {
 		}
 		nativeAgentNotExecuted(t, marker)
 	}
-	for _, input := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`true`), json.RawMessage(`12`), json.RawMessage(`"=WEBSERVICE(\"file:///etc/passwd\")"`), json.RawMessage(`"+WEBSERVICE(\"https://example.invalid\")"`), json.RawMessage(`"-IMPORTDATA(\"/etc/passwd\")"`), json.RawMessage(`" =A1+1"`), json.RawMessage(`"=1+1"`)} {
+	for _, input := range []json.RawMessage{json.RawMessage(`[]`), json.RawMessage(`{}`), json.RawMessage(`1e1000`), json.RawMessage(`"=WEBSERVICE(\"file:///etc/passwd\")"`), json.RawMessage(`"+WEBSERVICE(\"https://example.invalid\")"`), json.RawMessage(`"-IMPORTDATA(\"/etc/passwd\")"`), json.RawMessage(`" =A1+1"`), json.RawMessage(`"=1+1"`)} {
 		q := json.RawMessage(`[{"command":"cell.set","params":{"cell":"A1","input":` + string(input) + `}}]`)
 		if _, err := a.Apply(context.Background(), p, []byte(`{"sheets":[]}`), q); err == nil {
-			t.Fatalf("unsafe formula or non-string input accepted: %s", input)
+			t.Fatalf("unsafe formula or invalid input accepted: %s", input)
 		}
 		nativeAgentNotExecuted(t, marker)
 	}
