@@ -3,12 +3,16 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type sitLeaseRow struct {
@@ -188,7 +192,7 @@ func TestSheetITCoWritePublicationIsCASAndIdempotent(t *testing.T) {
 // lease (Own) it is refused too, as an invalid request, and nothing is stored. Every command the
 // agent may send is replayable: all of them together are published beside the person's lease.
 func TestSheetITCoWriteOnlyReplayableCommands(t *testing.T) {
-	for _, tc := range []struct {
+	rejected := []struct {
 		name    string
 		command map[string]any
 	}{
@@ -197,64 +201,69 @@ func TestSheetITCoWriteOnlyReplayableCommands(t *testing.T) {
 		{"rename a sheet", sitCmd("sheet.rename", map[string]any{"sheet": "Other", "name": "Codes"})},
 		{"format a range", sitCmd("range.setFormat", map[string]any{"sheet": "L", "range": "B2:B9", "format": "0.00"})},
 		{"unknown", sitCmd("sit.unknown", map[string]any{"sheet": "L", "range": "B2"})},
-	} {
-		t.Run("co-write, "+tc.name, func(t *testing.T) {
-			s := newSheetITScenario(t)
-			call, _, _ := s.sitAgentWithPersonsLease()
-			before := s.sitLease()
-			lease, refused := s.toolCall(call, "craft_sheet_acquire", map[string]any{})
-			var got struct {
-				Generation string `json:"generation"`
-			}
-			if refused || json.Unmarshal([]byte(lease), &got) != nil || got.Generation == "" {
-				t.Fatalf("no co-write grant: %.200s", lease)
-			}
-			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": got.Generation, "base_version": "1", "request_id": "sit-struct", "commands": sitCommands(tc.command)})
-			if !refused || s.head() != 1 || len(s.opsRows()) != 0 {
-				t.Fatalf("%s beside the person's lease: refused=%v head %d ops %d %.200s", tc.name, refused, s.head(), len(s.opsRows()), applied)
-			}
-			if !strings.Contains(applied, "holder_human") {
-				t.Errorf("%s beside the person's lease is refused, but not as holder_human: %.200s", tc.name, applied)
-			}
-			if after := s.sitLease(); after != before {
-				t.Errorf("the person's lease changed: %+v → %+v", before, after)
-			}
-		})
-		t.Run("own lease, "+tc.name, func(t *testing.T) {
-			s := newSheetITScenario(t)
-			s.send("Change the Sheet", true)
-			call := s.agent()
-			generation := s.acquire(call)
-			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "sit-struct-own", "commands": sitCommands(tc.command)})
-			if !refused || s.head() != 1 || len(s.opsRows()) != 0 {
-				t.Errorf("%s with the agent's own lease: refused=%v head %d %.200s", tc.name, refused, s.head(), applied)
-			}
-			t.Logf("own lease, %s: %.160s", tc.name, applied)
-		})
 	}
-	t.Run("co-write, every command the agent may send", func(t *testing.T) {
-		s := newSheetITScenario(t)
-		call, _, _ := s.sitAgentWithPersonsLease()
-		lease, refused := s.toolCall(call, "craft_sheet_acquire", map[string]any{})
-		var got struct {
-			Generation string `json:"generation"`
+	for _, mode := range []struct {
+		name, reason string
+		cowrite      bool
+	}{
+		{"co-write", CraftSheetReasonHolderHuman, true},
+		{"own lease", CraftSheetReasonInvalid, false},
+	} {
+		for _, order := range []string{"forward", "reverse"} {
+			t.Run(mode.name+"/"+order, func(t *testing.T) {
+				start := time.Now()
+				s := newSheetITScenario(t)
+				var call func(string, any) (string, bool, json.RawMessage)
+				if mode.cowrite {
+					call, _, _ = s.sitAgentWithPersonsLease()
+				} else {
+					s.send("Change the Sheet", true)
+					call = s.agent()
+				}
+				generation := s.acquire(call)
+				t.Logf("fixture and lease: %s", time.Since(start))
+				before := s.sitLease()
+				for i := range rejected {
+					index := i
+					if order == "reverse" {
+						index = len(rejected) - 1 - i
+					}
+					tc := rejected[index]
+					t.Run(tc.name, func(t *testing.T) {
+						requestID := fmt.Sprintf("sit-struct-%d", index)
+						applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": requestID, "commands": sitCommands(tc.command)})
+						var failure struct {
+							Reason string `json:"reason"`
+						}
+						if !refused || json.Unmarshal([]byte(applied), &failure) != nil || failure.Reason != mode.reason {
+							t.Fatalf("want refusal %s: refused=%v %.200s", mode.reason, refused, applied)
+						}
+						if s.head() != 1 || len(s.opsRows()) != 0 {
+							t.Fatal("refusal changed the head or journal")
+						}
+						if after := s.sitLease(); after != before {
+							t.Errorf("lease changed after refusal: %+v → %+v", before, after)
+						}
+					})
+				}
+				applied := s.tool(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "1", "request_id": "sit-all", "commands": sitCommands(
+					sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "B8", "input": "done"}),
+					sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "B2:B3", "values": [][]any{{"a"}, {"b"}}}),
+					sitCmd("range.clear", map[string]any{"sheet": "L", "range": "B4:B4"}),
+					sitCmd("formulas.calculateNow", map[string]any{}),
+				)})
+				if !strings.Contains(applied, `"version":2`) || s.head() != 2 {
+					t.Fatalf("replayable commands after the refusals: %.300s", applied)
+				}
+				if rows := s.opsRows(); len(rows) != 1 || !rows[0].Replayable || !strings.Contains(rows[0].Ops, "edit.clearContents") {
+					t.Errorf("ops after the successful write: %+v", rows)
+				}
+				if after := s.sitLease(); after != before {
+					t.Errorf("lease changed after the successful write: %+v → %+v", before, after)
+				}
+			})
 		}
-		if refused || json.Unmarshal([]byte(lease), &got) != nil || got.Generation == "" {
-			t.Fatalf("no co-write grant: %.200s", lease)
-		}
-		applied := s.tool(call, "craft_sheet_apply", map[string]any{"generation": got.Generation, "base_version": "1", "request_id": "sit-all", "commands": sitCommands(
-			sitCmd("cell.set", map[string]any{"sheet": "L", "cell": "B8", "input": "done"}),
-			sitCmd("range.setValues", map[string]any{"sheet": "L", "range": "B2:B3", "values": [][]any{{"a"}, {"b"}}}),
-			sitCmd("range.clear", map[string]any{"sheet": "L", "range": "B4:B4"}),
-			sitCmd("formulas.calculateNow", map[string]any{}),
-		)})
-		if !strings.Contains(applied, `"version":2`) {
-			t.Fatalf("the replayable commands beside the person's lease: %.300s", applied)
-		}
-		if rows := s.opsRows(); len(rows) != 1 || !rows[0].Replayable || !strings.Contains(string(rows[0].Ops), "edit.clearContents") {
-			t.Errorf("ops of the co-write: %+v", rows)
-		}
-	})
+	}
 }
 
 // sitLargeCells fills the columns cols of L!2:last with 32 000 synthetic characters a cell, text that
@@ -264,12 +273,15 @@ func sitLargeCells(cols []int, last int) sitCells {
 	rng := rand.New(rand.NewPCG(26, 11))
 	for _, col := range cols {
 		for i := 2; i <= last; i++ {
-			var b strings.Builder
-			fmt.Fprintf(&b, "%d-%02d", col, i)
-			for b.Len() < 32000 {
-				fmt.Fprintf(&b, "%016x", rng.Uint64())
+			const cellBytes = 32000
+			text := make([]byte, 0, cellBytes+15)
+			text = fmt.Appendf(text, "%d-%02d", col, i)
+			for len(text) < cellBytes {
+				var word [8]byte
+				binary.BigEndian.PutUint64(word[:], rng.Uint64())
+				text = hex.AppendEncode(text, word[:])
 			}
-			l[sitAddress(col, i)] = b.String()[:32000]
+			l[sitAddress(col, i)] = string(text[:cellBytes])
 		}
 	}
 	return l
@@ -277,11 +289,11 @@ func sitLargeCells(cols []int, last int) sitCells {
 
 // sitLargeAgent: the person saves version 2 with l, then (holding their lease, or not when own) sends
 // the message; the agent's run takes a grant.
-func (s *sitScenario) sitLargeAgent(l sitCells, own bool) (call func(string, any) (string, bool, json.RawMessage), human, generationH, generation string) {
+func (s *sitScenario) sitLargeAgent(workbook []byte, own bool) (call func(string, any) (string, bool, json.RawMessage), human, generationH, generation string) {
 	s.t.Helper()
 	human = s.humanSession()
 	generationH = s.humanLease(human)
-	if w := s.humanSave(human, generationH, "1", sitWorkbook(l, sitInitialOther()), "sit-large", ""); w.Code != 200 || s.head() != 2 {
+	if w := s.humanSave(human, generationH, "1", workbook, "sit-large", ""); w.Code != 200 || s.head() != 2 {
 		s.t.Fatalf("the person's large save: %d %.200s", w.Code, w.Body)
 	}
 	if own {
@@ -299,45 +311,115 @@ func (s *sitScenario) sitLargeAgent(l sitCells, own bool) (call func(string, any
 	return call, human, generationH, got.Generation
 }
 
-// Co-write, a large change of replayable commands: three range.clear over L!C2:E28, 81 cells of
-// 32 000 characters, each range read for its inverse under the read's 1 MiB answer, together more
-// than 2 MiB of operations and inverse. Publication requires the complete journal in either case.
+// Measure the undo reader's JSON and resolved journal payload using the same
+// values and serialization as the workbook adapter, before any test write.
+func sitUndoFixture(t *testing.T, cells sitCells, commands []any, oversizedRead bool) []byte {
+	t.Helper()
+	start := time.Now()
+	raw, err := json.Marshal(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := resolveCraftWorkbookOps(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads, ok := craftUndoReads(ops)
+	if !ok || len(reads) == 0 {
+		t.Fatal("fixture contains no undo reads")
+	}
+	session := &sitSession{cells: map[string]sitCells{"L": cells}}
+	inputs := make([][][]any, 0, len(reads))
+	for _, rd := range reads {
+		read, err := session.ReadRange(t.Context(), rd.address, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		area, ok := nativeAgentEngineRange(json.RawMessage(strconv.Quote(rd.rng)))
+		if !ok {
+			t.Fatalf("invalid fixture range %s", rd.rng)
+		}
+		if err := craftUndoEncodeText(t.Context(), session, area, read); err != nil {
+			t.Fatal(err)
+		}
+		answer, err := json.Marshal(map[string]any{"command": "sheet.read", "result": read})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("undo read %s: %d bytes", rd.address, len(answer))
+		if oversizedRead {
+			if len(reads) != 1 || len(answer) <= 1<<20 {
+				t.Fatal("fixture must exceed the limit for one inverse read")
+			}
+		} else if len(answer) > 1<<20 {
+			t.Fatal("journal fixture exceeds the limit for one inverse read")
+		}
+		inputs = append(inputs, read.Values)
+	}
+	if !oversizedRead {
+		inverse, complete := craftInverseFrom(ops, inputs)
+		if !complete || craftVersionOpsFit(ops, inverse) {
+			t.Fatalf("fixture must produce a complete journal exceeding the limit, got %d bytes", len(ops)+len(inverse))
+		}
+		t.Logf("complete journal: %d bytes", len(ops)+len(inverse))
+	}
+	t.Logf("measure undo fixture: %s", time.Since(start))
+	start = time.Now()
+	workbook := sitWorkbook(cells, sitInitialOther())
+	t.Logf("build immutable workbook ZIP: %s", time.Since(start))
+	return workbook
+}
+
 func TestSheetITRefusesOversizedUndoJournal(t *testing.T) {
 	clears := sitCommands(
-		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C28"}),
-		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "D2:D28"}),
-		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "E2:E28"}),
+		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C24"}),
+		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "D2:D24"}),
+		sitCmd("range.clear", map[string]any{"sheet": "L", "range": "E2:E24"}),
 	)
+	workbook := sitUndoFixture(t, sitLargeCells([]int{3, 4, 5}, 24), clears, false)
 	for _, own := range []bool{false, true} {
 		name := map[bool]string{false: "beside the person's lease", true: "own lease"}[own]
 		t.Run(name, func(t *testing.T) {
+			start := time.Now()
 			s := newSheetITScenario(t)
-			call, _, _, generation := s.sitLargeAgent(sitLargeCells([]int{3, 4, 5}, 28), own)
+			call, _, _, generation := s.sitLargeAgent(workbook, own)
+			t.Logf("fixture, save and acquire: %s", time.Since(start))
+
 			rowsBefore := len(s.opsRows())
+			_, appliesBefore := s.wb.count()
+			start = time.Now()
 			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-large-clear", "commands": clears})
-			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore {
-				t.Errorf("a large change: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
+			t.Logf("apply: %s", time.Since(start))
+			_, appliesAfter := s.wb.count()
+			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore || appliesAfter != appliesBefore {
+				t.Errorf("oversized journal: refused=%v head %d ops %d→%d applied=%d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), appliesBefore, appliesAfter, applied)
 			}
 		})
 	}
 }
 
-// The inverse of L!C2:C81 exceeds the engine's read limit. The agent cannot
-// publish the change even when it is the only editor.
 func TestSheetITRefusesAChangeWithoutAnInverse(t *testing.T) {
+	clears := sitCommands(sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C35"}))
+	workbook := sitUndoFixture(t, sitLargeCells([]int{3}, 35), clears, true)
 	for _, own := range []bool{false, true} {
 		name := map[bool]string{false: "beside the person's lease", true: "own lease"}[own]
 		t.Run(name, func(t *testing.T) {
+			start := time.Now()
 			s := newSheetITScenario(t)
-			call, human, _, generation := s.sitLargeAgent(sitLargeCells([]int{3}, 81), own)
+			call, _, _, generation := s.sitLargeAgent(workbook, own)
+			t.Logf("fixture, save and acquire: %s", time.Since(start))
+
 			rowsBefore := len(s.opsRows())
-			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-no-inverse", "commands": sitCommands(
-				sitCmd("range.clear", map[string]any{"sheet": "L", "range": "C2:C81"}))})
-			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore {
-				t.Fatalf("a change without an inverse: refused=%v head %d ops %d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), applied)
+			_, appliesBefore := s.wb.count()
+			start = time.Now()
+			applied, refused := s.toolCall(call, "craft_sheet_apply", map[string]any{"generation": generation, "base_version": "2", "request_id": "sit-no-inverse", "commands": clears})
+			t.Logf("apply: %s", time.Since(start))
+			_, appliesAfter := s.wb.count()
+			if !refused || !strings.Contains(applied, CraftSheetReasonNotUndoable) || s.head() != 2 || len(s.opsRows()) != rowsBefore || appliesAfter != appliesBefore {
+				t.Fatalf("unreadable inverse: refused=%v head %d ops %d→%d applied=%d→%d %.200s", refused, s.head(), rowsBefore, len(s.opsRows()), appliesBefore, appliesAfter, applied)
 			}
-			if got := s.headSheets(human)["L"]["C2"]; !strings.HasPrefix(got, "3-02") {
-				t.Errorf("original cell changed: %.100q", got)
+			if !bytes.Equal(s.stored(2), workbook) {
+				t.Fatal("original workbook bytes changed")
 			}
 		})
 	}
