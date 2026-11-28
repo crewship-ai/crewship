@@ -1659,7 +1659,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 
 		errMsg := runErr.Error()
-		if err := updateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
+		var failureMeta map[string]any
+		if errors.Is(runErr, orchestrator.ErrRunOutputIncomplete) {
+			failureMeta = map[string]any{"reason": "run_record_incomplete"}
+		}
+		if err := updateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, failureMeta)); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		// In-band failure: the CLI exited 0 and then reported that the turn
@@ -1886,7 +1890,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	failParts := make([]conversation.Part, 0, len(parts)+1)
 	failParts = append(failParts, parts...)
 	failParts = append(failParts, conversation.Part{Type: "error", Content: reason})
-	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+	message := conversation.Message{
 		RunID:     journal.RunIDFromContext(ctx),
 		ID:        generateMsgID(),
 		AgentID:   info.AgentID,
@@ -1894,8 +1898,19 @@ func (b *Bridge) persistInBandFailureTurn(
 		Content:   content,
 		Parts:     failParts,
 		Timestamp: time.Now().UTC(),
-	}); err != nil {
-		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)
+	}
+	err := b.convStore.Append(ctx, chatID, message)
+	if errors.Is(err, conversation.ErrMessageTooLarge) {
+		message.Role = conversation.RoleSystem
+		message.Content = orchestrator.ErrRunOutputIncomplete.Error()
+		message.Parts = []conversation.Part{{Type: "error", Content: message.Content}}
+		err = b.convStore.Append(ctx, chatID, message)
+	}
+	if err == nil {
+		err = b.convStore.SyncSession(ctx, chatID)
+	}
+	if err != nil {
+		b.logger.Error("failed to persist failure turn", "error", err, "chat_id", chatID)
 		return
 	}
 	// user turn + failure turn (the user turn may have been counted when saved)

@@ -165,10 +165,14 @@ func (a *PartAccumulator) Add(eventType, content string, metadata any) {
 		})
 		a.closeRun()
 	case "tool_result":
+		toolID := metaString(metadata, "tool_use_id")
+		if toolID == "" {
+			toolID = metaString(metadata, "tool_id")
+		}
 		a.parts = append(a.parts, Part{
 			Type:     "tool_result",
 			Content:  content,
-			ToolID:   metaString(metadata, "tool_id"),
+			ToolID:   toolID,
 			Metadata: metadata,
 		})
 		a.closeRun()

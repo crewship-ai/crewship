@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -164,12 +165,55 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 }
 
 // Claude normally streams text deltas before the complete assistant message.
-// Reconcile both per parent so a missing delta cannot discard complete text.
+// Keep reconciliation state scoped to one run, including replay on recovery.
 func (claudeCodeAdapter) NewStreamLineParser() func([]byte, EventHandler) {
-	pending := make(map[string]*strings.Builder)
-	return func(line []byte, handler EventHandler) {
-		parseClaudeStreamLine(line, handler, pending)
+	state := &claudeStreamState{
+		pending: make(map[string]*strings.Builder),
+		frames:  make(map[string]struct{}),
+		tools:   make(map[string][sha256.Size]byte),
 	}
+	return func(line []byte, handler EventHandler) {
+		parseClaudeStreamLine(line, handler, state)
+	}
+}
+
+type claudeStreamState struct {
+	pending map[string]*strings.Builder
+	frames  map[string]struct{}
+	tools   map[string][sha256.Size]byte
+}
+
+// The same tool ID may be replayed. Changes to its input or outcome cannot
+// safely be interpreted as a duplicate or as another invocation.
+func (s *claudeStreamState) toolEvent(e AgentEvent) (duplicate, incomplete bool) {
+	meta, _ := e.Metadata.(map[string]any)
+	var idKey string
+	switch e.Type {
+	case "tool_call":
+		idKey = "tool_id"
+	case "tool_result":
+		idKey = "tool_use_id"
+	default:
+		return false, false
+	}
+	id, _ := meta[idKey].(string)
+	if id == "" {
+		return false, true
+	}
+	data, err := json.Marshal(struct {
+		Content string
+		Meta    map[string]any
+	}{e.Content, meta})
+	if err != nil {
+		return false, true
+	}
+	key := e.Type + "\x00" + id
+	digest := sha256.Sum256(data)
+	if previous, seen := s.tools[key]; seen {
+		return true, previous != digest
+	}
+	s.tools[key] = digest
+	return false, false
 }
 
 // SetupSystemPrompt drops canonical memory files even though Claude Code
@@ -224,7 +268,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 	parseClaudeStreamLine(line, handler, nil)
 }
 
-func parseClaudeStreamLine(line []byte, handler EventHandler, pending map[string]*strings.Builder) {
+func parseClaudeStreamLine(line []byte, handler EventHandler, state *claudeStreamState) {
 	if handler == nil {
 		return
 	}
@@ -254,7 +298,30 @@ func parseClaudeStreamLine(line []byte, handler EventHandler, pending map[string
 	// as visibly wrong rather than as silence.
 	var msg streamJSONMessage
 	err := json.Unmarshal(line, &msg)
+	var pending map[string]*strings.Builder
+	if state != nil {
+		pending = state.pending
+		if msg.UUID != "" {
+			if _, seen := state.frames[msg.UUID]; seen {
+				return
+			}
+			state.frames[msg.UUID] = struct{}{}
+		}
+		inner := handler
+		handler = func(e AgentEvent) {
+			duplicate, incomplete := state.toolEvent(e)
+			if incomplete {
+				inner(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+			}
+			if !duplicate {
+				inner(e)
+			}
+		}
+	}
 	if err != nil && msg.Type == "" {
+		if state != nil && len(line) > 0 && line[0] == '{' {
+			handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+		}
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}
@@ -301,7 +368,9 @@ func parseClaudeStreamLine(line []byte, handler EventHandler, pending map[string
 	// counts, so the error is discarded and the length is the test.
 	if len(msg.Content) == 0 && len(msg.Message) > 0 {
 		var nested nestedMessage
-		_ = json.Unmarshal(msg.Message, &nested)
+		if nestedErr := json.Unmarshal(msg.Message, &nested); nestedErr != nil && state != nil {
+			handler(AgentEvent{Type: "audit_incomplete", Timestamp: time.Now()})
+		}
 		if len(nested.Content) > 0 {
 			msg.Content = nested.Content
 		}

@@ -2,9 +2,11 @@ package chatbridge
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,11 +19,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type auditedToolEvent struct {
 	Kind, ID, Body string
+	Failed         bool
 }
 
 func auditToolEvent(kind, body string, metadata any) (auditedToolEvent, bool) {
@@ -37,7 +41,8 @@ func auditToolEvent(kind, body string, metadata any) (auditedToolEvent, bool) {
 	if kind == "tool_call" {
 		body = ""
 	}
-	return auditedToolEvent{Kind: kind, ID: id, Body: body}, true
+	failed, _ := fields["is_error"].(bool)
+	return auditedToolEvent{Kind: kind, ID: id, Body: body, Failed: failed}, true
 }
 
 func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
@@ -50,6 +55,7 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 		{"one_large_tool", 1, 95 << 10, true},
 		{"aggregate_over_one_mib", 13, 90 << 10, true},
 		{"terminal_text_without_delta", 2, 15 << 10, false},
+		{"replayed_tool_frames", 1, 15 << 10, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var expected []auditedToolEvent
@@ -63,7 +69,7 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 				}
 				body := fmt.Sprintf("synthetic refusal for %s", id)
 				lock.Lock()
-				expected = append(expected, auditedToolEvent{"tool_call", id, ""}, auditedToolEvent{"tool_result", id, body})
+				expected = append(expected, auditedToolEvent{"tool_call", id, "", false}, auditedToolEvent{"tool_result", id, body, true})
 				lock.Unlock()
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				_, _ = fmt.Fprint(w, body)
@@ -119,10 +125,18 @@ func TestChatRunAuditLargeClaudeToolEvents(t *testing.T) {
 				if err != nil || res.StatusCode != http.StatusUnprocessableEntity {
 					t.Fatalf("synthetic MCP call %s returned %d: %v", id, res.StatusCode, err)
 				}
-				assistant(map[string]any{"type": "tool_use", "name": "mcp__crewship-routines__craft_sheet_apply", "id": id, "input": args})
-				emit(map[string]any{"type": "user", "message": map[string]any{"content": []any{
+				call := map[string]any{"type": "tool_use", "name": "mcp__crewship-routines__craft_sheet_apply", "id": id, "input": args}
+				outcome := map[string]any{"type": "user", "message": map[string]any{"content": []any{
 					map[string]any{"type": "tool_result", "tool_use_id": id, "content": result.String(), "is_error": true},
-				}}})
+				}}}
+				assistant(call)
+				if tc.name == "replayed_tool_frames" {
+					assistant(call)
+				}
+				emit(outcome)
+				if tc.name == "replayed_tool_frames" {
+					emit(outcome)
+				}
 			}
 			if tc.terminalDelta {
 				delta("text_delta", "text", "after tools")
@@ -224,5 +238,42 @@ func TestChatRunAuditMissingTerminalIsVisibleAfterReload(t *testing.T) {
 	parts := messages[1].Parts
 	if len(parts) == 0 || parts[len(parts)-1].Type != "error" || parts[len(parts)-1].Content != orchestrator.ErrRunOutputIncomplete.Error() {
 		t.Fatalf("missing durable incomplete marker: %v", parts)
+	}
+}
+
+type brokenAuditReader struct {
+	io.ReadCloser
+}
+
+func (r brokenAuditReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+type interruptedAuditContainer struct {
+	*scriptedContainer
+}
+
+func (c *interruptedAuditContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	result, err := c.scriptedContainer.Exec(ctx, cfg)
+	if err == nil && result.ExecID == "agent-exec" {
+		result.Reader = brokenAuditReader{result.Reader}
+	}
+	return result, err
+}
+
+func TestChatRunAuditReaderErrorOverridesTerminalSuccess(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	container := &interruptedAuditContainer{&scriptedContainer{agentOutput: claudeSuccessOutput(1)}}
+	bridge := testBridgeWithContainer(t, resolver, container)
+	err := bridge.HandleChatMessage(t.Context(), "user-1", "audit-reader-error", "verify audit", func(ws.ChatEvent) {})
+	if !errors.Is(err, orchestrator.ErrRunOutputIncomplete) {
+		t.Fatalf("transport failure after result must fail the audit, got %v", err)
+	}
+	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
+		t.Fatalf("run updates %v", resolver.runUpdates)
 	}
 }

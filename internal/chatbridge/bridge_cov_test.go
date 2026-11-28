@@ -940,48 +940,26 @@ func TestHandleChatMessageCompletedBookkeepingErrorsNonFatal(t *testing.T) {
 // Cancelling the context exactly when the COMPLETED run update lands makes
 // the subsequent assistant-message Append fail (the conversation store
 // checks ctx.Err() first), driving the "failed to save response" branch.
-func TestHandleChatMessagePersistAssistantFailure(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func TestHandleChatMessagePersistsAssistantBeforePublishingCompletion(t *testing.T) {
 	resolver := &capResolver{info: baseInfo()}
-	resolver.onUpdateRun = func(status string) {
-		if status == "COMPLETED" {
-			cancel()
-		}
-	}
-	ctr := &scriptedContainer{agentOutput: claudeSuccessOutput(0), exitCode: 0}
+	ctr := &scriptedContainer{agentOutput: claudeSuccessOutput(1), exitCode: 0}
 	b := testBridgeWithContainer(t, resolver, ctr)
 
-	var errEvents []ws.ChatEvent
-	err := b.HandleChatMessage(ctx, "u", "sess-persistfail", "hi", func(e ws.ChatEvent) {
-		if e.Type == "error" {
-			errEvents = append(errEvents, e)
+	var completed bool
+	resolver.onUpdateRun = func(status string) {
+		if status != "COMPLETED" {
+			return
 		}
-	})
-	if err == nil || !strings.Contains(err.Error(), "persist assistant message") {
-		t.Fatalf("error = %v, want 'persist assistant message' wrap", err)
-	}
-	found := false
-	for _, e := range errEvents {
-		if e.Content == "failed to save response" {
-			found = true
+		completed = true
+		messages, err := b.convStore.Read(t.Context(), "sess-persist", 0, 0)
+		if err != nil || len(messages) != 2 || messages[1].Role != conversation.RoleAssistant {
+			t.Fatalf("at completion: %d messages, %v", len(messages), err)
 		}
 	}
-	if !found {
-		t.Errorf("expected 'failed to save response' error event, got %+v", errEvents)
-	}
-	// User message persisted, assistant message not.
-	msgs, rerr := b.convStore.Read(context.Background(), "sess-persistfail", 0, 0)
-	if rerr != nil {
-		t.Fatalf("read conversation: %v", rerr)
-	}
-	if len(msgs) != 1 || msgs[0].Role != "user" {
-		t.Errorf("messages = %+v, want only the user message", msgs)
+	if err := b.HandleChatMessage(t.Context(), "u", "sess-persist", "hi", func(ws.ChatEvent) {}); err != nil || !completed {
+		t.Fatalf("run error %v, completed=%v", err, completed)
 	}
 }
-
-// ---------- done event carries trace_id when a span is active ----------
 
 func TestHandleChatMessageDoneCarriesTraceID(t *testing.T) {
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
@@ -1021,7 +999,7 @@ func TestHandleChatMessageDoneCarriesTraceID(t *testing.T) {
 
 // A broken log collector (base path under a regular file) makes every
 // logBuf.Append fail; the bridge must log at debug and keep streaming.
-func TestHandleChatMessageLogWriteFailureNonFatal(t *testing.T) {
+func TestHandleChatMessageLogWriteFailureMarksRecordIncomplete(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte("file, not dir"), 0o600); err != nil {
@@ -1035,21 +1013,25 @@ func TestHandleChatMessageLogWriteFailureNonFatal(t *testing.T) {
 	orch := orchestrator.New(ctr, &memState{data: make(map[string]map[string][]byte)}, logger)
 	b := New(orch, ctr, convStore, logWriter, resolver, BridgeConfig{}, logger)
 
-	var sawDone bool
+	var sawError bool
 	err := b.HandleChatMessage(context.Background(), "u", "sess-logfail", "hi", func(e ws.ChatEvent) {
-		if e.Type == "done" {
-			sawDone = true
+		if e.Type == "error" && e.Content == orchestrator.ErrRunOutputIncomplete.Error() {
+			sawError = true
 		}
 	})
-	if err != nil {
-		t.Fatalf("log write failures must be non-fatal, got: %v", err)
+	if !errors.Is(err, orchestrator.ErrRunOutputIncomplete) || !sawError {
+		t.Fatalf("run error %v, surfaced=%v", err, sawError)
 	}
-	if !sawDone {
-		t.Error("expected done event despite log writer failure")
+	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
+		t.Fatalf("run updates %v", resolver.runUpdates)
 	}
 	msgs, rerr := b.convStore.Read(context.Background(), "sess-logfail", 0, 0)
 	if rerr != nil || len(msgs) != 2 {
-		t.Errorf("messages = %d (err %v), want 2", len(msgs), rerr)
+		t.Fatalf("messages = %d (err %v), want 2", len(msgs), rerr)
+	}
+	parts := msgs[1].Parts
+	if len(parts) == 0 || parts[len(parts)-1].Type != "error" {
+		t.Fatal("missing incomplete audit marker")
 	}
 }
 

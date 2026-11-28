@@ -34,6 +34,7 @@ type streamJSONMessage struct {
 	// that keeps a structurally broken line visible as raw text. See the
 	// comment on the unmarshal there.
 	Type string `json:"type"`
+	UUID string `json:"uuid,omitempty"`
 	// Subtype is the second discriminator — the whole init branch and the
 	// error_max_turns classification hang off it. See tolerantSubtype.
 	Subtype tolerantSubtype `json:"subtype,omitempty"`
@@ -458,6 +459,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// check after the read loop.
 	sawResult := false
 	sawError := false
+	sawContent := false
 	var outputErr error
 	// PR-F4 "scan path 2" (#947): every adapter's parser emits tool_result
 	// events through this wrapper — it is the single production seam (the
@@ -476,6 +478,8 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 			case "audit_incomplete":
 				outputErr = ErrRunOutputIncomplete
 				return
+			case "text", "thinking", "tool_call", "tool_result", "image":
+				sawContent = true
 			case "result":
 				sawResult = true
 			case "error":
@@ -540,7 +544,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		o.loggerForRun(req).Warn("run output reader failed", "agent_id", req.AgentID, "adapter", req.CLIAdapter)
 		outputErr = ErrRunOutputIncomplete
 	}
-	if ctx.Err() == nil && adapter.Name() == "CLAUDE_CODE" && !sawResult && !sawError && totalBytes > 0 {
+	if ctx.Err() == nil && adapter.Name() == "CLAUDE_CODE" && !sawResult && !sawError && sawContent {
 		outputErr = ErrRunOutputIncomplete
 	}
 
