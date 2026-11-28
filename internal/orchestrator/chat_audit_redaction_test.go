@@ -33,14 +33,17 @@ func TestRedactChatAuditProtectsEscapedAndFragmentedCredentials(t *testing.T) {
 	fragment("text2", "text_delta", "text", suffix)
 	fragment("input1", "input_json_delta", "partial_json", `{"argument":"audit-test-registered-\u00`)
 	fragment("input2", "input_json_delta", "partial_json", `63redential-01753089","safe":"keep"}`)
-	emit(map[string]any{"type": "assistant", "uuid": "full", "input": map[string]any{"arg": secret}, "meta": []any{secret}})
-	emit(map[string]any{"type": "result", "uuid": "terminal", "result": secret})
+	emit(map[string]any{"type": "assistant", "uuid": "full",
+		"input": map[string]any{"arg": secret, "password": "opaque-unknown-to-scrubber"},
+		"meta":  []any{secret, `{"value":"audit-test-registered-\u0063redential-01753089"}`},
+	})
+	emit(map[string]any{"type": "result", "uuid": "terminal", "result": `audit-test-registered-\u0063redential-01753089`})
 
 	got, err := redactChatAudit(raw.Bytes(), []string{secret})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, denied := range []string{secret, prefix, suffix, "redential-01753089"} {
+	for _, denied := range []string{secret, prefix, suffix, "redential-01753089", "opaque-unknown-to-scrubber"} {
 		if bytes.Contains(got, []byte(denied)) {
 			t.Fatalf("credential fragment survived redaction: %q", denied)
 		}

@@ -146,7 +146,7 @@ func redactAuditFragments(scrub *scrubber.Scrubber, fragments []auditFragment) {
 		joined.WriteString(text)
 	}
 	original := joined.String()
-	redacted := scrub.Scrub(original)
+	redacted := scrubAuditText(scrub, original)
 	if fragments[0].field == "partial_json" {
 		value, err := decodeAuditJSON([]byte(original))
 		if err != nil {
@@ -170,14 +170,44 @@ func redactAuditFragments(scrub *scrubber.Scrubber, fragments []auditFragment) {
 	last.fields[last.field] = redacted
 }
 
+func scrubAuditText(scrub *scrubber.Scrubber, value string) string {
+	clean := scrub.Scrub(value)
+	if strings.ContainsRune(value, '\\') {
+		// A string field can hold a second JSON string encoding. Check its
+		// decoded form too, retaining the original representation if safe.
+		var decoded string
+		if json.Unmarshal([]byte(`"`+value+`"`), &decoded) == nil && scrub.ContainsSecret(decoded) {
+			return scrub.Scrub(decoded)
+		}
+	}
+	return clean
+}
+
 func scrubAuditJSON(scrub *scrubber.Scrubber, value any) any {
 	switch v := value.(type) {
 	case string:
-		return scrub.Scrub(v)
+		trimmed := strings.TrimSpace(v)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			if nested, err := decodeAuditJSON([]byte(trimmed)); err == nil {
+				clean := scrubAuditJSON(scrub, nested)
+				before, _ := json.Marshal(nested)
+				after, _ := json.Marshal(clean)
+				if !bytes.Equal(before, after) {
+					return string(after)
+				}
+			}
+		}
+		return scrubAuditText(scrub, v)
 	case map[string]any:
 		clean := make(map[string]any, len(v))
 		for key, item := range v {
-			clean[scrub.Scrub(key)] = scrubAuditJSON(scrub, item)
+			cleanKey := scrubAuditText(scrub, key)
+			switch strings.ToLower(cleanKey) {
+			case "password", "secret", "token", "api_key", "apikey", "secret_key":
+				clean[cleanKey] = "[REDACTED]"
+			default:
+				clean[cleanKey] = scrubAuditJSON(scrub, item)
+			}
 		}
 		return clean
 	case []any:

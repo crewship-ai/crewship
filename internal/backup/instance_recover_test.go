@@ -288,7 +288,7 @@ func TestInstanceBackupRecoverRoundTrip(t *testing.T) {
 		user, workspace string
 		want            bool
 	}{{"u_admin", "ws_e2e_1", true}, {"u_lab", "ws_lab", false}} {
-		allowed, err := chataudience.CanReadArtifactConversation(ctx, restored, "audit-chat", reader.user, reader.workspace, true)
+		allowed, err := chataudience.CanReadArtifactConversation(ctx, restored.DB, "audit-chat", reader.user, reader.workspace, true)
 		if err != nil || allowed != reader.want {
 			t.Fatalf("restored audit audience for %s: allowed %v, err %v", reader.user, allowed, err)
 		}
